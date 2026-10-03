@@ -14,20 +14,27 @@
 //!    comandos no host) nunca é aberto (decisão 0006).
 //!
 //! Caminhos com 108 bytes ou mais não cabem no `sun_path` do AF_UNIX; esses
-//! passam por um symlink curto no `XDG_RUNTIME_DIR` privado do container.
+//! passam por um symlink curto numa pasta só nossa (`claude-pet/`, 0700)
+//! dentro do `XDG_RUNTIME_DIR` privado do container. Nada fora dela é
+//! apagado, e dentro dela só symlinks: rodando fora do container, o
+//! `XDG_RUNTIME_DIR` é o do usuário, onde mora o socket do compositor.
 //!
 //! O backoff ([`Reconexao`]) vale só para nova tentativa na **mesma**
 //! assinatura depois de uma falha do lado do cliente; uma assinatura nova
-//! conecta na hora.
+//! conecta na hora. Enquanto a assinatura espera, nenhuma conexão é aberta
+//! nela (nem a prova).
 
 use std::fs;
 use std::io;
+use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 /// Limite do `sun_path` do AF_UNIX, contando o NUL final.
 const LIMITE_SUN_PATH: usize = 108;
+/// Pasta dos symlinks curtos, dentro de `curto`.
+const PASTA_LINKS: &str = "claude-pet";
 
 /// Primeiro atraso depois de uma falha na mesma assinatura.
 pub const ATRASO_MIN: Duration = Duration::from_secs(1);
@@ -56,15 +63,23 @@ pub enum Espera {
     SemHyprland,
     /// Há pastas, mas nenhuma viva (Hyprland caiu, ou ainda subindo).
     NenhumaViva { candidatas: usize },
+    /// A instância mais nova ainda candidata falhou do nosso lado há pouco:
+    /// espera o backoff sem abrir conexão nela.
+    Recuo { restante: Duration },
 }
 
 impl Espera {
+    /// Motivo para o log. Sem contagem regressiva: o laço só registra quando
+    /// o motivo muda.
     pub fn descrever(&self) -> String {
         match self {
             Espera::SemRuntime => "runtime do usuário ainda não existe".into(),
             Espera::SemHyprland => "nenhuma instância do Hyprland".into(),
             Espera::NenhumaViva { candidatas } => {
                 format!("{candidatas} instância(s) do Hyprland, nenhuma respondendo")
+            }
+            Espera::Recuo { .. } => {
+                "a mesma instância falhou há pouco; nova tentativa depois do backoff".into()
             }
         }
     }
@@ -120,7 +135,15 @@ fn candidatas(pasta_hypr: &Path) -> io::Result<Vec<String>> {
 /// Procura a instância viva mais nova do Hyprland em `base` (o runtime do
 /// usuário, `/host/run/user/<uid>` no container). `curto` é onde criar
 /// symlinks para caminhos longos demais para o AF_UNIX.
-pub fn procurar(base: &Path, curto: &Path) -> Result<Instancia, Espera> {
+///
+/// `em_espera(assinatura)` diz se a assinatura está no backoff e quanto
+/// falta. Ao chegar nela (as mais novas já foram tentadas), a procura para
+/// com [`Espera::Recuo`] sem conectar em nada: nem nela, nem nas mais velhas.
+pub fn procurar(
+    base: &Path,
+    curto: &Path,
+    em_espera: impl Fn(&str) -> Option<Duration>,
+) -> Result<Instancia, Espera> {
     if !base.is_dir() {
         return Err(Espera::SemRuntime);
     }
@@ -140,8 +163,11 @@ pub fn procurar(base: &Path, curto: &Path) -> Result<Instancia, Espera> {
             depurar!("descoberta: {assinatura} com hyprland.lock sem nome de socket");
             continue;
         };
+        if let Some(restante) = em_espera(&assinatura) {
+            return Err(Espera::Recuo { restante });
+        }
         let eventos = pasta.join(".socket2.sock");
-        match conectar_unix(&eventos, curto, &format!("hypr-{assinatura}")) {
+        match conectar_unix(&eventos, curto, &format!("eventos-{assinatura}")) {
             // Só a prova: fecha na hora. Este é o único toque no IPC do
             // Hyprland no M1.
             Ok(fluxo) => drop(fluxo),
@@ -167,27 +193,56 @@ pub fn procurar(base: &Path, curto: &Path) -> Result<Instancia, Espera> {
 }
 
 /// `connect()` num socket Unix; se o caminho for longo demais para o
-/// `sun_path`, passa por um symlink `curto/<apelido>`.
+/// `sun_path`, passa por um symlink `curto/claude-pet/pet-<apelido>`.
 fn conectar_unix(caminho: &Path, curto: &Path, apelido: &str) -> io::Result<UnixStream> {
     if caminho.as_os_str().len() < LIMITE_SUN_PATH {
         return UnixStream::connect(caminho);
     }
-    let link = curto.join(apelido);
+    let pasta = curto.join(PASTA_LINKS);
+    let link = pasta.join(format!("pet-{apelido}"));
     if link.as_os_str().len() >= LIMITE_SUN_PATH {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "caminho do socket longo demais, mesmo pelo XDG_RUNTIME_DIR",
         ));
     }
-    if fs::read_link(&link).ok().as_deref() != Some(caminho) {
-        match fs::remove_file(&link) {
-            Ok(()) => {}
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e),
+    preparar_pasta_de_links(&pasta)?;
+    match fs::symlink_metadata(&link) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            if fs::read_link(&link)? != caminho {
+                fs::remove_file(&link)?;
+                std::os::unix::fs::symlink(caminho, &link)?;
+            }
         }
-        std::os::unix::fs::symlink(caminho, &link)?;
+        Ok(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("{} existe e não é um symlink nosso", link.display()),
+            ));
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            std::os::unix::fs::symlink(caminho, &link)?;
+        }
+        Err(e) => return Err(e),
     }
     UnixStream::connect(&link)
+}
+
+/// Cria a pasta dos symlinks (0700) se faltar; recusa se ela existir e não
+/// for uma pasta de verdade (um symlink plantado, por exemplo).
+fn preparar_pasta_de_links(pasta: &Path) -> io::Result<()> {
+    match fs::symlink_metadata(pasta) {
+        Ok(meta) if meta.is_dir() => Ok(()),
+        Ok(_) => Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("{} existe e não é uma pasta", pasta.display()),
+        )),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            fs::DirBuilder::new().mode(0o700).create(pasta)?;
+            fs::set_permissions(pasta, fs::Permissions::from_mode(0o700))
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// Pasta do runtime do usuário dentro de `runtime_host` (`<runtime>/<uid>`).
@@ -274,25 +329,56 @@ mod testes {
         }
     }
 
-    /// Cria `base/hypr/<assinatura>` com lock e, se `viva`, os sockets.
-    fn instancia(base: &Path, assinatura: &str, wayland: &str, viva: bool) -> Vec<UnixListener> {
+    fn sem_backoff(_: &str) -> Option<Duration> {
+        None
+    }
+
+    /// Ouvintes de uma instância de mentira (vivos enquanto ela existir),
+    /// não bloqueantes para dar para conferir se alguém conectou.
+    struct Falsa {
+        eventos: UnixListener,
+        wayland: UnixListener,
+        /// O socket de comandos do Hyprland: nunca pode receber conexão.
+        comandos: UnixListener,
+    }
+
+    /// Ninguém conectou neste ouvinte.
+    fn intocado(ouvinte: &UnixListener) -> bool {
+        matches!(ouvinte.accept(), Err(e) if e.kind() == io::ErrorKind::WouldBlock)
+    }
+
+    fn ouvir(caminho: &Path) -> UnixListener {
+        let ouvinte = UnixListener::bind(caminho).unwrap();
+        ouvinte.set_nonblocking(true).unwrap();
+        ouvinte
+    }
+
+    fn pasta_com_lock(base: &Path, assinatura: &str, wayland: &str) -> PathBuf {
         let pasta = base.join("hypr").join(assinatura);
         fs::create_dir_all(&pasta).unwrap();
         fs::write(pasta.join("hyprland.lock"), format!("1501\n{wayland}\n")).unwrap();
-        let mut vivos = Vec::new();
-        let eventos = pasta.join(".socket2.sock");
-        let socket_wayland = base.join(wayland);
-        if viva {
-            vivos.push(UnixListener::bind(&eventos).unwrap());
-            vivos.push(UnixListener::bind(&socket_wayland).unwrap());
-        } else {
-            // Socket que sobrou de um Hyprland que caiu: existe e recusa.
-            drop(UnixListener::bind(&eventos).unwrap());
-            if !socket_wayland.exists() {
-                drop(UnixListener::bind(&socket_wayland).unwrap());
-            }
+        pasta
+    }
+
+    /// `base/hypr/<assinatura>` com lock e os três sockets ouvindo.
+    fn viva(base: &Path, assinatura: &str, wayland: &str) -> Falsa {
+        let pasta = pasta_com_lock(base, assinatura, wayland);
+        Falsa {
+            eventos: ouvir(&pasta.join(".socket2.sock")),
+            wayland: ouvir(&base.join(wayland)),
+            comandos: ouvir(&pasta.join(".socket.sock")),
         }
-        vivos
+    }
+
+    /// `base/hypr/<assinatura>` com lock e sockets que sobraram de um
+    /// Hyprland que caiu: existem e recusam.
+    fn morta(base: &Path, assinatura: &str, wayland: &str) {
+        let pasta = pasta_com_lock(base, assinatura, wayland);
+        drop(UnixListener::bind(pasta.join(".socket2.sock")).unwrap());
+        let socket_wayland = base.join(wayland);
+        if !socket_wayland.exists() {
+            drop(UnixListener::bind(&socket_wayland).unwrap());
+        }
     }
 
     #[test]
@@ -317,20 +403,26 @@ mod testes {
     fn sem_runtime_e_sem_hyprland() {
         let t = Temp::nova("vazio");
         assert_eq!(
-            procurar(&t.0.join("nada"), &t.0).unwrap_err(),
+            procurar(&t.0.join("nada"), &t.0, sem_backoff).unwrap_err(),
             Espera::SemRuntime
         );
-        assert_eq!(procurar(&t.0, &t.0).unwrap_err(), Espera::SemHyprland);
+        assert_eq!(
+            procurar(&t.0, &t.0, sem_backoff).unwrap_err(),
+            Espera::SemHyprland
+        );
         fs::create_dir_all(t.0.join("hypr")).unwrap();
-        assert_eq!(procurar(&t.0, &t.0).unwrap_err(), Espera::SemHyprland);
+        assert_eq!(
+            procurar(&t.0, &t.0, sem_backoff).unwrap_err(),
+            Espera::SemHyprland
+        );
     }
 
     #[test]
     fn a_mais_nova_viva_vence() {
         let t = Temp::nova("nova");
-        let _velha = instancia(&t.0, "aaa_100_1", "wayland-0", true);
-        let _nova = instancia(&t.0, "bbb_200_2", "wayland-1", true);
-        let achada = procurar(&t.0, &t.0).unwrap();
+        let _velha = viva(&t.0, "aaa_100_1", "wayland-0");
+        let _nova = viva(&t.0, "bbb_200_2", "wayland-1");
+        let achada = procurar(&t.0, &t.0, sem_backoff).unwrap();
         assert_eq!(achada.assinatura, "bbb_200_2");
         assert_eq!(achada.nome_wayland, "wayland-1");
     }
@@ -338,9 +430,9 @@ mod testes {
     #[test]
     fn pasta_velha_que_recusa_e_pulada() {
         let t = Temp::nova("velha");
-        let _viva = instancia(&t.0, "aaa_100_1", "wayland-1", true);
-        let _morta = instancia(&t.0, "ccc_300_3", "wayland-2", false);
-        let achada = procurar(&t.0, &t.0).unwrap();
+        let _viva = viva(&t.0, "aaa_100_1", "wayland-1");
+        morta(&t.0, "ccc_300_3", "wayland-2");
+        let achada = procurar(&t.0, &t.0, sem_backoff).unwrap();
         assert_eq!(achada.assinatura, "aaa_100_1");
     }
 
@@ -348,13 +440,16 @@ mod testes {
     fn sem_lock_e_pulada_e_so_mortas_dao_nenhuma_viva() {
         let t = Temp::nova("semlock");
         fs::create_dir_all(t.0.join("hypr/ddd_400_4")).unwrap();
-        let _morta = instancia(&t.0, "aaa_100_1", "wayland-1", false);
+        morta(&t.0, "aaa_100_1", "wayland-1");
         assert_eq!(
-            procurar(&t.0, &t.0).unwrap_err(),
+            procurar(&t.0, &t.0, sem_backoff).unwrap_err(),
             Espera::NenhumaViva { candidatas: 2 }
         );
-        let _viva = instancia(&t.0, "bbb_200_2", "wayland-3", true);
-        assert_eq!(procurar(&t.0, &t.0).unwrap().assinatura, "bbb_200_2");
+        let _viva = viva(&t.0, "bbb_200_2", "wayland-3");
+        assert_eq!(
+            procurar(&t.0, &t.0, sem_backoff).unwrap().assinatura,
+            "bbb_200_2"
+        );
     }
 
     #[test]
@@ -372,9 +467,82 @@ mod testes {
         let _ouvinte = UnixListener::bind(link_dir.join("s.sock")).unwrap();
         let fluxo = conectar_unix(&socket, &curto, "apelido");
         assert!(fluxo.is_ok(), "{fluxo:?}");
-        assert_eq!(fs::read_link(curto.join("apelido")).unwrap(), socket);
+        let pasta = curto.join(PASTA_LINKS);
+        assert_eq!(fs::read_link(pasta.join("pet-apelido")).unwrap(), socket);
+        let modo = fs::metadata(&pasta).unwrap().permissions().mode() & 0o777;
+        assert_eq!(modo, 0o700, "pasta dos links privada");
         // Segunda vez reaproveita o link.
         assert!(conectar_unix(&socket, &curto, "apelido").is_ok());
+    }
+
+    #[test]
+    fn link_curto_nunca_apaga_o_que_nao_e_symlink_nosso() {
+        let t = Temp::nova("seguro");
+        let curto = t.0.join("xdg");
+        let pasta = curto.join(PASTA_LINKS);
+        fs::create_dir_all(&pasta).unwrap();
+        let socket = t.0.join("z".repeat(110)).join("s.sock");
+        // Um arquivo de verdade (fora do container seria, por exemplo, o
+        // socket do compositor) no lugar do apelido: fica intacto.
+        let apelido = pasta.join("pet-wayland-1");
+        fs::write(&apelido, "não é nosso").unwrap();
+        assert!(conectar_unix(&socket, &curto, "wayland-1").is_err());
+        assert_eq!(fs::read_to_string(&apelido).unwrap(), "não é nosso");
+        // Um symlink velho (de uma instância anterior) é trocado.
+        let velho = pasta.join("pet-velho");
+        std::os::unix::fs::symlink(t.0.join("outro"), &velho).unwrap();
+        let _ = conectar_unix(&socket, &curto, "velho");
+        assert_eq!(fs::read_link(&velho).unwrap(), socket);
+        // A pasta dos links trocada por um symlink: recusa.
+        let curto2 = t.0.join("xdg2");
+        fs::create_dir_all(&curto2).unwrap();
+        std::os::unix::fs::symlink(&t.0, curto2.join(PASTA_LINKS)).unwrap();
+        assert!(conectar_unix(&socket, &curto2, "x").is_err());
+    }
+
+    #[test]
+    fn socket_de_comandos_nunca_e_aberto() {
+        let t = Temp::nova("comandos");
+        let falsa = viva(&t.0, "aaa_100_1", "wayland-1");
+        let achada = procurar(&t.0, &t.0, sem_backoff).unwrap();
+        assert_eq!(achada.assinatura, "aaa_100_1");
+        assert!(
+            !intocado(&falsa.eventos),
+            "a prova conecta no .socket2.sock"
+        );
+        assert!(!intocado(&falsa.wayland));
+        assert!(intocado(&falsa.comandos), "o .socket.sock nunca é aberto");
+    }
+
+    #[test]
+    fn backoff_nao_abre_conexao_nenhuma() {
+        let t = Temp::nova("recuo");
+        let velha = viva(&t.0, "aaa_100_1", "wayland-0");
+        let nova = viva(&t.0, "bbb_200_2", "wayland-1");
+        let espera = |a: &str| (a == "bbb_200_2").then_some(Duration::from_secs(7));
+        assert_eq!(
+            procurar(&t.0, &t.0, espera).unwrap_err(),
+            Espera::Recuo {
+                restante: Duration::from_secs(7)
+            }
+        );
+        for falsa in [&velha, &nova] {
+            assert!(intocado(&falsa.eventos) && intocado(&falsa.wayland));
+            assert!(intocado(&falsa.comandos));
+        }
+    }
+
+    #[test]
+    fn instancia_mais_nova_que_a_do_backoff_conecta_na_hora() {
+        let t = Temp::nova("mais-nova");
+        let velha = viva(&t.0, "aaa_100_1", "wayland-0");
+        let _nova = viva(&t.0, "bbb_200_2", "wayland-1");
+        let espera = |a: &str| (a == "aaa_100_1").then_some(Duration::from_secs(30));
+        assert_eq!(
+            procurar(&t.0, &t.0, espera).unwrap().assinatura,
+            "bbb_200_2"
+        );
+        assert!(intocado(&velha.eventos) && intocado(&velha.wayland));
     }
 
     #[test]

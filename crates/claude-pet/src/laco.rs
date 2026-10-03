@@ -32,7 +32,7 @@ use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
 use pet_core::skin::Skin;
 
 use crate::comando::Comando;
-use crate::descoberta::{self, Reconexao};
+use crate::descoberta::{self, Espera, Reconexao};
 use crate::estado::{Compartilhado, Painel, Tela};
 use crate::wl;
 
@@ -155,13 +155,15 @@ impl Laco {
     }
 
     /// (Re)arma o batimento de 5 s. Chamado na partida e depois de um erro
-    /// no `dispatch`, porque um evento de timer pode se perder quando outra
-    /// fonte falha no mesmo ciclo.
+    /// no `dispatch`, porque o calloop tira os timers vencidos da fila antes
+    /// de despachar: se outra fonte falha no mesmo ciclo, o evento do timer
+    /// se perde. Rearmar **não** bate: só o timer disparando prova que o
+    /// laço anda. Um `dispatch` que falhasse sempre rearmaria sem nunca
+    /// bater, e o vigia abortaria em 60 s (o Docker reinicia).
     pub fn armar_batimento(&mut self) {
         if let Some(token) = self.batimento.take() {
             self.handle.remove(token);
         }
-        self.comp.bater();
         let timer = Timer::from_duration(BATIMENTO);
         match self.handle.insert_source(timer, |_, _, laco| {
             laco.comp.bater();
@@ -201,23 +203,24 @@ impl Laco {
         if self.viva.is_some() {
             return None;
         }
-        let instancia = match descoberta::procurar(&self.base, &self.curto) {
+        let agora = Instant::now();
+        let reconexao = &self.reconexao;
+        let em_espera = |assinatura: &str| {
+            (!reconexao.pode_tentar(assinatura, agora))
+                .then(|| reconexao.espera_restante(assinatura, agora))
+        };
+        let instancia = match descoberta::procurar(&self.base, &self.curto, em_espera) {
             Ok(instancia) => instancia,
             Err(espera) => {
                 self.registrar_espera(espera.descrever());
-                return Some(INTERVALO_DESCOBERTA);
+                return Some(match espera {
+                    Espera::Recuo { restante } => {
+                        restante.clamp(Duration::from_millis(100), INTERVALO_DESCOBERTA)
+                    }
+                    _ => INTERVALO_DESCOBERTA,
+                });
             }
         };
-        let agora = Instant::now();
-        if !self.reconexao.pode_tentar(&instancia.assinatura, agora) {
-            let falta = self.reconexao.espera_restante(&instancia.assinatura, agora);
-            self.registrar_espera(format!(
-                "nova tentativa em {} daqui a {} s",
-                instancia.nome_wayland,
-                falta.as_secs_f32().ceil()
-            ));
-            return Some(falta.clamp(Duration::from_millis(100), INTERVALO_DESCOBERTA));
-        }
         let assinatura = instancia.assinatura;
         let nome_wayland = instancia.nome_wayland;
         let conexao = match wl::conectar(
@@ -283,8 +286,9 @@ impl Laco {
         }
     }
 
-    /// Fim do processo: esconde o pet (quadro transparente) e despeja os
-    /// pedidos no socket, para o fade de saída do Hyprland sair vazio.
+    /// Fim do processo: esconde o pet (quadro transparente), destrói a
+    /// camada e espera, com prazo, o compositor confirmar que processou tudo,
+    /// para o fade de saída do Hyprland sair vazio.
     pub fn encerrar(&mut self) {
         if let Some(sessao) = self.sessao_mut() {
             sessao.encerrar();

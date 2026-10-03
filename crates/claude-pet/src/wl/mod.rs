@@ -9,6 +9,7 @@
 
 pub mod saida;
 pub mod shm;
+pub mod sincronia;
 pub mod superficie;
 
 use std::collections::VecDeque;
@@ -78,6 +79,8 @@ const RECRIAR_APOS_FECHAR: Duration = Duration::from_millis(250);
 const ESPERA_DESTRUIR: Duration = Duration::from_millis(50);
 /// Janela da contagem de commits.
 const JANELA_COMMITS: Duration = Duration::from_secs(60);
+/// Prazo para o compositor responder antes do handshake.
+const LIMITE_HANDSHAKE: Duration = Duration::from_secs(3);
 /// Confetes do teste de estresse, sempre com a mesma semente: medições
 /// repetidas veem as mesmas trajetórias.
 const CONFETES: usize = 40;
@@ -167,6 +170,9 @@ pub fn conectar(
     comp: Arc<Compartilhado>,
 ) -> Result<Conexao, String> {
     let conexao = Connection::from_socket(fluxo).map_err(|e| format!("conexão Wayland: {e}"))?;
+    // O registro abaixo faz um roundtrip sem prazo; antes, prova com prazo
+    // que o compositor está lendo este socket.
+    sincronia::sincronizar(&conexao, LIMITE_HANDSHAKE)?;
     let (globais, fila) =
         registry_queue_init::<Sessao>(&conexao).map_err(|e| format!("registro Wayland: {e}"))?;
     let faltando: Vec<&str> = OBRIGATORIOS
