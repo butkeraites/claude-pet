@@ -15,9 +15,11 @@ O plano completo, com marcos M0–M7 e como verificar cada um, está em
 
 ## Estado do repositório
 
-**M0 (fundação) em andamento.** Existe o esqueleto: workspace Rust, daemon
-que responde `/saude` e `/v1/estado`, Docker e o CLI `bin/pet`. Ainda não
-há janela na tela (M1), arte (M2) nem hooks (M3).
+**M0 (fundação) concluído.** Existe o esqueleto: workspace Rust, daemon
+que responde `/saude` e `/v1/estado` (estado `tela: aguardando`), Docker
+(imagem de ~4 MB, healthy) e o CLI `bin/pet`. Repositório privado em
+`github.com/butkeraites/claude-pet`. Ainda não há janela na tela (M1), arte
+(M2) nem hooks (M3).
 
 O Renan precisa **comprar o pack** *Cute Parrots!* (exclusiveOlive,
 itch.io) para o M2. Até lá, o pet só aparece em modo debug com a skin
