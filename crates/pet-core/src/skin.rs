@@ -280,6 +280,11 @@ pub struct Skin {
     pub chao: Vec<String>,
     pub quadros: Vec<Quadro>,
     pub tags: Vec<Tag>,
+    /// Para cada quadro, o primeiro quadro com a mesma imagem (mesmo
+    /// retângulo da folha no mesmo lugar da célula). Folhas que guardam
+    /// quadros iguais uma vez só (o Zeca) repetem poses: o animador compara
+    /// por aqui para não fazer commit de um quadro idêntico (decisão 0027).
+    pub canonico: Vec<usize>,
     pub folha: Imagem,
     pub avisos: Vec<String>,
 }
@@ -502,6 +507,16 @@ impl Skin {
             }
         }
 
+        let canonico = (0..quadros.len())
+            .map(|i| {
+                (0..i)
+                    .find(|&j| {
+                        quadros[j].origem == quadros[i].origem
+                            && quadros[j].deslocamento == quadros[i].deslocamento
+                    })
+                    .unwrap_or(i)
+            })
+            .collect();
         Ok(Skin {
             id: s.id,
             nome: s.nome,
@@ -516,6 +531,7 @@ impl Skin {
             chao,
             quadros,
             tags,
+            canonico,
             folha,
             avisos,
         })
@@ -609,6 +625,22 @@ pub(crate) mod testes {
         assert_eq!(s.tags_do_estado("nada"), Vec::<usize>::new());
         assert_eq!(s.avisos.len(), 1, "{:?}", s.avisos);
         assert!(s.avisos[0].contains("sumida"));
+    }
+
+    #[test]
+    fn quadros_com_a_mesma_imagem_tem_o_mesmo_canonico() {
+        let folha = r#"{"frames":[
+            {"frame":{"x":0,"y":0,"w":2,"h":2},"spriteSourceSize":{"x":0,"y":0,"w":2,"h":2},"sourceSize":{"w":4,"h":4},"duration":100},
+            {"frame":{"x":2,"y":0,"w":2,"h":2},"spriteSourceSize":{"x":0,"y":0,"w":2,"h":2},"sourceSize":{"w":4,"h":4},"duration":100},
+            {"frame":{"x":0,"y":0,"w":2,"h":2},"spriteSourceSize":{"x":0,"y":0,"w":2,"h":2},"sourceSize":{"w":4,"h":4},"duration":300},
+            {"frame":{"x":0,"y":0,"w":2,"h":2},"spriteSourceSize":{"x":1,"y":0,"w":2,"h":2},"sourceSize":{"w":4,"h":4},"duration":100}],
+            "meta":{"size":{"w":4,"h":2},"frameTags":[{"name":"idle","from":0,"to":3}]}}"#;
+        let s = com_folha(folha).unwrap();
+        assert_eq!(
+            s.canonico,
+            vec![0, 1, 0, 3],
+            "o 3 está noutro lugar da célula"
+        );
     }
 
     #[test]

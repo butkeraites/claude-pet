@@ -15,7 +15,8 @@
 #   quadro.json    (só em debug) monitor, x, y, w, h, d, grade, seq;
 #   esperado.png   (só em debug) o RGBA exato do sprite em pixels do monitor.
 #
-# Saída: 0 ok; 1 erro; 3 tela apagada (com DPMS o grim esperaria para sempre).
+# Saída: 0 ok; 1 erro; 3 tela apagada (com DPMS o grim esperaria para sempre)
+# ou sessão bloqueada (a captura mostraria só a tela de senha).
 # Do Hyprland só usa a consulta de leitura `hyprctl -j monitors`.
 set -uo pipefail
 
@@ -33,9 +34,15 @@ if [ -z "$MONITOR" ] || [ "$(jq -r '.sprite_disp == null' <<<"$ESTADO")" = true 
   echo "o pet não está na tela (tela: $(jq -r .tela <<<"$ESTADO"))" >&2
   exit 1
 fi
-DPMS="$(hyprctl -j monitors | jq -r --arg m "$MONITOR" '.[] | select(.name == $m) | .dpmsStatus')"
+MONITORES="$(hyprctl -j monitors)"
+DPMS="$(jq -r --arg m "$MONITOR" '.[] | select(.name == $m) | .dpmsStatus' <<<"$MONITORES")"
 if [ "$DPMS" != true ]; then
   echo "a tela de ${MONITOR} está apagada (DPMS): o grim só captura com ela acesa" >&2
+  exit 3
+fi
+# Sessão bloqueada (lock do Omarchy): o Hyprland desenha só a tela de senha.
+if [ "$(jq -r 'any(.[]; (.solitaryBlockedBy // []) | index("LOCK") != null)' <<<"$MONITORES")" = true ]; then
+  echo "a sessão está bloqueada: a tela de senha cobre o pet (desbloqueie e tente de novo)" >&2
   exit 3
 fi
 

@@ -26,13 +26,19 @@ O daemon acha o Hyprland pelo `hyprland.lock`, conecta ao Wayland (Rust
 puro, SCTK), cria a camada OVERLAY `claude-pet` no monitor focado e desenha
 a skin em blocos D×D de pixels do monitor, com orçamento de commits.
 Repositório privado em `github.com/butkeraites/claude-pet`. Ainda não há
-arte (M2) nem hooks (M3).
+hooks (M3).
 
-O Renan **já comprou o pack** *Cute Parrots!* (exclusiveOlive): o zip fica
-fora do repositório (`~/Downloads`), e o Zeca nasce do Parrot 2, que já é
-verde (M2). Até a skin ser aprovada, a produção fica conectada e escondida
-(`tela: sem_personagem`); só a pilha de dev (`PET_DEBUG=1`) mostra a skin
-xadrez `_teste`.
+**M2 (Zeca) na branch `m2-zeca`:** o pack *Cute Parrots!* (exclusiveOlive,
+zip em `~/Downloads`, fora do repo) vira o Zeca: Parrot 2 verde no visual
+"Malandro rosa" (bico rosa original, chapéu-palheta de faixa laranja,
+gravata-borboleta rosa) e o "chapéu voa e volta" no susto e no mergulho
+(decisões 0023–0025). `bin/pet skin-instalar <zip>` gera `skins-locais/zeca`
+e `zeca-contorno` (fora do git) e as prévias em `tmp/previa-zeca-m2/`. O
+Zeca só aparece depois de `bin/pet subir` e `bin/pet skin-aprovar zeca`
+(decisão 0026); sem aprovação, a produção fica conectada e escondida (`tela:
+sem_personagem`). A pilha de dev (`PET_DEBUG=1`) mostra a skin xadrez
+`_teste`, ou o personagem aprovado com `PET_DEBUG_PERSONAGEM=1`. Formato,
+arte e aprovação em `docs/SKINS.md`.
 
 ## Comandos
 
@@ -49,6 +55,11 @@ Fora dele, use `~/.cargo/bin/cargo`.
 | `scripts/verificar-ao-vivo.sh` | verificação do M1 na tela de verdade; termina com a produção de pé |
 | `scripts/medir-custo.sh` | CPU do Hyprland, GPU e commits/s: escondido × parado, com e sem carga de repintura, e estresse |
 | `cargo xtask skin-teste` / `nitidez` / `fantasma` / `carga` | gera a skin xadrez; compara captura e quadro esperado; acha pixel velho e fantasma; repintura invisível para medir custo |
+| `bin/pet skin-instalar <zip\|pasta>` | o pack vira o Zeca em `skins-locais/` (com e sem contorno), com lint, cobertura e prévias em `tmp/previa-zeca-m2/` |
+| `bin/pet skin-aprovar [id]` / `skin-revogar [id]` | aprova o conteúdo exato da skin vista na folha de contato (cópia em `/state`) ou tira a aprovação |
+| `cargo xtask zeca --pack <zip\|pasta> [--contorno] [--ancoras]` | monta o Zeca; `--ancoras` mostra o encaixe quadro a quadro |
+| `cargo xtask skin-importar` / `lint-skin` / `cobertura` / `contato` | importa um pack; confere a skin; estados cobertos; folha de contato e GIFs |
+| `scripts/verificar-ao-vivo.sh --personagem` | a verificação do M1 com o personagem aprovado no lugar da `_teste` |
 
 ## Arquitetura em uma tela
 
@@ -73,8 +84,13 @@ Fora dele, use `~/.cargo/bin/cargo`.
   `hyprctl` só aparece em scripts de teste do host.
 - **Config do Hyprland** (`~/.config/hypr/*.lua`): só pela skill
   `omarchy` e com consentimento do Renan.
-- **Arte:** o pack e tudo derivado dele ficam em `skins-locais/`
-  (gitignored). A skin `_teste` nunca vira personagem.
+- **Arte:** o pack e tudo derivado dele (sheet, GIFs, folhas de contato,
+  fotos) ficam em `skins-locais/` ou `tmp/` (gitignored), nunca no git nem
+  em `docs/`. Só `arte/zeca/` (acessórios, âncoras, trajetórias) é nossa e
+  vai para o git. A skin `_teste` nunca vira personagem.
+- **Personagem só com aprovação:** o Zeca aparece só com a impressão
+  digital aprovada pelo Renan (`bin/pet skin-aprovar`, decisão 0026). Nunca
+  aprove por ele: aprovação de teste se revoga no fim.
 - **Orçamento de commits Wayland:** média ≤ 2/s parado, 0 dormindo,
   rajadas ≤ 30 fps (decisão 0005).
 - **Registro por tarefa:** cada tarefa ganha uma linha no `PROGRESS.md` e um
@@ -108,6 +124,17 @@ Fora dele, use `~/.cargo/bin/cargo`.
   (decisão 0018). O ritmo parado só se mede com a tela acesa.
 - Captura do monitor tem o que estiver na tela (janelas, texto): fica em
   `tmp/` e é apagada; para o git e para PR, só a foto mascarada do pet.
+- **Sessão bloqueada:** o lock do Omarchy (quickshell, ext-session-lock)
+  apaga a tela depois de um tempo parado e, bloqueado, o Hyprland desenha só a
+  tela de senha: nenhuma camada aparece, nem acendendo a tela. O logind não
+  marca `LockedHint`; quem diz é
+  `/usr/share/omarchy/bin/omarchy-hyprland-session-locked` (sai 0 bloqueada)
+  ou `LOCK` em `solitaryBlockedBy` no `hyprctl -j monitors`. Os scripts ao
+  vivo dão NÃO VERIFICADO nesse caso. Para acender ou apagar a tela:
+  `omarchy-brightness-display on|off`.
+- `pkill -f`/`pgrep -f` com um padrão que aparece na própria linha de
+  comando acha o shell que está rodando: para parar um daemon de teste,
+  guarde o PID.
 - O `shellcheck` não está instalado no host (o `bin/pet verificar` pula).
   Rodado pela imagem oficial, que depois foi removida:
   `docker run --rm --network none -v "$PWD:/mnt:ro" -w /mnt

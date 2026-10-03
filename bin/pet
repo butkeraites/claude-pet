@@ -111,6 +111,7 @@ foto() {
 # testes podem criar um `.socket.sock` falso para provar que ninguém conecta.
 daemon_sem_socket_de_comandos() {
   local achados
+  # shellcheck disable=SC2016 # é o programa do awk: o $0 é do awk, não do shell
   achados="$(find crates/claude-pet/src -name '*.rs' -print0 |
     xargs -0 awk '/^#\[cfg\(test\)\]/ {nextfile} {print FILENAME ":" FNR ":" $0}' |
     grep -E '\.socket\.sock|hyprctl' | grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true)"

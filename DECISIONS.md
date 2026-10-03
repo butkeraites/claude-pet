@@ -530,3 +530,46 @@ pack reinstalado): a imagem pode passar a ter algo que o Renan não viu.
 segura o Zeca quando a imagem muda ou quebra, e o caminho por HTTP no
 loopback, com as checagens de Host e `X-Pet`, evita escrever no volume
 Docker a partir do host.
+
+## 0027 — O Zeca na tela: verificação ao vivo do M2 e quadros iguais sem commit (2026-10-03)
+
+**Problema:** o M2 só fecha com a nitidez do M1 passando com o Zeca na tela
+de verdade. E a folha do Zeca guarda cada pose repetida uma vez só (quadros
+iguais apontam para a mesma célula, decisão 0025), o que expôs commits de
+quadros idênticos: o animador comparava pelo índice do quadro.
+**Escolha:**
+- **Verificação ao vivo com o personagem:** `scripts/verificar-ao-vivo.sh
+  --personagem` sobe a pilha de dev com `PET_DEBUG_PERSONAGEM=1` (o Zeca
+  aprovado só para o teste, decisão 0026). Com a tela acesa e desbloqueada,
+  tudo passou:
+  - nitidez: 12 672 pixels opacos, nenhum fora de ±2 (maior desvio 0), 198
+    blocos 8×8 uniformes;
+  - sem pixel velho (67 968 pixels conferidos) e esconder sem fantasma
+    (80 640);
+  - parado: 1,50 commit/s (orçamento 2);
+  - container: imagem de 4,77 MB, RSS de 11,9 MiB, CPU de 0,04%;
+  - restart em 310 ms, no mesmo lugar; `kill -9` de volta em 261 ms;
+  - região de input de 102×102 lógicos, só no corpo; D = 8 no eDP-1,
+    célula em (1632, 920).
+- **Produção:** aprovar faz o Zeca aparecer na hora no canto inferior direito
+  do eDP-1 (camada no nível 3, `tela: ativa`); revogar o esconde na hora,
+  sem fantasma no canto. As fotos mascaradas ficaram em `tmp/fotos/`: têm
+  pixels do pack e nunca vão para o git nem para `docs/`.
+- **A sessão bloqueia sozinha:** no meio da sessão o lock do Omarchy
+  (quickshell) apagou e cobriu a tela. Bloqueado, o Hyprland não desenha
+  camadas nem com a tela acesa. Os scripts ao vivo passaram a detectar isso
+  (`LOCK` em `solitaryBlockedBy`) e dão NÃO VERIFICADO em vez de comparar a
+  tela de senha. A verificação rodou depois que a sessão foi desbloqueada.
+- **Quadros iguais não fazem commit:** o `Skin` ganha `canonico`, o primeiro
+  quadro com o mesmo retângulo da folha no mesmo lugar da célula. O
+  animador toca e conta trocas por ele: um passo que não muda a imagem não
+  conta no orçamento nem gera commit. O Zeca parado foi de 1,52 commit/s
+  calculado (1,50 medido) para 1,26 calculado e 1,20 medido ao vivo. A
+  `_teste`, sem quadros repetidos, não muda (0,76).
+- **Fim do M2 nesta máquina:** o Zeca está na imagem local, a aprovação de
+  teste foi revogada e a produção ficou de pé com `tela: sem_personagem`. Quem
+  aprova é o Renan, vendo a folha de contato (`bin/pet skin-aprovar zeca`).
+
+**Por quê:** a nitidez depende só do caminho D×D, mas o portão pede a prova
+com o personagem de verdade. Cada commit repinta o monitor (decisão 0005),
+então pose repetida não pode custar repintura.
