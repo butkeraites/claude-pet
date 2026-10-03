@@ -25,8 +25,7 @@ o clique manual (clicar ao lado do pet chega na janela de baixo).
 O daemon acha o Hyprland pelo `hyprland.lock`, conecta ao Wayland (Rust
 puro, SCTK), cria a camada OVERLAY `claude-pet` no monitor focado e desenha
 a skin em blocos D×D de pixels do monitor, com orçamento de commits.
-Repositório privado em `github.com/butkeraites/claude-pet`. Ainda não há
-hooks (M3).
+Repositório privado em `github.com/butkeraites/claude-pet`.
 
 **M2 (Zeca) na branch `m2-zeca`:** o pack *Cute Parrots!* (exclusiveOlive,
 zip em `~/Downloads`, fora do repo) vira o Zeca: Parrot 2 verde no visual
@@ -48,6 +47,15 @@ personagem: a sessão ficou bloqueada. Com a tela acesa e desbloqueada, rode
 `scripts/verificar-ao-vivo.sh --personagem` e `scripts/medir-custo.sh
 --personagem` (aprovam só para o teste e revogam no fim).
 
+**M3 (hooks → reação) na branch `m3-hooks`**, em cima da `m2-zeca`
+(publicada, sem PR nem merge): fio v1 validado no `/v1/evento`, plugin
+`bichinho` (13 hooks async → `avisar.sh`), cérebro mínimo (T0 `nod`, T1
+`done_small`) e `bin/pet testar`. Gate ao vivo passou (decisão 0021). O
+plugin **não** está instalado: até o merge na `main`, só por sessão, com
+`claude --plugin-dir ~/Documents/claude-pet/plugin`; depois do merge, pela
+worktree estável (README). Sem personagem aprovado a produção reage só no
+`/v1/estado` (`ultima_reacao`, `turnos`).
+
 ## Comandos
 
 O `~/.cargo/bin` **não está no PATH** do Renan; o `bin/pet` acrescenta.
@@ -57,6 +65,9 @@ Fora dele, use `~/.cargo/bin/cargo`.
 |---|---|
 | `bin/pet verificar` | portão antes de **todo** commit: fmt, clippy, testes, compose, plugin |
 | `bin/pet subir` / `parar` / `logs` / `estado` | compose e estado do pet |
+| `bin/pet testar rapido` / `pequeno` | eventos sintéticos pelo `avisar.sh` de verdade (`PET_TESTE=1`) → `nod` / `done_small` |
+| `bin/pet tocar <reação>` / `esconder` / `mostrar` | `/v1/comando` (não persiste) |
+| `claude --plugin-dir ~/Documents/claude-pet/plugin` | o plugin numa sessão só (até o merge, nunca instalar) |
 | `~/.cargo/bin/cargo test` | testes do workspace (os quadros dourados regeneram com `PET_ATUALIZAR_OURO=1`) |
 | `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build` | modo desenvolvimento (sem restart, debug, skin `_teste`) |
 | `bin/pet foto` | foto do pet (grim no monitor inteiro); em debug, só os pixels opacos do pet sobre fundo neutro |
@@ -80,7 +91,10 @@ Fora dele, use `~/.cargo/bin/cargo`.
   nunca redimensionada, sem subsurfaces; o Zeca anda dentro do buffer.
   Cada pixel de arte vira um bloco D×D inteiro de pixels do monitor.
 - Eventos do Claude Code chegam por `POST 127.0.0.1:27380/v1/evento`
-  vindos do plugin `bichinho` (hooks async → `plugin/scripts/avisar.sh`).
+  vindos do plugin `bichinho` (hooks async → `plugin/scripts/avisar.sh`),
+  são validados campo a campo (`pet_core::evento`, decisão 0019) e vão
+  pelo canal do calloop para o cérebro (`pet_core::cerebro`, decisão
+  0020), que mora no laço principal e funciona mesmo sem compositor.
 
 ## Regras de ouro
 
@@ -146,10 +160,24 @@ Fora dele, use `~/.cargo/bin/cargo`.
 - `pkill -f`/`pgrep -f` com um padrão que aparece na própria linha de
   comando acha o shell que está rodando: para parar um daemon de teste,
   guarde o PID.
+- Plugin: **nunca** `claude plugin marketplace add` / `install` antes do
+  merge na `main` (sessões de outros projetos rodariam a branch). Para
+  testar ao vivo, `claude --plugin-dir ~/Documents/claude-pet/plugin`.
+- Hook async não aparece em lugar nenhum: para ver o que chegou, pilha de
+  dev e `curl -H 'X-Pet: 1' 127.0.0.1:27380/v1/debug/eventos` (só
+  metadados validados).
+- `claude` aninhado (tmux, testes) a partir de uma sessão do Claude: tire
+  `CLAUDECODE` e as `CLAUDE_CODE_*` do ambiente antes, como no gate do M3.
+  O próprio Claude Code põe `CLAUDE_CODE_ENTRYPOINT` (`cli` no terminal,
+  `sdk-cli` no `-p`), e o cérebro só conta `cli` (`sessoes.origens`).
+- No 2.1.288 o `UserPromptSubmit` vem **sem** `source`, e o `SessionEnd`
+  vem com o `prompt_id` do `/exit`.
+- `bin/pet testar` precisa do pet de pé; as sessões de teste somem em 60 s
+  e nunca se misturam com as reais.
 - O `shellcheck` não está instalado no host (o `bin/pet verificar` pula).
   Rodado pela imagem oficial, que depois foi removida:
   `docker run --rm --network none -v "$PWD:/mnt:ro" -w /mnt
-  koalaman/shellcheck:stable -x bin/pet scripts/*.sh`.
+  koalaman/shellcheck:stable -x bin/pet scripts/*.sh plugin/scripts/avisar.sh`.
 
 ## Convenções
 

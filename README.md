@@ -17,7 +17,8 @@ monitor que está em foco. Sem som.
 
 > **Estado:** em construção. O M1 (overlay nítido na tela, seguindo o
 > orçamento de custo no Hyprland) está pronto na branch `m1-overlay`; o M2
-> (o Zeca, com aprovação do personagem) está na branch `m2-zeca`. Veja
+> (o Zeca, com aprovação do personagem) está na branch `m2-zeca`; o M3
+> (hooks → reação) está na branch `m3-hooks`, em cima da `m2-zeca`. Veja
 > `PLANO.md` para os marcos e `PROGRESS.md` para o andamento.
 
 ## Requisitos
@@ -62,10 +63,41 @@ folha de contato que você viu. Para o Zeca com contorno creme, ponha
 
 ### Hooks do Claude Code
 
-Os hooks vêm no plugin `bichinho`, que mora neste repositório (a partir do
-M3). Eles mandam **só metadados** (nome do evento, ferramenta, nome da pasta
-do projeto) para `127.0.0.1:27380` — nunca o texto dos prompts, código ou
-respostas — e nunca atrasam o Claude.
+Os hooks vêm no plugin `bichinho`, que mora neste repositório (`plugin/`,
+com o marketplace local `bichinho-local` em `.claude-plugin/`): 13 hooks
+async que chamam `plugin/scripts/avisar.sh`. Ele manda **só metadados**
+para `127.0.0.1:27380` — nome do evento, ids opacos, nome da ferramenta,
+contagens e durações, um hash do caminho do arquivo editado e o nome da
+pasta do projeto —, nunca o texto dos prompts, código, respostas ou
+caminhos. Não imprime nada, sempre sai 0 e não atrasa o Claude: com o pet
+desligado, desiste na hora. Precisa de `jq` e `curl` no host.
+
+**Instalação, depois do merge na `main`.** O marketplace aponta para uma
+worktree estável, destacada na `main`, para uma branch em andamento nunca
+chegar às sessões de outros projetos:
+
+```sh
+git -C ~/Documents/claude-pet worktree add --detach ~/.local/share/claude-pet/estavel main
+claude plugin validate ~/.local/share/claude-pet/estavel --strict
+claude plugin marketplace add ~/.local/share/claude-pet/estavel
+claude plugin install bichinho@bichinho-local
+```
+
+Depois de cada merge, atualize a worktree
+(`git -C ~/.local/share/claude-pet/estavel checkout --detach main`) e rode
+`/reload-plugins` nas sessões abertas.
+
+**Até o merge**, ou para testar uma mudança, carregue o plugin só numa
+sessão:
+
+```sh
+claude --plugin-dir ~/Documents/claude-pet/plugin
+```
+
+Para conferir sem o Claude: `bin/pet testar rapido` (aceno) e
+`bin/pet testar pequeno` (pulinho) mandam eventos sintéticos pelo mesmo
+`avisar.sh`. Só sessões de terminal contam (`sessoes.origens = ["cli"]` em
+`config/exemplo.toml`): `claude -p`, SDK e IDE ficam de fora.
 
 ## Desenvolvimento
 

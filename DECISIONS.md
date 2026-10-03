@@ -470,6 +470,59 @@ segurar a festa. O filtro de origem e o isolamento dos testes vêm da
 revisão de produto. O M5 pontua T2/T3, correntes e escalada em cima dos
 mesmos componentes, sem mudar o fio nem o registro.
 
+## 0021 — Gate ao vivo do M3 e plugin só por `--plugin-dir` até o merge (2026-10-03)
+
+**Problema:** o plano verifica o M3 com `claude plugin list` mostrando
+`bichinho@bichinho-local` habilitado, mas instalar o marketplace antes do
+merge faria toda sessão do Claude nesta máquina rodar o plugin de uma
+branch (revisão de produto: acoplamento in-place). E o fio v1 foi escrito a
+partir dos tipos do d.ts do 2.1.288: faltava ver o que o Claude Code manda
+de verdade.
+**Escolha:**
+- Até o merge, o plugin só entra numa sessão por vez:
+  `claude --plugin-dir ~/Documents/claude-pet/plugin`. A instalação
+  (worktree estável destacada na `main`, `claude plugin marketplace add`,
+  `claude plugin install bichinho@bichinho-local`) vem depois do merge.
+  `claude plugin list` e `claude plugin marketplace list` terminaram o M3
+  iguais aos de antes.
+- Gate ao vivo (tela em DPMS; pilha de dev para ter o `/v1/debug/eventos`,
+  produção refeita da branch no fim):
+  - `bin/pet testar rapido` → `nod` e `bin/pet testar pequeno` →
+    `done_small`, na produção;
+  - sessão interativa no tmux em `~/Documents`, com as variáveis
+    `CLAUDECODE` e `CLAUDE_CODE_*` do agente tiradas do ambiente:
+    "responda só: ok" → `nod` (T0); "crie o arquivo …" → o Claude usou um
+    Bash (`mkdir && echo`) → `done_small` (T1); "use a ferramenta Write …"
+    → Read e Write → `done_small`, com o `arq` igual ao sha256 do caminho
+    calculado à parte; `/exit` → `SessionEnd` → `bye`;
+  - pet parado: `claude -p --plugin-dir …` imprimiu só `ok`, stderr vazio,
+    saída 0; o `avisar.sh` levou ~30 ms com a porta recusando e 2,04 s com
+    um servidor que aceita e nunca responde;
+  - pet de pé: um `claude -p` mandou SessionStart, UserPromptSubmit, Stop e
+    SessionEnd com `ent: sdk-cli`, e o cérebro ignorou os quatro.
+- O que o 2.1.288 mandou (só os metadados que o `/v1/debug/eventos`
+  guarda; nenhum campo descartado, nenhum evento recusado):
+  - `CLAUDE_CODE_ENTRYPOINT` chega aos hooks posto pelo próprio Claude
+    Code: `cli` no terminal, `sdk-cli` no `-p`;
+  - `SessionStart` com `source: startup` e sem `prompt_id`;
+  - `UserPromptSubmit` **sem** `source` (o d.ts avisa que o campo ainda
+    está chegando): o turno fica com `src: null`;
+  - `Stop` com `background_tasks: []` e `stop_hook_active: false`;
+  - `PostToolUse` com `duration_ms` (Bash 151 ms, Read 33 ms, Write 84 ms);
+  - `SessionEnd` chega mesmo com o processo saindo, com `reason:
+    prompt_input_exit` (terminal) ou `other` (`-p`) e o `prompt_id` do
+    próprio `/exit`;
+  - do hook ao pet: 25 a 82 ms; a reação sai ~850 ms depois do `ts` do Stop.
+- Não exercitados ao vivo (cobertos pelos canários e pelos testes do
+  cérebro): PreToolUse de AskUserQuestion/ExitPlanMode, PermissionRequest,
+  Notification, SubagentStart, PreCompact, PostCompact, StopFailure e
+  PostToolUseFailure.
+**Por quê:** sessões de outros projetos não podem rodar código de uma
+branch; instalar a partir da `main` estável é o desenho do plano. Ver os
+campos de verdade confirma o fio v1 e mostra que o `source` do
+UserPromptSubmit ainda não vem: o M5 usa esse campo para continuação de
+correntes e terá de tolerar a falta dele.
+
 ## 0023 — O Zeca é o Parrot 2 no visual "Malandro rosa" (2026-10-03)
 
 **Problema:** a decisão 0001 previa troca de paleta (bico amarelo, peito

@@ -28,32 +28,123 @@ ajuda() {
   cat <<'TEXTO'
 uso: bin/pet <comando>
 
-  subir         sobe o pet (docker compose up -d --build)
-  parar         para o pet
-  logs          acompanha os logs
-  estado        mostra /v1/estado (o que o pet está vendo e pensando)
-  foto          foto do pet na tela (grim no monitor inteiro, recorte exato;
-                em debug, só os pixels do pet sobre fundo neutro)
+  subir           sobe o pet (docker compose up -d --build)
+  parar           para o pet
+  logs            acompanha os logs
+  estado          mostra /v1/estado (o que o pet está vendo e pensando)
+  testar CENÁRIO  manda eventos sintéticos pelo plugin/scripts/avisar.sh de
+                  verdade (PET_TESTE=1: isolados das sessões reais e
+                  esquecidos em 60 s) e mostra a reação: rapido → nod,
+                  pequeno → done_small
+  tocar REAÇÃO    toca uma reação (nod, done_small, wave, alert, …)
+  esconder        esconde o pet (até mostrar ou reiniciar)
+  mostrar         mostra o pet de novo
+  foto            foto do pet na tela (grim no monitor inteiro, recorte exato;
+                  em debug, só os pixels do pet sobre fundo neutro)
   skin-instalar <zip|pasta>
-                instala o Zeca a partir do pack Cute Parrots! (lê o zip em
-                memória, gera skins-locais/zeca e zeca-contorno, mostra lint,
-                cobertura e as prévias em tmp/previa-zeca-m2/)
+                  instala o Zeca a partir do pack Cute Parrots! (lê o zip em
+                  memória, gera skins-locais/zeca e zeca-contorno, mostra
+                  lint, cobertura e as prévias em tmp/previa-zeca-m2/)
   skin-aprovar [id]
-                aprova o personagem que você viu na folha de contato (padrão:
-                a skin configurada); só vale se a skin for a da folha e a
-                imagem tiver exatamente esses arquivos; guarda uma cópia
-                aprovada em /state
+                  aprova o personagem que você viu na folha de contato
+                  (padrão: a skin configurada); só vale se a skin for a da
+                  folha e a imagem tiver exatamente esses arquivos; guarda
+                  uma cópia aprovada em /state
   skin-revogar [id]
-                tira a aprovação: o pet volta a ficar escondido
-  reconstruir   reconstrói a imagem com bases atualizadas e sobe de novo
-  dev           modo desenvolvimento em primeiro plano (debug, sem restart)
-  verificar     portão antes de todo commit: fmt, clippy, testes, compose, plugin
-  ajuda         esta mensagem
+                  tira a aprovação: o pet volta a ficar escondido
+  reconstruir     reconstrói a imagem com bases atualizadas e sobe de novo
+  dev             modo desenvolvimento em primeiro plano (debug, sem restart)
+  verificar       portão antes de todo commit: fmt, clippy, testes, compose, plugin
+  ajuda           esta mensagem
 TEXTO
 }
 
 api() {
   curl -fsS -m 3 -H 'X-Pet: 1' "${URL}$1"
+}
+
+# POST /v1/comando; num erro, mostra o motivo que o pet devolveu.
+comando() {
+  local resposta codigo
+  resposta="$(mktemp)"
+  codigo="$(curl -sS -m 3 -o "$resposta" -w '%{http_code}' -H 'X-Pet: 1' \
+    -H 'Content-Type: application/json' --data-binary "$1" "${URL}/v1/comando" || true)"
+  if [ "$codigo" != 204 ]; then
+    printf 'o pet recusou (%s): %s\n' "${codigo:-sem resposta}" \
+      "$(jq -r '.erro // empty' "$resposta" 2>/dev/null || true)" >&2
+    rm -f "$resposta"
+    return 1
+  fi
+  rm -f "$resposta"
+}
+
+# Um cenário sintético PELO avisar.sh de verdade, como o Claude Code chamaria:
+# o JSON do hook na entrada padrão, CLAUDE_CODE_ENTRYPOINT=cli (uma sessão
+# de terminal) e PET_TESTE=1 (o pet isola o evento das sessões reais e o
+# esquece em 60 s). Depois espera a acomodação do Stop e mostra a reação.
+testar() {
+  local cenario="${1:-}" esperado
+  case "$cenario" in
+    rapido) esperado=nod ;;
+    pequeno) esperado=done_small ;;
+    *)
+      echo "uso: bin/pet testar <rapido|pequeno>" >&2
+      return 2
+      ;;
+  esac
+  if ! api /v1/estado >/dev/null; then
+    echo "o pet não respondeu em ${URL} — está de pé? (bin/pet subir)" >&2
+    return 1
+  fi
+  local sid turno inicio
+  sid="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')-pet-testar"
+  turno="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+  inicio="$(date +%s%3N)"
+  hook() {
+    jq -nc --arg e "$1" --arg sid "$sid" --arg turno "$turno" --argjson extra "$2" \
+      '{session_id: $sid, prompt_id: $turno, cwd: "/tmp/pet-testar",
+        transcript_path: "/dev/null", hook_event_name: $e} + $extra' |
+      PET_TESTE=1 PET_PORTA="$PORTA" CLAUDE_CODE_ENTRYPOINT=cli \
+        sh "$RAIZ/plugin/scripts/avisar.sh" "$1"
+  }
+  hook SessionStart '{"source": "startup"}'
+  hook UserPromptSubmit '{"prompt": "teste do bin/pet", "source": "user"}'
+  if [ "$cenario" = pequeno ]; then
+    hook PostToolUse '{"tool_name": "Edit", "duration_ms": 40,
+      "tool_input": {"file_path": "/tmp/pet-testar/oi.txt"}, "tool_response": {}}'
+    hook PostToolUse '{"tool_name": "Bash", "duration_ms": 900,
+      "tool_input": {"command": "true"}, "tool_response": {}}'
+  fi
+  hook Stop '{"stop_hook_active": false, "background_tasks": []}'
+
+  # A reação desta sessão (sid8 e teste) depois do início; a acomodação do
+  # Stop é de 0,8 s.
+  local filtro estado reacao=""
+  # shellcheck disable=SC2016 # programa do jq: $sid8 e $inicio são dele
+  filtro='.ultima_reacao | select(. != null and .teste == true
+    and .sid8 == $sid8 and .ts >= ($inicio | tonumber))'
+  for _ in $(seq 1 50); do
+    estado="$(api /v1/estado || true)"
+    reacao="$(jq -c --arg sid8 "${sid:0:8}" --arg inicio "$inicio" "$filtro" \
+      <<<"$estado" 2>/dev/null || true)"
+    [ -n "$reacao" ] && break
+    sleep 0.1
+  done
+  if [ -z "$reacao" ]; then
+    echo "✗ ${cenario}: nenhuma reação em 5 s (bin/pet logs; os eventos chegaram?)" >&2
+    return 1
+  fi
+  jq . <<<"$reacao"
+  jq -c --arg sid8 "${sid:0:8}" '[.turnos[] | select(.sid8 == $sid8)][0]
+    | {nivel, trabalho, outras, arquivos, subagentes, dur_ms}' <<<"$estado"
+  local nome
+  nome="$(jq -r .nome <<<"$reacao")"
+  if [ "$nome" = "$esperado" ]; then
+    echo "✓ ${cenario} → ${nome}"
+  else
+    echo "✗ ${cenario}: esperava ${esperado}, veio ${nome}" >&2
+    return 1
+  fi
 }
 
 # O core é puro (CLAUDE.md): nenhuma dependência normal, direta ou
@@ -357,6 +448,16 @@ case "$comando" in
       exit 1
     fi
     ;;
+  testar) testar "$@" ;;
+  tocar)
+    if [ -z "${1:-}" ]; then
+      echo "uso: bin/pet tocar <reação>" >&2
+      exit 2
+    fi
+    comando "$(jq -nc --arg r "$1" '{cmd: "tocar", arg: $r}')"
+    ;;
+  esconder) comando '{"cmd": "esconder"}' ;;
+  mostrar) comando '{"cmd": "mostrar"}' ;;
   foto) foto ;;
   skin-instalar) skin_instalar "$@" ;;
   skin-aprovar) skin_aprovar "$@" ;;
