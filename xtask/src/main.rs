@@ -7,8 +7,10 @@
 mod args;
 mod carga;
 mod cobertura;
+mod contato;
 mod fantasma;
 mod folha;
+mod fonte_mini;
 mod importar;
 mod lint;
 mod nitidez;
@@ -126,6 +128,16 @@ fn main() -> ExitCode {
                 eprintln!("lint-skin: {e}");
                 eprintln!("uso: cargo xtask lint-skin [--so-erros] <pasta> [<pasta>…]");
                 ExitCode::from(2)
+            }
+        },
+        Some("contato") => match contato::executar(&args[1..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("contato: {e}");
+                eprintln!(
+                    "uso: cargo xtask contato <pasta> [--saida <pasta>] [--escala 4] [--copia <pasta>]"
+                );
+                ExitCode::FAILURE
             }
         },
         Some("cobertura") => match cobertura::executar(&args[1..]) {
