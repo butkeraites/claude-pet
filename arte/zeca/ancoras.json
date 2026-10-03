@@ -1,0 +1,62 @@
+{
+  "_sobre": [
+    "Encaixe do chapéu e da gravata no Zeca, quadro a quadro (decisão 0023).",
+    "regra: onde cada peça fica em relação ao canto superior esquerdo do olho branco do pack.",
+    "tags: correções por tag do pack (valem para todos os quadros da tag) e por quadro (índice dentro da tag, a partir de 0).",
+    "Ajuste: oculto (tira a peça), variante (outro desenho de acessorios/), x/y (absolutos na célula), dx/dy (somam).",
+    "Gravata oculta = o peito está virado para longe (cabeça baixa comendo, mergulho de cabeça para baixo)."
+  ],
+  "regra": {
+    "chapeu": {"variante": "chapeu", "dx": -4, "dy": -6},
+    "gravata": {"variante": "gravata", "dx": 1, "dy": 6}
+  },
+  "tags": {
+    "eating": {
+      "_nota": "Cabeça baixa bicando (quadros 2 a 8): o peito fica escondido debaixo da cabeça.",
+      "quadros": {
+        "2": {"gravata": {"oculto": true}},
+        "3": {"gravata": {"oculto": true}},
+        "4": {"gravata": {"oculto": true}},
+        "5": {"gravata": {"oculto": true}},
+        "6": {"gravata": {"oculto": true}},
+        "7": {"gravata": {"oculto": true}},
+        "8": {"gravata": {"oculto": true}}
+      }
+    },
+    "take_off": {
+      "_nota": "Quadro 2: abaixa a cabeça para pegar impulso (a pose do comendo); quadro 3 já é voo.",
+      "quadros": {
+        "2": {"gravata": {"oculto": true}},
+        "3": {"gravata": {"dx": -3, "dy": -2}}
+      }
+    },
+    "fly": {
+      "_nota": "No voo a garganta fica embaixo da cabeça: a gravata desce para a linha do queixo, atrás do bico (encostada no bico ela se confunde com ele).",
+      "gravata": {"dx": -3, "dy": -2}
+    },
+    "glide": {"gravata": {"dx": -3, "dy": -2}},
+    "bite": {"gravata": {"dx": -3, "dy": -2}},
+    "fly_hurt": {"gravata": {"dx": -3, "dy": -2}},
+    "dive_start": {
+      "_nota": "Quadro 0 ainda é voo; do 1 em diante ele gira de cabeça para baixo e o peito some.",
+      "gravata": {"oculto": true},
+      "quadros": {
+        "0": {"gravata": {"x": 25, "y": 24}}
+      }
+    },
+    "dive_loop": {"gravata": {"oculto": true}},
+    "dive_end": {
+      "_nota": "Volta do mergulho: o peito reaparece no último quadro, já na horizontal.",
+      "gravata": {"oculto": true},
+      "quadros": {
+        "3": {"gravata": {"variante": "gravata", "x": 25, "y": 24}}
+      }
+    },
+    "landing": {
+      "quadros": {
+        "0": {"gravata": {"x": 24, "y": 21}},
+        "1": {"gravata": {"oculto": true}}
+      }
+    }
+  }
+}

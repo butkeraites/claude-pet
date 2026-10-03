@@ -1,0 +1,8 @@
+; Chapéu levemente torto para a esquerda (~10°): espelho do torto para a
+; direita.
+.....###...
+..###ccc#..
+.#cccfff#..
+.#fffaaaaa#
+#aaaa#####.
+.####......

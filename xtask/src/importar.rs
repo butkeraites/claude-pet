@@ -117,6 +117,9 @@ pub struct Importado {
     pub origem: Origem,
     /// Por que caiu para as tiras, quando caiu.
     pub aviso: Option<String>,
+    /// Paleta do `.aseprite` (vazia quando veio das tiras): as regras de
+    /// estilo travam as cores novas nela.
+    pub paleta: Vec<[u8; 4]>,
 }
 
 impl Importado {
@@ -199,12 +202,22 @@ fn ler_aseprite_direto(bytes: &[u8]) -> Result<Importado, String> {
         tags.push(tag_importada(tag.name(), de, ate, direcao));
     }
     nomes_unicos(&mut tags);
+    let paleta = ase
+        .palette()
+        .map(|p| {
+            (0..p.num_colors())
+                .filter_map(|i| p.color(i))
+                .map(|c| [c.red(), c.green(), c.blue(), c.alpha()])
+                .collect()
+        })
+        .unwrap_or_default();
     Ok(Importado {
         celula,
         quadros,
         tags,
         origem: Origem::Aseprite,
         aviso: None,
+        paleta,
     })
 }
 
@@ -269,6 +282,7 @@ pub fn ler_tiras(
         tags,
         origem: Origem::Tiras,
         aviso: None,
+        paleta: Vec::new(),
     })
 }
 

@@ -1,0 +1,36 @@
+# Cores do Zeca (decisões 0023 e 0024). Arte nossa, MIT.
+#
+# Regras de estilo (docs/pesquisa/06-inspiracoes.md): contorno de 1 pixel na
+# tinta do pack (#1D2427, nunca #000000), paleta travada no pack e no máximo
+# uma rampa nova de 3 tons. Todas as cores daqui existem na paleta do
+# Parrot.aseprite; a única rampa que o corpo verde não usa é a da palha
+# (#E9DF6B, #E4C35A, #D6A54D). `cargo xtask zeca` avisa se alguma cor sair
+# da paleta do pack.
+
+[pack]
+# Branco do olho e a sombra dele: a maior mancha dessas cores é a âncora da
+# cabeça.
+olho = ["#F5F7F4", "#E9EFE7"]
+# Bico rosa: o encaixe avisa se um acessório cobrir o bico.
+bico = ["#E1536F", "#CE3F6F"]
+# Silhueta branca do começo do susto: os acessórios também ficam brancos.
+clarao = "#F5F7F4"
+
+# Troca de cor do corpo: cor do pack = cor nova. Vazia de propósito: no
+# visual 1, "Malandro rosa", o bico rosa original fica (decisão 0023).
+[troca]
+
+# Letra das grades em acessorios/*.txt → cor ("." é sempre transparente).
+[letras]
+"#" = "#1D2427" # tinta do pack (contorno)
+c = "#E9DF6B"   # palha clara (copa do chapéu, luz de cima-esquerda)
+a = "#E4C35A"   # palha (aba)
+s = "#D6A54D"   # palha na sombra
+f = "#FA9662"   # faixa laranja do chapéu
+o = "#E1536F"   # rosa da gravata (o mesmo do bico)
+k = "#CE3F6F"   # nó da gravata, rosa escuro
+
+# Contorno creme opcional (skin zeca-contorno): 1 pixel por fora de tudo,
+# para o Zeca ler no tema escuro.
+[contorno]
+cor = "#F7E7C5"

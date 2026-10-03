@@ -1,0 +1,9 @@
+; Chapéu tombando para a direita (~20°, sentido horário), no voo do chapéu
+; (decisão 0024). Rotação do assentado limpa à mão.
+...####....
+..#cccc##..
+.#fffcccc#.
+#aaaafffc#.
+.###aaaaf#.
+....####aa#
+........##.

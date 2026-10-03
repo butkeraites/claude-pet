@@ -1,0 +1,8 @@
+; Chapéu-palheta assentado (11x5), o aprovado na prévia de 2026-10-03.
+; Canto superior esquerdo em (olho.x - 4, olho.y - 6): a aba inferior cai
+; em cima do contorno do topo da cabeça.
+...######..
+..#cccccc#.
+..#ffffff#.
+#aaaaaaaaa#
+.#########.

@@ -11,6 +11,8 @@ mod folha;
 mod importar;
 mod nitidez;
 mod skin_teste;
+mod zeca;
+mod zip;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -104,6 +106,14 @@ fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("carga: {e}");
+                ExitCode::FAILURE
+            }
+        },
+        Some("zeca") => match zeca::executar(&args[1..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("zeca: {e}");
+                eprintln!("{}", zeca::USO);
                 ExitCode::FAILURE
             }
         },

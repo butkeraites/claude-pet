@@ -1,0 +1,7 @@
+; Chapéu amassado na hora em que cai de volta na cabeça (11x4): a copa
+; perde uma linha e alarga. Assentado com dy = +1, a aba fica no mesmo
+; lugar do chapéu normal.
+..#######..
+.#cffffff#.
+#aaaaaaaaa#
+.#########.

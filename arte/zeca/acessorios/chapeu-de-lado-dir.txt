@@ -1,0 +1,12 @@
+; Chapéu de lado no meio da cambalhota (90°, copa apontando para a direita).
+.#...
+#a...
+#a##.
+#afc#
+#afc#
+#afc#
+#afc#
+#afc#
+#afc#
+#a##.
+.#...

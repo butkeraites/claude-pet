@@ -1,0 +1,76 @@
+{
+  "_sobre": [
+    "Chapéu voa e volta (decisão 0024): no mergulho e no susto o chapéu sai da cabeça, dá uma cambalhota no ar e cai de volta nela.",
+    "Cada tag daqui troca os quadros da tag do pack: corpo (índice do quadro do pack dentro da tag), ms (duração) e chapeu.",
+    "chapeu solto: variante, x e y absolutos na célula (canto superior esquerdo do desenho). chapeu assentado: o encaixe normal daquele corpo, com dx/dy e variante opcionais.",
+    "Cambalhota no sentido horário: chapeu (0°), chapeu-inclinado-dir (~20°), chapeu-de-lado-dir (90°), chapeu-de-ponta-cabeca (180°), chapeu-de-lado-esq (270°), chapeu-inclinado-esq (~340°).",
+    "Na volta, o chapéu cai amassado (chapeu-amassado, dy +1) e desamassa no quadro seguinte."
+  ],
+  "tags": {
+    "hurt": {
+      "_nota": "Susto: o chapéu pula no clarão (branco como a silhueta), gira enquanto o Zeca se encolhe e cai de volta quando ele se endireita.",
+      "quadros": [
+        {"corpo": 0, "ms": 80, "chapeu": {"variante": "chapeu", "x": 21, "y": 8}},
+        {"corpo": 1, "ms": 90, "chapeu": {"variante": "chapeu-inclinado-dir", "x": 21, "y": 4}},
+        {"corpo": 2, "ms": 100, "chapeu": {"variante": "chapeu-de-lado-dir", "x": 24, "y": 1}},
+        {"corpo": 2, "ms": 100, "chapeu": {"variante": "chapeu-de-ponta-cabeca", "x": 20, "y": 1}},
+        {"corpo": 2, "ms": 100, "chapeu": {"variante": "chapeu-de-lado-esq", "x": 22, "y": 3}},
+        {"corpo": 3, "ms": 90, "chapeu": {"variante": "chapeu-inclinado-esq", "x": 21, "y": 7}},
+        {"corpo": 3, "ms": 80, "chapeu": {"assentado": true, "variante": "chapeu-amassado", "dy": 1}},
+        {"corpo": 3, "ms": 200, "chapeu": {"assentado": true}}
+      ]
+    },
+    "fly_hurt": {
+      "_nota": "Susto em pleno voo: mesma cambalhota, com as asas batendo (os quadros 1 a 3 se repetem).",
+      "quadros": [
+        {"corpo": 0, "ms": 80, "chapeu": {"variante": "chapeu", "x": 24, "y": 11}},
+        {"corpo": 1, "ms": 90, "chapeu": {"variante": "chapeu-inclinado-dir", "x": 25, "y": 7}},
+        {"corpo": 2, "ms": 100, "chapeu": {"variante": "chapeu-de-lado-dir", "x": 28, "y": 2}},
+        {"corpo": 3, "ms": 100, "chapeu": {"variante": "chapeu-de-ponta-cabeca", "x": 24, "y": 2}},
+        {"corpo": 1, "ms": 100, "chapeu": {"variante": "chapeu-de-lado-esq", "x": 26, "y": 3}},
+        {"corpo": 2, "ms": 90, "chapeu": {"variante": "chapeu-inclinado-esq", "x": 24, "y": 8}},
+        {"corpo": 3, "ms": 80, "chapeu": {"assentado": true, "variante": "chapeu-amassado", "dy": 1}},
+        {"corpo": 1, "ms": 100, "chapeu": {"assentado": true}}
+      ]
+    },
+    "dive_start": {
+      "_nota": "Ele mergulha e o chapéu fica no ar: a cabeça sai de baixo dele e o chapéu começa a tombar.",
+      "quadros": [
+        {"corpo": 0, "ms": 100, "chapeu": {"assentado": true}},
+        {"corpo": 1, "ms": 100, "chapeu": {"variante": "chapeu", "x": 24, "y": 10}},
+        {"corpo": 2, "ms": 100, "chapeu": {"variante": "chapeu", "x": 25, "y": 6}},
+        {"corpo": 3, "ms": 100, "chapeu": {"variante": "chapeu-inclinado-dir", "x": 26, "y": 3}}
+      ]
+    },
+    "dive_loop": {
+      "_nota": "Mergulho em laço: o chapéu fica para trás, em cima dele, dando cambalhotas (uma volta por ciclo).",
+      "quadros": [
+        {"corpo": 0, "ms": 100, "chapeu": {"variante": "chapeu-de-lado-dir", "x": 30, "y": 1}},
+        {"corpo": 1, "ms": 100, "chapeu": {"variante": "chapeu-de-ponta-cabeca", "x": 26, "y": 2}},
+        {"corpo": 2, "ms": 100, "chapeu": {"variante": "chapeu-de-lado-esq", "x": 28, "y": 1}},
+        {"corpo": 3, "ms": 100, "chapeu": {"variante": "chapeu", "x": 26, "y": 3}}
+      ]
+    },
+    "dive_end": {
+      "_nota": "Saindo do mergulho: o chapéu completa a cambalhota, cai em cima da cabeça amassado e desamassa enquanto ele plana.",
+      "quadros": [
+        {"corpo": 0, "ms": 100, "chapeu": {"variante": "chapeu-de-lado-dir", "x": 29, "y": 1}},
+        {"corpo": 1, "ms": 100, "chapeu": {"variante": "chapeu-de-ponta-cabeca", "x": 25, "y": 2}},
+        {"corpo": 2, "ms": 100, "chapeu": {"variante": "chapeu-de-lado-esq", "x": 26, "y": 3}},
+        {"corpo": 3, "ms": 80, "chapeu": {"variante": "chapeu-inclinado-esq", "x": 23, "y": 7}},
+        {"corpo": 3, "ms": 70, "chapeu": {"assentado": true, "variante": "chapeu-torto-esq", "dy": -2}},
+        {"corpo": 3, "ms": 80, "chapeu": {"assentado": true, "variante": "chapeu-amassado", "dy": 1}},
+        {"corpo": 3, "ms": 150, "chapeu": {"assentado": true}}
+      ]
+    },
+    "landing": {
+      "_nota": "Pouso: o chapéu se reassenta com o tranco (amassa no impacto e volta).",
+      "quadros": [
+        {"corpo": 0, "ms": 100, "chapeu": {"assentado": true}},
+        {"corpo": 1, "ms": 100, "chapeu": {"assentado": true, "dy": -1}},
+        {"corpo": 2, "ms": 100, "chapeu": {"assentado": true, "variante": "chapeu-amassado", "dy": 1}},
+        {"corpo": 3, "ms": 100, "chapeu": {"assentado": true}}
+      ]
+    }
+  }
+}

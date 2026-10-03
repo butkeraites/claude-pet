@@ -382,3 +382,102 @@ Ao vivo com a tela apagada passaram:
 - saída confirmada;
 - `kill -9` com RestartCount 0 → 1, de volta em 471 ms;
 - "aguardando compositor" sem compositor.
+
+## 0023 — O Zeca é o Parrot 2 no visual "Malandro rosa" (2026-10-03)
+
+**Problema:** a decisão 0001 previa troca de paleta (bico amarelo, peito
+creme) e acessórios laranja. Em 2026-10-03 o Renan viu a prévia com três
+visuais sobre o pack comprado e escolheu.
+**Escolha (do Renan):**
+- o personagem se chama **Zeca** (nome confirmado) e nasce do **Parrot 2**,
+  o papagaio verde do pack *Cute Parrots!*;
+- **visual 1, "Malandro rosa":** o **bico rosa original fica** (`#E1536F` e
+  `#CE3F6F`; a troca de paleta é vazia), **chapéu-palheta** com **faixa
+  laranja** (`#FA9662`) e uma **gravata-borboleta rosa** pequena no peito
+  (o rosa do bico, com o nó em `#CE3F6F`);
+- "estilo Zé Carioca, um pouco diferente": nada de nome nem visual da Disney
+  (sem paletó, sem charuto, sem guarda-chuva; faixa laranja e gravata rosa).
+
+Como o encaixe funciona (`cargo xtask zeca`, `arte/zeca/`):
+- chapéu e gravata são grades de texto nossas (MIT), só com cores da paleta
+  do próprio `.aseprite` (a rampa nova é a da palha), contorno na tinta do
+  pack `#1D2427`;
+- âncora: o olho branco do pack (a maior mancha branca, para as bolhas do
+  sono e o risco da mordida não enganarem); chapéu em (olho − 4, olho − 6),
+  gravata em (olho + 1, olho + 6);
+- correções por tag e por quadro em `arte/zeca/ancoras.json`: no voo a
+  gravata desce para a linha do queixo, atrás do bico (encostada no bico ela
+  vira bico); a gravata some quando o peito está virado para longe (cabeça
+  baixa comendo, decolagem e pouso agachados, mergulho de cabeça para
+  baixo); comendo, o chapéu fica reto (as versões tortas comparadas lado a
+  lado ficaram piores);
+- quadros de clarão (silhueta branca do susto): sem olho, a âncora vem do
+  quadro comum com a mesma silhueta, e chapéu e gravata também ficam
+  brancos;
+- a tag `Death` fica fora da skin: o Zeca não morre.
+
+A fonte monogram, que estava na lista do M2, vai para o M6 junto com os
+balões, que são os únicos que a usam.
+**Por quê:** o bico rosa com gravata rosa amarra as cores, e o chapéu de
+faixa laranja é a marca de malandro sem copiar o personagem da Disney. O
+encaixe por dados (regra do olho mais correções) deixa cada quadro conferido
+e reproduzível sem redesenhar nada do pack.
+
+## 0024 — Chapéu voa e volta (2026-10-03)
+
+**Problema:** no mergulho a cabeça fica para baixo e a regra do olho põe o
+chapéu no meio do corpo; o susto começa num quadro de silhueta branca.
+**Escolha (pedido do Renan, "chapéu voa e volta"):** no mergulho e no susto
+o chapéu sai da cabeça e cai de volta nela, como comédia física.
+- **Variantes desenhadas à mão** (`arte/zeca/acessorios/`): a cambalhota no
+  sentido horário em 0°, ~20°, 90°, 180°, 270° e ~340°, um torto de ~10° e
+  o **amassado**, que aparece no quadro em que o chapéu cai na cabeça e
+  desamassa no seguinte.
+- **Trajetória quadro a quadro** em `arte/zeca/chapeu_voando.json`, que troca
+  os quadros da tag: corpo do pack, duração e chapéu solto (variante e
+  posição na célula) ou assentado.
+- **Susto (`hurt`, `fly_hurt`):** o chapéu pula no clarão (branco como a
+  silhueta), dá uma volta inteira enquanto o Zeca se encolhe e cai quando ele
+  se endireita. O `hurt` passa de 400 para 840 ms (o corpo encolhido segura
+  300 ms).
+- **Mergulho:** a cabeça sai de baixo do chapéu, que fica no ar e começa a
+  tombar (`dive_start`); no laço (`dive_loop`) o chapéu gira em cima dele, uma
+  volta por ciclo de 4 quadros, para o laço emendar; no `dive_end` ele
+  completa a volta e cai na cabeça quando o Zeca volta à horizontal (3
+  quadros a mais, 680 ms).
+- **Pouso (`landing`):** o chapéu se reassenta com o tranco: sobe 1 pixel e
+  amassa no impacto.
+**Por quê:** o chapéu que voa e volta transforma o quadro em que a regra
+falhava na piada. A cambalhota usa poucas variantes legíveis a 48×48, e o
+amassado vende o peso da queda.
+
+## 0025 — Folha do Zeca: nomes normalizados, tags compostas e duas variantes (2026-10-03)
+
+**Problema:** os nomes do pack têm espaço e parêntese (`Sit(End)`, `End
+Dive`), e vários estados do pet são sequências de tags (levantar e olhar,
+voo curto, voo com mergulho). O animador do M1 alterna as tags de `idle` e
+o do M3 toca a primeira tag de cada reação. E o contorno creme ficou para o
+Renan decidir vendo a folha.
+**Escolha:**
+- **Nomes:** o importador normaliza para ids (`Sit(End)` → `stand`, `End
+  Dive` → `dive_end`, `Fly Bite` → `bite`) e guarda o original no campo
+  `data` da tag, que a folha de contato mostra.
+- **Tags compostas** (`arte/zeca/zeca.toml`), com quadros repetidos
+  apontando para a mesma célula da folha (custam zero pixel):
+  `stand_look_sit` (rajada do repouso: levanta, respira em pé e senta, sem
+  pular do sentado para o em pé), `nod` (aceno T0), `short_flight` (T2) e
+  `big_flight` (T3, com o mergulho e o chapéu voando). O caminho pela tela
+  é do M6.
+- **Estados:** `idle` = pose fixa do Sit Idle com rajadas de
+  `stand_look_sit`; `working` comendo; `thinking` Sit Idle; `waiting`,
+  `alert`, `wave`, `done_small`, `giggle`, `hello` e `bye` piando; `ready` em
+  pé; `error` susto; `yawn`, `sleep` e `wake`; `dangle` voando; `land`
+  pousando. `chao` lista as tags com os pés no chão, para o lint.
+- **Tamanho:** `corpo_px` = 19, a altura da pose parada com chapéu → D = 8 no
+  eDP-1 e 13 no 4K; `toque` = a caixa dessa pose; pés em (24, 32).
+- **Duas variantes:** `zeca` e `zeca-contorno` (1 pixel de arte creme
+  `#F7E7C5` por fora, nos 8 vizinhos), ambas em `skins-locais/` e com o mesmo
+  toque e D. A escolha é `aparencia.skin`.
+**Por quê:** ids sem espaço servem de chave estável; a sequência inteira numa
+tag só funciona com os dois animadores sem mudar o core; e o contorno vira
+uma escolha de config, não um rebuild.
