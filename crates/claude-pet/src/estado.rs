@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use pet_core::config::ConfigEfetiva;
+use serde::Serialize;
 use serde_json::{Value, json};
 
 /// Batimento mais velho que isto: `/saude` responde 503.
@@ -37,12 +38,25 @@ impl Tela {
     }
 }
 
+/// O que a sessão Wayland publica para o `/v1/estado` (escrito só pela
+/// thread principal; o ingress só lê).
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct Painel {
+    /// Commits Wayland no último minuto (orçamento: até 120 parado).
+    pub commits_por_min: usize,
+    pub commits_total: u64,
+    /// SHM do buffer do monitor (o Hyprland guarda uma textura do mesmo
+    /// tamanho, fora do container).
+    pub shm_bytes: usize,
+}
+
 pub struct Compartilhado {
     inicio: Instant,
     /// Milissegundos desde `inicio` no último batimento.
     batimento_ms: AtomicU64,
     tela: AtomicU8,
     config: RwLock<ConfigEfetiva>,
+    painel: RwLock<Painel>,
     debug: bool,
 }
 
@@ -53,6 +67,7 @@ impl Compartilhado {
             batimento_ms: AtomicU64::new(0),
             tela: AtomicU8::new(Tela::Aguardando as u8),
             config: RwLock::new(config),
+            painel: RwLock::new(Painel::default()),
             debug,
         }
     }
@@ -80,6 +95,10 @@ impl Compartilhado {
         self.tela.store(tela as u8, Ordering::Relaxed);
     }
 
+    pub fn publicar_painel(&self, painel: Painel) {
+        *self.painel.write().expect("lock do painel envenenado") = painel;
+    }
+
     pub fn saude_json(&self) -> Value {
         json!({
             "ok": self.saudavel(),
@@ -92,12 +111,16 @@ impl Compartilhado {
     /// Fotografia só com metadados, para `bin/pet estado`.
     pub fn estado_json(&self) -> Value {
         let config = self.config.read().expect("lock da config envenenado");
+        let painel = self.painel.read().expect("lock do painel envenenado");
         json!({
             "versao": pet_core::VERSAO,
             "tela": self.tela().nome(),
             "desde_s": self.inicio.elapsed().as_secs(),
             "batimento_ms": self.idade_batimento().as_millis() as u64,
             "debug": self.debug,
+            "commits_por_min": painel.commits_por_min,
+            "commits_total": painel.commits_total,
+            "shm_bytes": painel.shm_bytes,
             "config": &*config,
         })
     }
@@ -129,6 +152,20 @@ mod testes {
             "padrao"
         );
         assert_eq!(estado["versao"], pet_core::VERSAO);
+    }
+
+    #[test]
+    fn painel_aparece_no_estado() {
+        let c = novo();
+        c.publicar_painel(Painel {
+            commits_por_min: 42,
+            commits_total: 7,
+            shm_bytes: 9_216_000,
+        });
+        let estado = c.estado_json();
+        assert_eq!(estado["commits_por_min"], 42);
+        assert_eq!(estado["commits_total"], 7);
+        assert_eq!(estado["shm_bytes"], 9_216_000);
     }
 
     #[test]

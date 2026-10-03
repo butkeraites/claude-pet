@@ -8,15 +8,21 @@
 //! O que a sessão recupera sozinha é a própria camada (`closed` → recria).
 
 pub mod saida;
+pub mod shm;
 pub mod superficie;
 
+use std::collections::VecDeque;
 use std::os::unix::net::UnixStream;
-use std::time::Duration;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use pet_core::skin::Skin;
 
 use smithay_client_toolkit as sctk;
 use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState};
 use smithay_client_toolkit::output::{OutputHandler, OutputState};
-use smithay_client_toolkit::reexports::calloop::LoopHandle;
+use smithay_client_toolkit::reexports::calloop::{LoopHandle, RegistrationToken};
 use smithay_client_toolkit::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay_client_toolkit::reexports::client::globals::{GlobalList, registry_queue_init};
 use smithay_client_toolkit::reexports::client::protocol::{wl_output, wl_surface};
@@ -36,8 +42,10 @@ use smithay_client_toolkit::shell::wlr_layer::{
 use smithay_client_toolkit::shm::{Shm, ShmHandler};
 use smithay_client_toolkit::{delegate_registry, registry_handlers};
 
+use crate::estado::{Compartilhado, Painel};
 use crate::laco::Laco;
-use superficie::{OrigemEscala, Prazo, Superficie};
+use crate::pet::{Palco, Pet};
+use superficie::{Desenho, OrigemEscala, Prazo, Superficie};
 
 /// Globais sem os quais não há camada para desenhar.
 const OBRIGATORIOS: &[&str] = &[
@@ -54,6 +62,41 @@ const OPCIONAIS: &[&str] = &[
 ];
 /// Depois de um `closed`, espera o monitor assentar antes de recriar.
 const RECRIAR_APOS_FECHAR: Duration = Duration::from_millis(250);
+/// Ao esconder, a camada morre no frame callback do quadro transparente ou
+/// depois disto, o que vier primeiro.
+const ESPERA_DESTRUIR: Duration = Duration::from_millis(50);
+/// Janela da contagem de commits.
+const JANELA_COMMITS: Duration = Duration::from_secs(60);
+
+/// Commits Wayland: o total e os do último minuto (orçamento da decisão
+/// 0005: média de até 2/s parado, 0 dormindo, rajadas de até 30 fps).
+#[derive(Debug, Default)]
+pub struct Commits {
+    recentes: VecDeque<Instant>,
+    pub total: u64,
+}
+
+impl Commits {
+    pub fn contar(&mut self, agora: Instant) {
+        self.total += 1;
+        self.recentes.push_back(agora);
+        self.podar(agora);
+    }
+
+    pub fn por_minuto(&mut self, agora: Instant) -> usize {
+        self.podar(agora);
+        self.recentes.len()
+    }
+
+    fn podar(&mut self, agora: Instant) {
+        while let Some(&t) = self.recentes.front() {
+            if agora.saturating_duration_since(t) <= JANELA_COMMITS {
+                break;
+            }
+            self.recentes.pop_front();
+        }
+    }
+}
 
 /// Estado da fila de eventos Wayland.
 pub struct Sessao {
@@ -66,9 +109,19 @@ pub struct Sessao {
     viewporter: WpViewporter,
     qh: QueueHandle<Sessao>,
     handle: LoopHandle<'static, Laco>,
+    conexao: Connection,
     superficie: Option<Superficie>,
     /// O pet deve aparecer (há personagem e ninguém mandou esconder).
     visivel: bool,
+    pet: Option<Pet>,
+    /// Onde o pet fica na superfície atual (D e posição).
+    palco: Option<Palco>,
+    /// Relógio da animação: os quadros contam a partir daqui.
+    inicio: Instant,
+    /// Timer da próxima troca de quadro.
+    relogio: Option<RegistrationToken>,
+    commits: Commits,
+    comp: Arc<Compartilhado>,
 }
 
 /// Resultado do handshake: a conexão, a fila e o estado que ela despacha.
@@ -79,7 +132,12 @@ pub struct Conexao {
 }
 
 /// Faz o handshake numa conexão já aberta (a da prova da descoberta).
-pub fn conectar(fluxo: UnixStream, handle: LoopHandle<'static, Laco>) -> Result<Conexao, String> {
+pub fn conectar(
+    fluxo: UnixStream,
+    handle: LoopHandle<'static, Laco>,
+    skin: Option<Rc<Skin>>,
+    comp: Arc<Compartilhado>,
+) -> Result<Conexao, String> {
     let conexao = Connection::from_socket(fluxo).map_err(|e| format!("conexão Wayland: {e}"))?;
     let (globais, fila) =
         registry_queue_init::<Sessao>(&conexao).map_err(|e| format!("registro Wayland: {e}"))?;
@@ -118,8 +176,15 @@ pub fn conectar(fluxo: UnixStream, handle: LoopHandle<'static, Laco>) -> Result<
         viewporter,
         qh,
         handle,
+        conexao: conexao.clone(),
         superficie: None,
         visivel: false,
+        pet: skin.map(|skin| Pet::novo(skin, 0)),
+        palco: None,
+        inicio: Instant::now(),
+        relogio: None,
+        commits: Commits::default(),
+        comp,
     };
     Ok(Conexao {
         conexao,
@@ -152,14 +217,47 @@ fn descrever_saida(saidas: &OutputState, saida: &wl_output::WlOutput) -> String 
 }
 
 impl Sessao {
+    fn agora_ms(&self) -> u64 {
+        self.inicio.elapsed().as_millis() as u64
+    }
+
+    /// Publica as medidas da sessão no `/v1/estado`.
+    pub fn publicar(&mut self) {
+        let painel = Painel {
+            commits_por_min: self.commits.por_minuto(Instant::now()),
+            commits_total: self.commits.total,
+            shm_bytes: self.superficie.as_ref().map_or(0, Superficie::bytes_shm),
+        };
+        self.comp.publicar_painel(painel);
+    }
+
+    fn contar_commit(&mut self) {
+        self.commits.contar(Instant::now());
+        self.publicar();
+    }
+
     /// Liga ou desliga o pet na tela. Ligar cria a camada (no monitor
-    /// focado); desligar a destrói.
+    /// focado); desligar desenha transparente e só então destrói, para o
+    /// fade de saída do Hyprland não guardar um quadro fantasma.
     pub fn definir_visivel(&mut self, visivel: bool) {
-        self.visivel = visivel;
-        if visivel && self.superficie.is_none() {
-            self.criar_superficie();
-        } else if !visivel {
-            self.superficie = None;
+        self.visivel = visivel && self.pet.is_some();
+        if self.visivel {
+            if self.superficie.is_none() {
+                self.criar_superficie();
+            }
+        } else {
+            self.esconder();
+        }
+    }
+
+    /// Antes de sair do processo: esconde e despeja os pedidos no socket.
+    pub fn encerrar(&mut self) {
+        if self.superficie.is_some() {
+            depurar!("escondendo o pet antes de sair");
+        }
+        self.definir_visivel(false);
+        if let Err(e) = self.conexao.flush() {
+            depurar!("flush final: {e}");
         }
     }
 
@@ -172,7 +270,89 @@ impl Sessao {
             &self.qh,
         );
         depurar!("camada criada (geração {})", superficie.geracao);
+        self.palco = None;
         self.superficie = Some(superficie);
+    }
+
+    fn esconder(&mut self) {
+        self.cancelar_relogio();
+        let (Some(superficie), Some(pet)) = (self.superficie.as_mut(), self.pet.as_ref()) else {
+            self.superficie = None;
+            return;
+        };
+        if !superficie.desenhou() || superficie.pronta().is_none() {
+            self.superficie = None;
+            return;
+        }
+        superficie.saindo = true;
+        let geracao = superficie.geracao;
+        match superficie.desenhar(&[], pet.skin(), &self.shm, &self.qh, true) {
+            Ok(Desenho::Enviado { .. }) => self.contar_commit(),
+            Ok(_) => {}
+            Err(e) => {
+                aviso!("quadro transparente ao esconder: {e}");
+                self.superficie = None;
+                return;
+            }
+        }
+        self.depois(ESPERA_DESTRUIR, geracao, |sessao| {
+            if sessao.superficie.as_ref().is_some_and(|s| s.saindo) {
+                sessao.superficie = None;
+            }
+        });
+    }
+
+    /// Desenha o quadro de agora (se a camada está pronta e algo mudou) e
+    /// agenda a próxima troca.
+    fn desenhar(&mut self) {
+        let agora_ms = self.agora_ms();
+        let (Some(superficie), Some(pet), Some(palco)) = (
+            self.superficie.as_mut(),
+            self.pet.as_ref(),
+            self.palco.as_ref(),
+        ) else {
+            return;
+        };
+        if superficie.saindo {
+            return;
+        }
+        let (cena, proxima) = pet.cena(palco, agora_ms);
+        let resultado = superficie.desenhar(&cena, pet.skin(), &self.shm, &self.qh, false);
+        match resultado {
+            Ok(Desenho::Enviado { retangulos, area }) => {
+                self.contar_commit();
+                depurar!("quadro enviado: {retangulos} retângulo(s) de dano, {area} px");
+            }
+            Ok(Desenho::SemMudanca | Desenho::Adiado) => {}
+            Err(e) => aviso!("desenho: {e}"),
+        }
+        if let Some(proxima) = proxima {
+            self.armar_relogio(proxima);
+        }
+    }
+
+    fn armar_relogio(&mut self, prazo_ms: u64) {
+        self.cancelar_relogio();
+        let quando = self.inicio + Duration::from_millis(prazo_ms);
+        let inserido = self
+            .handle
+            .insert_source(Timer::from_deadline(quando), |_, _, laco| {
+                if let Some(sessao) = laco.sessao_mut() {
+                    sessao.relogio = None;
+                    sessao.desenhar();
+                }
+                TimeoutAction::Drop
+            });
+        match inserido {
+            Ok(token) => self.relogio = Some(token),
+            Err(e) => erro!("não consegui armar o relógio da animação: {e}"),
+        }
+    }
+
+    fn cancelar_relogio(&mut self) {
+        if let Some(token) = self.relogio.take() {
+            self.handle.remove(token);
+        }
     }
 
     /// Arma um timer que chama `acao` nesta sessão se a superfície ainda
@@ -211,7 +391,8 @@ impl Sessao {
         self.tentar_aprontar();
     }
 
-    /// Recalcula tamanho, escala e monitor da camada; avisa quando muda.
+    /// Recalcula tamanho, escala e monitor da camada; quando mudam, refaz o
+    /// palco (D e posição) e desenha.
     fn tentar_aprontar(&mut self) {
         let Some(superficie) = self.superficie.as_mut() else {
             return;
@@ -232,6 +413,18 @@ impl Sessao {
             pronta.logico.1,
             pronta.escala
         );
+        if let Some(pet) = &self.pet {
+            let palco = pet.palco(pronta.logico, pronta.escala, (largura, altura));
+            info!(
+                "pet «{}» com D={} e célula em ({}, {}) pixels do monitor",
+                pet.skin().id,
+                palco.d,
+                palco.x,
+                palco.y
+            );
+            self.palco = Some(palco);
+            self.desenhar();
+        }
     }
 
     fn escala_preferida(&mut self, objeto: &WpFractionalScaleV1, escala_120: u32) {
@@ -268,7 +461,26 @@ impl CompositorHandler for Sessao {
     ) {
     }
 
-    fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: u32) {}
+    fn frame(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        surface: &wl_surface::WlSurface,
+        _: u32,
+    ) {
+        let Some(superficie) = self.superficie.as_mut() else {
+            return;
+        };
+        if !superficie.eh(surface) {
+            return;
+        }
+        superficie.quadro_mostrado();
+        if superficie.saindo {
+            self.superficie = None;
+        } else if superficie.pendente {
+            self.desenhar();
+        }
+    }
 
     fn surface_enter(
         &mut self,
@@ -310,7 +522,9 @@ impl LayerShellHandler for Sessao {
             "a camada foi fechada pelo compositor; recriando em {} ms",
             RECRIAR_APOS_FECHAR.as_millis()
         );
+        self.cancelar_relogio();
         self.superficie = None;
+        self.palco = None;
         let timer = Timer::from_duration(RECRIAR_APOS_FECHAR);
         let inserido = self.handle.insert_source(timer, |_, _, laco| {
             if let Some(sessao) = laco.sessao_mut()
@@ -412,3 +626,27 @@ impl ProvidesRegistryState for Sessao {
 
 delegate_registry!(Sessao);
 sctk::delegate_dispatch2!(Sessao);
+
+impl Drop for Sessao {
+    fn drop(&mut self) {
+        self.cancelar_relogio();
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    #[test]
+    fn commits_por_minuto_esquece_o_que_passou_de_60_s() {
+        let t0 = Instant::now();
+        let mut c = Commits::default();
+        for i in 0..5 {
+            c.contar(t0 + Duration::from_secs(i * 10));
+        }
+        assert_eq!(c.por_minuto(t0 + Duration::from_secs(40)), 5);
+        assert_eq!(c.por_minuto(t0 + Duration::from_secs(75)), 3);
+        assert_eq!(c.por_minuto(t0 + Duration::from_secs(500)), 0);
+        assert_eq!(c.total, 5);
+    }
+}

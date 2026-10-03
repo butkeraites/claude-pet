@@ -60,8 +60,9 @@ pub fn danos(antes: &[Elemento], depois: &[Elemento], skin: &Skin) -> Vec<Ret> {
         if a == b {
             continue;
         }
-        for e in [a, b].into_iter().flatten() {
-            let r = e.limites(skin);
+        let antes = a.map(|e| e.limites(skin));
+        let depois = b.map(|e| e.limites(skin)).filter(|r| Some(*r) != antes);
+        for r in [antes, depois].into_iter().flatten() {
             if !r.vazio() {
                 saida.push(r);
             }
@@ -157,6 +158,13 @@ mod testes {
             danos(&a, &b, &skin),
             vec![Ret::novo(0, 0, 4, 4), Ret::novo(10, 0, 4, 4)]
         );
+        // Mudou só o conteúdo, no mesmo lugar: um retângulo, não dois.
+        let mut c = a;
+        c[1] = Elemento::Bloco {
+            ret: Ret::novo(50, 50, 4, 4),
+            cor: [9, 9, 9, 255],
+        };
+        assert_eq!(danos(&a, &c, &skin), vec![Ret::novo(50, 50, 4, 4)]);
         // Elemento que some ou aparece entra só com o lado que existe.
         assert_eq!(danos(&a, &a[..1], &skin), vec![Ret::novo(50, 50, 4, 4)]);
     }

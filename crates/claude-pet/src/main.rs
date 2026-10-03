@@ -14,6 +14,8 @@ mod descoberta;
 mod estado;
 mod ingress;
 mod laco;
+mod personagem;
+mod pet;
 mod vigia;
 mod wl;
 

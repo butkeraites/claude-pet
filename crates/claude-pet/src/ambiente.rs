@@ -21,6 +21,8 @@ pub struct Ambiente {
     pub pasta_estado: PathBuf,
     /// Onde o `/run/user` do host está montado (`PET_HOST_RUNTIME`).
     pub runtime_host: PathBuf,
+    /// Pastas onde procurar skins, em ordem (`PET_SKINS`, separadas por `:`).
+    pub skins: Vec<PathBuf>,
     /// Modo debug (`PET_DEBUG=1`): libera rotas e a skin `_teste`.
     pub debug: bool,
 }
@@ -55,6 +57,12 @@ impl Ambiente {
             runtime_host: var("PET_HOST_RUNTIME")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from("/run/user")),
+            skins: var("PET_SKINS")
+                .unwrap_or_else(|| "skins:skins-locais".to_owned())
+                .split(':')
+                .filter(|p| !p.trim().is_empty())
+                .map(|p| PathBuf::from(p.trim()))
+                .collect(),
             debug: var("PET_DEBUG").is_some_and(|v| v.trim() == "1"),
         })
     }
@@ -74,6 +82,10 @@ mod testes {
         assert_eq!(a.escuta, "127.0.0.1:27380".parse().unwrap());
         assert_eq!(a.porta_publica, 27380);
         assert_eq!(a.arquivo_config(), PathBuf::from("config/claude-pet.toml"));
+        assert_eq!(
+            a.skins,
+            vec![PathBuf::from("skins"), PathBuf::from("skins-locais")]
+        );
         assert!(!a.debug);
     }
 
@@ -83,9 +95,12 @@ mod testes {
             "PET_ESCUTA" => Some("0.0.0.0:27380".into()),
             "PET_PORTA_PUBLICA" => Some("28000".into()),
             "PET_DEBUG" => Some("1".into()),
+            "PET_SKINS" => Some("/opt/claude-pet/skins:/opt/claude-pet/skins-locais".into()),
             _ => None,
         })
         .unwrap();
+        assert_eq!(a.skins.len(), 2);
+        assert_eq!(a.skins[1], PathBuf::from("/opt/claude-pet/skins-locais"));
         assert_eq!(a.escuta.port(), 27380);
         assert_eq!(a.porta_publica, 28000);
         assert!(a.debug);

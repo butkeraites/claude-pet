@@ -15,7 +15,7 @@ use smithay_client_toolkit::reexports::calloop::EventLoop;
 use crate::ambiente::Ambiente;
 use crate::estado::Compartilhado;
 use crate::laco::Laco;
-use crate::{descoberta, ingress, vigia};
+use crate::{descoberta, ingress, personagem, vigia};
 
 pub fn rodar() -> ExitCode {
     let ambiente = match Ambiente::ler(|nome| std::env::var(nome).ok()) {
@@ -32,6 +32,21 @@ pub fn rodar() -> ExitCode {
     let config = carregar_config(&ambiente);
     for aviso in &config.avisos {
         aviso!("config: {aviso}");
+    }
+    let escolha = personagem::escolher(
+        ambiente.debug,
+        config.texto("aparencia.skin"),
+        &ambiente.skins,
+    );
+    for aviso in &escolha.avisos {
+        aviso!("personagem: {aviso}");
+    }
+    match &escolha.skin {
+        Some(skin) => info!("personagem: skin «{}» ({})", skin.id, skin.nome),
+        None => info!(
+            "sem personagem (pedida: «{}»): o pet fica escondido",
+            escolha.pedida
+        ),
     }
     let comp = Arc::new(Compartilhado::novo(config, ambiente.debug));
     comp.bater();
@@ -67,14 +82,12 @@ pub fn rodar() -> ExitCode {
     let curto = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
-    // No M1 só a skin de teste existe, e ela só aparece em modo debug
-    // (decisão 0011); a escolha de skin de verdade chega no T1.5.
     let mut laco = Laco::novo(
         Arc::clone(&comp),
         eventos.handle(),
         base.clone(),
         curto,
-        ambiente.debug,
+        escolha.skin.map(std::rc::Rc::new),
     );
     if let Err(e) = laco.instalar_sinais() {
         erro!("não consegui tratar SIGTERM/SIGINT: {e}");
@@ -102,6 +115,7 @@ pub fn rodar() -> ExitCode {
             laco.falha_no_laco(e);
         }
     }
+    laco.encerrar();
     ExitCode::SUCCESS
 }
 

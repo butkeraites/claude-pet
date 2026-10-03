@@ -16,6 +16,7 @@
 use std::io::Read;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -27,8 +28,10 @@ use smithay_client_toolkit::reexports::calloop::{
 };
 use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
 
+use pet_core::skin::Skin;
+
 use crate::descoberta::{self, Reconexao};
-use crate::estado::{Compartilhado, Tela};
+use crate::estado::{Compartilhado, Painel, Tela};
 use crate::wl;
 
 /// Batimento do laço principal (o vigia aborta com 60 s sem batimento).
@@ -49,8 +52,8 @@ pub struct Laco {
     batimento: Option<RegistrationToken>,
     /// Última razão de espera registrada no log (só loga quando muda).
     ultima_espera: Option<String>,
-    /// O pet deve aparecer quando houver compositor.
-    visivel: bool,
+    /// O personagem (só a skin de teste, em debug, no M1).
+    skin: Option<Rc<Skin>>,
     pub parar: bool,
 }
 
@@ -68,7 +71,7 @@ impl Laco {
         handle: LoopHandle<'static, Laco>,
         base: PathBuf,
         curto: PathBuf,
-        visivel: bool,
+        skin: Option<Rc<Skin>>,
     ) -> Laco {
         Laco {
             comp,
@@ -80,7 +83,7 @@ impl Laco {
             descoberta: None,
             batimento: None,
             ultima_espera: None,
-            visivel,
+            skin,
             parar: false,
         }
     }
@@ -121,6 +124,9 @@ impl Laco {
         let timer = Timer::from_duration(BATIMENTO);
         match self.handle.insert_source(timer, |_, _, laco| {
             laco.comp.bater();
+            if let Some(sessao) = laco.sessao_mut() {
+                sessao.publicar();
+            }
             TimeoutAction::ToDuration(BATIMENTO)
         }) {
             Ok(token) => self.batimento = Some(token),
@@ -173,7 +179,12 @@ impl Laco {
         }
         let assinatura = instancia.assinatura;
         let nome_wayland = instancia.nome_wayland;
-        let conexao = match wl::conectar(instancia.wayland, self.handle.clone()) {
+        let conexao = match wl::conectar(
+            instancia.wayland,
+            self.handle.clone(),
+            self.skin.clone(),
+            Arc::clone(&self.comp),
+        ) {
             Ok(conexao) => conexao,
             Err(motivo) => {
                 let atraso = self.reconexao.falhou(&assinatura, Duration::ZERO, agora);
@@ -213,9 +224,8 @@ impl Laco {
             desde: agora,
         });
         self.comp.definir_tela(Tela::Ativa);
-        let visivel = self.visivel;
         if let Some(sessao) = self.sessao_mut() {
-            sessao.definir_visivel(visivel);
+            sessao.definir_visivel(true);
         }
         None
     }
@@ -224,6 +234,14 @@ impl Laco {
         if self.ultima_espera.as_deref() != Some(motivo.as_str()) {
             info!("aguardando compositor: {motivo}");
             self.ultima_espera = Some(motivo);
+        }
+    }
+
+    /// Fim do processo: esconde o pet (quadro transparente) e despeja os
+    /// pedidos no socket, para o fade de saída do Hyprland sair vazio.
+    pub fn encerrar(&mut self) {
+        if let Some(sessao) = self.sessao_mut() {
+            sessao.encerrar();
         }
     }
 
@@ -256,6 +274,7 @@ impl Laco {
             atraso.as_secs()
         );
         self.comp.definir_tela(Tela::Aguardando);
+        self.comp.publicar_painel(Painel::default());
         self.armar_descoberta(Duration::ZERO);
     }
 }

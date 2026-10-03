@@ -13,7 +13,13 @@
 //! para desenhar em pixels do monitor.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+use pet_core::cena::{self, Elemento};
+use pet_core::geometria::Ret;
+use pet_core::raster::{self, Alvo};
+use pet_core::skin::Skin;
+use smithay_client_toolkit::compositor::FrameCallbackData;
 
 use smithay_client_toolkit::compositor::{CompositorState, Region};
 use smithay_client_toolkit::output::OutputState;
@@ -34,6 +40,7 @@ use smithay_client_toolkit::shm::slot::{Buffer, SlotPool};
 
 use super::Sessao;
 use super::saida;
+use super::shm::Lona;
 
 /// Namespace da camada (decisão 0012); é por ele que o `hyprctl layers` e
 /// uma eventual regra do Hyprland acham o pet.
@@ -42,6 +49,10 @@ pub const NAMESPACE: &str = "claude-pet";
 pub const PRAZO_ESCALA: Duration = Duration::from_millis(200);
 /// Sem `enter` depois disto: primeiro monitor utilizável.
 pub const PRAZO_ENTER: Duration = Duration::from_millis(500);
+/// Um quadro em voo há mais que isto não segura o próximo: protege contra
+/// um frame callback perdido. Com a tela apagada (DPMS) não há callback, e
+/// o pet desenha no máximo uma vez a cada este tanto.
+pub const LIMITE_EM_VOO: Duration = Duration::from_secs(5);
 
 /// Cada superfície ganha um número; timers velhos comparam e se calam.
 static GERACOES: AtomicU64 = AtomicU64::new(1);
@@ -144,6 +155,29 @@ pub struct Superficie {
     /// verdade, porque o compositor pode ainda ler o buffer).
     inicial: Option<(SlotPool, Buffer)>,
     pronta: Option<Pronta>,
+    /// Buffers do tamanho do monitor (pool novo por superfície e tamanho).
+    lona: Option<Lona>,
+    /// Cena do último quadro enviado (`None`: nada enviado neste buffer).
+    ultima_cena: Option<Vec<Elemento>>,
+    /// Desde quando há um quadro esperando o frame callback.
+    em_voo: Option<Instant>,
+    /// Um quadro novo esperou o frame callback.
+    pub pendente: bool,
+    /// Escondendo: o último quadro enviado é transparente e a superfície
+    /// morre no próximo frame callback (ou num prazo curto).
+    pub saindo: bool,
+}
+
+/// O que aconteceu num pedido de desenho.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Desenho {
+    Enviado {
+        retangulos: usize,
+        area: i64,
+    },
+    SemMudanca,
+    /// Há um quadro em voo; desenha no frame callback.
+    Adiado,
 }
 
 impl Superficie {
@@ -174,6 +208,11 @@ impl Superficie {
             saida: None,
             inicial: None,
             pronta: None,
+            lona: None,
+            ultima_cena: None,
+            em_voo: None,
+            pendente: false,
+            saindo: false,
         }
     }
 
@@ -258,8 +297,103 @@ impl Superficie {
         if self.pronta.as_ref() == Some(&nova) {
             return None;
         }
+        let muda_buffer = self
+            .pronta
+            .as_ref()
+            .is_none_or(|velha| velha.buffer() != nova.buffer() || velha.escala != nova.escala);
+        if muda_buffer {
+            // Tamanho ou escala novos: pool novo e quadro inteiro.
+            self.lona = None;
+            self.ultima_cena = None;
+        }
         self.pronta = Some(nova.clone());
         Some(nova)
+    }
+
+    /// Já enviou algum quadro de verdade (há o que limpar ao esconder).
+    pub fn desenhou(&self) -> bool {
+        self.ultima_cena.is_some()
+    }
+
+    /// Bytes de SHM do buffer do monitor.
+    pub fn bytes_shm(&self) -> usize {
+        self.lona.as_ref().map_or(0, Lona::bytes)
+    }
+
+    /// Chegou o frame callback do último quadro.
+    pub fn quadro_mostrado(&mut self) {
+        self.em_voo = None;
+    }
+
+    /// Desenha `cena` se ela mudou: redesenha só as regiões com dano, anexa,
+    /// manda o dano em lista, pede o frame callback e faz o commit. Com um
+    /// quadro em voo, adia (a menos que `forcar`, usado ao esconder).
+    pub fn desenhar(
+        &mut self,
+        cena: &[Elemento],
+        skin: &Skin,
+        shm: &Shm,
+        qh: &QueueHandle<Sessao>,
+        forcar: bool,
+    ) -> Result<Desenho, String> {
+        let Some(pronta) = self.pronta.as_ref() else {
+            return Err("camada ainda não está pronta".into());
+        };
+        if self.ultima_cena.as_deref() == Some(cena) {
+            self.pendente = false;
+            return Ok(Desenho::SemMudanca);
+        }
+        if let Some(desde) = self.em_voo
+            && !forcar
+        {
+            if desde.elapsed() < LIMITE_EM_VOO {
+                self.pendente = true;
+                return Ok(Desenho::Adiado);
+            }
+            depurar!(
+                "frame callback não veio em {} s; seguindo",
+                LIMITE_EM_VOO.as_secs()
+            );
+        }
+        let (largura, altura) = pronta.buffer();
+        let tela = Ret::novo(0, 0, largura, altura);
+        if self.lona.is_none() {
+            self.lona = Some(Lona::nova(shm, largura, altura)?);
+        }
+        let Some(lona) = self.lona.as_mut() else {
+            return Err("sem buffer".into());
+        };
+        let vez = lona.pegar()?;
+        let danos = match &self.ultima_cena {
+            None => vec![tela],
+            Some(antes) => raster::consolidar_danos(&cena::danos(antes, cena, skin), tela),
+        };
+        let regioes = if vez.redesenhar_tudo {
+            vec![tela]
+        } else {
+            danos.clone()
+        };
+        {
+            let dados = lona.tela(vez.indice).ok_or("buffer ocupado")?;
+            let mut alvo = Alvo::novo(dados, largura, altura);
+            cena::redesenhar(&mut alvo, cena, skin, &regioes);
+        }
+        let superficie = self.camada.wl_surface();
+        lona.anexar(vez.indice, superficie)?;
+        for r in &danos {
+            superficie.damage_buffer(r.x, r.y, r.w, r.h);
+        }
+        superficie.frame(qh, FrameCallbackData(superficie.clone()));
+        self.camada.commit();
+        // O 1x1 do mapeamento saiu de cena.
+        self.inicial = None;
+        self.ultima_cena = Some(cena.to_vec());
+        self.em_voo = Some(Instant::now());
+        self.pendente = false;
+        Ok(Desenho::Enviado {
+            retangulos: danos.len(),
+            area: danos.iter().map(Ret::area).sum(),
+        })
     }
 }
 
