@@ -9,7 +9,7 @@
 #   A. escondido × parado, intercalados (PET_RODADAS vezes, PET_FASE_S cada):
 #      o custo do pet sozinho num desktop parado;
 #   B. carga+escondido × carga+parado, intercalados: o mesmo, com uma repintura
-#      de tela cheia no ritmo do monitor (`cargo xtask carga`: camada BACKGROUND
+#      de tela cheia no ritmo do monitor (`cargo xtask carga`: camada OVERLAY
 #      transparente, invisível) — o custo estrutural da camada sempre mapeada;
 #   C. estresse (PET_FASE_ESTRESSE_S): 40 confetes a 30 fps.
 #

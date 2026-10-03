@@ -1,10 +1,14 @@
 //! `cargo xtask carga --segundos N`: carga de repintura **invisível**, para a
 //! medição de custo (`scripts/medir-custo.sh`).
 //!
-//! Um cliente Wayland do host cria uma camada BACKGROUND (abaixo das janelas)
-//! transparente, do tamanho do monitor focado, com namespace
+//! Um cliente Wayland do host cria uma camada OVERLAY transparente (1 pixel
+//! de alfa 0 esticado pelo viewport, invisível e sem área clicável), do
+//! tamanho do monitor focado, com namespace
 //! `claude-pet-carga` e região de input vazia, e faz commit a cada frame
-//! callback, no ritmo do monitor. No Hyprland 0.56 cada commit de camada
+//! callback, no ritmo do monitor. Tem de ser OVERLAY: uma camada BACKGROUND
+//! fica tapada pela janela em tela cheia, e o Hyprland não manda frame
+//! callback para superfície tapada (medido: 2,6 commits/s em vez de 60).
+//! No Hyprland 0.56 cada commit de camada
 //! repinta o monitor inteiro (decisão 0005): é a carga de um vídeo em tela
 //! cheia sem nada visível mudar. Com ela rodando, a diferença entre o pet
 //! escondido e o pet parado mede quanto a camada do pet, sempre mapeada, custa
@@ -104,7 +108,7 @@ pub fn executar(args: &[String]) -> Result<(), String> {
     let superficie = compositor.create_surface(&qh);
     let viewport = viewporter.get_viewport(&superficie, &qh, ());
     let camada =
-        camadas.create_layer_surface(&qh, superficie, Layer::Background, Some(NAMESPACE), None);
+        camadas.create_layer_surface(&qh, superficie, Layer::Overlay, Some(NAMESPACE), None);
     camada.set_anchor(Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT);
     camada.set_size(0, 0);
     camada.set_exclusive_zone(-1);

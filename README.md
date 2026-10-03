@@ -15,8 +15,8 @@ terminal:
 Pode ser arrastado com o mouse para qualquer lugar e sempre aparece no
 monitor que está em foco. Sem som.
 
-> **Estado:** em construção. O M1 (overlay) está na branch `m1-overlay`,
-> com o portão aberto: falta medir nitidez e custo com a tela acesa. Veja
+> **Estado:** em construção. O M1 (overlay nítido na tela, seguindo o
+> orçamento de custo no Hyprland) está pronto na branch `m1-overlay`. Veja
 > `PLANO.md` para os marcos e `PROGRESS.md` para o andamento.
 
 ## Requisitos

@@ -15,17 +15,12 @@ O plano completo, com marcos M0–M7 e como verificar cada um, está em
 
 ## Estado do repositório
 
-**M0 (fundação) concluído. M1 (overlay) implementado e revisado na branch
-`m1-overlay`, mas o portão do M1 continua ABERTO** (decisões 0017 e 0018).
-A tela ficou apagada (DPMS) nas duas sessões. Falta, com ela acesa:
-- nitidez, pixel velho e fantasma: `scripts/verificar-ao-vivo.sh`;
-- custo no Hyprland, com a fase de carga: `scripts/medir-custo.sh`. É o
-  número que decide entre a camada única e o plano B;
-- o clique manual;
-- as fotos do PR: `bin/pet foto` com a pilha de dev.
-
-Não abra nem mescle o PR do M1 antes disso, e registre os números numa
-decisão nova.
+**M0 (fundação) concluído. M1 (overlay) concluído na branch `m1-overlay`,
+com o portão fechado com a tela acesa** (atualização da decisão 0005):
+nitidez exata, sem fantasma, parado a 0,70 commit/s e +0,58 ponto de CPU do
+Hyprland; sob repintura de tela cheia, +0,20 de CPU e +1,6 de GPU. A camada
+única fica; o plano B não é necessário. Fotos em `docs/fotos/m1/`. Falta só
+o clique manual (clicar ao lado do pet chega na janela de baixo).
 
 O daemon acha o Hyprland pelo `hyprland.lock`, conecta ao Wayland (Rust
 puro, SCTK), cria a camada OVERLAY `claude-pet` no monitor focado e desenha
@@ -33,8 +28,9 @@ a skin em blocos D×D de pixels do monitor, com orçamento de commits.
 Repositório privado em `github.com/butkeraites/claude-pet`. Ainda não há
 arte (M2) nem hooks (M3).
 
-O Renan precisa **comprar o pack** *Cute Parrots!* (exclusiveOlive,
-itch.io) para o M2. Até lá a produção fica conectada e escondida
+O Renan **já comprou o pack** *Cute Parrots!* (exclusiveOlive): o zip fica
+fora do repositório (`~/Downloads`), e o Zeca nasce do Parrot 2, que já é
+verde (M2). Até a skin ser aprovada, a produção fica conectada e escondida
 (`tela: sem_personagem`); só a pilha de dev (`PET_DEBUG=1`) mostra a skin
 xadrez `_teste`.
 

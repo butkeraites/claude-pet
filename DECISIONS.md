@@ -78,6 +78,40 @@ medido no Hyprland (CPU e GPU) no M1. Se estourar, plano B: uma superfície
 pequena fixa para o repouso e um palco de tela cheia só durante arraste,
 voo e confete.
 
+**Atualização (2026-10-03): portão do M1 fechado com a tela acesa.** Com o
+eDP-1 aceso (as decisões 0017 e 0018 tinham medido só com DPMS),
+`scripts/verificar-ao-vivo.sh` passou inteiro:
+- nitidez: 22 300 pixels opacos, nenhum fora de ±2, 892 blocos 5×5
+  uniformes;
+- sem pixel velho e sem fantasma (ao esconder e no SIGTERM);
+- 0,80 commit/s parado;
+- restart em 319 ms e volta de `kill -9` em 262 ms.
+
+`scripts/medir-custo.sh` (3 rodadas de 20 s intercaladas) mediu:
+
+| fase | CPU do Hyprland % | GPU ocupada % | commits/s do pet |
+|---|---|---|---|
+| escondido | 7,28 (6,50–7,89) | 11,03 (9,90–11,70) | 0 |
+| parado | 7,86 (7,54–8,25) | 17,17 (16,70–17,80) | 0,70 |
+| carga + escondido | 8,82 (8,39–9,24) | 17,47 (16,00–18,40) | 0 |
+| carga + parado | 9,02 (8,94–9,14) | 19,07 (18,70–19,30) | 0,75 |
+| estresse (40 confetes, 30 fps) | 9,66 | 19,4 | 30,8 |
+
+A carga é uma repintura de tela cheia a 60 commits/s, como um vídeo. O
+RSS do Hyprland vai de 61,0 para 69,8 MiB com a camada do pet mapeada.
+
+- **Parado:** +0,58 ponto de CPU (orçamento ≤ 1) e 0,70 commit/s (≤ 2).
+- **Custo estrutural sob repintura de tela cheia:** +0,20 ponto de CPU
+  (≤ 1) e +1,6 de GPU (≤ 5).
+- **Decisão:** **a camada única fica; o plano B não é necessário.**
+- **Ponto de atenção para a bateria:** parado, a GPU sai mais vezes do
+  RC6 (+6 pontos de ocupação). O sono profundo (0 commits) e rajadas de
+  repouso mais espaçadas são as alavancas, se um dia pesar.
+- **A carga tem de ser OVERLAY.** A primeira medição usou uma camada
+  BACKGROUND, tapada pelo terminal em tela cheia, e o Hyprland não manda
+  frame callback para superfície tapada: só 2,6 commits/s. A carga
+  passou a ser OVERLAY transparente, sem área clicável.
+
 ## 0006 — Só eventos do Hyprland; nunca o socket de comandos (2026-10-02)
 
 **Problema:** seguir o monitor ativo exige saber do Hyprland qual monitor
