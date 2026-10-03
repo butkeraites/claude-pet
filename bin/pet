@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# bin/pet — atalhos do claude-pet. `bin/pet ajuda` lista os comandos.
+#
+# Funciona de qualquer pasta (resolve a raiz do repo pelo próprio caminho)
+# e acrescenta ~/.cargo/bin ao PATH, que fica fora do PATH do Renan.
+set -euo pipefail
+
+RAIZ="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+cd "$RAIZ"
+export PATH="$HOME/.cargo/bin:$PATH"
+
+# Porta dos hooks: ambiente > .env > padrão.
+porta_configurada() {
+  if [ -n "${PET_PORTA:-}" ]; then
+    printf '%s' "$PET_PORTA"
+  elif [ -f .env ] && grep -qE '^PET_PORTA=' .env; then
+    grep -E '^PET_PORTA=' .env | tail -n1 | cut -d= -f2-
+  else
+    printf '27380'
+  fi
+}
+PORTA="$(porta_configurada)"
+URL="http://127.0.0.1:${PORTA}"
+
+ajuda() {
+  cat <<'TEXTO'
+uso: bin/pet <comando>
+
+  subir         sobe o pet (docker compose up -d --build)
+  parar         para o pet
+  logs          acompanha os logs
+  estado        mostra /v1/estado (o que o pet está vendo e pensando)
+  reconstruir   reconstrói a imagem com bases atualizadas e sobe de novo
+  dev           modo desenvolvimento em primeiro plano (debug, sem restart)
+  verificar     portão antes de todo commit: fmt, clippy, testes, compose, plugin
+  ajuda         esta mensagem
+TEXTO
+}
+
+api() {
+  curl -fsS -m 3 -H 'X-Pet: 1' "${URL}$1"
+}
+
+verificar() {
+  local falhou=0
+  passo() {
+    local nome=$1
+    shift
+    printf '▸ %s\n' "$nome"
+    if ! "$@"; then
+      printf '✗ %s\n' "$nome" >&2
+      falhou=1
+    fi
+  }
+  passo "cargo fmt" cargo fmt --all --check
+  passo "cargo clippy" cargo clippy --all-targets --quiet -- -D warnings
+  passo "cargo test" cargo test --quiet
+  passo "compose" docker compose config -q
+  passo "compose dev" docker compose -f docker-compose.yml -f docker-compose.dev.yml config -q
+  if [ -f .claude-plugin/marketplace.json ]; then
+    passo "marketplace" claude plugin validate . --strict
+  fi
+  if [ -f plugin/.claude-plugin/plugin.json ]; then
+    passo "plugin" claude plugin validate plugin --strict
+  fi
+  if command -v shellcheck >/dev/null 2>&1; then
+    local scripts=(bin/pet)
+    while IFS= read -r -d '' arquivo; do scripts+=("$arquivo"); done \
+      < <(find scripts plugin -name '*.sh' -print0 2>/dev/null)
+    passo "shellcheck" shellcheck "${scripts[@]}"
+  fi
+  if [ "$falhou" -eq 0 ]; then
+    echo "✓ tudo verde"
+  else
+    echo "✗ verificação falhou" >&2
+    return 1
+  fi
+}
+
+comando="${1:-ajuda}"
+[ "$#" -gt 0 ] && shift
+
+case "$comando" in
+  subir) docker compose up -d --build "$@" ;;
+  parar) docker compose stop "$@" ;;
+  logs) docker compose logs -f --tail=100 pet ;;
+  estado)
+    if ! api /v1/estado | jq .; then
+      echo "o pet não respondeu em ${URL} — está de pé? (bin/pet subir)" >&2
+      exit 1
+    fi
+    ;;
+  reconstruir) docker compose build --pull pet && docker compose up -d pet ;;
+  dev) docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build ;;
+  verificar) verificar ;;
+  ajuda | -h | --help) ajuda ;;
+  *)
+    echo "comando desconhecido: ${comando}" >&2
+    ajuda >&2
+    exit 2
+    ;;
+esac

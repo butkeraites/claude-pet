@@ -1,0 +1,23 @@
+# Desenvolvimento:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+# (ou bin/pet dev). Depois, bin/pet subir volta ao modo normal.
+#
+# O nome NÃO é compose.override.yml de propósito: esse nome é mesclado
+# automaticamente e levaria debug e bind da árvore de trabalho para produção.
+services:
+  pet:
+    restart: "no"
+    environment:
+      PET_LOG: debug
+      PET_DEBUG: "1"
+    volumes:
+      - type: bind
+        source: ./skins
+        target: /opt/claude-pet/skins
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ./assets
+        target: /opt/claude-pet/assets
+        read_only: true
+        bind: {create_host_path: false}

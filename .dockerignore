@@ -1,0 +1,10 @@
+# Só o necessário vai para o build. NUNCA ignore skins-locais/ (decisão 0011).
+target/
+.git/
+tmp/
+previa/
+docs/
+cenarios/
+config/
+.env
+**/*.md

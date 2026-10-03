@@ -1,0 +1,72 @@
+name: claude-pet
+
+# Sem isto o json-file cresce sem limite até encher o disco do host.
+x-log: &log
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "5"}
+
+services:
+  pet:
+    <<: *log
+    image: claude-pet:local
+    build:
+      context: .
+      args: {APP_UID: "${APP_UID:-1000}", APP_GID: "${APP_GID:-1000}"}
+    # O binário espera o Hyprland e reconecta sozinho: vale desde o boot
+    # (docker.service + linger), sobrevive a logout/login, crash do
+    # compositor, suspensão e hotplug, sem unit do systemd (decisão 0007).
+    restart: unless-stopped
+    init: true
+    # TEM que ser o dono de wayland-1 e de hypr/ (diretórios 0700).
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: 0.5
+    stop_grace_period: 5s
+    ports:
+      # Só loopback: é por aqui que os hooks do Claude Code chegam.
+      - "127.0.0.1:${PET_PORTA:-27380}:27380"
+    environment:
+      PET_LOG: ${PET_LOG:-info}
+      # Para conferir o cabeçalho Host das requisições.
+      PET_PORTA_PUBLICA: ${PET_PORTA:-27380}
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    volumes:
+      # /run/user, NUNCA /run/user/1000 nem sockets avulsos: existe desde o
+      # boot; rslave propaga o tmpfs do usuário quando ele loga; connect()
+      # funciona mesmo com bind somente leitura.
+      - type: bind
+        source: /run/user
+        target: /host/run/user
+        read_only: true
+        bind: {propagation: rslave, create_host_path: false}
+      # Relógio do host (decisão 0013); nunca TZ.
+      - type: bind
+        source: /etc/localtime
+        target: /etc/localtime
+        read_only: true
+        bind: {create_host_path: false}
+      # config/claude-pet.toml (fora do git); modelo em config/exemplo.toml.
+      - type: bind
+        source: ./config
+        target: /etc/claude-pet
+        read_only: true
+        bind: {create_host_path: false}
+      - estado:/state
+    healthcheck:
+      # "Aguardando login" também é saudável. O Docker não reinicia container
+      # unhealthy; quem reinicia um laço travado é o vigia interno (abort).
+      test: ["CMD", "/usr/local/bin/claude-pet", "saude"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+      start_interval: 2s
+
+volumes:
+  estado:
