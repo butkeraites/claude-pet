@@ -4,6 +4,9 @@
 //! `skin-teste` e `nitidez` no M1; `skin-importar`, `zeca`, `lint-skin`,
 //! `cobertura`, `contato` e `fonte` no M2.
 
+mod skin_teste;
+
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 const COMANDOS: &[(&str, &str)] = &[
@@ -26,15 +29,43 @@ const COMANDOS: &[(&str, &str)] = &[
     ("fonte", "monta o atlas da fonte monogram (M2)"),
 ];
 
+/// Raiz do repositório (o xtask mora em `<raiz>/xtask`).
+fn raiz() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(PathBuf::from)
+        .unwrap_or_default()
+}
+
 fn main() -> ExitCode {
-    let comando = std::env::args().nth(1);
-    match comando.as_deref() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
         None | Some("ajuda" | "--help" | "-h") => {
             println!("uso: cargo xtask <comando>\n");
             for (nome, descricao) in COMANDOS {
                 println!("  {nome:<14} {descricao}");
             }
             ExitCode::SUCCESS
+        }
+        Some("skin-teste") => {
+            let pasta = raiz().join("skins/_teste");
+            match skin_teste::executar(&pasta) {
+                Ok(skin) => {
+                    println!(
+                        "skin «{}» gerada em {}: {} quadros, {} tags, {} estados",
+                        skin.id,
+                        pasta.display(),
+                        skin.quadros.len(),
+                        skin.tags.len(),
+                        skin.estados.len()
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("skin-teste: {e}");
+                    ExitCode::FAILURE
+                }
+            }
         }
         Some(nome) if COMANDOS.iter().any(|(n, _)| *n == nome) => {
             eprintln!("cargo xtask {nome}: ainda não implementado (veja PLANO.md)");
