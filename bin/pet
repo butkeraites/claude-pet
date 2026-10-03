@@ -38,6 +38,12 @@ uso: bin/pet <comando>
                 instala o Zeca a partir do pack Cute Parrots! (descompacta fora
                 do repo, gera skins-locais/zeca e zeca-contorno, mostra lint,
                 cobertura e as prévias em tmp/previa-zeca-m2/)
+  skin-aprovar [id]
+                aprova o personagem que você viu na folha de contato (padrão:
+                a skin configurada); só vale se a imagem tiver exatamente
+                esses arquivos; guarda uma cópia aprovada em /state
+  skin-revogar [id]
+                tira a aprovação: o pet volta a ficar escondido
   reconstruir   reconstrói a imagem com bases atualizadas e sobe de novo
   dev           modo desenvolvimento em primeiro plano (debug, sem restart)
   verificar     portão antes de todo commit: fmt, clippy, testes, compose, plugin
@@ -193,6 +199,108 @@ Para o Zeca aparecer na tela:
 TEXTO
 }
 
+# Impressão digital de uma skin (decisão 0026): o sha256 da saída do
+# sha256sum dos três arquivos, na ordem skin.json, dados, folha. O daemon
+# calcula igual (pet_core::aprovacao::impressao).
+impressao_da_skin() {
+  local pasta=$1 dados folha
+  dados="$(jq -r .dados "$pasta/skin.json")"
+  folha="$(jq -r .folha "$pasta/skin.json")"
+  (cd "$pasta" && sha256sum skin.json "$dados" "$folha" | sha256sum | cut -d' ' -f1)
+}
+
+# Pasta da skin no host: skins-locais/<id> (packs) ou skins/<id>.
+pasta_da_skin() {
+  local base
+  for base in skins-locais skins; do
+    if [ -f "$base/$1/skin.json" ]; then
+      printf '%s' "$base/$1"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# POST /v1/comando; deixa a resposta em RESPOSTA e o status HTTP em STATUS.
+RESPOSTA=""
+STATUS=""
+comando_pet() {
+  local saida
+  saida="$(curl -sS -m 10 -w '\n%{http_code}' -X POST -H 'X-Pet: 1' \
+    -H 'Content-Type: application/json' --data-binary "$1" "${URL}/v1/comando")" || return 1
+  STATUS="${saida##*$'\n'}"
+  RESPOSTA="${saida%$'\n'*}"
+}
+
+# A skin pedida pelo daemon (aparencia.skin), quando o id não vem.
+skin_pedida() {
+  api /v1/estado | jq -r '.skin.pedida // empty'
+}
+
+# skin-aprovar [id]: o Renan aprova o conteúdo exato que viu na folha de
+# contato. O host calcula a impressão dos arquivos em skins-locais/<id>; o
+# daemon só aprova se a skin da imagem tiver a mesma (senão, falta um
+# `bin/pet subir`) e guarda uma cópia aprovada em /state, que segura o
+# personagem se a imagem mudar ou quebrar (decisão 0026).
+skin_aprovar() {
+  local id pasta sha pedida
+  id="${1:-}"
+  if [ -z "$id" ]; then
+    id="$(skin_pedida)" || {
+      echo "o pet não respondeu em ${URL} — está de pé? (bin/pet subir)" >&2
+      return 1
+    }
+  fi
+  pasta="$(pasta_da_skin "$id")" || {
+    echo "não achei a skin «$id» em skins-locais/ nem em skins/ (bin/pet skin-instalar <zip>)" >&2
+    return 1
+  }
+  sha="$(impressao_da_skin "$pasta")"
+  echo "aprovando «$id» ($pasta, sha ${sha:0:12}), a da folha tmp/previa-zeca-m2/contato-$id.png"
+  if ! comando_pet "$(jq -cn --arg id "$id" --arg sha "$sha" \
+    '{cmd: "aprovar_skin", arg: {id: $id, sha256: $sha}}')"; then
+    echo "o pet não respondeu em ${URL} — está de pé? (bin/pet subir)" >&2
+    return 1
+  fi
+  if [ "$STATUS" != 200 ]; then
+    echo "não aprovou ($STATUS): $(jq -r '.erro // .' <<<"$RESPOSTA" 2>/dev/null || printf '%s' "$RESPOSTA")" >&2
+    return 1
+  fi
+  echo "aprovada: cópia em $(jq -r .snapshot <<<"$RESPOSTA") (volume do pet)"
+  jq -r '.personagem | if .id then "personagem: \(.id) (\(.origem))" else "personagem: nenhum — \(.avisos | join("; "))" end' <<<"$RESPOSTA"
+  pedida="$(skin_pedida || true)"
+  if [ -n "$pedida" ] && [ "$pedida" != "$id" ]; then
+    echo "atenção: o pet está configurado para «$pedida»; para usar «$id», ponha" \
+      "aparencia.skin = \"$id\" em config/claude-pet.toml e rode bin/pet subir" >&2
+  fi
+}
+
+# skin-revogar [id]: tira a aprovação e apaga a cópia de /state.
+skin_revogar() {
+  local id
+  id="${1:-}"
+  if [ -z "$id" ]; then
+    id="$(skin_pedida)" || {
+      echo "o pet não respondeu em ${URL} — está de pé? (bin/pet subir)" >&2
+      return 1
+    }
+  fi
+  if ! comando_pet "$(jq -cn --arg id "$id" '{cmd: "revogar_skin", arg: $id}')"; then
+    echo "o pet não respondeu em ${URL} — está de pé? (bin/pet subir)" >&2
+    return 1
+  fi
+  if [ "$STATUS" != 200 ]; then
+    echo "não revogou ($STATUS): $(jq -r '.erro // .' <<<"$RESPOSTA" 2>/dev/null || printf '%s' "$RESPOSTA")" >&2
+    return 1
+  fi
+  if [ "$(jq -r .revogada <<<"$RESPOSTA")" = true ]; then
+    echo "aprovação de «$id» revogada"
+  else
+    echo "«$id» não estava aprovada"
+  fi
+  jq -r '.personagem | if .id then "personagem: \(.id) (\(.origem))" else "personagem: nenhum (o pet fica escondido)" end' <<<"$RESPOSTA"
+}
+
 verificar() {
   local falhou=0
   passo() {
@@ -247,6 +355,8 @@ case "$comando" in
     ;;
   foto) foto ;;
   skin-instalar) skin_instalar "$@" ;;
+  skin-aprovar) skin_aprovar "$@" ;;
+  skin-revogar) skin_revogar "$@" ;;
   reconstruir) docker compose build --pull pet && docker compose up -d pet ;;
   dev) docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build ;;
   verificar) verificar ;;

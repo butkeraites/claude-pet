@@ -33,7 +33,8 @@ use pet_core::skin::Skin;
 
 use crate::comando::Comando;
 use crate::descoberta::{self, Espera, Reconexao};
-use crate::estado::{Compartilhado, Painel, Tela};
+use crate::estado::{Compartilhado, InfoSkin, Painel, Tela};
+use crate::personagem::{self, Escolha, Onde};
 use crate::wl;
 
 /// Batimento do laço principal (o vigia aborta com 60 s sem batimento).
@@ -54,8 +55,12 @@ pub struct Laco {
     batimento: Option<RegistrationToken>,
     /// Última razão de espera registrada no log (só loga quando muda).
     ultima_espera: Option<String>,
-    /// O personagem (só a skin de teste, em debug, no M1).
+    /// O personagem: a skin aprovada (ou a de teste, em debug).
     skin: Option<Rc<Skin>>,
+    /// Onde procurar skins e aprovações, para escolher de novo.
+    onde: Onde,
+    /// A skin configurada (`aparencia.skin`).
+    configurada: String,
     /// O pet deve estar na tela (o debug pode esconder e mostrar).
     visivel: bool,
     pub parar: bool,
@@ -75,9 +80,10 @@ impl Laco {
         handle: LoopHandle<'static, Laco>,
         base: PathBuf,
         curto: PathBuf,
-        skin: Option<Rc<Skin>>,
+        onde: Onde,
+        configurada: String,
     ) -> Laco {
-        Laco {
+        let mut laco = Laco {
             comp,
             handle,
             base,
@@ -87,9 +93,52 @@ impl Laco {
             descoberta: None,
             batimento: None,
             ultima_espera: None,
-            skin,
+            skin: None,
+            onde,
+            configurada,
             visivel: true,
             parar: false,
+        };
+        laco.escolher_personagem();
+        laco
+    }
+
+    /// Escolhe o personagem (decisões 0011 e 0026), publica no `/v1/estado`
+    /// e, com o compositor conectado, troca na tela.
+    pub fn escolher_personagem(&mut self) {
+        let Escolha {
+            skin,
+            pedida,
+            origem,
+            sha256,
+            avisos,
+        } = personagem::escolher(&self.onde, &self.configurada);
+        for aviso in &avisos {
+            aviso!("personagem: {aviso}");
+        }
+        match &skin {
+            Some(skin) => info!("personagem: skin «{}» ({})", skin.id, skin.nome),
+            None => info!("sem personagem (pedida: «{pedida}»): o pet fica escondido"),
+        }
+        self.comp.definir_skin(InfoSkin {
+            id: skin.as_ref().map(|s| s.id.clone()),
+            pedida,
+            origem,
+            sha256,
+            avisos,
+        });
+        let skin = skin.map(Rc::new);
+        self.skin = skin.clone();
+        if self.viva.is_some() {
+            self.comp.definir_tela(if self.skin.is_some() {
+                Tela::Ativa
+            } else {
+                Tela::SemPersonagem
+            });
+            let visivel = self.visivel;
+            if let Some(sessao) = self.sessao_mut() {
+                sessao.trocar_skin(skin, visivel);
+            }
         }
     }
 
@@ -118,7 +167,7 @@ impl Laco {
         Ok(())
     }
 
-    /// Comandos das outras threads (rotas de debug no M1).
+    /// Comandos das outras threads (rotas de debug e aprovações).
     pub fn instalar_comandos(&mut self, canal: Channel<Comando>) -> Result<(), String> {
         self.handle
             .insert_source(canal, |evento, _, laco| {
@@ -150,6 +199,11 @@ impl Laco {
             Comando::Quadro(resposta) => {
                 let quadro = self.sessao_mut().and_then(|s| s.quadro_esperado());
                 let _ = resposta.try_send(quadro);
+            }
+            Comando::RecarregarPersonagem(feito) => {
+                info!("aprovação mudou: escolhendo o personagem de novo");
+                self.escolher_personagem();
+                let _ = feito.try_send(());
             }
         }
     }

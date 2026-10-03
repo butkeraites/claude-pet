@@ -14,9 +14,9 @@ use smithay_client_toolkit::reexports::calloop::EventLoop;
 use smithay_client_toolkit::reexports::calloop::channel;
 
 use crate::ambiente::Ambiente;
-use crate::estado::{Compartilhado, InfoSkin};
+use crate::estado::Compartilhado;
 use crate::laco::Laco;
-use crate::{comando, descoberta, ingress, personagem, vigia};
+use crate::{comando, descoberta, ingress, vigia};
 
 pub fn rodar() -> ExitCode {
     let ambiente = match Ambiente::ler(|nome| std::env::var(nome).ok()) {
@@ -34,27 +34,8 @@ pub fn rodar() -> ExitCode {
     for aviso in &config.avisos {
         aviso!("config: {aviso}");
     }
-    let escolha = personagem::escolher(
-        ambiente.debug,
-        config.texto("aparencia.skin"),
-        &ambiente.skins,
-    );
-    for aviso in &escolha.avisos {
-        aviso!("personagem: {aviso}");
-    }
-    match &escolha.skin {
-        Some(skin) => info!("personagem: skin «{}» ({})", skin.id, skin.nome),
-        None => info!(
-            "sem personagem (pedida: «{}»): o pet fica escondido",
-            escolha.pedida
-        ),
-    }
+    let configurada = config.texto("aparencia.skin").to_owned();
     let comp = Arc::new(Compartilhado::novo(config, ambiente.debug));
-    comp.definir_skin(InfoSkin {
-        id: escolha.skin.as_ref().map(|s| s.id.clone()),
-        pedida: escolha.pedida.clone(),
-        avisos: escolha.avisos.clone(),
-    });
     comp.bater();
     let (canal, comandos) = channel::sync_channel(comando::CAPACIDADE);
 
@@ -70,6 +51,8 @@ pub fn rodar() -> ExitCode {
         porta_publica: ambiente.porta_publica,
         debug: ambiente.debug,
         comandos: Some(canal),
+        onde: ambiente.onde(),
+        aprovando: std::sync::Mutex::new(()),
     });
     if let Err(e) = thread::Builder::new()
         .name("ingress".into())
@@ -96,7 +79,8 @@ pub fn rodar() -> ExitCode {
         eventos.handle(),
         base.clone(),
         curto,
-        escolha.skin.map(std::rc::Rc::new),
+        ambiente.onde(),
+        configurada,
     );
     if let Err(e) = laco.instalar_sinais() {
         erro!("não consegui tratar SIGTERM/SIGINT: {e}");
@@ -232,6 +216,8 @@ mod testes {
             porta_publica: endereco.port(),
             debug: false,
             comandos: None,
+            onde: crate::ambiente::Ambiente::ler(|_| None).unwrap().onde(),
+            aprovando: std::sync::Mutex::new(()),
         });
         thread::spawn(move || ingress::servir(ouvinte, ctx));
         assert!(checar_saude(endereco));

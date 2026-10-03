@@ -1,8 +1,8 @@
 //! Pedidos de outras threads para o laço principal.
 //!
 //! Chegam por um canal do calloop (limitado: um ingress afobado recebe 503
-//! em vez de crescer a memória). No M1 só as rotas de debug mandam
-//! comandos; o `/v1/evento` dos hooks chega no M3.
+//! em vez de crescer a memória): as rotas de debug e as aprovações de
+//! personagem do `/v1/comando`; o `/v1/evento` dos hooks chega no M3.
 
 use std::sync::mpsc::SyncSender;
 
@@ -40,4 +40,8 @@ pub enum Comando {
     },
     /// Pede o quadro esperado; `None` se o pet não está na tela.
     Quadro(SyncSender<Option<QuadroEsperado>>),
+    /// Uma aprovação mudou: escolher o personagem de novo e trocar na tela
+    /// (`/v1/comando` `aprovar_skin` e `revogar_skin`, decisão 0026). O
+    /// laço avisa pelo canal quando terminou.
+    RecarregarPersonagem(SyncSender<()>),
 }

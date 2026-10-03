@@ -481,3 +481,52 @@ Renan decidir vendo a folha.
 **Por quê:** ids sem espaço servem de chave estável; a sequência inteira numa
 tag só funciona com os dois animadores sem mudar o core; e o contorno vira
 uma escolha de config, não um rebuild.
+
+## 0026 — Aprovação do personagem pela impressão digital, com cópia em /state (2026-10-03)
+
+**Problema:** o PLANO exige que o Zeca só vire personagem depois de o Renan
+aprovar a folha de contato e a demonstração ao vivo, que um snapshot
+aprovado sirva de reserva se a skin quebrar e que, sem aprovação, o pet fique
+escondido (nunca com a skin de teste). E a skin é reconstruída (arte nova,
+pack reinstalado): a imagem pode passar a ter algo que o Renan não viu.
+**Escolha:**
+- **Impressão digital:** o sha256 da saída do `sha256sum` dos três arquivos,
+  na ordem `skin.json`, dados, folha. No host é `sha256sum skin.json
+  sheet.json sheet.png | sha256sum`.
+- **`bin/pet skin-aprovar [id]`** (padrão: a skin configurada) calcula a
+  impressão dos arquivos do host, os mesmos da folha de contato, e manda
+  `POST /v1/comando {"cmd": "aprovar_skin", "arg": {"id": …, "sha256": …}}`
+  (o formato do `/v1/comando` do M3). O daemon recusa se:
+  - a skin da imagem tiver outra impressão (409: falta `bin/pet subir`);
+  - não carregar (422);
+  - for a `_teste` (403).
+  Senão, grava `/state/skins/<id>/` com a cópia dos três arquivos e o
+  `aprovacao.json` (id, sha256, hora), trocando a pasta inteira de uma vez. O
+  laço principal escolhe o personagem de novo e a resposta espera isso (até
+  2 s), com o personagem que ficou na tela.
+- **Quem aparece:**
+  1. a skin da imagem, se a impressão dela é a aprovada;
+  2. senão, a cópia de `/state`, se a da imagem mudou depois da aprovação,
+     sumiu ou não carrega (com o motivo em `/v1/estado.skin.avisos`);
+  3. senão, ninguém (`tela: sem_personagem`).
+  `/v1/estado.skin` mostra `origem` (`imagem` ou `snapshot`) e `sha256`.
+- **Debug:** continua com a `_teste`. `PET_DEBUG_PERSONAGEM=1` (repassada
+  pelo compose de dev) troca pelo personagem aprovado, com as mesmas regras
+  e com as rotas de debug, para conferir o Zeca na tela (nitidez, foto
+  mascarada).
+- **`bin/pet skin-revogar [id]`** manda `{"cmd": "revogar_skin", "arg":
+  "<id>"}`, que apaga a aprovação e a cópia: o pet some na hora.
+- **Reaprovar depois de reconstruir a skin:** depois de `bin/pet
+  skin-instalar` (ou de mexer em `arte/zeca/`) e de `bin/pet subir`, a
+  imagem tem uma impressão nova, que não é a aprovada. O pet continua com a
+  cópia aprovada antiga e avisa que a skin "mudou depois da aprovação". O
+  Renan olha a folha de contato nova e roda `bin/pet skin-aprovar` de novo;
+  a cópia em `/state` vira a nova. Sem a nova aprovação, nada muda na tela.
+- **A aprovação é por id:** aprovar `zeca-contorno` não muda o personagem;
+  quem escolhe é `aparencia.skin`, e o `bin/pet` avisa quando os dois
+  divergem.
+
+**Por quê:** aprova-se o que foi visto, não um nome. A cópia em `/state`
+segura o Zeca quando a imagem muda ou quebra, e o caminho por HTTP no
+loopback, com as checagens de Host e `X-Pet`, evita escrever no volume
+Docker a partir do host.

@@ -415,6 +415,29 @@ impl Sessao {
         self.publicar();
     }
 
+    /// Troca o personagem na tela (aprovação ou revogação, decisão 0026).
+    /// Sem skin, o pet se esconde com o quadro transparente (desenhado com a
+    /// skin velha); com skin nova, a cena velha é esquecida e o próximo
+    /// quadro redesenha a tela toda.
+    pub fn trocar_skin(&mut self, skin: Option<Rc<Skin>>, visivel: bool) {
+        match skin {
+            None => {
+                self.definir_visivel(false);
+                self.pet = None;
+            }
+            Some(skin) => {
+                self.pet = Some(Pet::novo(skin, self.agora_ms()));
+                self.palco = None;
+                if let Some(superficie) = self.superficie.as_mut() {
+                    superficie.esquecer_cena();
+                }
+                self.definir_visivel(visivel);
+                self.tentar_aprontar();
+            }
+        }
+        self.publicar();
+    }
+
     /// Antes de sair do processo: quadro transparente, camada destruída e
     /// uma ida e volta com prazo, para garantir que o compositor processou
     /// tudo antes de o socket fechar (o libwayland-server descarta o que não
