@@ -1,0 +1,20 @@
+# Compilação
+/target/
+
+# Configuração e segredos locais
+.env
+/config/claude-pet.toml
+
+# Arte que não pode ser redistribuída (decisão 0011)
+/skins-locais/*
+!/skins-locais/.gitkeep
+
+# Saídas temporárias (fotos, prévias, capturas)
+/tmp/
+/previa/
+
+# Editores
+*.swp
+*~
+.idea/
+.vscode/

@@ -1,0 +1,12 @@
+# Copie para config/claude-pet.toml (fora do git) para mudar algo.
+# Precedência: comandos dados em tempo de execução (gravados em /state),
+# depois variáveis PET_*, depois este arquivo, depois os padrões do código.
+# `bin/pet estado` mostra o valor efetivo de cada chave e de onde ele veio.
+
+[aparencia]
+# Personagem: nome da pasta em skins/ ou skins-locais/.
+skin = "zeca"
+
+[celebracao]
+# proporcional | sempre_grande | discreta | desligada
+modo = "proporcional"
