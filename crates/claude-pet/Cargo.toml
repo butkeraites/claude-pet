@@ -12,6 +12,11 @@ pet-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 signal-hook.workspace = true
+png.workspace = true
+smithay-client-toolkit.workspace = true
+wayland-client.workspace = true
+wayland-protocols.workspace = true
+rustix.workspace = true
 
 [lints]
 workspace = true

@@ -76,7 +76,6 @@ impl Compartilhado {
         Tela::de_u8(self.tela.load(Ordering::Relaxed))
     }
 
-    #[allow(dead_code)] // usado a partir do M1, quando a sessão Wayland liga
     pub fn definir_tela(&self, tela: Tela) {
         self.tela.store(tela as u8, Ordering::Relaxed);
     }

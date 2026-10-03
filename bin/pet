@@ -41,6 +41,18 @@ api() {
   curl -fsS -m 3 -H 'X-Pet: 1' "${URL}$1"
 }
 
+# O core é puro (CLAUDE.md): nenhuma dependência normal, direta ou
+# transitiva, pode ser crate de Wayland ou do laço de eventos.
+core_sem_wayland() {
+  local proibidas
+  proibidas="$(cargo tree -p pet-core -e normal --prefix none --quiet |
+    grep -iE '^(wayland|smithay|calloop)' || true)"
+  if [ -n "$proibidas" ]; then
+    printf 'pet-core depende de:\n%s\n' "$proibidas" >&2
+    return 1
+  fi
+}
+
 verificar() {
   local falhou=0
   passo() {
@@ -53,6 +65,7 @@ verificar() {
     fi
   }
   passo "cargo fmt" cargo fmt --all --check
+  passo "pet-core sem Wayland" core_sem_wayland
   passo "cargo clippy" cargo clippy --all-targets --quiet -- -D warnings
   passo "cargo test" cargo test --quiet
   passo "compose" docker compose config -q

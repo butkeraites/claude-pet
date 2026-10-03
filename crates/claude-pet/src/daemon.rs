@@ -3,22 +3,19 @@
 use std::io::{ErrorKind, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
 use pet_core::config::ConfigEfetiva;
-use signal_hook::consts::{SIGINT, SIGTERM};
+use smithay_client_toolkit::reexports::calloop::EventLoop;
 
 use crate::ambiente::Ambiente;
 use crate::estado::Compartilhado;
-use crate::{ingress, vigia};
-
-/// Intervalo do batimento do laço principal. No M1 vira um timer do calloop.
-const BATIMENTO: Duration = Duration::from_millis(250);
+use crate::laco::Laco;
+use crate::{descoberta, ingress, vigia};
 
 pub fn rodar() -> ExitCode {
     let ambiente = match Ambiente::ler(|nome| std::env::var(nome).ok()) {
@@ -59,12 +56,24 @@ pub fn rodar() -> ExitCode {
     }
     vigia::iniciar(Arc::clone(&comp));
 
-    let parar = Arc::new(AtomicBool::new(false));
-    for sinal in [SIGTERM, SIGINT] {
-        if let Err(e) = signal_hook::flag::register(sinal, Arc::clone(&parar)) {
-            aviso!("não consegui tratar o sinal {sinal}: {e}");
+    let mut eventos: EventLoop<'static, Laco> = match EventLoop::try_new() {
+        Ok(eventos) => eventos,
+        Err(e) => {
+            erro!("não consegui criar o laço de eventos: {e}");
+            return ExitCode::FAILURE;
         }
+    };
+    let base = descoberta::base_do_usuario(&ambiente.runtime_host);
+    let curto = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    let mut laco = Laco::novo(Arc::clone(&comp), eventos.handle(), base.clone(), curto);
+    if let Err(e) = laco.instalar_sinais() {
+        erro!("não consegui tratar SIGTERM/SIGINT: {e}");
+        return ExitCode::FAILURE;
     }
+    laco.armar_batimento();
+    laco.armar_descoberta(Duration::ZERO);
 
     info!(
         "claude-pet {} escutando em {} (porta pública {}){}",
@@ -74,18 +83,17 @@ pub fn rodar() -> ExitCode {
         if ambiente.debug { ", modo debug" } else { "" }
     );
     depurar!(
-        "config em {}, estado em {}, runtime do host em {}",
+        "config em {}, estado em {}",
         ambiente.arquivo_config().display(),
         ambiente.pasta_estado.display(),
-        ambiente.runtime_host.display()
     );
-    info!("aguardando compositor (a conexão Wayland chega no M1)");
+    info!("procurando o compositor em {}", base.display());
 
-    while !parar.load(Ordering::Relaxed) {
-        comp.bater();
-        thread::sleep(BATIMENTO);
+    while !laco.parar {
+        if let Err(e) = eventos.dispatch(None, &mut laco) {
+            laco.falha_no_laco(e);
+        }
     }
-    info!("encerrando: sinal recebido");
     ExitCode::SUCCESS
 }
 

@@ -10,9 +10,12 @@ mod registro;
 
 mod ambiente;
 mod daemon;
+mod descoberta;
 mod estado;
 mod ingress;
+mod laco;
 mod vigia;
+mod wl;
 
 use std::process::ExitCode;
 

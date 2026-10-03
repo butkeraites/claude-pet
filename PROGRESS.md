@@ -10,3 +10,4 @@ Uma linha por tarefa concluída: data, tarefa, o quê, commit.
 | 2026-10-02 | T0.4 | Daemon: config com precedência e origem, `/saude`, `/v1/estado`, checagem de Host e `X-Pet`, vigia de 60 s, SIGTERM, subcomando `saude`; 27 testes | 9932081 |
 | 2026-10-02 | T0.5 | Docker (alpine fixada por digest, imagem de 4,3 MB, RSS < 1 MiB, healthy) com bind de `/run/user` em rslave, compose de dev e `bin/pet` (`subir`, `parar`, `logs`, `estado`, `reconstruir`, `dev`, `verificar`) | 74084d3 |
 | 2026-10-02 | T0.6 | Repositório privado `butkeraites/claude-pet` no GitHub, `main` publicada | — |
+| 2026-10-02 | T1.1 | Descoberta do compositor (`hyprland.lock`, assinatura mais nova, `connect()` de prova no `.socket2.sock` e no `wayland-N`, symlink curto para caminho longo), laço calloop com batimento de 5 s, sinais por pipe e reconexão com backoff só na mesma assinatura; testado ao vivo com um proxy derrubando a conexão | — |
