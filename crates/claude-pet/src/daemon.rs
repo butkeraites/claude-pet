@@ -67,7 +67,15 @@ pub fn rodar() -> ExitCode {
     let curto = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
-    let mut laco = Laco::novo(Arc::clone(&comp), eventos.handle(), base.clone(), curto);
+    // No M1 só a skin de teste existe, e ela só aparece em modo debug
+    // (decisão 0011); a escolha de skin de verdade chega no T1.5.
+    let mut laco = Laco::novo(
+        Arc::clone(&comp),
+        eventos.handle(),
+        base.clone(),
+        curto,
+        ambiente.debug,
+    );
     if let Err(e) = laco.instalar_sinais() {
         erro!("não consegui tratar SIGTERM/SIGINT: {e}");
         return ExitCode::FAILURE;

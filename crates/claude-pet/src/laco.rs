@@ -49,6 +49,8 @@ pub struct Laco {
     batimento: Option<RegistrationToken>,
     /// Última razão de espera registrada no log (só loga quando muda).
     ultima_espera: Option<String>,
+    /// O pet deve aparecer quando houver compositor.
+    visivel: bool,
     pub parar: bool,
 }
 
@@ -66,6 +68,7 @@ impl Laco {
         handle: LoopHandle<'static, Laco>,
         base: PathBuf,
         curto: PathBuf,
+        visivel: bool,
     ) -> Laco {
         Laco {
             comp,
@@ -77,8 +80,14 @@ impl Laco {
             descoberta: None,
             batimento: None,
             ultima_espera: None,
+            visivel,
             parar: false,
         }
+    }
+
+    /// A sessão Wayland, se conectada.
+    pub fn sessao_mut(&mut self) -> Option<&mut wl::Sessao> {
+        self.viva.as_mut().map(|viva| &mut viva.sessao)
     }
 
     /// SIGTERM e SIGINT acordam o laço por um pipe e pedem para parar.
@@ -164,7 +173,7 @@ impl Laco {
         }
         let assinatura = instancia.assinatura;
         let nome_wayland = instancia.nome_wayland;
-        let conexao = match wl::conectar(instancia.wayland) {
+        let conexao = match wl::conectar(instancia.wayland, self.handle.clone()) {
             Ok(conexao) => conexao,
             Err(motivo) => {
                 let atraso = self.reconexao.falhou(&assinatura, Duration::ZERO, agora);
@@ -204,6 +213,10 @@ impl Laco {
             desde: agora,
         });
         self.comp.definir_tela(Tela::Ativa);
+        let visivel = self.visivel;
+        if let Some(sessao) = self.sessao_mut() {
+            sessao.definir_visivel(visivel);
+        }
         None
     }
 
