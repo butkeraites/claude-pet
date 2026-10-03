@@ -43,6 +43,8 @@ pub struct QuadroZeca {
     pub corpo: usize,
     pub ms: u32,
     pub vestido: Vestido,
+    /// O chapéu está solto no ar (chapéu voando), não assentado.
+    pub solto: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -196,6 +198,7 @@ fn roteiro(
                     Ok(QuadroZeca {
                         corpo,
                         ms: q.ms,
+                        solto: !q.chapeu.assentado,
                         vestido: Vestido {
                             chapeu: compor::chapeu_do_voo(&q.chapeu, base.chapeu.as_ref()),
                             ..base.clone()
@@ -208,6 +211,7 @@ fn roteiro(
                     corpo,
                     ms: importado.quadros[corpo].duracao_ms,
                     vestido: vestidos[corpo].clone(),
+                    solto: false,
                 })
                 .collect(),
         };
@@ -361,6 +365,17 @@ pub fn montar(importado: &Importado, arte: &Arte, variante: Variante) -> Result<
                             ));
                         }
                     }
+                    if let (true, Some(chapeu)) = (q.solto, &q.vestido.chapeu)
+                        && let Some(sprite) = arte.sprites.get(&chapeu.variante)
+                        && let Some(d) = compor::distancia(&corpos[q.corpo], celula, chapeu, sprite)
+                        && d < compor::FOLGA_SOLTO
+                    {
+                        avisos.push(format!(
+                            "{}[{i}]: chapéu solto a {d} px do corpo (com menos de {} o contorno creme junta os dois)",
+                            t.nome,
+                            compor::FOLGA_SOLTO
+                        ));
+                    }
                     if variante == Variante::Contorno {
                         compor::contornar(&mut rgba, celula, arte.paleta.contorno);
                     }
@@ -433,7 +448,11 @@ pub fn montar(importado: &Importado, arte: &Arte, variante: Variante) -> Result<
         "folha": "sheet.png",
         "dados": "sheet.json",
         "celula": [celula.0, celula.1],
-        "pe": z.skin.pe,
+        // Com contorno, a linha creme debaixo dos pés vira o chão.
+        "pe": match variante {
+            Variante::Simples => z.skin.pe,
+            Variante::Contorno => [z.skin.pe[0], z.skin.pe[1] + 1],
+        },
         "toque": toque,
         "corpo_px": corpo_px,
         "escala_padrao": z.skin.escala_padrao,

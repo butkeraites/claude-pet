@@ -8,6 +8,8 @@
 # Arte que não pode ser redistribuída (decisão 0011)
 /skins-locais/*
 !/skins-locais/.gitkeep
+# Relatório de `cargo xtask cobertura` (gerado, não vai para o git)
+/skins/*/cobertura.md
 
 # Saídas temporárias (fotos, prévias, capturas)
 /tmp/

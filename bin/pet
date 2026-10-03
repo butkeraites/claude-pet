@@ -108,6 +108,17 @@ daemon_sem_socket_de_comandos() {
   fi
 }
 
+# Lint de todas as skins da máquina: skins/ (git) e skins-locais/ (packs).
+# Avisos não reprovam; erros sim (PLANO.md, `verificar`).
+lint_skins() {
+  local pastas=() pasta
+  for pasta in skins/*/ skins-locais/*/; do
+    [ -f "${pasta}skin.json" ] && pastas+=("${pasta%/}")
+  done
+  [ "${#pastas[@]}" -eq 0 ] && return 0
+  cargo xtask lint-skin --so-erros "${pastas[@]}"
+}
+
 verificar() {
   local falhou=0
   passo() {
@@ -124,6 +135,7 @@ verificar() {
   passo "daemon sem socket de comandos" daemon_sem_socket_de_comandos
   passo "cargo clippy" cargo clippy --all-targets --quiet -- -D warnings
   passo "cargo test" cargo test --quiet
+  passo "lint-skin" lint_skins
   passo "compose" docker compose config -q
   passo "compose dev" docker compose -f docker-compose.yml -f docker-compose.dev.yml config -q
   if [ -f .claude-plugin/marketplace.json ]; then

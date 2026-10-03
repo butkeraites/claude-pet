@@ -53,7 +53,6 @@ impl Args {
         self.bandeiras.iter().any(|b| b == nome)
     }
 
-    #[cfg(test)]
     pub fn posicionais(&self) -> &[String] {
         &self.posicionais
     }

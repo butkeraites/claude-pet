@@ -261,6 +261,40 @@ pub fn vestir(
     Ok((saida, r))
 }
 
+/// Menor distância (Chebyshev, em pixels de arte) entre os pixels opacos da
+/// peça e os do corpo. Abaixo de 4, o contorno creme de 1 pixel em volta dos
+/// dois vira uma ponte entre eles.
+pub fn distancia(
+    corpo: &[u8],
+    celula: (u32, u32),
+    peca: &Colocacao,
+    sprite: &Sprite,
+) -> Option<i32> {
+    let (w, h) = (celula.0 as i32, celula.1 as i32);
+    let corpo_px: Vec<(i32, i32)> = (0..h)
+        .flat_map(|y| (0..w).map(move |x| (x, y)))
+        .filter(|&(x, y)| corpo[((y * w + x) * 4 + 3) as usize] != 0)
+        .collect();
+    let mut menor: Option<i32> = None;
+    for sy in 0..sprite.altura {
+        for sx in 0..sprite.largura {
+            if sprite.em(sx, sy).is_none() {
+                continue;
+            }
+            let (x, y) = (peca.x + sx, peca.y + sy);
+            for &(cx, cy) in &corpo_px {
+                let d = (cx - x).abs().max((cy - y).abs());
+                menor = Some(menor.map_or(d, |m| m.min(d)));
+            }
+        }
+    }
+    menor
+}
+
+/// Folga mínima entre o chapéu solto e o corpo para o contorno não juntar
+/// os dois.
+pub const FOLGA_SOLTO: i32 = 4;
+
 /// Contorno de 1 pixel de arte por fora de tudo que é opaco (8 vizinhos).
 pub fn contornar(rgba: &mut [u8], celula: (u32, u32), cor: Rgba) {
     let (w, h) = (celula.0 as i32, celula.1 as i32);
@@ -511,6 +545,24 @@ mod testes {
             ..Vestido::default()
         };
         assert!(vestir(&corpo, c, &sem, &sprites(), B, &protegidas).is_err());
+    }
+
+    #[test]
+    fn distancia_do_chapeu_solto_ao_corpo() {
+        let (corpo, c) = celula(&["......", "......", "......", "......", "GG....", "GG...."]);
+        let s = sprites();
+        let longe = Colocacao {
+            variante: "chapeu".into(),
+            x: 4,
+            y: 0,
+        };
+        assert_eq!(distancia(&corpo, c, &longe, &s["chapeu"]), Some(4));
+        let perto = Colocacao {
+            variante: "chapeu".into(),
+            x: 2,
+            y: 2,
+        };
+        assert_eq!(distancia(&corpo, c, &perto, &s["chapeu"]), Some(2));
     }
 
     #[test]

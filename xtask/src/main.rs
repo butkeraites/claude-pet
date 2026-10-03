@@ -6,9 +6,11 @@
 
 mod args;
 mod carga;
+mod cobertura;
 mod fantasma;
 mod folha;
 mod importar;
+mod lint;
 mod nitidez;
 mod skin_teste;
 mod zeca;
@@ -115,6 +117,24 @@ fn main() -> ExitCode {
                 eprintln!("zeca: {e}");
                 eprintln!("{}", zeca::USO);
                 ExitCode::FAILURE
+            }
+        },
+        Some("lint-skin") => match lint::executar(&args[1..]) {
+            Ok(true) => ExitCode::SUCCESS,
+            Ok(false) => ExitCode::FAILURE,
+            Err(e) => {
+                eprintln!("lint-skin: {e}");
+                eprintln!("uso: cargo xtask lint-skin [--so-erros] <pasta> [<pasta>…]");
+                ExitCode::from(2)
+            }
+        },
+        Some("cobertura") => match cobertura::executar(&args[1..]) {
+            Ok(true) => ExitCode::SUCCESS,
+            Ok(false) => ExitCode::FAILURE,
+            Err(e) => {
+                eprintln!("cobertura: {e}");
+                eprintln!("uso: cargo xtask cobertura <pasta> [--saida <arquivo.md>]");
+                ExitCode::from(2)
             }
         },
         Some("skin-importar") => match importar::executar(&args[1..]) {
