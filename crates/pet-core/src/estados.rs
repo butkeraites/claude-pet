@@ -169,6 +169,30 @@ pub const CATALOGO: &[Estado] = &[
     },
 ];
 
+/// Estados que um personagem de verdade precisa ter **nativos** no MVP: a
+/// tabela do PLANO.md ("Zeca: arte e skin", item 4). Receita e reserva
+/// existem para skins de teste e para o que falta até o M6; o personagem
+/// aprovado não depende delas (`cargo xtask cobertura --nativos mvp`).
+pub const NATIVOS_DO_MVP: &[&str] = &[
+    "idle",
+    "working",
+    "thinking",
+    "waiting",
+    "ready",
+    "done_small",
+    "done_medium",
+    "done_big",
+    "error",
+    "yawn",
+    "sleep",
+    "wake",
+    "dangle",
+    "land",
+    "giggle",
+    "hello",
+    "bye",
+];
+
 pub fn estado(chave: &str) -> Option<&'static Estado> {
     CATALOGO.iter().find(|e| e.chave == chave)
 }
@@ -264,6 +288,9 @@ mod testes {
         // As reservas do M3 (animador::RESERVAS na branch m3-hooks).
         assert_eq!(estado("nod").unwrap().reservas, &["wave"]);
         assert_eq!(estado("done_small").unwrap().reservas, &["wave"]);
+        for e in NATIVOS_DO_MVP {
+            assert!(estado(e).is_some(), "MVP cita «{e}», fora do catálogo");
+        }
     }
 
     #[test]

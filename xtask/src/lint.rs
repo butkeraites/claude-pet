@@ -18,7 +18,9 @@
 //! - pés fora da linha do `pe` nos quadros das tags de `chao` (o corpo pode
 //!   passar 1 pixel, o rabo às vezes passa);
 //! - pixels opacos na borda da célula: um acessório ou contorno pode ter
-//!   sido cortado.
+//!   sido cortado;
+//! - preto puro (`#000000`) opaco: as regras de estilo pedem a tinta do
+//!   pack no contorno, nunca preto.
 
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
@@ -122,6 +124,15 @@ pub fn em_skins(pasta: &Path) -> bool {
     normalizar(pasta).starts_with(normalizar(&crate::raiz().join("skins")))
 }
 
+/// O `sheet.json` da skin, pelo campo `dados` do `skin.json` (o mesmo
+/// arquivo que o core lê), cru, para o que o core normaliza (durações) e o
+/// que ele não guarda (o nome original das tags).
+pub fn dados_crus(pasta: &Path) -> Option<serde_json::Value> {
+    let arquivos = pet_core::aprovacao::arquivos_da_skin(pasta).ok()?;
+    let (_, dados) = arquivos.get(1)?;
+    serde_json::from_slice(dados).ok()
+}
+
 /// Confere a skin da pasta.
 pub fn conferir(pasta: &Path) -> Achados {
     let mut a = Achados {
@@ -142,9 +153,7 @@ pub fn conferir(pasta: &Path) -> Achados {
     a.avisos.extend(skin.avisos.iter().cloned());
 
     // Durações brutas (o core troca 0 por 100 ms e só avisa).
-    let dados = std::fs::read_to_string(pasta.join("sheet.json"))
-        .ok()
-        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
+    let dados = dados_crus(pasta);
     let duracoes: Vec<u64> = dados
         .as_ref()
         .and_then(|v| v["frames"].as_array())
@@ -173,6 +182,7 @@ pub fn conferir(pasta: &Path) -> Achados {
     let mut cores = BTreeSet::new();
     let mut parciais = 0usize;
     let mut na_borda = BTreeSet::new();
+    let mut pretos = BTreeSet::new();
     for (q, rgba) in celulas.iter().enumerate() {
         for (i, p) in rgba.chunks_exact(4).enumerate() {
             if p[3] == 0 {
@@ -181,6 +191,9 @@ pub fn conferir(pasta: &Path) -> Achados {
             cores.insert([p[0], p[1], p[2]]);
             if p[3] != 255 {
                 parciais += 1;
+            }
+            if p[..3] == [0, 0, 0] {
+                pretos.insert(q);
             }
             let (x, y) = (i as i32 % cw, i as i32 / cw);
             if x == 0 || y == 0 || x == cw - 1 || y == ch - 1 {
@@ -201,6 +214,13 @@ pub fn conferir(pasta: &Path) -> Achados {
         let lista: Vec<String> = na_borda.iter().map(|q| q.to_string()).collect();
         a.avisos.push(format!(
             "pixels opacos na borda da célula (cortados?) nos quadros {}",
+            lista.join(", ")
+        ));
+    }
+    if !pretos.is_empty() {
+        let lista: Vec<String> = pretos.iter().map(|q| q.to_string()).collect();
+        a.avisos.push(format!(
+            "preto puro (#000000) nos quadros {}: o contorno é a tinta do pack, nunca preto",
             lista.join(", ")
         ));
     }
@@ -401,6 +421,37 @@ mod testes {
             "{todos}"
         );
         assert!(todos.contains("pula mais de 3 px em 0→1"), "{todos}");
+        let _ = fs::remove_dir_all(p.parent().unwrap());
+    }
+
+    #[test]
+    fn preto_puro_e_dados_com_outro_nome() {
+        let mut preto = bloco(2, 3, 5, 6, 255);
+        preto[(4 * L + 3) * 4..(4 * L + 3) * 4 + 3].copy_from_slice(&[0, 0, 0]);
+        let p = skin_em(
+            "preto",
+            &[(preto, 100), (bloco(2, 3, 5, 6, 255), 9000)],
+            json!({}),
+        );
+        // O sheet.json com outro nome: o lint lê o que o skin.json diz.
+        fs::rename(p.join("sheet.json"), p.join("folha-dados.json")).unwrap();
+        let skin = fs::read_to_string(p.join("skin.json")).unwrap();
+        fs::write(
+            p.join("skin.json"),
+            skin.replace("\"sheet.json\"", "\"folha-dados.json\""),
+        )
+        .unwrap();
+        let a = conferir(&p);
+        assert!(
+            a.erros.iter().any(|e| e.contains("9000 ms")),
+            "a duração vem do arquivo de dados certo: {:?}",
+            a.erros
+        );
+        assert!(
+            a.avisos.iter().any(|v| v.contains("#000000")),
+            "{:?}",
+            a.avisos
+        );
         let _ = fs::remove_dir_all(p.parent().unwrap());
     }
 
