@@ -619,15 +619,14 @@ claude-pet/
 ### M2 — Zeca (portão de arte)
 
 **Tarefas:**
-- `skin-importar` (aseprite ou tiras);
-- `lint-skin`;
-- `cobertura`;
-- `zeca` (recolor + acessórios + contorno creme);
-- `contato` + GIFs;
-- `skin-instalar`;
-- snapshot aprovado em `/state`;
-- pet escondido sem personagem aprovado;
-- fonte monogram.
+- **T2.1** `cargo xtask skin-importar`: lê o `.aseprite` pelo `asefile` (tags, duração por quadro, camadas achatadas) ou, se ele não ler, tiras PNG com uma tabela linha → tag documentada; escreve `sheet.png`, `sheet.json` (json-array do Aseprite) e o esqueleto do `skin.json`, com nomes de tag normalizados e o nome original guardado;
+- **T2.2** `cargo xtask zeca --pack <zip|pasta>`: o Parrot 2 com o visual "Malandro rosa" (bico original), chapéu-palheta e gravata-borboleta encaixados quadro a quadro (âncora no olho, correções em `arte/zeca/ancoras.json`, regras por tag, acessórios brancos nos quadros de clarão), "chapéu voa e volta" no mergulho e no susto (`arte/zeca/chapeu_voando.json`) e contorno creme opcional; saída em `skins-locais/zeca/` com `CREDITS.md`;
+- **T2.3** `cargo xtask lint-skin` e `cargo xtask cobertura` (`cobertura.md`: nativo, receita, reserva ou faltando);
+- **T2.4** `cargo xtask contato`: folha de contato (todas as tags, índice e duração, fundo escuro e claro, ×4) e um GIF por tag, em `tmp/`;
+- **T2.5** `bin/pet skin-instalar <zip|pasta>`: descompacta fora do repo, roda o `zeca`, mostra lint, cobertura e prévias; idempotente;
+- **T2.6** aprovação: `bin/pet skin-aprovar` e `skin-revogar` pelo `/v1/comando`, com hash do conteúdo e snapshot aprovado em `/state` como reserva; sem aprovação o pet fica escondido (`sem_personagem`), nunca com a skin de teste;
+- **T2.7** ao vivo: imagem com a skin, nitidez do M1 passando com o Zeca, fotos mascaradas em `tmp/` e aprovação revogada no fim, para o Renan aprovar vendo a folha de contato.
+- A fonte monogram vai para o M6, junto com os balões (decisão 0023).
 
 **Se o pack ainda não tiver sido comprado:** o M3 vem antes. O pet só aparece em debug ou demonstração.
 
