@@ -35,8 +35,8 @@ uso: bin/pet <comando>
   foto          foto do pet na tela (grim no monitor inteiro, recorte exato;
                 em debug, só os pixels do pet sobre fundo neutro)
   skin-instalar <zip|pasta>
-                instala o Zeca a partir do pack Cute Parrots! (descompacta fora
-                do repo, gera skins-locais/zeca e zeca-contorno, mostra lint,
+                instala o Zeca a partir do pack Cute Parrots! (lê o zip em
+                memória, gera skins-locais/zeca e zeca-contorno, mostra lint,
                 cobertura e as prévias em tmp/previa-zeca-m2/)
   skin-aprovar [id]
                 aprova o personagem que você viu na folha de contato (padrão:
@@ -140,60 +140,46 @@ absoluto() {
   esac
 }
 
+# Onde ficam as prévias que o Renan olha antes de aprovar (fora do git).
+PREVIAS="tmp/previa-zeca-m2"
+
 # skin-instalar <zip|pasta>: o pack Cute Parrots! vira o Zeca em
-# skins-locais/ (fora do git, decisão 0011). O zip é descompactado numa pasta
-# temporária fora do repo, apagada no fim. Rodar de novo dá o mesmo resultado.
-# A skin só aparece na tela depois de `bin/pet subir` (entra na imagem) e de
-# `bin/pet skin-aprovar zeca` (decisão 0026).
-PACK_TMP=""
+# skins-locais/ (fora do git, decisão 0011). O zip é lido em memória pelo
+# `cargo xtask zeca` (CRC conferido, teto de tamanho, sem extrair nada no
+# disco); uma pasta descompactada também serve. Rodar de novo dá o mesmo
+# resultado. A arte é montada com --estrito: aviso novo (fora de
+# arte/zeca/avisos-aceitos.txt) reprova antes de gravar. A skin só aparece na
+# tela depois de `bin/pet subir` (entra na imagem) e de `bin/pet skin-aprovar
+# zeca` (decisão 0026).
 skin_instalar() {
-  local origem pack achados variante
+  local origem variante
   [ "$#" -eq 1 ] || {
     echo "uso: bin/pet skin-instalar <arquivo.zip|pasta do pack>" >&2
     return 2
   }
   origem="$(absoluto "$1")"
-  if [ -d "$origem" ]; then
-    pack="$origem"
-  elif [ -f "$origem" ]; then
-    command -v unzip >/dev/null || {
-      echo "falta o unzip no host (sudo pacman -S unzip)" >&2
-      return 1
-    }
-    PACK_TMP="$(mktemp -d "${TMPDIR:-/tmp}/claude-pet-pack.XXXXXX")"
-    trap 'rm -rf "${PACK_TMP:-}"' EXIT
-    if ! unzip -q -o "$origem" -d "$PACK_TMP"; then
-      echo "não consegui descompactar $origem (é o zip do pack?)" >&2
-      return 1
-    fi
-    pack="$PACK_TMP"
-  else
+  if [ ! -e "$origem" ]; then
     echo "não achei $origem" >&2
-    return 1
-  fi
-  achados="$(find "$pack" -path '*/__MACOSX' -prune -o -path '*/Parrot 2/Parrot.aseprite' -print | wc -l)"
-  if [ "$achados" -ne 1 ]; then
-    echo "layout inesperado: esperava uma pasta «Parrot 2» com Parrot.aseprite (achei $achados) —" >&2
-    echo "é o pack Cute Parrots! da exclusiveOlive? https://exclusiveolive.itch.io/cute-parrots-pixel-art-asset-pack" >&2
     return 1
   fi
   echo "▸ gerando o Zeca (sem e com contorno creme) em skins-locais/"
   for variante in "" --contorno; do
     # shellcheck disable=SC2086 # variante vazia some de propósito
-    cargo xtask zeca --pack "$pack" $variante || return 1
+    cargo xtask zeca --estrito --pack "$origem" $variante || return 1
   done
   echo "▸ lint"
   cargo xtask lint-skin skins-locais/zeca skins-locais/zeca-contorno || return 1
-  echo "▸ cobertura"
-  cargo xtask cobertura skins-locais/zeca || return 1
+  echo "▸ cobertura (os estados do MVP têm de ser nativos)"
+  cargo xtask cobertura skins-locais/zeca --nativos mvp || return 1
   echo "▸ prévias"
   for variante in zeca zeca-contorno; do
-    cargo xtask contato "skins-locais/$variante" --copia tmp/previa-zeca-m2 || return 1
+    cargo xtask contato "skins-locais/$variante" --copia "$PREVIAS" || return 1
   done
   cat <<TEXTO
 
-Pronto. Veja a folha de contato e os GIFs em $RAIZ/tmp/previa-zeca-m2/
-(contato-zeca.png sem contorno, contato-zeca-contorno.png com contorno creme).
+Pronto. Veja a folha de contato e os GIFs em $RAIZ/$PREVIAS/
+(contato-zeca.png sem contorno, contato-zeca-contorno.png com contorno creme;
+nos GIFs, fundo escuro à esquerda e claro à direita).
 Para o Zeca aparecer na tela:
   1. bin/pet subir                 # a skin entra na imagem local
   2. bin/pet skin-aprovar zeca     # ou zeca-contorno; sem aprovação ele fica escondido
