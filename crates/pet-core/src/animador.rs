@@ -4,17 +4,26 @@
 //! Cada troca de quadro vira um commit Wayland, e cada commit repinta o
 //! monitor inteiro no Hyprland 0.56 (decisão 0005). Por isso o repouso não é
 //! a tag `idle` em laço: é uma **pose fixa** (o primeiro quadro da primeira
-//! tag do estado `idle`) e, a cada [`PAUSA_MS`], uma **rajada** que toca uma
-//! das tags do estado uma vez, alternando entre elas. Com as tags da skin de
-//! teste isso dá menos de 1 commit/s em média (orçamento: até 2/s).
+//! tag do estado `idle`) e uma **rajada** de vez em quando, que toca uma das
+//! tags do estado uma vez, alternando entre elas.
+//!
+//! O orçamento é garantido aqui, qualquer que seja a skin:
+//! - nenhum quadro dura menos que [`DURACAO_MIN_MS`] (rajadas de até 30 fps);
+//! - a pausa antes de cada rajada é de pelo menos [`PAUSA_MS`] e cresce o
+//!   quanto for preciso para cada trecho pausa + rajada ficar em até
+//!   [`COMMITS_POR_S_PARADO`] commits/s em média.
 //!
 //! Tudo aqui recebe o relógio de fora (milissegundos), para os testes não
 //! dependerem de tempo real.
 
 use crate::skin::{Direcao, Skin, Tag};
 
-/// Pausa entre rajadas no repouso.
+/// Pausa mínima entre rajadas no repouso.
 pub const PAUSA_MS: u64 = 4000;
+/// Duração mínima de um quadro: nenhuma animação passa de 30 fps.
+pub const DURACAO_MIN_MS: u64 = 34;
+/// Teto da média de commits com o pet parado (decisão 0005).
+pub const COMMITS_POR_S_PARADO: u64 = 2;
 
 /// Quadros de uma tag na ordem em que tocam num ciclo (sem repetir as pontas
 /// no ping-pong, como o Aseprite).
@@ -47,7 +56,7 @@ impl Animacao {
     pub fn nova(skin: &Skin, tag: usize, inicio_ms: u64, laco: bool) -> Animacao {
         let passos: Vec<(usize, u64)> = sequencia(&skin.tags[tag])
             .into_iter()
-            .map(|q| (q, skin.quadros[q].duracao_ms.max(1) as u64))
+            .map(|q| (q, (skin.quadros[q].duracao_ms as u64).max(DURACAO_MIN_MS)))
             .collect();
         let total_ms = passos.iter().map(|(_, d)| d).sum();
         Animacao {
@@ -88,14 +97,41 @@ impl Animacao {
     }
 }
 
+/// Um trecho do repouso: a pose parada por `pausa_ms` e depois a rajada.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Trecho {
+    pausa_ms: u64,
+    rajada: Animacao,
+}
+
 /// O pet parado: pose fixa e rajadas.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Repouso {
     pose: usize,
-    /// Rajadas (cada uma começa no instante 0; o repouso desloca).
-    rajadas: Vec<Animacao>,
+    /// Trechos em ordem (cada rajada começa no instante 0; o repouso desloca).
+    trechos: Vec<Trecho>,
     inicio_ms: u64,
     periodo_ms: u64,
+}
+
+/// Trocas de quadro de uma rajada que sai da pose e volta para ela.
+fn trocas(pose: usize, rajada: &Animacao) -> u64 {
+    let mut anterior = pose;
+    let mut trocas = 0;
+    for quadro in rajada.passos.iter().map(|p| p.0).chain([pose]) {
+        if quadro != anterior {
+            trocas += 1;
+            anterior = quadro;
+        }
+    }
+    trocas
+}
+
+/// Pausa antes de uma rajada: pelo menos [`PAUSA_MS`] e o bastante para o
+/// trecho inteiro ficar em até [`COMMITS_POR_S_PARADO`] commits/s.
+fn pausa_para(pose: usize, rajada: &Animacao) -> u64 {
+    let minimo_do_trecho = (trocas(pose, rajada) * 1000).div_ceil(COMMITS_POR_S_PARADO);
+    PAUSA_MS.max(minimo_do_trecho.saturating_sub(rajada.duracao_ms()))
 }
 
 impl Repouso {
@@ -106,17 +142,23 @@ impl Repouso {
             .first()
             .map(|&t| sequencia(&skin.tags[t])[0])
             .unwrap_or(0);
-        let rajadas: Vec<Animacao> = tags
+        let trechos: Vec<Trecho> = tags
             .iter()
-            .map(|&t| Animacao::nova(skin, t, 0, false))
+            .map(|&t| {
+                let rajada = Animacao::nova(skin, t, 0, false);
+                Trecho {
+                    pausa_ms: pausa_para(pose, &rajada),
+                    rajada,
+                }
+            })
             .collect();
-        let periodo_ms = rajadas
+        let periodo_ms = trechos
             .iter()
-            .map(|r| PAUSA_MS + r.duracao_ms())
+            .map(|t| t.pausa_ms + t.rajada.duracao_ms())
             .sum::<u64>();
         Repouso {
             pose,
-            rajadas,
+            trechos,
             inicio_ms,
             periodo_ms: periodo_ms.max(PAUSA_MS),
         }
@@ -132,12 +174,12 @@ impl Repouso {
         let base = self.inicio_ms + decorrido / self.periodo_ms * self.periodo_ms;
         let mut t = decorrido % self.periodo_ms;
         let mut inicio_segmento = base;
-        for rajada in &self.rajadas {
-            if t < PAUSA_MS {
-                return (self.pose, inicio_segmento + PAUSA_MS);
+        for Trecho { pausa_ms, rajada } in &self.trechos {
+            if t < *pausa_ms {
+                return (self.pose, inicio_segmento + pausa_ms);
             }
-            t -= PAUSA_MS;
-            inicio_segmento += PAUSA_MS;
+            t -= pausa_ms;
+            inicio_segmento += pausa_ms;
             if t < rajada.duracao_ms() {
                 let (quadro, proxima) = rajada.em(t);
                 let fim = inicio_segmento + rajada.duracao_ms();
@@ -154,7 +196,7 @@ impl Repouso {
 #[cfg(test)]
 mod testes {
     use super::*;
-    use crate::skin::testes::skin_minima;
+    use crate::skin::testes::{skin_com_idle, skin_minima};
 
     fn tag(de: usize, ate: usize, direcao: Direcao) -> Tag {
         Tag {
@@ -216,28 +258,64 @@ mod testes {
         );
     }
 
-    /// Simula seguindo os prazos e conta trocas de quadro (= commits).
-    fn commits_por_segundo(r: &Repouso, segundos: u64) -> f64 {
+    /// Simula seguindo os prazos: média de trocas de quadro (= commits) por
+    /// segundo e o menor intervalo entre duas trocas.
+    fn simular(r: &Repouso, segundos: u64) -> (f64, u64) {
         let fim = segundos * 1000;
         let (mut atual, mut t) = r.em(0);
         let mut commits = 1; // o primeiro quadro
+        let mut ultima_troca = 0;
+        let mut menor = u64::MAX;
         while t < fim {
             let (q, proxima) = r.em(t);
             if q != atual {
                 commits += 1;
                 atual = q;
+                menor = menor.min(t - ultima_troca);
+                ultima_troca = t;
             }
             assert!(proxima > t, "prazo não avança em {t}");
             t = proxima;
         }
-        commits as f64 / segundos as f64
+        (commits as f64 / segundos as f64, menor)
     }
 
     #[test]
     fn repouso_cabe_no_orcamento_de_commits() {
         let skin = skin_minima();
-        let media = commits_por_segundo(&Repouso::novo(&skin, 0), 600);
+        let (media, _) = simular(&Repouso::novo(&skin, 0), 600);
         assert!(media <= 2.0, "{media} commits/s");
         assert!(media > 0.0);
+    }
+
+    #[test]
+    fn repouso_da_skin_de_teste_cabe_no_orcamento() {
+        let pasta = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../skins/_teste");
+        let skin = Skin::carregar(&pasta).expect("skins/_teste (cargo xtask skin-teste)");
+        assert!(skin.tags_do_estado("idle").len() > 1, "várias tags de idle");
+        let (media, menor) = simular(&Repouso::novo(&skin, 0), 600);
+        assert!(media <= 2.0, "{media} commits/s");
+        assert!(menor >= DURACAO_MIN_MS, "trocas a {menor} ms");
+    }
+
+    #[test]
+    fn idle_denso_estica_a_pausa_ate_caber() {
+        // 20 quadros de 50 ms: sem esticar, 20 trocas a cada 5 s (4/s).
+        let skin = skin_com_idle(&[50; 20]);
+        let r = Repouso::novo(&skin, 0);
+        assert_eq!(
+            r.trechos[0].pausa_ms, 9000,
+            "20 trocas pedem 10 s por trecho"
+        );
+        let (media, _) = simular(&r, 600);
+        assert!(media <= 2.0, "{media} commits/s");
+    }
+
+    #[test]
+    fn quadros_curtos_nao_passam_de_30_fps() {
+        let skin = skin_com_idle(&[10, 5, 0, 20, 10, 10]);
+        let (media, menor) = simular(&Repouso::novo(&skin, 0), 600);
+        assert!(menor >= DURACAO_MIN_MS, "trocas a {menor} ms");
+        assert!(media <= 2.0, "{media} commits/s");
     }
 }

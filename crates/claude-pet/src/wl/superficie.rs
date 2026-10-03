@@ -11,6 +11,11 @@
 //! nada aparece e nenhum clique é roubado. Só depois de `enter` +
 //! `preferred_scale` (ou dos prazos de reserva) a superfície fica pronta
 //! para desenhar em pixels do monitor.
+//!
+//! Ritmo: no máximo **um** frame callback pendente. Um quadro novo com outro
+//! em voo espera o callback, sem prazo de reserva: callback não se perde, ele
+//! só não vem enquanto o monitor não desenha (tela apagada). Assim, com a
+//! tela apagada, o pet não faz commit nenhum.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -49,10 +54,6 @@ pub const NAMESPACE: &str = "claude-pet";
 pub const PRAZO_ESCALA: Duration = Duration::from_millis(200);
 /// Sem `enter` depois disto: primeiro monitor utilizável.
 pub const PRAZO_ENTER: Duration = Duration::from_millis(500);
-/// Um quadro em voo há mais que isto não segura o próximo: protege contra
-/// um frame callback perdido. Com a tela apagada (DPMS) não há callback, e
-/// o pet desenha no máximo uma vez a cada este tanto.
-pub const LIMITE_EM_VOO: Duration = Duration::from_secs(5);
 
 /// Cada superfície ganha um número; timers velhos comparam e se calam.
 static GERACOES: AtomicU64 = AtomicU64::new(1);
@@ -145,6 +146,46 @@ impl Prontidao {
     }
 }
 
+/// Em que pé está a camada, para decidir mostrar ou esconder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fase {
+    /// Nenhuma camada.
+    Ausente,
+    /// Camada viva; `conteudo`: o compositor guarda pixels do pet nela.
+    Viva { conteudo: bool },
+    /// Escondendo: o quadro transparente já foi; a camada morre no próximo
+    /// frame callback ou num prazo curto.
+    Saindo,
+}
+
+/// O que fazer para chegar à visibilidade pedida.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Passo {
+    Nada,
+    /// Cria a camada (output NULL: o monitor focado).
+    Criar,
+    /// Desiste de esconder: a mesma camada volta a desenhar o pet.
+    Cancelar,
+    /// Quadro transparente agora; destrói no frame callback ou no prazo, para
+    /// o fade de saída do Hyprland fotografar um quadro vazio.
+    ApagarEDestruir,
+    /// Nada do pet no compositor (nunca desenhou): destrói já.
+    Destruir,
+}
+
+/// Mostrar/esconder como função pura. Pedir para mostrar enquanto a camada
+/// ainda está saindo **cancela** a saída: sem isso o pedido se perdia e a
+/// camada morria logo depois, deixando o pet escondido.
+pub fn passo_de_visibilidade(fase: Fase, mostrar: bool) -> Passo {
+    match (fase, mostrar) {
+        (Fase::Ausente, true) => Passo::Criar,
+        (Fase::Saindo, true) => Passo::Cancelar,
+        (Fase::Viva { conteudo: true }, false) => Passo::ApagarEDestruir,
+        (Fase::Viva { conteudo: false }, false) => Passo::Destruir,
+        (Fase::Viva { .. }, true) | (Fase::Ausente | Fase::Saindo, false) => Passo::Nada,
+    }
+}
+
 pub struct Superficie {
     pub camada: LayerSurface,
     viewport: WpViewport,
@@ -161,13 +202,18 @@ pub struct Superficie {
     lona: Option<Lona>,
     /// Cena do último quadro enviado (`None`: nada enviado neste buffer).
     ultima_cena: Option<Vec<Elemento>>,
-    /// Desde quando há um quadro esperando o frame callback.
+    /// Desde quando há um frame callback pedido e ainda não recebido (no
+    /// máximo um por vez).
     em_voo: Option<Instant>,
     /// Um quadro novo esperou o frame callback.
     pub pendente: bool,
     /// Escondendo: o último quadro enviado é transparente e a superfície
     /// morre no próximo frame callback (ou num prazo curto).
     pub saindo: bool,
+    /// O compositor guarda pixels do pet desta superfície: o último quadro
+    /// enviado não era vazio. É isto, e não a cena guardada (que some quando
+    /// a escala muda), que decide se esconder precisa do quadro transparente.
+    conteudo: bool,
     /// A camada caiu num monitor que não serve de casa (FALLBACK ou sem
     /// tamanho) ou recebeu um configure 0x0: não desenha e espera um monitor
     /// de verdade aparecer para ser recriada.
@@ -225,6 +271,7 @@ impl Superficie {
             em_voo: None,
             pendente: false,
             saindo: false,
+            conteudo: false,
             sem_casa: false,
             regiao: None,
             seq: 0,
@@ -378,9 +425,21 @@ impl Superficie {
         (self.seq, self.ultimo_commit.map(|t| t.elapsed()))
     }
 
-    /// Já enviou algum quadro de verdade (há o que limpar ao esconder).
-    pub fn desenhou(&self) -> bool {
-        self.ultima_cena.is_some()
+    /// O compositor guarda pixels do pet desta superfície (há o que limpar
+    /// ao esconder).
+    pub fn tem_conteudo(&self) -> bool {
+        self.conteudo
+    }
+
+    /// Em que pé a camada está, para [`passo_de_visibilidade`].
+    pub fn fase(&self) -> Fase {
+        if self.saindo {
+            Fase::Saindo
+        } else {
+            Fase::Viva {
+                conteudo: self.conteudo,
+            }
+        }
     }
 
     /// Caiu num monitor que não serve de casa: espera ser recriada.
@@ -393,14 +452,15 @@ impl Superficie {
         self.lona.as_ref().map_or(0, Lona::bytes)
     }
 
-    /// Chegou o frame callback do último quadro.
+    /// Chegou o frame callback pendente.
     pub fn quadro_mostrado(&mut self) {
         self.em_voo = None;
     }
 
     /// Desenha `cena` se ela mudou: redesenha só as regiões com dano, anexa,
-    /// manda o dano em lista, pede o frame callback e faz o commit. Com um
-    /// quadro em voo, adia (a menos que `forcar`, usado ao esconder).
+    /// manda o dano em lista e faz o commit, pedindo frame callback se não
+    /// houver um pendente. Com um callback pendente, adia (a menos que
+    /// `forcar`, usado ao esconder: aí o commit vai sem pedir outro).
     pub fn desenhar(
         &mut self,
         cena: &[Elemento],
@@ -416,17 +476,9 @@ impl Superficie {
             self.pendente = false;
             return Ok(Desenho::SemMudanca);
         }
-        if let Some(desde) = self.em_voo
-            && !forcar
-        {
-            if desde.elapsed() < LIMITE_EM_VOO {
-                self.pendente = true;
-                return Ok(Desenho::Adiado);
-            }
-            depurar!(
-                "frame callback não veio em {} s; seguindo",
-                LIMITE_EM_VOO.as_secs()
-            );
+        if self.em_voo.is_some() && !forcar {
+            self.pendente = true;
+            return Ok(Desenho::Adiado);
         }
         let (largura, altura) = pronta.buffer();
         let tela = Ret::novo(0, 0, largura, altura);
@@ -462,13 +514,16 @@ impl Superficie {
         for r in &danos {
             superficie.damage_buffer(r.x, r.y, r.w, r.h);
         }
-        superficie.frame(qh, FrameCallbackData(superficie.clone()));
+        let agora = Instant::now();
+        if self.em_voo.is_none() {
+            superficie.frame(qh, FrameCallbackData(superficie.clone()));
+            self.em_voo = Some(agora);
+        }
         self.camada.commit();
         // O 1x1 do mapeamento saiu de cena.
         self.inicial = None;
         self.ultima_cena = Some(cena.to_vec());
-        let agora = Instant::now();
-        self.em_voo = Some(agora);
+        self.conteudo = !cena.is_empty();
         self.ultimo_commit = Some(agora);
         self.seq += 1;
         self.pendente = false;
@@ -591,6 +646,29 @@ mod testes {
         assert_eq!(p.decidir(true, Some(&fallback), Some(&edp())), None);
         assert_eq!(p.decidir(true, Some(&zerado), Some(&edp())), None);
         assert!(p.decidir(true, Some(&edp()), None).is_some());
+    }
+
+    #[test]
+    fn mostrar_e_esconder_por_fase() {
+        use Passo::*;
+        let viva = |conteudo| Fase::Viva { conteudo };
+        assert_eq!(passo_de_visibilidade(Fase::Ausente, true), Criar);
+        assert_eq!(passo_de_visibilidade(Fase::Ausente, false), Nada);
+        assert_eq!(passo_de_visibilidade(viva(true), true), Nada);
+        assert_eq!(passo_de_visibilidade(viva(false), true), Nada);
+        assert_eq!(passo_de_visibilidade(viva(true), false), ApagarEDestruir);
+        assert_eq!(passo_de_visibilidade(viva(false), false), Destruir);
+        assert_eq!(passo_de_visibilidade(Fase::Saindo, false), Nada);
+    }
+
+    #[test]
+    fn mostrar_logo_depois_de_esconder_cancela_a_saida() {
+        // A corrida da revisão: esconder e mostrar em seguida (no mesmo lote
+        // do canal ou antes do frame callback). Antes, o pedido de mostrar
+        // não fazia nada e a camada morria em seguida: pet escondido.
+        let fase = Fase::Viva { conteudo: true };
+        assert_eq!(passo_de_visibilidade(fase, false), Passo::ApagarEDestruir);
+        assert_eq!(passo_de_visibilidade(Fase::Saindo, true), Passo::Cancelar);
     }
 
     #[test]

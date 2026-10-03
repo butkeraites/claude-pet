@@ -34,10 +34,45 @@ pub struct Lona {
 }
 
 /// Um buffer pronto para desenhar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Vez {
     pub indice: usize,
     /// O buffer não tem o último quadro: redesenhe tudo.
     pub redesenhar_tudo: bool,
+}
+
+/// Qual buffer usar no próximo quadro.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Escolha {
+    Usar(Vez),
+    /// Um buffer novo, zerado e redesenhado inteiro.
+    Criar,
+    /// Todos ainda estão com o compositor e não cabe mais nenhum.
+    Nenhum,
+}
+
+/// Escolha pura, dado `(em_dia, livre)` de cada buffer: um livre e em dia
+/// (desenho incremental); senão um livre (redesenhado inteiro); senão um
+/// novo, se couber.
+pub fn escolher(folhas: &[(bool, bool)], max: usize) -> Escolha {
+    let achar = |cond: fn(&(bool, bool)) -> bool| folhas.iter().position(cond);
+    if let Some(indice) = achar(|&(em_dia, livre)| em_dia && livre) {
+        return Escolha::Usar(Vez {
+            indice,
+            redesenhar_tudo: false,
+        });
+    }
+    if let Some(indice) = achar(|&(_, livre)| livre) {
+        return Escolha::Usar(Vez {
+            indice,
+            redesenhar_tudo: true,
+        });
+    }
+    if folhas.len() < max {
+        Escolha::Criar
+    } else {
+        Escolha::Nenhum
+    }
 }
 
 impl Lona {
@@ -56,23 +91,15 @@ impl Lona {
     /// Escolhe o buffer do próximo quadro: um livre e em dia; senão um
     /// livre (que será redesenhado inteiro); senão um novo, zerado.
     pub fn pegar(&mut self) -> Result<Vez, String> {
-        let livre = |pool: &mut SlotPool, folha: &Folha| folha.buffer.canvas(pool).is_some();
-        if let Some(i) = (0..self.folhas.len())
-            .find(|&i| self.folhas[i].em_dia && livre(&mut self.pool, &self.folhas[i]))
-        {
-            return Ok(Vez {
-                indice: i,
-                redesenhar_tudo: false,
-            });
-        }
-        if let Some(i) = (0..self.folhas.len()).find(|&i| livre(&mut self.pool, &self.folhas[i])) {
-            return Ok(Vez {
-                indice: i,
-                redesenhar_tudo: true,
-            });
-        }
-        if self.folhas.len() >= MAX_BUFFERS {
-            return Err("todos os buffers ainda estão com o compositor".into());
+        let estados: Vec<(bool, bool)> = self
+            .folhas
+            .iter()
+            .map(|f| (f.em_dia, f.buffer.canvas(&mut self.pool).is_some()))
+            .collect();
+        match escolher(&estados, MAX_BUFFERS) {
+            Escolha::Usar(vez) => return Ok(vez),
+            Escolha::Nenhum => return Err("todos os buffers ainda estão com o compositor".into()),
+            Escolha::Criar => {}
         }
         let passo = self.largura * 4;
         let (buffer, tela) = self
@@ -114,5 +141,55 @@ impl Lona {
     /// Bytes de SHM do pool (para o estado e o orçamento de memória).
     pub fn bytes(&self) -> usize {
         self.pool.len()
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    const LIVRE_EM_DIA: (bool, bool) = (true, true);
+    const LIVRE_VELHO: (bool, bool) = (false, true);
+    const OCUPADO_EM_DIA: (bool, bool) = (true, false);
+    const OCUPADO_VELHO: (bool, bool) = (false, false);
+
+    fn usar(indice: usize, redesenhar_tudo: bool) -> Escolha {
+        Escolha::Usar(Vez {
+            indice,
+            redesenhar_tudo,
+        })
+    }
+
+    #[test]
+    fn primeiro_quadro_cria_um_buffer() {
+        assert_eq!(escolher(&[], MAX_BUFFERS), Escolha::Criar);
+    }
+
+    #[test]
+    fn buffer_devolvido_e_em_dia_desenha_so_o_dano() {
+        // O normal no Hyprland: o SHM volta logo depois do commit.
+        assert_eq!(escolher(&[LIVRE_EM_DIA], MAX_BUFFERS), usar(0, false));
+        assert_eq!(
+            escolher(&[LIVRE_VELHO, LIVRE_EM_DIA], MAX_BUFFERS),
+            usar(1, false),
+            "o em dia ganha do velho"
+        );
+    }
+
+    #[test]
+    fn buffer_que_ficou_para_tras_e_redesenhado_inteiro() {
+        assert_eq!(
+            escolher(&[OCUPADO_EM_DIA, LIVRE_VELHO], MAX_BUFFERS),
+            usar(1, true)
+        );
+    }
+
+    #[test]
+    fn todos_ocupados_cria_ate_o_teto() {
+        assert_eq!(escolher(&[OCUPADO_EM_DIA], MAX_BUFFERS), Escolha::Criar);
+        assert_eq!(
+            escolher(&[OCUPADO_EM_DIA, OCUPADO_VELHO, OCUPADO_VELHO], MAX_BUFFERS),
+            Escolha::Nenhum
+        );
     }
 }

@@ -20,6 +20,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 
+use crate::animador::DURACAO_MIN_MS;
 use crate::geometria::{Ancoras, Ret};
 
 /// Versão do formato do `skin.json`.
@@ -410,6 +411,12 @@ impl Skin {
                 ));
                 DURACAO_PADRAO
             } else {
+                if (q.duration as u64) < DURACAO_MIN_MS {
+                    avisos.push(format!(
+                        "quadro {i} com {} ms; o pet toca com {DURACAO_MIN_MS} ms (até 30 fps)",
+                        q.duration
+                    ));
+                }
                 q.duration
             };
             quadros.push(Quadro {
@@ -540,6 +547,35 @@ pub(crate) mod testes {
             "celula":[4,4],"pe":[2,4],"toque":[0,0,4,4],"corpo_px":4,
             "estados":{"idle":["idle"],"festa":["pula","sumida"]}}"#;
         Skin::de_partes(skin, folha, &png).unwrap()
+    }
+
+    /// Skin de células 1x1 cujo `idle` é uma tag só com um quadro por
+    /// duração de `duracoes` (cada quadro com uma cor diferente).
+    pub(crate) fn skin_com_idle(duracoes: &[u32]) -> Skin {
+        let n = duracoes.len();
+        let rgba: Vec<u8> = (0..n)
+            .flat_map(|i| [i as u8, (i * 7) as u8, 200, 255])
+            .collect();
+        let png = codificar_png(n as u32, 1, &rgba).unwrap();
+        let quadros: Vec<String> = duracoes
+            .iter()
+            .enumerate()
+            .map(|(i, d)| {
+                format!(
+                    r#"{{"frame":{{"x":{i},"y":0,"w":1,"h":1}},"spriteSourceSize":{{"x":0,"y":0,"w":1,"h":1}},"sourceSize":{{"w":1,"h":1}},"duration":{d}}}"#
+                )
+            })
+            .collect();
+        let folha = format!(
+            r#"{{"frames":[{}],"meta":{{"size":{{"w":{n},"h":1}},"frameTags":[{{"name":"idle","from":0,"to":{}}}]}}}}"#,
+            quadros.join(","),
+            n - 1
+        );
+        let skin = r#"{"formato":1,"id":"densa","nome":"Densa","autor":"testes","licenca":"MIT",
+            "redistribuivel":true,"folha":"sheet.png","dados":"sheet.json",
+            "celula":[1,1],"pe":[0,1],"toque":[0,0,1,1],"corpo_px":1,
+            "estados":{"idle":["idle"]}}"#;
+        Skin::de_partes(skin, &folha, &png).unwrap()
     }
 
     #[test]

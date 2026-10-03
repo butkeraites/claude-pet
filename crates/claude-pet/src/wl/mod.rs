@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use pet_core::cena::{self, Elemento};
-use pet_core::confete::Chuva;
+use pet_core::confete::{Chuva, Grade};
 use pet_core::skin::Skin;
 
 use smithay_client_toolkit as sctk;
@@ -57,7 +57,7 @@ use crate::comando::QuadroEsperado;
 use crate::estado::{Compartilhado, Painel};
 use crate::laco::Laco;
 use crate::pet::{Palco, Pet};
-use superficie::{Desenho, OrigemEscala, Prazo, Superficie};
+use superficie::{Desenho, Fase, OrigemEscala, Passo, Prazo, Superficie};
 
 /// Globais sem os quais não há camada para desenhar.
 const OBRIGATORIOS: &[&str] = &[
@@ -81,17 +81,47 @@ const ESPERA_DESTRUIR: Duration = Duration::from_millis(50);
 const JANELA_COMMITS: Duration = Duration::from_secs(60);
 /// Prazo para o compositor responder antes do handshake.
 const LIMITE_HANDSHAKE: Duration = Duration::from_secs(3);
+/// Prazo para o compositor confirmar o quadro transparente ao sair (o
+/// `stop_grace_period` do compose é de 5 s).
+const LIMITE_SAIDA: Duration = Duration::from_secs(1);
 /// Confetes do teste de estresse, sempre com a mesma semente: medições
 /// repetidas veem as mesmas trajetórias.
 const CONFETES: usize = 40;
 const SEMENTE_CONFETE: u64 = 7;
+/// Lado de cada confete, em pixels de arte.
+const LADO_CONFETE: i32 = 3;
 
-/// Teste de estresse em curso (`/v1/debug/estresse`).
+/// Teste de estresse em curso (`/v1/debug/estresse`). Os prazos ficam no
+/// mesmo relógio inteiro em milissegundos do animador: o timer dispara no
+/// prazo ou depois, e o passo devido sempre acontece (sem laço ocupado por
+/// um prazo arredondado para baixo).
 struct Estresse {
     chuva: Chuva,
-    intervalo: Duration,
-    ultimo_passo: Instant,
-    fim: Instant,
+    fps: u64,
+    inicio_ms: u64,
+    /// Passos dados (o passo `n` vence em `inicio + ⌈n·1000/fps⌉`).
+    passos: u64,
+    fim_ms: u64,
+}
+
+impl Estresse {
+    fn prazo_do_passo(&self, n: u64) -> u64 {
+        self.inicio_ms + (n * 1000).div_ceil(self.fps)
+    }
+
+    /// Dá um passo se algum venceu. Passos atrasados não viram rajada: o
+    /// confete só pula para o passo de agora.
+    fn avancar(&mut self, agora_ms: u64) {
+        let devidos = agora_ms.saturating_sub(self.inicio_ms) * self.fps / 1000;
+        if devidos > self.passos {
+            self.chuva.passo();
+            self.passos = devidos;
+        }
+    }
+
+    fn proximo_prazo(&self) -> u64 {
+        self.prazo_do_passo(self.passos + 1).min(self.fim_ms)
+    }
 }
 
 /// Commits Wayland: o total e os do último minuto (orçamento da decisão
@@ -264,9 +294,13 @@ impl Sessao {
 
     /// Publica o que a sessão sabe no `/v1/estado`.
     pub fn publicar(&mut self) {
+        let agora_ms = self.agora_ms();
+        // Pelo relógio: com a tela apagada o último quadro do estresse pode
+        // nunca ser desenhado, mas o estresse acabou do mesmo jeito.
+        let estresse = self.estresse.as_ref().is_some_and(|e| agora_ms < e.fim_ms);
         let superficie = self.superficie.as_ref();
         let pronta = superficie.and_then(Superficie::pronta);
-        let visivel = superficie.is_some_and(|s| s.desenhou() && !s.saindo);
+        let visivel = superficie.is_some_and(|s| s.tem_conteudo() && !s.saindo);
         let (d, sprite_disp) = match (&self.palco, &self.pet) {
             (Some(palco), Some(pet)) if visivel => (Some(palco.d), pet.sprite_disp(palco)),
             _ => (None, None),
@@ -278,7 +312,7 @@ impl Sessao {
             sprite_disp,
             regiao_entrada: superficie.and_then(Superficie::regiao),
             visivel,
-            estresse: self.estresse.is_some(),
+            estresse,
             commits_por_min: self.commits.por_minuto(Instant::now()),
             commits_total: self.commits.total,
             shm_bytes: superficie.map_or(0, Superficie::bytes_shm),
@@ -316,22 +350,31 @@ impl Sessao {
     }
 
     /// Confete pela tela inteira por `segundos`, a `fps` quadros por
-    /// segundo; depois volta ao repouso.
+    /// segundo; depois volta ao repouso. O confete anda na grade de arte do
+    /// pet (múltiplos de D a partir do canto da célula).
     pub fn estresse(&mut self, fps: u32, segundos: u32) {
         let Some(palco) = self.palco else {
             aviso!("debug: estresse pedido com o pet fora da tela");
             return;
         };
-        let agora = Instant::now();
-        let lado = (palco.d * 3).max(4);
+        let agora_ms = self.agora_ms();
+        let grade = Grade {
+            x: palco.x,
+            y: palco.y,
+            d: palco.d,
+        };
         self.estresse = Some(Estresse {
-            chuva: Chuva::nova(CONFETES, palco.tela, lado, SEMENTE_CONFETE),
-            intervalo: Duration::from_secs(1) / fps.max(1),
-            ultimo_passo: agora,
-            fim: agora + Duration::from_secs(segundos as u64),
+            chuva: Chuva::nova(CONFETES, palco.tela, grade, LADO_CONFETE, SEMENTE_CONFETE),
+            fps: fps.max(1) as u64,
+            inicio_ms: agora_ms,
+            passos: 0,
+            fim_ms: agora_ms + segundos as u64 * 1000,
         });
         info!("debug: estresse com {CONFETES} confetes a {fps} fps por {segundos} s");
         self.desenhar();
+        // Com um frame callback pendente nada foi desenhado ainda: publica
+        // assim mesmo, para o /v1/estado já mostrar o estresse.
+        self.publicar();
     }
 
     fn contar_commit(&mut self) {
@@ -339,29 +382,54 @@ impl Sessao {
         self.publicar();
     }
 
-    /// Liga ou desliga o pet na tela. Ligar cria a camada (no monitor
-    /// focado); desligar desenha transparente e só então destrói, para o
-    /// fade de saída do Hyprland não guardar um quadro fantasma.
+    /// Liga ou desliga o pet na tela ([`superficie::passo_de_visibilidade`]).
+    /// Ligar cria a camada (no monitor focado) ou cancela uma saída em
+    /// curso; desligar desenha transparente e só então destrói, para o fade
+    /// de saída do Hyprland não guardar um quadro fantasma.
     pub fn definir_visivel(&mut self, visivel: bool) {
         self.visivel = visivel && self.pet.is_some();
-        if self.visivel {
-            if self.superficie.is_none() {
-                self.criar_superficie();
+        let fase = self
+            .superficie
+            .as_ref()
+            .map_or(Fase::Ausente, Superficie::fase);
+        match superficie::passo_de_visibilidade(fase, self.visivel) {
+            Passo::Nada => {}
+            Passo::Criar => self.criar_superficie(),
+            Passo::Cancelar => {
+                if let Some(superficie) = self.superficie.as_mut() {
+                    depurar!("mostrar durante a saída: a camada fica");
+                    superficie.saindo = false;
+                }
+                // Como esconder, mostrar é uma ordem e não animação: o pet
+                // volta já, mesmo com um frame callback pendente (que, com a
+                // tela apagada, só chegaria quando ela acendesse).
+                self.desenhar_com(true);
             }
-        } else {
-            self.esconder();
+            Passo::ApagarEDestruir => self.apagar_e_destruir(),
+            Passo::Destruir => {
+                self.cancelar_relogio();
+                self.estresse = None;
+                self.superficie = None;
+            }
         }
         self.publicar();
     }
 
-    /// Antes de sair do processo: esconde e despeja os pedidos no socket.
+    /// Antes de sair do processo: quadro transparente, camada destruída e
+    /// uma ida e volta com prazo, para garantir que o compositor processou
+    /// tudo antes de o socket fechar (o libwayland-server descarta o que não
+    /// leu quando o cliente desliga).
     pub fn encerrar(&mut self) {
-        if self.superficie.is_some() {
-            depurar!("escondendo o pet antes de sair");
-        }
+        let tinha_camada = self.superficie.is_some();
         self.definir_visivel(false);
-        if let Err(e) = self.conexao.flush() {
-            depurar!("flush final: {e}");
+        self.cancelar_relogio();
+        self.superficie = None;
+        if !tinha_camada {
+            return;
+        }
+        match sincronia::sincronizar(&self.conexao, LIMITE_SAIDA) {
+            Ok(()) => depurar!("o compositor processou o quadro transparente e a destruição"),
+            Err(e) => aviso!("saindo sem confirmação do compositor: {e}"),
         }
     }
 
@@ -378,17 +446,18 @@ impl Sessao {
         self.superficie = Some(superficie);
     }
 
-    fn esconder(&mut self) {
+    /// Esconde uma camada com pixels do pet: região de input vazia, quadro
+    /// transparente com commit e destruição no frame callback seguinte (ou
+    /// em [`ESPERA_DESTRUIR`]). Funciona também logo depois de uma troca de
+    /// escala, quando o buffer antigo já foi descartado: o quadro vazio vai
+    /// num buffer novo, zerado, com dano na tela inteira.
+    fn apagar_e_destruir(&mut self) {
         self.cancelar_relogio();
         self.estresse = None;
         let (Some(superficie), Some(pet)) = (self.superficie.as_mut(), self.pet.as_ref()) else {
             self.superficie = None;
             return;
         };
-        if !superficie.desenhou() || superficie.pronta().is_none() {
-            self.superficie = None;
-            return;
-        }
         superficie.saindo = true;
         if let Err(e) = superficie.definir_regiao(None, &self.compositor) {
             aviso!("região de input ao esconder: {e}");
@@ -412,9 +481,17 @@ impl Sessao {
     }
 
     /// Desenha o quadro de agora (se a camada está pronta e algo mudou) e
-    /// agenda a próxima troca.
+    /// agenda a próxima troca. Com um frame callback pendente o quadro
+    /// espera por ele e nenhum timer é armado: é o callback que chama de
+    /// novo, já com o quadro do instante em que chegar. Com a tela apagada
+    /// ele não chega, e o pet fica sem commit nenhum até ela acender.
     fn desenhar(&mut self) {
-        let agora = Instant::now();
+        self.desenhar_com(false);
+    }
+
+    /// [`Self::desenhar`]; `forcar` faz o commit mesmo com um frame callback
+    /// pendente (sem pedir outro).
+    fn desenhar_com(&mut self, forcar: bool) {
         let agora_ms = self.agora_ms();
         let Some(palco) = self.palco else {
             return;
@@ -426,19 +503,15 @@ impl Sessao {
             return;
         }
         let (mut cena, mut proxima) = pet.cena(&palco, agora_ms);
-        if self.estresse.as_ref().is_some_and(|e| agora >= e.fim) {
+        if self.estresse.as_ref().is_some_and(|e| agora_ms >= e.fim_ms) {
             self.estresse = None;
             info!("debug: estresse acabou");
         }
         if let Some(estresse) = self.estresse.as_mut() {
-            if agora.duration_since(estresse.ultimo_passo) >= estresse.intervalo {
-                estresse.chuva.passo(palco.tela);
-                estresse.ultimo_passo = agora;
-            }
+            estresse.avancar(agora_ms);
             cena.extend(estresse.chuva.elementos());
-            let passo = (estresse.ultimo_passo + estresse.intervalo).min(estresse.fim);
-            let passo_ms = passo.saturating_duration_since(self.inicio).as_millis() as u64;
-            proxima = Some(proxima.map_or(passo_ms, |p| p.min(passo_ms)));
+            let prazo = estresse.proximo_prazo();
+            proxima = Some(proxima.map_or(prazo, |p| p.min(prazo)));
         }
         let regiao = pet.regiao_de_toque(&palco);
         let mudou_regiao = superficie
@@ -447,7 +520,7 @@ impl Sessao {
                 aviso!("região de input: {e}");
                 false
             });
-        let resultado = superficie.desenhar(&cena, pet.skin(), &self.shm, &self.qh, false);
+        let resultado = superficie.desenhar(&cena, pet.skin(), &self.shm, &self.qh, forcar);
         match resultado {
             Ok(Desenho::Enviado { retangulos, area }) => {
                 self.contar_commit();
@@ -459,7 +532,9 @@ impl Sessao {
                 superficie.commit_de_estado();
                 self.contar_commit();
             }
-            Ok(Desenho::SemMudanca | Desenho::Adiado) => {}
+            // O frame callback pendente chama `desenhar` de novo.
+            Ok(Desenho::Adiado) => return,
+            Ok(Desenho::SemMudanca) => {}
             Err(e) => aviso!("desenho: {e}"),
         }
         if let Some(proxima) = proxima {
