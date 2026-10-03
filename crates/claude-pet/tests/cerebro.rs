@@ -35,6 +35,11 @@ fn rapido_acena_pequeno_pula_e_fim_da_sessao_da_tchau() {
     );
     mandar(&d, evento("Stop", json!({"turno": "p1"})));
     let estado = d.esperar_estado("aceno", |e| reacao(e) == Some("nod"));
+    // Sem personagem aprovado (o Zeca nem está na busca), a reação fica
+    // registrada no /v1/estado e nada toca na tela (decisão 0030).
+    assert!(estado["skin"]["id"].is_null(), "{estado:#}");
+    assert_eq!(estado["skin"]["pedida"], "zeca");
+    assert!(estado["reacao"].is_null());
     assert_eq!(estado["ultima_reacao"]["sid8"], "c0ffee00");
     assert_eq!(estado["ultima_reacao"]["proj"], "meu-projeto");
     assert_eq!(estado["ultima_reacao"]["nivel"], "T0");
@@ -123,4 +128,38 @@ fn origens_pela_config() {
     v["ent"] = json!("sdk-cli");
     mandar(&d, v.to_string());
     d.esperar_estado("aceno do sdk-cli", |e| reacao(e) == Some("nod"));
+}
+
+#[test]
+fn config_relida_na_aprovacao_vale_para_o_cerebro() {
+    // O daemon relê o config a cada aprovação ou revogação (decisão 0029);
+    // as origens e o modo do cérebro vêm junto (decisão 0030).
+    let d = Daemon::subir(false);
+    assert_eq!(
+        d.get_json("/v1/estado")["cerebro"]["origens"],
+        json!(["cli"])
+    );
+    let pasta = d.pasta.join("config");
+    std::fs::create_dir_all(&pasta).unwrap();
+    std::fs::write(
+        pasta.join("claude-pet.toml"),
+        "[sessoes]\norigens = [\"cli\", \"sdk-cli\"]\n",
+    )
+    .unwrap();
+    let (status, corpo) = d.post_json("/v1/comando", r#"{"cmd":"revogar_skin","arg":"zeca"}"#);
+    assert_eq!(status, 200, "{corpo}");
+    let estado = d.get_json("/v1/estado");
+    assert_eq!(estado["cerebro"]["origens"], json!(["cli", "sdk-cli"]));
+    assert_eq!(
+        estado["config"]["chaves"]["sessoes.origens"]["origem"],
+        "arquivo"
+    );
+    let mut v: Value = serde_json::from_str(&evento("Stop", json!({"turno": "p1"}))).unwrap();
+    v["ent"] = json!("sdk-cli");
+    mandar(&d, v.to_string());
+    d.esperar_estado("aceno do sdk-cli", |e| reacao(e) == Some("nod"));
+    assert!(
+        d.log()
+            .contains("o cérebro passa a acompanhar as origens cli, sdk-cli")
+    );
 }

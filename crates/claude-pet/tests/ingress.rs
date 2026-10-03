@@ -104,6 +104,24 @@ fn comandos_de_ponta_a_ponta() {
     assert_eq!(d.post_json("/v1/comando", r#"{"cmd":"esconder"}"#).0, 204);
     assert_eq!(d.post_json("/v1/comando", r#"{"cmd":"mostrar"}"#).0, 204);
     assert_eq!(d.post_json("/v1/comando", r#"{"cmd":"voar"}"#).0, 400);
+    // As aprovações do M2 vêm pelo mesmo `/v1/comando` (decisão 0030): o
+    // laço escolhe o personagem de novo e a resposta traz o resultado.
+    let (status, corpo) = d.post_json("/v1/comando", r#"{"cmd":"revogar_skin","arg":"zeca"}"#);
+    assert_eq!(status, 200, "{corpo}");
+    let resposta: serde_json::Value = serde_json::from_str(&corpo).unwrap();
+    assert_eq!(resposta["revogada"], false);
+    assert_eq!(resposta["aplicado"], true);
+    assert_eq!(
+        resposta["personagem"]["pedida"], "_teste",
+        "debug: a skin de teste"
+    );
+    let sha = "a".repeat(64);
+    let aprova = format!(r#"{{"cmd":"aprovar_skin","arg":{{"id":"zeca","sha256":"{sha}"}}}}"#);
+    assert_eq!(
+        d.post_json("/v1/comando", &aprova).0,
+        404,
+        "sem o Zeca na busca"
+    );
     let (status, _) = d.bruto(&format!(
         "POST /v1/comando HTTP/1.1\r\n{}Content-Type: text/plain\r\nContent-Length: 2\r\n\r\n{{}}",
         d.cabecalhos()

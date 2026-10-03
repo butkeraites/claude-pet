@@ -21,6 +21,7 @@
 //! Tudo aqui recebe o relógio de fora (milissegundos), para os testes não
 //! dependerem de tempo real.
 
+use crate::estados;
 use crate::skin::{Direcao, Skin, Tag};
 
 /// Pausa mínima entre rajadas no repouso.
@@ -203,28 +204,24 @@ impl Repouso {
     }
 }
 
-/// Reservas de cada reação com nome fixo, quando a skin não tem o estado
-/// semântico dela. O cérebro só emite estes nomes; `tocar` aceita também
-/// qualquer estado da skin (`done_big`, `alert`, …). `bye` não tem reserva:
-/// sem um estado `bye` na skin, o tchau não anima (M3).
-pub const RESERVAS: &[(&str, &[&str])] = &[
-    // T0: aceno discreto.
-    ("nod", &["wave"]),
-    // T1: pulinho.
-    ("done_small", &["wave"]),
-];
-
-/// Tag que toca a reação `nome` nesta skin: a primeira tag do estado
-/// semântico `nome`; senão a do primeiro estado de reserva que existir;
-/// senão uma tag com esse nome. `None`: a skin não sabe tocar a reação.
+/// Tag que toca a reação `nome` nesta skin, pelos `estados` do `skin.json`:
+/// a primeira tag do estado semântico `nome`; senão a do primeiro estado de
+/// reserva que a skin tem, pelas reservas do catálogo
+/// ([`estados::reserva`], as mesmas que o `cargo xtask cobertura` mostra),
+/// nunca a pose parada (`idle`: tocar o repouso não é reação); senão uma tag
+/// com esse nome. `None`: a skin não sabe tocar a reação.
+///
+/// O cérebro emite `nod` (T0), `done_small` (T1) e `bye`; o `tocar` aceita
+/// qualquer estado. Na skin de teste o aceno cai no `wave` e o tchau não
+/// anima; no Zeca os três são nativos (o aceno é a tag composta `nod`, que
+/// levanta e senta; o pulinho e o tchau são o pio), e o `cargo xtask
+/// cobertura --nativos mvp` exige isso de todo personagem (decisão 0030).
 pub fn tag_da_reacao(skin: &Skin, nome: &str) -> Option<usize> {
-    let reservas = RESERVAS
-        .iter()
-        .find(|(n, _)| *n == nome)
-        .map_or(&[][..], |(_, r)| *r);
-    std::iter::once(nome)
-        .chain(reservas.iter().copied())
-        .find_map(|estado| skin.tags_do_estado(estado).first().copied())
+    let primeira = |estado: &str| skin.tags_do_estado(estado).first().copied();
+    primeira(nome)
+        .or_else(|| {
+            estados::reserva(nome, &|r| r != "idle" && primeira(r).is_some()).and_then(primeira)
+        })
         .or_else(|| skin.tags.iter().position(|t| t.nome == nome))
 }
 
@@ -459,6 +456,41 @@ mod testes {
         assert_eq!(tag_da_reacao(&mini, "done_small"), None);
         assert_eq!(tag_da_reacao(&mini, "festa"), Some(1), "estado da skin");
         assert_eq!(tag_da_reacao(&mini, "pula"), Some(1), "tag pelo nome");
+    }
+
+    /// Skin de duas tags de um quadro (`a` e `b`) com os `estados` dados.
+    fn skin_com_estados(estados: &str) -> Skin {
+        let png = codificar_png(2, 1, &[10, 20, 30, 255, 40, 50, 60, 255]).unwrap();
+        let folha = r#"{"frames":[
+            {"frame":{"x":0,"y":0,"w":1,"h":1},"spriteSourceSize":{"x":0,"y":0,"w":1,"h":1},"sourceSize":{"w":1,"h":1},"duration":100},
+            {"frame":{"x":1,"y":0,"w":1,"h":1},"spriteSourceSize":{"x":0,"y":0,"w":1,"h":1},"sourceSize":{"w":1,"h":1},"duration":100}],
+            "meta":{"size":{"w":2,"h":1},"frameTags":[{"name":"a","from":0,"to":0},{"name":"b","from":1,"to":1}]}}"#;
+        let skin = format!(
+            r#"{{"formato":1,"id":"est","nome":"E","autor":"t","licenca":"MIT",
+            "redistribuivel":true,"folha":"sheet.png","dados":"sheet.json",
+            "celula":[1,1],"pe":[0,1],"toque":[0,0,1,1],"corpo_px":1,"estados":{estados}}}"#
+        );
+        Skin::de_partes(&skin, folha, &png).unwrap()
+    }
+
+    #[test]
+    fn reacao_segue_as_reservas_do_catalogo_sem_cair_no_repouso() {
+        // Só com o pio do T1: o voo grande cai nele (done_big → done_medium
+        // → done_small), como a cobertura mostra; o aceno não tem `wave` e,
+        // sem a pose parada como reserva, não anima.
+        let pio = skin_com_estados(r#"{"idle":["a"],"done_small":["b"]}"#);
+        assert_eq!(tag_da_reacao(&pio, "done_big"), Some(1));
+        assert_eq!(tag_da_reacao(&pio, "nod"), None, "nunca o idle");
+        assert_eq!(tag_da_reacao(&pio, "working"), None);
+        // Com `wave`: aceno, pulinho, oi e risadinha caem nele; tchau não.
+        let aceno = skin_com_estados(r#"{"idle":["a"],"wave":["b"]}"#);
+        for reacao in ["nod", "done_small", "hello", "giggle"] {
+            assert_eq!(tag_da_reacao(&aceno, reacao), Some(1), "{reacao}");
+        }
+        assert_eq!(tag_da_reacao(&aceno, "bye"), None);
+        // O estado nativo ganha da reserva.
+        let ambos = skin_com_estados(r#"{"idle":["a"],"wave":["a"],"nod":["b"]}"#);
+        assert_eq!(tag_da_reacao(&ambos, "nod"), Some(1));
     }
 
     #[test]

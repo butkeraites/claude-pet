@@ -63,19 +63,30 @@ api() {
   curl -fsS -m 3 -H 'X-Pet: 1' "${URL}$1"
 }
 
-# POST /v1/comando; num erro, mostra o motivo que o pet devolveu.
+# POST /v1/comando, o mesmo para as reações e as aprovações (decisão 0030);
+# deixa a resposta em RESPOSTA e o status HTTP em STATUS.
+RESPOSTA=""
+STATUS=""
+comando_pet() {
+  local saida
+  saida="$(curl -sS -m 10 -w '\n%{http_code}' -X POST -H 'X-Pet: 1' \
+    -H 'Content-Type: application/json' --data-binary "$1" "${URL}/v1/comando")" || return 1
+  STATUS="${saida##*$'\n'}"
+  RESPOSTA="${saida%$'\n'*}"
+}
+
+# tocar, esconder e mostrar: o pet responde 204; senão, mostra o motivo que
+# ele devolveu.
 comando() {
-  local resposta codigo
-  resposta="$(mktemp)"
-  codigo="$(curl -sS -m 3 -o "$resposta" -w '%{http_code}' -H 'X-Pet: 1' \
-    -H 'Content-Type: application/json' --data-binary "$1" "${URL}/v1/comando" || true)"
-  if [ "$codigo" != 204 ]; then
-    printf 'o pet recusou (%s): %s\n' "${codigo:-sem resposta}" \
-      "$(jq -r '.erro // empty' "$resposta" 2>/dev/null || true)" >&2
-    rm -f "$resposta"
+  if ! comando_pet "$1"; then
+    echo "o pet não respondeu em ${URL} — está de pé? (bin/pet subir)" >&2
     return 1
   fi
-  rm -f "$resposta"
+  if [ "$STATUS" != 204 ]; then
+    printf 'o pet recusou (%s): %s\n' "$STATUS" \
+      "$(jq -r '.erro // empty' <<<"$RESPOSTA" 2>/dev/null || true)" >&2
+    return 1
+  fi
 }
 
 # Um cenário sintético PELO avisar.sh de verdade, como o Claude Code chamaria:
@@ -298,17 +309,6 @@ pasta_da_skin() {
     fi
   done
   return 1
-}
-
-# POST /v1/comando; deixa a resposta em RESPOSTA e o status HTTP em STATUS.
-RESPOSTA=""
-STATUS=""
-comando_pet() {
-  local saida
-  saida="$(curl -sS -m 10 -w '\n%{http_code}' -X POST -H 'X-Pet: 1' \
-    -H 'Content-Type: application/json' --data-binary "$1" "${URL}/v1/comando")" || return 1
-  STATUS="${saida##*$'\n'}"
-  RESPOSTA="${saida%$'\n'*}"
 }
 
 # A skin pedida pelo daemon (aparencia.skin), quando o id não vem.

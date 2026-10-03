@@ -440,6 +440,7 @@ As outras sessões aparecem como selos: um contador "+N", uma bandeirinha com a 
 | pensando | Sit Idle + "…" |
 | esperando você | Chirp em rajadas + "!" |
 | pronto | Stand + bandeirinha |
+| T0 (aceno) | Stand → Sit |
 | T1 | Chirp + receita pulo |
 | T2 | Take Off → Fly em arco curto → Landing |
 | T3 | Take Off → Fly/Glide atravessando a tela → Dive → Landing |
@@ -643,7 +644,8 @@ claude-pet/
 - **T3.1** fio v1 com validação: `/v1/evento` (Host, Content-Type, `X-Pet`, até 8 KiB; 204, 400, 415), `/v1/comando` (`tocar`, `esconder`, `mostrar`), `/v1/debug/eventos` (só debug); o evento chega ao laço principal pelo canal do calloop; o animador toca uma reação uma vez e volta à pose;
 - **T3.2** plugin (manifests, 13 hooks, `avisar.sh`) e testes canário;
 - **T3.3** cérebro mínimo: sessões (só `ent = cli` por padrão), turnos por `prompt_id`, acomodação e dedupe do Stop, T0 aceno contra T1 pulinho, eventos de teste com TTL de 60 s; `/v1/estado.sessoes`, `.ultima_reacao` e `.turnos`;
-- **T3.4** `bin/pet testar`, gate interativo ao vivo com `--plugin-dir`; o marketplace local pela worktree estável entra só depois do merge na `main`.
+- **T3.4** `bin/pet testar`, gate interativo ao vivo com `--plugin-dir`; o marketplace local pela worktree estável entra só depois do merge na `main`;
+- **T3.5** integração sobre o M2 (a `m3-hooks` rebaseada na `m2-zeca`, decisão 0030): um `/v1/comando` para as reações e as aprovações, reações pelos estados da skin com as reservas do catálogo, `nod` nativo no MVP, config relida também no cérebro; `skin-instalar`, `bin/pet testar` e gate interativo de novo com o Zeca.
 
 **Testes canário:**
 - `SEGREDO-n` plantado em todo campo de conteúdo; nada disso pode sair do script;

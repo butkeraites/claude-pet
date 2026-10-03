@@ -547,6 +547,19 @@ impl Cerebro {
         &self.config
     }
 
+    /// Troca a configuração: o config relido a cada aprovação de personagem
+    /// (decisão 0029) vale também aqui (decisão 0030). Uma sessão de origem
+    /// que deixou de contar sai na hora, sem reação: os eventos dela seriam
+    /// ignorados dali em diante e ela só sumiria em 12 h. As outras seguem
+    /// como estavam.
+    pub fn reconfigurar(&mut self, config: ConfigCerebro) {
+        self.sessoes.retain(|_, sessao| {
+            let origem = sessao.ent.as_deref().unwrap_or("desconhecida");
+            config.origens.iter().any(|o| o == origem)
+        });
+        self.config = config;
+    }
+
     fn ignorar(&mut self, motivo: impl Into<String>) {
         let mut motivo = motivo.into();
         if self.ignorados.len() >= MAX_MOTIVOS && !self.ignorados.contains_key(&motivo) {
@@ -1609,5 +1622,51 @@ mod testes {
         // Real sem eventos por 12 h some calada.
         assert!(c.tique(em(1_000 + VIDA_SESSAO_MS)).is_empty());
         assert!(c.resumo().sessoes.is_empty());
+    }
+
+    #[test]
+    fn reconfigurar_troca_origens_e_modo() {
+        let mut c = Cerebro::novo(ConfigCerebro::default());
+        let saida = rodar(
+            &mut c,
+            vec![chega(0, prompt("p1")), chega(10, stop("p1")), Ate(900)],
+        );
+        assert_eq!(saida, vec![(810, ACENO)]);
+        assert_eq!(c.resumo().sessoes.len(), 1);
+
+        // Só `sdk-cli` agora: a sessão `cli` sai sem reação e os eventos
+        // dela passam a ser ignorados.
+        c.reconfigurar(ConfigCerebro {
+            origens: vec!["sdk-cli".into()],
+            modo: ModoCelebracao::Proporcional,
+        });
+        assert_eq!(c.config().origens, vec!["sdk-cli"]);
+        assert!(c.resumo().sessoes.is_empty());
+        let saida = rodar(
+            &mut c,
+            vec![
+                chega(1000, prompt("p2")),
+                chega(1010, stop("p2")),
+                Ate(2000),
+            ],
+        );
+        assert!(saida.is_empty(), "{saida:?}");
+        assert_eq!(c.resumo().ignorados["origem:cli"], 2);
+
+        // De volta ao `cli`, com a celebração desligada: conta, mas não reage.
+        c.reconfigurar(ConfigCerebro {
+            origens: vec!["cli".into()],
+            modo: ModoCelebracao::Desligada,
+        });
+        let saida = rodar(
+            &mut c,
+            vec![
+                chega(3000, prompt("p3")),
+                chega(3010, stop("p3")),
+                Ate(4000),
+            ],
+        );
+        assert!(saida.is_empty(), "{saida:?}");
+        assert_eq!(c.resumo().sessoes.len(), 1);
     }
 }

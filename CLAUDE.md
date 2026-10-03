@@ -47,14 +47,28 @@ personagem: a sessão ficou bloqueada. Com a tela acesa e desbloqueada, rode
 `scripts/verificar-ao-vivo.sh --personagem` e `scripts/medir-custo.sh
 --personagem` (aprovam só para o teste e revogam no fim).
 
-**M3 (hooks → reação) na branch `m3-hooks`**, em cima da `m2-zeca`
-(publicada, sem PR nem merge): fio v1 validado no `/v1/evento`, plugin
-`bichinho` (13 hooks async → `avisar.sh`), cérebro mínimo (T0 `nod`, T1
-`done_small`) e `bin/pet testar`. Gate ao vivo passou (decisão 0021). O
-plugin **não** está instalado: até o merge na `main`, só por sessão, com
-`claude --plugin-dir ~/Documents/claude-pet/plugin`; depois do merge, pela
-worktree estável (README). Sem personagem aprovado a produção reage só no
-`/v1/estado` (`ultima_reacao`, `turnos`).
+**M3 (hooks → reação) na branch `m3-hooks`, rebaseada sobre a `m2-zeca`**
+(publicada, sem PR nem merge; a pilha é `m1-overlay` ← `m2-zeca` ←
+`m3-hooks`): fio v1 validado no `/v1/evento`, plugin `bichinho` (13 hooks
+async → `avisar.sh`), cérebro mínimo (T0 `nod`, T1 `done_small`, `bye`
+quando o Claude sai) e `bin/pet testar`. Na integração (decisão 0030) um
+`/v1/comando` só serve as reações (`tocar`, `esconder`, `mostrar`) e as
+aprovações (`aprovar_skin`, `revogar_skin`); as reações tocam pelos estados
+do `skin.json` com as reservas do catálogo: no Zeca, o aceno é a tag
+composta `nod` (levanta e senta) e o pulinho e o tchau são o pio; na
+`_teste`, o aceno cai no `wave`. O `nod` é nativo obrigatório do MVP, e o
+config relido a cada aprovação vale também para o cérebro. Gate ao vivo
+refeito com o Zeca (decisões 0021 e 0030). O plugin **não** está
+instalado: até o merge na `main`, só por sessão, com `claude --plugin-dir
+~/Documents/claude-pet/plugin`; depois do merge, pela worktree estável
+(README). Sem personagem aprovado a produção reage só no `/v1/estado`
+(`ultima_reacao`, `turnos`).
+
+**Nesta máquina** a produção roda da `m3-hooks`, com o Zeca instalado em
+`skins-locais/` e **aprovado**: a aprovação do `zeca` (sha 5b843b03…, de
+2026-10-03 às 23:28 UTC) foi feita fora das sessões de integração e é
+tratada como do Renan. Não a revogue; teste com `bin/pet testar`, que
+nunca mexe nela.
 
 ## Comandos
 
@@ -95,6 +109,13 @@ Fora dele, use `~/.cargo/bin/cargo`.
   são validados campo a campo (`pet_core::evento`, decisão 0019) e vão
   pelo canal do calloop para o cérebro (`pet_core::cerebro`, decisão
   0020), que mora no laço principal e funciona mesmo sem compositor.
+- Comandos chegam por `POST /v1/comando`, sempre `{"cmd", "arg"}`: as
+  reações (`tocar`, `esconder`, `mostrar`; 204) e as aprovações
+  (`aprovar_skin`, `revogar_skin`; 200 depois de o laço trocar o
+  personagem), com as mesmas checagens de `Host`, `X-Pet` e `Content-Type`
+  (decisão 0030). Uma reação toca a tag do estado de mesmo nome no
+  `skin.json`, ou a reserva do catálogo (`pet_core::estados`), nunca o
+  repouso.
 
 ## Regras de ouro
 

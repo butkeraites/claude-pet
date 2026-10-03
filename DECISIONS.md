@@ -862,3 +862,93 @@ medido do M1 sem depender de uma conta linear.
 precisa valer para a arte da folha vista, poder trocar o personagem sem
 congelar a tela nem reiniciar, e nenhum teste pode terminar com o Zeca
 aprovado no lugar do Renan.
+
+## 0030 — Integração do M3 sobre o M2: um `/v1/comando`, reações pelos estados da skin e o config relido também no cérebro (2026-10-03)
+
+**Problema:** o M3 (decisões 0019–0022) foi feito de madrugada, a partir da
+`m1-overlay` de antes do portão do M1, e o M2 (0023–0029) à tarde, em cima
+do portão fechado. Rebaseada a `m3-hooks` na `m2-zeca`, as duas metades se
+encontram em quatro pontos:
+- os dois escreveram um `POST /v1/comando` no mesmo formato `{"cmd",
+  "arg"}`: o M3 com `tocar`, `esconder` e `mostrar` (204, sem esperar), o M2
+  com `aprovar_skin` e `revogar_skin` (200, uma por vez, esperando o laço
+  escolher o personagem de novo);
+- o animador do M3 tinha a própria tabela de reservas (`nod` e `done_small`
+  → `wave`), repetida no catálogo de estados do M2 (`pet_core::estados`),
+  que a cobertura usa: duas fontes para a mesma regra;
+- o `nod`, o aceno do T0 e a reação mais frequente, não estava entre os
+  estados que o personagem tem de ter nativos: sem ele, o aceno cairia no
+  `wave`, que no Zeca é o mesmo pio do pulinho do T1;
+- o M2 relê o config a cada aprovação (decisão 0029), mas o cérebro ficava
+  com as origens e o modo da partida, e o `/v1/estado.config` passaria a
+  mostrar outra coisa que o `cerebro.origens`.
+
+**Escolha:**
+- **Um `/v1/comando` só**, com as mesmas checagens de `Host`, `X-Pet` e
+  `Content-Type` e o mesmo corpo `{"cmd", "arg"}` sem campo a mais:
+  `tocar`, `esconder` e `mostrar` vão ao laço e respondem 204 na hora;
+  `aprovar_skin` e `revogar_skin` respondem 200 com o resultado depois de o
+  laço escolher o personagem. Só as aprovações passam pelo cadeado: uma
+  reação nunca espera uma aprovação. Um `cmd` desconhecido lista os cinco.
+  O `bin/pet` fala com o `/v1/comando` por uma função só.
+- **Um laço só** recebe pelo mesmo canal (256 vagas) eventos, reações,
+  aprovações e debug; o `/v1/estado` traz o `skin` do M2 (`id`, `origem`,
+  `sha256`, avisos) e o `sessoes`, `ultima_reacao`, `turnos`, `cerebro` e
+  `eventos` do M3. O `Laco::novo` recebe a config da partida, de onde saem
+  a skin configurada e a config do cérebro (com os argumentos dos dois
+  marcos ele passava do limite do clippy; corrigido no próprio commit do
+  T3.3 rebaseado).
+- **Reações pelos estados do `skin.json`:** toca a primeira tag do estado de
+  mesmo nome; senão a do primeiro estado de reserva que a skin tem, pelas
+  reservas do catálogo (`estados::reserva`, a mesma caminhada da
+  cobertura), nunca a pose parada (tocar o repouso não é reação); senão uma
+  tag de mesmo nome. A tabela própria do animador saiu.
+  - No Zeca: `nod` → a tag composta `nod` (levanta e senta, 600 ms);
+    `done_small` → `chirp`; `bye` → `chirp`. O tchau, que na `_teste` não
+    anima, no Zeca pia.
+  - Na `_teste` (debug), como antes: `nod` → `wave`, `done_small` →
+    `done_small`, `bye` não anima.
+- **`nod` entra nos nativos do MVP** (`cargo xtask cobertura --nativos mvp`,
+  que o `skin-instalar` exige): o Zeca passa com 18 de 18; um personagem sem
+  aceno próprio não passa. A tabela do PLANO ("Zeca: arte e skin", item 4)
+  ganha a linha do T0.
+- **O config relido vale para o cérebro:** a cada aprovação ou revogação,
+  `sessoes.origens` e `celebracao.modo` do arquivo novo passam ao cérebro
+  (`Cerebro::reconfigurar`); uma sessão de origem que deixou de contar sai
+  na hora, sem reação (os eventos dela seriam ignorados e ela só sumiria em
+  12 h).
+- **Rebase:** cada conflito foi resolvido mantendo os dois lados (lista na
+  linha do T3.5 no PROGRESS). DECISIONS em ordem numérica (0019–0022 antes
+  de 0023); PROGRESS em ordem cronológica: as linhas do M3, de madrugada,
+  antes do portão do M1 (de manhã) e do M2 (à tarde). Todo commit
+  rebaseado passa `cargo fmt --check`, `clippy -D warnings` e `cargo test`.
+
+Ao vivo, com a produção refeita da `m3-hooks` (verificação pelo
+`/v1/estado`, sem olhar pixels):
+- `bin/pet skin-instalar` com o zip do pack deu as mesmas impressões das
+  prévias do M2 (`zeca` 5b843b03…, `zeca-contorno` a0d5fbb1…), com os três
+  arquivos, o `CREDITS.md`, as folhas de contato e os GIFs idênticos byte a
+  byte; só o `cobertura.md` mudou (18 de 18 exigidos, era 17 de 17);
+- o `zeca` estava aprovado: uma aprovação feita fora desta sessão em
+  2026-10-03 às 23:28 UTC, depois do fim do M2, com a impressão da folha.
+  Ela ficou como estava; com a mesma impressão na imagem nova, a produção
+  mostra o Zeca (`tela: ativa`, D = 8) e as reações tocam nele;
+- `bin/pet testar rapido` → `nod` (T0) e `pequeno` → `done_small` (T1,
+  trabalho 2, 940 ms de ferramenta), isolados como teste; `bin/pet tocar`
+  `nod`, `done_small` e `bye` aparecem em `/v1/estado.reacao`;
+- gate interativo no tmux em `~/Documents`, com `--plugin-dir` e sem as
+  variáveis `CLAUDECODE`/`CLAUDE_*` do agente: "responda só: ok" → `nod`
+  (T0); "crie o arquivo …" → um Bash de 66 ms → `done_small` (T1); `/exit`
+  → `bye`; as sessões de teste expiraram sozinhas;
+- pet parado: `claude -p --plugin-dir …` imprimiu só `ok`, stderr vazio,
+  saída 0; o `avisar.sh` levou 12 ms com a porta recusando; pet de pé: um
+  `claude -p` mandou 4 eventos `sdk-cli`, todos ignorados;
+- `claude plugin list`, `claude plugin marketplace list` e os arquivos de
+  configuração do Claude Code terminaram iguais aos de antes.
+
+**Por quê:** o formato `{"cmd", "arg"}` já era o mesmo dos dois lados, então
+um endpoint só, com uma tabela de comandos, é menos superfície do que dois
+caminhos; aprovações são lentas e raras e não podem segurar uma reação. Uma
+fonte só para as reservas faz o `cobertura.md` dizer o que o pet toca. Com o
+`nod` nativo, T0 e T1 continuam diferentes na tela. E o config relido tem de
+valer para tudo o que o `/v1/estado.config` mostra.

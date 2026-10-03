@@ -823,6 +823,75 @@ mod testes {
     }
 
     #[test]
+    fn um_comando_so_para_reacoes_e_aprovacoes() {
+        // As reações do M3 e as aprovações do M2 dividem o `/v1/comando`,
+        // com o mesmo formato e as mesmas checagens (decisão 0030).
+        let (canal, recebe) = smithay_client_toolkit::reexports::calloop::channel::sync_channel(16);
+        let laco = laco_que_confirma(recebe);
+        let ctx = Contexto {
+            comandos: Some(canal),
+            ..contexto()
+        };
+        let pedido = |cabecalhos: &str, corpo: &str| {
+            ler(&format!(
+                "POST /v1/comando HTTP/1.1\r\n{cabecalhos}Content-Length: {}\r\n\r\n{corpo}",
+                corpo.len()
+            ))
+            .unwrap()
+        };
+        for corpo in [
+            r#"{"cmd":"tocar","arg":"nod"}"#,
+            r#"{"cmd":"revogar_skin","arg":"zeca"}"#,
+        ] {
+            let json = "Content-Type: application/json\r\n";
+            for (cabecalhos, status) in [
+                (format!("Host: evil.com:27380\r\nX-Pet: 1\r\n{json}"), 403),
+                (format!("Host: 127.0.0.1:27380\r\n{json}"), 403),
+                ("Host: 127.0.0.1:27380\r\nX-Pet: 1\r\n".to_owned(), 415),
+            ] {
+                let (obtido, resposta) = rotear(&pedido(&cabecalhos, corpo), &ctx);
+                assert_eq!(obtido, status, "{corpo} com {cabecalhos:?}: {resposta}");
+            }
+            let a_mais = corpo.replacen('{', r#"{"x":1,"#, 1);
+            assert_eq!(rotear(&post_json("/v1/comando", &a_mais), &ctx).0, 400);
+        }
+        // Aceitos: a reação vai sem esperar (204); a revogação espera o laço
+        // escolher o personagem de novo (200, com o resultado).
+        assert_eq!(
+            rotear(
+                &post_json("/v1/comando", r#"{"cmd":"tocar","arg":"nod"}"#),
+                &ctx
+            )
+            .0,
+            204
+        );
+        let (status, resposta) = rotear(
+            &post_json("/v1/comando", r#"{"cmd":"revogar_skin","arg":"zeca"}"#),
+            &ctx,
+        );
+        assert_eq!(status, 200, "{resposta}");
+        assert!(resposta.contains(r#""revogada":false"#), "{resposta}");
+        assert!(resposta.contains(r#""aplicado":true"#), "{resposta}");
+        let (status, resposta) = rotear(&post_json("/v1/comando", r#"{"cmd":"voar"}"#), &ctx);
+        assert_eq!(status, 400);
+        for cmd in [
+            "tocar",
+            "esconder",
+            "mostrar",
+            "aprovar_skin",
+            "revogar_skin",
+        ] {
+            assert!(resposta.contains(cmd), "{resposta}");
+        }
+        drop(ctx);
+        assert_eq!(
+            laco.join().unwrap(),
+            1,
+            "só a revogação troca de personagem"
+        );
+    }
+
+    #[test]
     fn debug_eventos_so_em_debug() {
         let ok = "Host: 127.0.0.1:27380\r\nX-Pet: 1\r\n";
         assert_eq!(rotear(&get("/v1/debug/eventos", ok), &contexto()).0, 404);

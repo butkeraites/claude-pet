@@ -143,9 +143,32 @@ precisa virar uma trilha separada), senão ele desce junto com o Zeca
 | Comando | O quê |
 |---|---|
 | `cargo xtask lint-skin <pasta>…` | erros (não carrega, duração fora de 16–5000 ms, não redistribuível em `skins/`) e avisos (cores, alfa parcial, preto puro, corpo pulando > 3 px, pés fora da linha, borda da célula); o `bin/pet verificar` roda em todas |
-| `cargo xtask cobertura <pasta> [--nativos mvp]` | `cobertura.md`: cada estado do catálogo (`pet_core::estados`) como nativo, receita, reserva ou faltando; `--nativos` (uma lista, ou `mvp` = a tabela do PLANO, item 4) reprova se algum desses não for nativo |
+| `cargo xtask cobertura <pasta> [--nativos mvp]` | `cobertura.md`: cada estado do catálogo (`pet_core::estados`) como nativo, receita, reserva ou faltando; `--nativos` (uma lista, ou `mvp` = a tabela do PLANO, item 4, com o `nod` do T0) reprova se algum desses não for nativo |
 | `cargo xtask contato <pasta> [--copia <pasta>]` | folha de contato (todas as tags, fundo escuro e claro, ×4, impressão digital no título e em `contato.sha256`) e um GIF por tag com o fundo escuro e o claro lado a lado, mais o `repouso.gif` (o parado como o daemon toca), em `tmp/contato/<id>/` |
 | `cargo xtask skin-importar …` | importa um pack qualquer (`.aseprite` ou tiras PNG) num esqueleto de skin (o id é o nome da pasta) |
+
+## Reações (M3, decisões 0019, 0020 e 0030)
+
+O cérebro emite três reações: `nod` (T0, uma resposta sem trabalho),
+`done_small` (T1, uma resposta com trabalho) e `bye` (o Claude saiu). O
+`bin/pet tocar` aceita qualquer estado. O animador toca a reação uma vez e
+volta à pose, escolhendo a tag assim:
+1. a primeira tag do estado de mesmo nome em `estados`;
+2. senão, a do primeiro estado de reserva que a skin tem, pelas reservas do
+   catálogo (`pet_core::estados`, as mesmas do `cobertura.md`), nunca o
+   `idle` (tocar o repouso não é reação);
+3. senão, uma tag com esse nome.
+
+| Reação | Zeca | `_teste` (debug) |
+|---|---|---|
+| `nod` | `nod` (composta: levanta e senta, 600 ms) | `wave` (reserva) |
+| `done_small` | `chirp` | `done_small` |
+| `bye` | `chirp` | não anima |
+
+Os três são nativos obrigatórios do personagem (`--nativos mvp`): sem um
+`nod` próprio, o aceno cairia no `wave`, que no Zeca é o mesmo pio do
+pulinho. Sem personagem aprovado, nada toca na tela: a reação fica em
+`/v1/estado.ultima_reacao`.
 
 ## Aprovar (decisões 0026 e 0029)
 

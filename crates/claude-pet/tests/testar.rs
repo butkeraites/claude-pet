@@ -58,3 +58,47 @@ fn cenario_desconhecido_e_pet_desligado() {
         "{saida:?}"
     );
 }
+
+/// `bin/pet <args>` contra o daemon `d`: (sucesso, saída, erro).
+fn pet(d: &Daemon, args: &[&str]) -> (bool, String, String) {
+    let saida = Command::new(comum::raiz().join("bin/pet"))
+        .args(args)
+        .env("PET_PORTA", d.porta.to_string())
+        .output()
+        .expect("rodar bin/pet");
+    (
+        saida.status.success(),
+        String::from_utf8_lossy(&saida.stdout).into_owned(),
+        String::from_utf8_lossy(&saida.stderr).into_owned(),
+    )
+}
+
+#[test]
+fn reacoes_e_aprovacoes_pelo_mesmo_comando() {
+    // O CLI fala com o mesmo `/v1/comando` para as reações do M3 e as
+    // aprovações do M2 (decisão 0030).
+    let d = Daemon::subir(true);
+    for args in [["tocar", "nod"], ["esconder", ""], ["mostrar", ""]] {
+        let args: Vec<&str> = args.into_iter().filter(|a| !a.is_empty()).collect();
+        let (ok, saida, erro) = pet(&d, &args);
+        assert!(ok, "{args:?}: {saida}{erro}");
+    }
+    let (ok, _, erro) = pet(&d, &["tocar", "Nod!"]);
+    assert!(!ok);
+    assert!(erro.contains("o pet recusou (400)"), "{erro}");
+    let (ok, saida, erro) = pet(&d, &["skin-revogar", "zeca"]);
+    assert!(ok, "{saida}{erro}");
+    assert!(saida.contains("«zeca» não estava aprovada"), "{saida}");
+    let porta = d.porta;
+    drop(d);
+    let saida = Command::new(comum::raiz().join("bin/pet"))
+        .args(["tocar", "nod"])
+        .env("PET_PORTA", porta.to_string())
+        .output()
+        .unwrap();
+    assert!(!saida.status.success());
+    assert!(
+        String::from_utf8_lossy(&saida.stderr).contains("o pet não respondeu"),
+        "{saida:?}"
+    );
+}

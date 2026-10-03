@@ -145,7 +145,9 @@ impl Laco {
     }
 
     /// Relê o `claude-pet.toml` (o mesmo caminho e as mesmas variáveis da
-    /// partida): uma aprovação depois de trocar `aparencia.skin` já vale.
+    /// partida): uma aprovação depois de trocar `aparencia.skin` já vale, e
+    /// o cérebro passa a usar `sessoes.origens` e `celebracao.modo` do
+    /// arquivo novo, como o `/v1/estado.config` mostra (decisão 0030).
     fn reler_config(&mut self) {
         let Some(arquivo) = &self.arquivo_config else {
             return;
@@ -159,7 +161,17 @@ impl Laco {
             );
             self.configurada = skin;
         }
+        let cerebro = ConfigCerebro::de(&config.config());
         self.comp.definir_config(config);
+        if &cerebro != self.cerebro.config() {
+            info!(
+                "config: o cérebro passa a acompanhar as origens {} (celebração {:?})",
+                cerebro.origens.join(", "),
+                cerebro.modo
+            );
+            self.cerebro.reconfigurar(cerebro);
+            self.depois_do_cerebro(Vec::new());
+        }
     }
 
     /// Escolhe o personagem (decisões 0011 e 0026), publica no `/v1/estado`

@@ -99,6 +99,12 @@ Para conferir sem o Claude: `bin/pet testar rapido` (aceno) e
 `avisar.sh`. Só sessões de terminal contam (`sessoes.origens = ["cli"]` em
 `config/exemplo.toml`): `claude -p`, SDK e IDE ficam de fora.
 
+Com o Zeca aprovado, uma resposta sem trabalho (sem editar arquivo, rodar
+comando nem chamar subagente) ganha o aceno, ele levantando e sentando; uma
+resposta com trabalho ganha o pulinho, um pio; e fechar o Claude, um pio de
+tchau. Sem personagem aprovado, as reações ficam só em `bin/pet estado`
+(`ultima_reacao`).
+
 ## Desenvolvimento
 
 ```sh
