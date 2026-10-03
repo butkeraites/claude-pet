@@ -534,6 +534,7 @@ pub fn executar(lista: &[String]) -> Result<(), String> {
         png,
         celula: (48, 48),
         nomes: &nomes,
+        duracao_ms: importar::DURACAO_TIRAS,
     });
     let importado = importar::ler_com_reserva(&p2.aseprite, tiras)?;
     let m = montar(&importado, &arte, variante)?;

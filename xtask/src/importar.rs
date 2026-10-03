@@ -202,10 +202,14 @@ fn ler_aseprite_direto(bytes: &[u8]) -> Result<Importado, String> {
         tags.push(tag_importada(tag.name(), de, ate, direcao));
     }
     nomes_unicos(&mut tags);
+    // Num sprite indexado, a entrada do índice transparente não é cor: no
+    // pack ela é #000000, justamente a cor que as regras de estilo proíbem.
+    let transparente = ase.transparent_color_index().map(u32::from);
     let paleta = ase
         .palette()
         .map(|p| {
             (0..p.num_colors())
+                .filter(|&i| Some(i) != transparente)
                 .filter_map(|i| p.color(i))
                 .map(|c| [c.red(), c.green(), c.blue(), c.alpha()])
                 .collect()
@@ -293,6 +297,8 @@ pub struct Tiras<'a> {
     pub celula: (u32, u32),
     /// Nome de cada linha, de cima para baixo.
     pub nomes: &'a [String],
+    /// Duração de cada quadro (as tiras não guardam duração).
+    pub duracao_ms: u32,
 }
 
 /// O `.aseprite` e, se ele não ler, as tiras PNG com a tabela dada.
@@ -300,16 +306,22 @@ pub fn ler_com_reserva(aseprite: &[u8], tiras: Option<Tiras<'_>>) -> Result<Impo
     match ler_aseprite(aseprite) {
         Ok(importado) => Ok(importado),
         Err(motivo) => {
-            let Some(Tiras { png, celula, nomes }) = tiras else {
+            let Some(Tiras {
+                png,
+                celula,
+                nomes,
+                duracao_ms,
+            }) = tiras
+            else {
                 return Err(format!(
                     "o .aseprite não leu ({motivo}) e não há PNG de reserva"
                 ));
             };
-            let mut importado = ler_tiras(png, celula, nomes, DURACAO_TIRAS).map_err(|e| {
+            let mut importado = ler_tiras(png, celula, nomes, duracao_ms).map_err(|e| {
                 format!("o .aseprite não leu ({motivo}) e as tiras também não: {e}")
             })?;
             importado.aviso = Some(format!(
-                "o .aseprite não leu ({motivo}); usei as tiras PNG com {DURACAO_TIRAS} ms por quadro"
+                "o .aseprite não leu ({motivo}); usei as tiras PNG com {duracao_ms} ms por quadro"
             ));
             Ok(importado)
         }
@@ -399,10 +411,19 @@ fn normalizar_caminho(caminho: &Path) -> PathBuf {
     saida
 }
 
-/// Uma skin não redistribuível nunca é gravada em `skins/` (que vai para o
-/// git): o lugar dela é `skins-locais/` (decisão 0011).
+/// Pastas do repositório onde arte que não pode ser redistribuída pode ser
+/// gravada: as duas são ignoradas pelo git (decisão 0011).
+pub const PASTAS_LOCAIS: &[&str] = &["skins-locais", "tmp"];
+
+/// Arte derivada de um pack não redistribuível (folha, prévias, fotos) só é
+/// gravada dentro do repositório em `skins-locais/` ou `tmp/`, que o git
+/// ignora; fora do repositório, em qualquer lugar. Nunca em `skins/`,
+/// `docs/`, `arte/`… onde um `git add` a levaria para o histórico.
 pub fn conferir_destino(saida: &Path, redistribuivel: bool) -> Result<(), String> {
-    let skins = crate::raiz().join("skins");
+    if redistribuivel {
+        return Ok(());
+    }
+    let raiz = normalizar_caminho(&crate::raiz());
     let absoluto = if saida.is_absolute() {
         saida.to_path_buf()
     } else {
@@ -410,13 +431,22 @@ pub fn conferir_destino(saida: &Path, redistribuivel: bool) -> Result<(), String
             .map_err(|e| e.to_string())?
             .join(saida)
     };
-    if !redistribuivel && normalizar_caminho(&absoluto).starts_with(normalizar_caminho(&skins)) {
-        return Err(format!(
-            "{} fica em skins/, que vai para o git; um pack não redistribuível vai para skins-locais/ (decisão 0011)",
-            saida.display()
-        ));
+    let absoluto = normalizar_caminho(&absoluto);
+    let Ok(dentro) = absoluto.strip_prefix(&raiz) else {
+        return Ok(()); // fora do repositório
+    };
+    let local = dentro.components().next().is_some_and(|c| {
+        PASTAS_LOCAIS
+            .iter()
+            .any(|p| c.as_os_str() == std::ffi::OsStr::new(p))
+    });
+    if local && dentro.components().count() > 1 {
+        return Ok(());
     }
-    Ok(())
+    Err(format!(
+        "{} fica num lugar do repositório que pode ir para o git; arte de pack não redistribuível vai só para skins-locais/ ou tmp/ (decisão 0011)",
+        saida.display()
+    ))
 }
 
 pub const USO: &str = "uso: cargo xtask skin-importar (--aseprite <arquivo> | --tiras <png> --celula LxA [--nomes a,b,c | --tabela cute-parrots] [--duracao MS]) --saida <pasta> [--id ID] [--nome NOME] [--autor AUTOR] [--licenca TEXTO] [--fonte URL] [--redistribuivel]";
@@ -487,6 +517,7 @@ pub fn executar(lista: &[String]) -> Result<(), String> {
                             png,
                             celula,
                             nomes: &nomes,
+                            duracao_ms: duracao,
                         }),
                     )?
                 }
@@ -502,14 +533,21 @@ pub fn executar(lista: &[String]) -> Result<(), String> {
     if let Some(aviso) = &importado.aviso {
         eprintln!("aviso: {aviso}");
     }
+    // O daemon acha a skin pelo nome da pasta: sem --id, o id é o nome da
+    // pasta (normalizado só quando não serve como id).
     let id = match a.valor("--id") {
         Some(id) => id.to_owned(),
-        None => normalizar(
-            &saida
+        None => {
+            let pasta = saida
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default(),
-        ),
+                .unwrap_or_default();
+            if id_valido(&pasta) {
+                pasta
+            } else {
+                normalizar(&pasta)
+            }
+        }
     };
     if !id_valido(&id) {
         return Err(format!("id «{id}» fora de [a-z0-9_-]{{1,40}} (use --id)"));
@@ -571,84 +609,154 @@ pub(crate) mod testes {
     use super::*;
     use pet_core::skin::codificar_png;
 
-    /// Escreve um `.aseprite` RGBA mínimo (uma camada, quadros brutos e
-    /// tags), seguindo a especificação do formato. Só para testes: nenhum
-    /// arquivo do pack entra no repositório.
+    /// Uma camada do `.aseprite` sintético.
+    pub(crate) struct CamadaSintetica<'a> {
+        pub nome: &'a str,
+        pub visivel: bool,
+    }
+
+    /// Um `.aseprite` mínimo escrito pela especificação do formato, só para
+    /// testes: nenhum arquivo do pack entra no repositório.
+    pub(crate) struct AsepriteSintetico<'a> {
+        pub celula: (u16, u16),
+        /// 32 (RGBA, 4 bytes por pixel) ou 8 (indexado, 1 byte por pixel).
+        pub profundidade: u16,
+        /// Indexado: o índice transparente e a paleta (chunk 0x2019).
+        pub transparente: u8,
+        pub paleta: &'a [[u8; 4]],
+        pub camadas: &'a [CamadaSintetica<'a>],
+        /// Por quadro: os pixels de cada camada (na ordem das camadas) e a
+        /// duração em ms.
+        pub quadros: &'a [(Vec<Vec<u8>>, u16)],
+        /// (nome, de, até, direção: 0 forward, 1 reverse, 2 pingpong).
+        pub tags: &'a [(&'a str, u16, u16, u8)],
+    }
+
+    impl AsepriteSintetico<'_> {
+        pub(crate) fn escrever(&self) -> Vec<u8> {
+            fn pedaco(tipo: u16, dados: &[u8]) -> Vec<u8> {
+                let mut c = Vec::new();
+                c.extend_from_slice(&((dados.len() + 6) as u32).to_le_bytes());
+                c.extend_from_slice(&tipo.to_le_bytes());
+                c.extend_from_slice(dados);
+                c
+            }
+            fn texto(s: &str) -> Vec<u8> {
+                let mut t = (s.len() as u16).to_le_bytes().to_vec();
+                t.extend_from_slice(s.as_bytes());
+                t
+            }
+            let (w, h) = self.celula;
+            let indexado = self.profundidade == 8;
+            let mut corpo = Vec::new();
+            for (i, (camadas, duracao)) in self.quadros.iter().enumerate() {
+                let mut pedacos = Vec::new();
+                if i == 0 {
+                    if indexado {
+                        let n = self.paleta.len() as u32;
+                        let mut p = Vec::new();
+                        p.extend_from_slice(&n.to_le_bytes());
+                        p.extend_from_slice(&0u32.to_le_bytes());
+                        p.extend_from_slice(&(n - 1).to_le_bytes());
+                        p.extend_from_slice(&[0; 8]);
+                        for c in self.paleta {
+                            p.extend_from_slice(&0u16.to_le_bytes()); // sem nome
+                            p.extend_from_slice(c);
+                        }
+                        pedacos.push(pedaco(0x2019, &p));
+                    }
+                    for c in self.camadas {
+                        let mut camada = Vec::new();
+                        // 1 = visível, 2 = editável.
+                        let bandeiras: u16 = if c.visivel { 3 } else { 2 };
+                        camada.extend_from_slice(&bandeiras.to_le_bytes());
+                        camada.extend_from_slice(&[0; 2 * 5]); // tipo, nível, w, h, mistura
+                        camada.push(255); // opacidade
+                        camada.extend_from_slice(&[0; 3]);
+                        camada.extend_from_slice(&texto(c.nome));
+                        pedacos.push(pedaco(0x2004, &camada));
+                    }
+                    let mut t = (self.tags.len() as u16).to_le_bytes().to_vec();
+                    t.extend_from_slice(&[0; 8]);
+                    for (nome, de, ate, direcao) in self.tags {
+                        t.extend_from_slice(&de.to_le_bytes());
+                        t.extend_from_slice(&ate.to_le_bytes());
+                        t.push(*direcao);
+                        t.extend_from_slice(&[0; 2 + 6 + 4]); // repetição, reservado, cor
+                        t.extend_from_slice(&texto(nome));
+                    }
+                    pedacos.push(pedaco(0x2018, &t));
+                }
+                for (camada, pixels) in camadas.iter().enumerate() {
+                    let mut cel = Vec::new();
+                    cel.extend_from_slice(&(camada as u16).to_le_bytes());
+                    cel.extend_from_slice(&[0; 2 + 2]); // em (0, 0)
+                    cel.push(255);
+                    cel.extend_from_slice(&0u16.to_le_bytes()); // célula bruta
+                    cel.extend_from_slice(&[0; 7]);
+                    cel.extend_from_slice(&w.to_le_bytes());
+                    cel.extend_from_slice(&h.to_le_bytes());
+                    cel.extend_from_slice(pixels);
+                    pedacos.push(pedaco(0x2005, &cel));
+                }
+                let dados: Vec<u8> = pedacos.concat();
+                corpo.extend_from_slice(&((dados.len() + 16) as u32).to_le_bytes());
+                corpo.extend_from_slice(&0xF1FAu16.to_le_bytes());
+                corpo.extend_from_slice(&(pedacos.len() as u16).to_le_bytes());
+                corpo.extend_from_slice(&duracao.to_le_bytes());
+                corpo.extend_from_slice(&[0; 2]);
+                corpo.extend_from_slice(&(pedacos.len() as u32).to_le_bytes());
+                corpo.extend_from_slice(&dados);
+            }
+            let mut arquivo = Vec::new();
+            arquivo.extend_from_slice(&((corpo.len() + 128) as u32).to_le_bytes());
+            arquivo.extend_from_slice(&0xA5E0u16.to_le_bytes());
+            arquivo.extend_from_slice(&(self.quadros.len() as u16).to_le_bytes());
+            arquivo.extend_from_slice(&w.to_le_bytes());
+            arquivo.extend_from_slice(&h.to_le_bytes());
+            arquivo.extend_from_slice(&self.profundidade.to_le_bytes());
+            arquivo.extend_from_slice(&1u32.to_le_bytes()); // opacidade de camada válida
+            arquivo.extend_from_slice(&100u16.to_le_bytes());
+            arquivo.extend_from_slice(&[0; 8]);
+            arquivo.extend_from_slice(&[self.transparente, 0, 0, 0]); // índice transparente + ignorados
+            let cores = if indexado {
+                self.paleta.len() as u16
+            } else {
+                0
+            };
+            arquivo.extend_from_slice(&cores.to_le_bytes());
+            arquivo.extend_from_slice(&[1, 1]); // pixel 1:1
+            arquivo.extend_from_slice(&[0; 8]); // grade
+            arquivo.extend_from_slice(&[0; 84]);
+            assert_eq!(arquivo.len(), 128);
+            arquivo.extend_from_slice(&corpo);
+            arquivo
+        }
+    }
+
+    /// `.aseprite` RGBA com uma camada visível, um RGBA por quadro.
     pub(crate) fn aseprite_sintetico(
         celula: (u16, u16),
         quadros: &[(Vec<u8>, u16)],
         tags: &[(&str, u16, u16, u8)],
     ) -> Vec<u8> {
-        fn pedaco(tipo: u16, dados: &[u8]) -> Vec<u8> {
-            let mut c = Vec::new();
-            c.extend_from_slice(&((dados.len() + 6) as u32).to_le_bytes());
-            c.extend_from_slice(&tipo.to_le_bytes());
-            c.extend_from_slice(dados);
-            c
+        let quadros: Vec<(Vec<Vec<u8>>, u16)> = quadros
+            .iter()
+            .map(|(rgba, d)| (vec![rgba.clone()], *d))
+            .collect();
+        AsepriteSintetico {
+            celula,
+            profundidade: 32,
+            transparente: 0,
+            paleta: &[],
+            camadas: &[CamadaSintetica {
+                nome: "Camada 1",
+                visivel: true,
+            }],
+            quadros: &quadros,
+            tags,
         }
-        fn texto(s: &str) -> Vec<u8> {
-            let mut t = (s.len() as u16).to_le_bytes().to_vec();
-            t.extend_from_slice(s.as_bytes());
-            t
-        }
-        let mut corpo = Vec::new();
-        for (i, (rgba, duracao)) in quadros.iter().enumerate() {
-            let mut pedacos = Vec::new();
-            if i == 0 {
-                let mut camada = Vec::new();
-                camada.extend_from_slice(&3u16.to_le_bytes()); // visível + editável
-                camada.extend_from_slice(&[0; 2 * 5]); // tipo, nível, w, h, mistura
-                camada.push(255); // opacidade
-                camada.extend_from_slice(&[0; 3]);
-                camada.extend_from_slice(&texto("Camada 1"));
-                pedacos.push(pedaco(0x2004, &camada));
-                let mut t = (tags.len() as u16).to_le_bytes().to_vec();
-                t.extend_from_slice(&[0; 8]);
-                for (nome, de, ate, direcao) in tags {
-                    t.extend_from_slice(&de.to_le_bytes());
-                    t.extend_from_slice(&ate.to_le_bytes());
-                    t.push(*direcao);
-                    t.extend_from_slice(&[0; 2 + 6 + 4]); // repetição, reservado, cor
-                    t.extend_from_slice(&texto(nome));
-                }
-                pedacos.push(pedaco(0x2018, &t));
-            }
-            let mut cel = Vec::new();
-            cel.extend_from_slice(&[0; 2 + 2 + 2]); // camada 0 em (0, 0)
-            cel.push(255);
-            cel.extend_from_slice(&0u16.to_le_bytes()); // célula bruta
-            cel.extend_from_slice(&[0; 7]);
-            cel.extend_from_slice(&celula.0.to_le_bytes());
-            cel.extend_from_slice(&celula.1.to_le_bytes());
-            cel.extend_from_slice(rgba);
-            pedacos.push(pedaco(0x2005, &cel));
-            let dados: Vec<u8> = pedacos.concat();
-            corpo.extend_from_slice(&((dados.len() + 16) as u32).to_le_bytes());
-            corpo.extend_from_slice(&0xF1FAu16.to_le_bytes());
-            corpo.extend_from_slice(&(pedacos.len() as u16).to_le_bytes());
-            corpo.extend_from_slice(&duracao.to_le_bytes());
-            corpo.extend_from_slice(&[0; 2]);
-            corpo.extend_from_slice(&(pedacos.len() as u32).to_le_bytes());
-            corpo.extend_from_slice(&dados);
-        }
-        let mut arquivo = Vec::new();
-        arquivo.extend_from_slice(&((corpo.len() + 128) as u32).to_le_bytes());
-        arquivo.extend_from_slice(&0xA5E0u16.to_le_bytes());
-        arquivo.extend_from_slice(&(quadros.len() as u16).to_le_bytes());
-        arquivo.extend_from_slice(&celula.0.to_le_bytes());
-        arquivo.extend_from_slice(&celula.1.to_le_bytes());
-        arquivo.extend_from_slice(&32u16.to_le_bytes()); // RGBA
-        arquivo.extend_from_slice(&1u32.to_le_bytes());
-        arquivo.extend_from_slice(&100u16.to_le_bytes());
-        arquivo.extend_from_slice(&[0; 8]);
-        arquivo.extend_from_slice(&[0; 4]); // índice transparente + ignorados
-        arquivo.extend_from_slice(&0u16.to_le_bytes()); // cores
-        arquivo.extend_from_slice(&[1, 1]); // pixel 1:1
-        arquivo.extend_from_slice(&[0; 8]); // grade
-        arquivo.extend_from_slice(&[0; 84]);
-        assert_eq!(arquivo.len(), 128);
-        arquivo.extend_from_slice(&corpo);
-        arquivo
+        .escrever()
     }
 
     /// Célula 4x4 com um bloco opaco de cor `cor` em (1..3, 1..4).
@@ -706,6 +814,64 @@ pub(crate) mod testes {
     }
 
     #[test]
+    fn aseprite_indexado_achata_so_as_camadas_visiveis() {
+        // Como o pack: indexado (8 bits), índice transparente 0 = #000000.
+        let paleta = [
+            [0, 0, 0, 255],
+            [200, 10, 10, 255],
+            [10, 200, 10, 255],
+            [10, 10, 200, 255],
+        ];
+        let camadas = [
+            CamadaSintetica {
+                nome: "fundo",
+                visivel: true,
+            },
+            CamadaSintetica {
+                nome: "escondida",
+                visivel: false,
+            },
+            CamadaSintetica {
+                nome: "frente",
+                visivel: true,
+            },
+        ];
+        let quadros = [(
+            vec![vec![1, 0, 0, 1], vec![3, 3, 3, 3], vec![0, 2, 0, 0]],
+            120,
+        )];
+        let ase = AsepriteSintetico {
+            celula: (2, 2),
+            profundidade: 8,
+            transparente: 0,
+            paleta: &paleta,
+            camadas: &camadas,
+            quadros: &quadros,
+            tags: &[("Idle", 0, 0, 0)],
+        }
+        .escrever();
+        let i = ler_aseprite(&ase).unwrap();
+        assert_eq!(i.quadros[0].duracao_ms, 120);
+        let px: Vec<&[u8]> = i.quadros[0].rgba.chunks_exact(4).collect();
+        assert_eq!(px[0], [200, 10, 10, 255], "camada de baixo");
+        assert_eq!(px[1], [10, 200, 10, 255], "a de cima por cima");
+        assert_eq!(px[2][3], 0, "índice transparente vira transparente");
+        assert_eq!(px[3], [200, 10, 10, 255], "a camada escondida não aparece");
+        assert!(
+            i.quadros[0]
+                .rgba
+                .chunks_exact(4)
+                .all(|p| p[..3] != [10, 10, 200]),
+            "nada da camada escondida"
+        );
+        assert_eq!(
+            i.paleta,
+            vec![[200, 10, 10, 255], [10, 200, 10, 255], [10, 10, 200, 255]],
+            "o índice transparente (#000000) não entra na paleta"
+        );
+    }
+
+    #[test]
     fn aseprite_quebrado_cai_para_as_tiras() {
         let mut ase = aseprite_sintetico((4, 4), &[(celula_com(1), 100)], &[("A", 0, 0, 0)]);
         ase.truncate(150);
@@ -732,6 +898,7 @@ pub(crate) mod testes {
             png: &png,
             celula: (4, 4),
             nomes: &nomes,
+            duracao_ms: 150,
         };
         let i = ler_com_reserva(&ase, Some(tiras)).unwrap();
         assert_eq!(i.origem, Origem::Tiras);
@@ -739,7 +906,10 @@ pub(crate) mod testes {
         assert_eq!(i.quadros.len(), 3);
         assert_eq!(i.tag("idle").map(|t| (t.de, t.ate)), Some((0, 1)));
         assert_eq!(i.tag("stand").map(|t| (t.de, t.ate)), Some((2, 2)));
-        assert!(i.quadros.iter().all(|q| q.duracao_ms == DURACAO_TIRAS));
+        assert!(
+            i.quadros.iter().all(|q| q.duracao_ms == 150),
+            "a duração pedida vale também na reserva"
+        );
         // Tabela com outro número de linhas: não é este pack.
         let poucos = vec!["Idle".to_owned()];
         assert!(ler_tiras(&png, (4, 4), &poucos, 100).is_err());
@@ -777,12 +947,25 @@ pub(crate) mod testes {
     }
 
     #[test]
-    fn pack_nao_redistribuivel_nunca_vai_para_skins() {
+    fn pack_nao_redistribuivel_so_vai_para_pastas_fora_do_git() {
         let raiz = crate::raiz();
         assert!(conferir_destino(&raiz.join("skins/zeca"), false).is_err());
         assert!(conferir_destino(&raiz.join("skins/../skins/zeca"), false).is_err());
         assert!(conferir_destino(&raiz.join("skins-locais/../skins/zeca"), false).is_err());
+        assert!(conferir_destino(&raiz.join("arte/zeca/previa"), false).is_err());
+        assert!(conferir_destino(&raiz.join("docs/fotos/m2"), false).is_err());
+        assert!(conferir_destino(&raiz, false).is_err(), "a raiz do repo");
+        assert!(
+            conferir_destino(&raiz.join("skins-locais"), false).is_err(),
+            "a pasta em si, não uma skin dentro dela"
+        );
         assert!(conferir_destino(&raiz.join("skins-locais/zeca"), false).is_ok());
+        assert!(conferir_destino(&raiz.join("tmp/contato/zeca"), false).is_ok());
+        assert!(conferir_destino(&raiz.join("tmp/../docs/x"), false).is_err());
+        assert!(
+            conferir_destino(Path::new("/tmp/qualquer/coisa"), false).is_ok(),
+            "fora do repositório"
+        );
         assert!(conferir_destino(&raiz.join("skins/minha"), true).is_ok());
     }
 }

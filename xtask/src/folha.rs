@@ -139,7 +139,9 @@ pub fn montar(
         "frames": quadros_json,
         "meta": {
             "app": app,
-            "version": pet_core::VERSAO,
+            // Sem a versão do pet: o sheet.json entra na impressão digital da
+            // aprovação (decisão 0026), e subir a versão sem mexer na arte não
+            // pode pedir uma aprovação nova.
             "image": "sheet.png",
             "format": "RGBA8888",
             "size": {"w": largura, "h": altura},
@@ -237,6 +239,10 @@ mod testes {
         let quadros = [quadro(1, 100), quadro(2, 100)];
         let a = montar((2, 2), &quadros, &[tag("a", 0, 1)], "t").unwrap();
         let b = montar((2, 2), &quadros, &[tag("a", 0, 1)], "t").unwrap();
+        assert!(
+            !a.json.contains(pet_core::VERSAO) && !a.json.contains("\"version\""),
+            "a versão do pet não entra na folha (nem na impressão digital)"
+        );
         assert_eq!((a.png, a.json), (b.png, b.json));
         assert!(montar((2, 2), &quadros, &[tag("a", 0, 2)], "t").is_err());
         assert!(
