@@ -523,6 +523,25 @@ campos de verdade confirma o fio v1 e mostra que o `source` do
 UserPromptSubmit ainda não vem: o M5 usa esse campo para continuação de
 correntes e terá de tolerar a falta dele.
 
+## 0022 — Revisão do M3: tchau só quando o processo sai e motivos com teto (2026-10-03)
+
+**Problema:** relendo o cérebro antes de publicar a branch:
+- um `/clear` (ou uma retomada) manda `SessionEnd` com `reason: clear`
+  (`resume`) para o `sid` velho, e o processo segue com outro `sid`. Com
+  uma sessão só, o pet daria tchau sem o Renan ter saído, contra o plano
+  ("só o tchau depende do motivo");
+- `cerebro.ignorados` ganhava uma chave por origem diferente: um processo
+  local mandando `ent` sempre novo cresceria o mapa sem limite.
+**Escolha:**
+- `SessionEnd` continua largando a sessão, o turno e a acomodação sempre;
+  o `bye` só vem com a última sessão **e** um motivo de saída do processo
+  (`prompt_input_exit`, `logout`, `other`), nunca com `clear` ou `resume`;
+- no máximo 32 motivos distintos em `ignorados`; os novos depois disso
+  contam em `outros`.
+**Por quê:** o tchau é a despedida de quem fechou o Claude; um `/clear` é
+o mesmo terminal continuando. O teto custa uma linha e fecha o único mapa
+do cérebro que ainda crescia com dado de fora.
+
 ## 0023 — O Zeca é o Parrot 2 no visual "Malandro rosa" (2026-10-03)
 
 **Problema:** a decisão 0001 previa troca de paleta (bico amarelo, peito

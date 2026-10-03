@@ -9,7 +9,8 @@
 //! fora. Eventos de teste (`teste: true`, do `bin/pet testar`) vivem num
 //! mundo à parte, nunca se misturam com sessões reais e somem 60 s depois
 //! do último evento. `SessionEnd` sempre larga a sessão e o turno dela; o
-//! tchau (`bye`) só vem quando não sobra nenhuma sessão.
+//! tchau (`bye`) só vem quando o processo está saindo (não num `/clear` nem
+//! numa retomada, que seguem com outro `sid`) e não sobra nenhuma sessão.
 //!
 //! **Turnos** por `turno` (`prompt_id`). O `UserPromptSubmit` abre o turno
 //! (t0); as ferramentas da thread principal contam como trabalho (Edit,
@@ -57,6 +58,12 @@ const AGENTES_POR_SESSAO: usize = 32;
 /// Teto de sessões acompanhadas de cada tipo (real ou teste); acima disso
 /// a mais parada sai.
 const MAX_SESSOES: usize = 64;
+/// Teto de motivos distintos em `ignorados` (cada origem desconhecida é um
+/// motivo): passou disso, conta em `outros`.
+const MAX_MOTIVOS: usize = 32;
+/// Motivos do `SessionEnd` em que o processo continua com outro `sid`
+/// (`/clear`, retomada): sem tchau.
+const FIM_SEM_TCHAU: [&str; 2] = ["clear", "resume"];
 
 /// Ferramentas que contam como trabalho de verdade (decisão 0003).
 pub const FERRAMENTAS_DE_TRABALHO: [&str; 5] =
@@ -541,7 +548,11 @@ impl Cerebro {
     }
 
     fn ignorar(&mut self, motivo: impl Into<String>) {
-        *self.ignorados.entry(motivo.into()).or_default() += 1;
+        let mut motivo = motivo.into();
+        if self.ignorados.len() >= MAX_MOTIVOS && !self.ignorados.contains_key(&motivo) {
+            motivo = "outros".into();
+        }
+        *self.ignorados.entry(motivo).or_default() += 1;
     }
 
     /// Guarda os turnos fechados e devolve as reações deles.
@@ -578,7 +589,11 @@ impl Cerebro {
         let t = hora_do_evento(ev.ts, recebido_ms);
         let chave = (ev.teste, sid);
         if ev.e == "SessionEnd" {
-            self.encerrar(&chave, t, agora, &mut reacoes);
+            let sai = !ev
+                .reason
+                .as_deref()
+                .is_some_and(|r| FIM_SEM_TCHAU.contains(&r));
+            self.encerrar(&chave, t, sai, agora, &mut reacoes);
             return reacoes;
         }
         if !self.sessoes.contains_key(&chave) {
@@ -755,11 +770,13 @@ impl Cerebro {
     }
 
     /// `SessionEnd`: a sessão sai com o turno dela, sem festa. Tchau só se
-    /// não sobrou nenhuma sessão do mesmo tipo.
+    /// o processo está saindo (`sai`: não é `/clear` nem retomada) e não
+    /// sobrou nenhuma sessão do mesmo tipo.
     fn encerrar(
         &mut self,
         chave: &(bool, String),
         t: u64,
+        sai: bool,
         agora: Agora,
         reacoes: &mut Vec<Reacao>,
     ) {
@@ -770,7 +787,7 @@ impl Cerebro {
         let fechamento = sessao.fechar(Fim::SessaoEncerrada, t, agora, self.config.modo);
         self.registrar(fechamento.into_iter().collect(), reacoes);
         let sobrou = self.sessoes.keys().any(|(teste, _)| *teste == chave.0);
-        if !sobrou && self.config.modo != ModoCelebracao::Desligada {
+        if sai && !sobrou && self.config.modo != ModoCelebracao::Desligada {
             let reacao = Reacao {
                 nome: TCHAU,
                 sid8: evento::curto(&sessao.sid),
@@ -1278,6 +1295,63 @@ mod testes {
         assert_eq!(saida, vec![(6_000, TCHAU)]);
         assert!(c.resumo().sessoes.is_empty());
         assert_eq!(c.proximo_prazo(), None);
+    }
+
+    #[test]
+    fn clear_e_retomada_nao_dao_tchau() {
+        let fim = |reason: &str| Evento {
+            reason: Some(reason.into()),
+            ..ev("SessionEnd")
+        };
+        for (reason, esperado) in [
+            ("clear", vec![]),
+            ("resume", vec![]),
+            ("prompt_input_exit", vec![(1_000, TCHAU)]),
+            ("logout", vec![(1_000, TCHAU)]),
+            ("other", vec![(1_000, TCHAU)]),
+        ] {
+            let mut c = novo();
+            let saida = rodar(
+                &mut c,
+                vec![chega(0, ev("SessionStart")), chega(1_000, fim(reason))],
+            );
+            assert_eq!(saida, esperado, "{reason}");
+            assert!(
+                c.resumo().sessoes.is_empty(),
+                "{reason}: a sessão sempre sai"
+            );
+        }
+        // /clear: o fim da velha e o começo da nova, em qualquer ordem.
+        let nova = |e: Evento| Evento {
+            sid: Some("dddddddd-nova".into()),
+            ..e
+        };
+        let mut c = novo();
+        let saida = rodar(
+            &mut c,
+            vec![
+                chega(0, ev("SessionStart")),
+                chega(1_000, nova(ev("SessionStart"))),
+                chega(1_001, fim("clear")),
+            ],
+        );
+        assert_eq!(saida, vec![]);
+        assert_eq!(c.resumo().sessoes[0].sid8, "dddddddd");
+    }
+
+    #[test]
+    fn motivos_ignorados_tem_teto() {
+        let mut c = novo();
+        for i in 0..100 {
+            let ev = Evento {
+                ent: Some(format!("origem-{i}")),
+                ..stop("p1")
+            };
+            c.receber(&ev, BASE, em(0));
+        }
+        let r = c.resumo();
+        assert_eq!(r.ignorados.len(), MAX_MOTIVOS + 1);
+        assert_eq!(r.ignorados["outros"], 100 - MAX_MOTIVOS as u64);
     }
 
     #[test]
