@@ -1,0 +1,5 @@
+# Decisão 0015: "stable" (o instalado), para o rustup não baixar nada escondido.
+# A versão exata do compilador fica fixada na imagem de build do Dockerfile.
+[toolchain]
+channel = "stable"
+components = ["clippy", "rustfmt"]
