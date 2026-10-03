@@ -295,16 +295,37 @@ pub fn distancia(
 /// os dois.
 pub const FOLGA_SOLTO: i32 = 4;
 
-/// Contorno de 1 pixel de arte por fora de tudo que é opaco (8 vizinhos).
+/// Contorno de 1 pixel de arte por fora de tudo que é opaco (8 vizinhos),
+/// só do lado de fora: furos fechados (o meio da bolha do sono, o vão entre
+/// asa e corpo) continuam transparentes. "Fora" é o transparente que chega na
+/// borda da célula andando nos 4 vizinhos.
 pub fn contornar(rgba: &mut [u8], celula: (u32, u32), cor: Rgba) {
     let (w, h) = (celula.0 as i32, celula.1 as i32);
     let opaco = |r: &[u8], x: i32, y: i32| {
         (0..w).contains(&x) && (0..h).contains(&y) && r[((y * w + x) * 4 + 3) as usize] != 0
     };
     let original = rgba.to_vec();
+    let mut fora = vec![false; (w * h) as usize];
+    let mut pilha: Vec<(i32, i32)> = (0..w)
+        .flat_map(|x| [(x, 0), (x, h - 1)])
+        .chain((0..h).flat_map(|y| [(0, y), (w - 1, y)]))
+        .filter(|&(x, y)| !opaco(&original, x, y))
+        .collect();
+    while let Some((x, y)) = pilha.pop() {
+        let i = (y * w + x) as usize;
+        if fora[i] {
+            continue;
+        }
+        fora[i] = true;
+        for (nx, ny) in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] {
+            if (0..w).contains(&nx) && (0..h).contains(&ny) && !opaco(&original, nx, ny) {
+                pilha.push((nx, ny));
+            }
+        }
+    }
     for y in 0..h {
         for x in 0..w {
-            if opaco(&original, x, y) {
+            if !fora[(y * w + x) as usize] {
                 continue;
             }
             let vizinho = (-1..=1)
@@ -563,6 +584,17 @@ mod testes {
             y: 2,
         };
         assert_eq!(distancia(&corpo, c, &perto, &s["chapeu"]), Some(2));
+    }
+
+    #[test]
+    fn contorno_nao_enche_furo_fechado() {
+        // Anel (a bolha do sono): o meio fica transparente.
+        let (mut rgba, c) = celula(&["......", "..GG..", ".G..G.", ".G..G.", "..GG..", "......"]);
+        let creme = [247, 231, 197, 255];
+        contornar(&mut rgba, c, creme);
+        assert_eq!(pixel(&rgba, 6, 2, 2), T, "o meio da bolha continua vazio");
+        assert_eq!(pixel(&rgba, 6, 1, 1), creme, "por fora, encostado no anel");
+        assert_eq!(pixel(&rgba, 6, 0, 0), T, "longe do anel, nada");
     }
 
     #[test]
