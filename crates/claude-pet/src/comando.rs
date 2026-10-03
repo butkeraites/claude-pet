@@ -1,15 +1,19 @@
 //! Pedidos de outras threads para o laço principal.
 //!
 //! Chegam por um canal do calloop (limitado: um ingress afobado recebe 503
-//! em vez de crescer a memória): as rotas de debug e as aprovações de
-//! personagem do `/v1/comando`; o `/v1/evento` dos hooks chega no M3.
+//! em vez de crescer a memória): os eventos dos hooks (`/v1/evento`), os
+//! comandos do `/v1/comando` (as reações do M3 e as aprovações de
+//! personagem do M2) e as rotas de debug.
 
 use std::sync::mpsc::SyncSender;
 
+use pet_core::evento::Evento;
 use pet_core::geometria::Ret;
 
-/// Quantos comandos esperam no canal antes de o ingress responder 503.
-pub const CAPACIDADE: usize = 64;
+/// Quantos comandos esperam no canal antes de o ingress responder 503
+/// (folga para rajadas de PostToolUse de ferramentas em paralelo enquanto o
+/// laço espera o compositor numa ida e volta com prazo).
+pub const CAPACIDADE: usize = 256;
 
 /// O sprite como deveria estar na tela: o RGBA exato, em pixels do
 /// monitor, para a checagem de nitidez comparar com uma captura do grim.
@@ -29,8 +33,21 @@ pub struct QuadroEsperado {
     pub rgba: Vec<u8>,
 }
 
+/// Um evento de hook já validado e a hora em que o ingress o recebeu (ms
+/// desde 1970, relógio do host): vale como hora do evento quando o `ts`
+/// dele falta ou não é plausível.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Recebido {
+    pub evento: Evento,
+    pub recebido_ms: u64,
+}
+
 #[derive(Debug)]
 pub enum Comando {
+    /// Evento do Claude Code (`POST /v1/evento`).
+    Evento(Box<Recebido>),
+    /// Toca uma reação uma vez (`/v1/comando` `tocar`).
+    Tocar(String),
     Esconder,
     Mostrar,
     /// Confete pela tela inteira, para medir o custo no compositor.

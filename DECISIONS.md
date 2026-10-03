@@ -383,6 +383,42 @@ Ao vivo com a tela apagada passaram:
 - `kill -9` com RestartCount 0 → 1, de volta em 471 ms;
 - "aguardando compositor" sem compositor.
 
+## 0019 — Fio v1: validação campo a campo e entrada dos eventos (2026-10-03)
+
+**Problema:** o M3 congela o formato de fio dos hooks (revisão de produto:
+tarefas em segundo plano, sessões sem terminal, `stop_hook_active`). A
+entrada HTTP é a segunda barreira de privacidade, depois da lista branca do
+`avisar.sh`. Um campo inesperado não pode vazar conteúdo nem deixar o pet
+surdo quando o Claude Code muda um enum.
+**Escolha:**
+- `POST /v1/evento` exige `Host` de loopback na porta pública, `X-Pet: 1` e
+  `Content-Type: application/json` (415), corpo de até 8 KiB (413) com
+  `Content-Length` (411). Só `v = 1` e `e = [A-Za-z]{1,40}` são
+  obrigatórios (400); aceito, 204.
+- Cada campo opcional tem tipo, tamanho e classe de caracteres (tabela em
+  `pet_core::evento`). O que não passa é descartado sozinho e só o nome do
+  campo fica; campos desconhecidos são ignorados; nenhuma mensagem de erro
+  cita o corpo (o erro do serde pode citar).
+- `bgt` e `bgi` andam alinhados, até 16 tarefas; `bg` é a contagem total.
+- O ingress carimba a hora de chegada (relógio do host) e manda o evento ao
+  laço principal pelo canal do calloop (256 vagas; cheio, 503).
+- `/v1/estado.eventos`: aceitos, recusados e idade do último. Em debug,
+  `/v1/debug/eventos` guarda os últimos 200 eventos já validados, com a
+  hora de chegada e os nomes descartados; sem debug nada é guardado. No log
+  vão só o nome do evento e os 8 primeiros caracteres do `sid`.
+- `POST /v1/comando`, subconjunto do M3: `{"cmd":"tocar","arg":"<reação>"}`,
+  `esconder` e `mostrar`, sem persistir; campo a mais é recusado (um pedido
+  como `esconder 30m` não pode virar `esconder` para sempre em silêncio).
+- O animador toca uma reação uma vez, com as durações por quadro (mínimo de
+  34 ms), e o repouso recomeça no fim dela com a pausa inteira. `nod` cai
+  no estado `wave` quando a skin não tem `nod`; `done_small` também tem o
+  `wave` de reserva; `bye` não tem reserva e, sem estado próprio, não anima.
+**Por quê:** a lista branca do `avisar.sh` é a primeira barreira e os
+canários a provam; esta protege contra um script velho, um bug ou outro
+processo local. Descartar campo por campo, em vez de recusar o evento,
+mantém o pet funcionando depois de uma atualização do Claude Code; `v` e
+`e` são o mínimo para rotear.
+
 ## 0023 — O Zeca é o Parrot 2 no visual "Malandro rosa" (2026-10-03)
 
 **Problema:** a decisão 0001 previa troca de paleta (bico amarelo, peito

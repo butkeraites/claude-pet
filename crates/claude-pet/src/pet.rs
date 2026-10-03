@@ -1,12 +1,13 @@
 //! O pet na tela: personagem, onde ele fica e que quadro mostra agora.
 //!
-//! No M1 o pet só sabe ficar parado (pose fixa com rajadas, para caber no
-//! orçamento de commits) no canto inferior direito. Cérebro, arraste e
-//! reações chegam nos marcos seguintes.
+//! Parado (pose fixa com rajadas, para caber no orçamento de commits) no
+//! canto inferior direito, e tocando uma reação de cada vez (M3: o aceno do
+//! T0, o pulinho do T1 e o `tocar`). Arraste e seguir o monitor chegam no
+//! M4.
 
 use std::rc::Rc;
 
-use pet_core::animador::Repouso;
+use pet_core::animador::Animador;
 use pet_core::cena::Elemento;
 use pet_core::geometria::{self, Ret};
 use pet_core::skin::Skin;
@@ -26,13 +27,24 @@ pub struct Palco {
 
 pub struct Pet {
     skin: Rc<Skin>,
-    repouso: Repouso,
+    animador: Animador,
 }
 
 impl Pet {
     pub fn novo(skin: Rc<Skin>, agora_ms: u64) -> Pet {
-        let repouso = Repouso::novo(&skin, agora_ms);
-        Pet { skin, repouso }
+        let animador = Animador::novo(&skin, agora_ms);
+        Pet { skin, animador }
+    }
+
+    /// Toca a reação uma vez e volta à pose; `false` se a skin não sabe
+    /// tocá-la.
+    pub fn tocar(&mut self, reacao: &str, agora_ms: u64) -> bool {
+        self.animador.tocar(&self.skin, reacao, agora_ms)
+    }
+
+    /// A reação tocando agora, se houver.
+    pub fn reacao(&self, agora_ms: u64) -> Option<&str> {
+        self.animador.reacao(agora_ms)
     }
 
     pub fn skin(&self) -> &Skin {
@@ -78,7 +90,7 @@ impl Pet {
 
     /// O sprite agora e o instante da próxima troca de quadro.
     pub fn sprite(&self, palco: &Palco, agora_ms: u64) -> (Elemento, u64) {
-        let (quadro, proxima) = self.repouso.em(agora_ms);
+        let (quadro, proxima) = self.animador.em(agora_ms);
         let sprite = Elemento::Sprite {
             quadro,
             x: palco.x,
@@ -145,5 +157,21 @@ mod testes {
             panic!("esperava sprite");
         };
         assert_eq!(quadro, 0, "pose = primeiro quadro de idle");
+    }
+
+    #[test]
+    fn reacao_troca_o_quadro_e_volta() {
+        let mut pet = pet();
+        let palco = pet.palco((1280, 800), 1.5, (1920, 1200));
+        assert!(pet.tocar("done_small", 1000));
+        assert_eq!(pet.reacao(1000), Some("done_small"));
+        let (cena, proxima) = pet.cena(&palco, 1000);
+        let Elemento::Sprite { quadro, .. } = cena[0] else {
+            panic!("esperava sprite");
+        };
+        assert_eq!(quadro, 29, "primeiro quadro de done_small");
+        assert_eq!(proxima, Some(1200));
+        assert_eq!(pet.reacao(1400), None);
+        assert!(!pet.tocar("bye", 2000), "tchau sem animação no M3");
     }
 }

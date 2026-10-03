@@ -1,8 +1,11 @@
 //! Estado compartilhado entre as threads: batimento do laço principal (lido
-//! pelo vigia e pelo `/saude`), situação da tela e a configuração efetiva.
+//! pelo vigia e pelo `/saude`), situação da tela, a configuração efetiva,
+//! a contagem de eventos dos hooks e, em debug, os últimos eventos já
+//! validados (só metadados, decisão 0019).
 
-use std::sync::RwLock;
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+use std::sync::{Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use pet_core::config::ConfigEfetiva;
@@ -12,6 +15,8 @@ use serde_json::{Value, json};
 
 /// Batimento mais velho que isto: `/saude` responde 503.
 pub const LIMITE_SAUDE: Duration = Duration::from_secs(30);
+/// Eventos guardados para o `/v1/debug/eventos` (só com `PET_DEBUG=1`).
+pub const EVENTOS_DEBUG: usize = 200;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -83,6 +88,8 @@ pub struct Painel {
     /// SHM do buffer do monitor (o Hyprland guarda uma textura do mesmo
     /// tamanho, fora do container).
     pub shm_bytes: usize,
+    /// A reação tocando na tela agora (`nod`, `done_small`, …).
+    pub reacao: Option<String>,
 }
 
 pub struct Compartilhado {
@@ -94,6 +101,14 @@ pub struct Compartilhado {
     painel: RwLock<Painel>,
     skin: RwLock<InfoSkin>,
     debug: bool,
+    /// Eventos de hook aceitos (204) e recusados (4xx) pelo ingress.
+    eventos_aceitos: AtomicU64,
+    eventos_recusados: AtomicU64,
+    /// Milissegundos desde `inicio` no último evento aceito, mais 1 (0 =
+    /// nenhum ainda).
+    ultimo_evento_ms: AtomicU64,
+    /// Os últimos eventos validados, só em debug.
+    eventos_debug: Mutex<VecDeque<Value>>,
 }
 
 impl Compartilhado {
@@ -106,7 +121,53 @@ impl Compartilhado {
             painel: RwLock::new(Painel::default()),
             skin: RwLock::new(InfoSkin::default()),
             debug,
+            eventos_aceitos: AtomicU64::new(0),
+            eventos_recusados: AtomicU64::new(0),
+            ultimo_evento_ms: AtomicU64::new(0),
+            eventos_debug: Mutex::new(VecDeque::new()),
         }
+    }
+
+    /// Um evento de hook aceito. Em debug, `validado` (só os campos que
+    /// passaram na validação) vai para o `/v1/debug/eventos`.
+    pub fn evento_aceito(&self, validado: impl FnOnce() -> Value) {
+        self.eventos_aceitos.fetch_add(1, Ordering::Relaxed);
+        let agora = self.inicio.elapsed().as_millis() as u64;
+        self.ultimo_evento_ms.store(agora + 1, Ordering::Relaxed);
+        if self.debug {
+            let mut fila = self
+                .eventos_debug
+                .lock()
+                .expect("lock dos eventos envenenado");
+            if fila.len() == EVENTOS_DEBUG {
+                fila.pop_front();
+            }
+            fila.push_back(validado());
+        }
+    }
+
+    pub fn evento_recusado(&self) {
+        self.eventos_recusados.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Os últimos eventos validados (vazio sem debug), do mais velho ao
+    /// mais novo.
+    pub fn eventos_debug_json(&self) -> Value {
+        let fila = self
+            .eventos_debug
+            .lock()
+            .expect("lock dos eventos envenenado");
+        json!({ "eventos": fila.iter().collect::<Vec<_>>() })
+    }
+
+    fn eventos_json(&self) -> Value {
+        let ultimo = self.ultimo_evento_ms.load(Ordering::Relaxed);
+        let agora = self.inicio.elapsed().as_millis() as u64;
+        json!({
+            "aceitos": self.eventos_aceitos.load(Ordering::Relaxed),
+            "recusados": self.eventos_recusados.load(Ordering::Relaxed),
+            "ultimo_ha_ms": (ultimo > 0).then(|| agora.saturating_sub(ultimo - 1)),
+        })
     }
 
     /// Chamado pelo laço principal, independente de desenhar ou não.
@@ -175,6 +236,8 @@ impl Compartilhado {
             "commits_por_min": painel.commits_por_min,
             "commits_total": painel.commits_total,
             "shm_bytes": painel.shm_bytes,
+            "reacao": painel.reacao,
+            "eventos": self.eventos_json(),
             "skin": &*skin,
             "config": &*config,
         })
@@ -237,6 +300,28 @@ mod testes {
         assert_eq!(estado["commits_por_min"], 42);
         assert_eq!(estado["commits_total"], 7);
         assert_eq!(estado["shm_bytes"], 9_216_000);
+    }
+
+    #[test]
+    fn eventos_contados_e_guardados_so_em_debug() {
+        let c = novo();
+        assert!(c.estado_json()["eventos"]["ultimo_ha_ms"].is_null());
+        c.evento_aceito(|| json!({"e": "Stop"}));
+        c.evento_recusado();
+        let estado = c.estado_json();
+        assert_eq!(estado["eventos"]["aceitos"], 1);
+        assert_eq!(estado["eventos"]["recusados"], 1);
+        assert!(estado["eventos"]["ultimo_ha_ms"].is_u64());
+        assert_eq!(c.eventos_debug_json()["eventos"], json!([]), "sem debug");
+
+        let d = Compartilhado::novo(ConfigEfetiva::carregar(None, |_| None), true);
+        for i in 0..EVENTOS_DEBUG + 5 {
+            d.evento_aceito(|| json!({ "n": i }));
+        }
+        let lista = d.eventos_debug_json();
+        let eventos = lista["eventos"].as_array().unwrap();
+        assert_eq!(eventos.len(), EVENTOS_DEBUG);
+        assert_eq!(eventos[0]["n"], 5, "os mais velhos saem primeiro");
     }
 
     #[test]

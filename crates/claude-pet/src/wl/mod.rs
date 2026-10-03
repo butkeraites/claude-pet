@@ -316,8 +316,29 @@ impl Sessao {
             commits_por_min: self.commits.por_minuto(Instant::now()),
             commits_total: self.commits.total,
             shm_bytes: superficie.map_or(0, Superficie::bytes_shm),
+            reacao: self
+                .pet
+                .as_ref()
+                .and_then(|pet| pet.reacao(agora_ms))
+                .map(str::to_owned),
         };
         self.comp.publicar_painel(painel);
+    }
+
+    /// Toca uma reação uma vez e volta à pose. `false` sem personagem ou
+    /// quando a skin não sabe tocar a reação. Com o pet escondido a
+    /// animação corre no relógio sem desenhar nada.
+    pub fn tocar(&mut self, reacao: &str) -> bool {
+        let agora_ms = self.agora_ms();
+        let Some(pet) = self.pet.as_mut() else {
+            return false;
+        };
+        if !pet.tocar(reacao, agora_ms) {
+            return false;
+        }
+        self.desenhar();
+        self.publicar();
+        true
     }
 
     /// O sprite como está na tela agora, para a checagem de nitidez.

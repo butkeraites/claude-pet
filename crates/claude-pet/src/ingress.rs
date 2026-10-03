@@ -6,37 +6,44 @@
 //!
 //! As rotas `/v1/*` só aceitam `Host` de loopback na porta pública e o
 //! cabeçalho `X-Pet: 1`: isso barra requisições disparadas por navegador
-//! (DNS rebinding, CSRF).
+//! (DNS rebinding, CSRF). As que recebem corpo exigem também
+//! `Content-Type: application/json` (415), coisa que um formulário HTML não
+//! consegue mandar sem preflight.
 //!
 //! - `GET /v1/estado`: o que o pet está vendo e pensando (só metadados).
-//! - `POST /v1/comando` (`Content-Type: application/json`, no formato do M3
-//!   `{"cmd": …, "arg": …}`): `aprovar_skin` com `{"id", "sha256"}` aprova
-//!   o conteúdo exato da skin da imagem e guarda a cópia em `/state`;
-//!   `revogar_skin` com o id apaga a aprovação (decisão 0026). Depois de
-//!   cada um, o laço principal escolhe o personagem de novo.
+//! - `POST /v1/evento`: um evento dos hooks no formato de fio v1
+//!   (decisão 0019, [`pet_core::evento`]); 204, ou 400 sem `v`/`e` válidos.
+//!   Vai para o laço principal pelo canal do calloop.
+//! - `POST /v1/comando`, sempre `{"cmd": …, "arg": …}` e mais nada:
+//!   - `tocar` com o nome da reação, `esconder` e `mostrar` (M3, decisão
+//!     0019) vão para o laço principal sem esperar; 204, e nada persiste;
+//!   - `aprovar_skin` com `{"id", "sha256"}` aprova o conteúdo exato da skin
+//!     da imagem e guarda a cópia em `/state`; `revogar_skin` com o id apaga
+//!     a aprovação (M2, decisão 0026). Uma por vez; a resposta (200, JSON)
+//!     sai depois de o laço principal escolher o personagem de novo.
 //!
 //! Com `PET_DEBUG=1` existem também as rotas `/v1/debug/*` (mesmas
-//! checagens): `quadro` (o RGBA esperado do sprite, para a checagem de
-//! nitidez), `esconder`, `mostrar` e `estresse`. Sem debug elas respondem
-//! 404, como se não existissem.
+//! checagens): `eventos` (os últimos 200 eventos, já validados), `quadro`
+//! (o RGBA esperado do sprite, para a checagem de nitidez), `esconder`,
+//! `mostrar` e `estresse`. Sem debug elas respondem 404, como se não
+//! existissem.
 
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use std::sync::Mutex;
-
+use pet_core::evento::{self, Lido};
 use pet_core::skin::codificar_png;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use smithay_client_toolkit::reexports::calloop::channel::SyncSender;
 
 use crate::aprovacao;
-use crate::comando::{Comando, QuadroEsperado};
+use crate::comando::{Comando, QuadroEsperado, Recebido};
 use crate::estado::Compartilhado;
 use crate::personagem::Onde;
 
@@ -248,6 +255,8 @@ pub fn rotear(req: &Requisicao, ctx: &Contexto) -> (u16, String) {
     match (req.metodo.as_str(), caminho) {
         ("GET", "/v1/estado") => (200, ctx.comp.estado_json().to_string()),
         (_, "/v1/estado") => (405, erro_json("use GET")),
+        ("POST", "/v1/evento") => receber_evento(req, ctx),
+        (_, "/v1/evento") => (405, erro_json("use POST")),
         ("POST", "/v1/comando") => receber_comando(req, ctx),
         (_, "/v1/comando") => (405, erro_json("use POST")),
         (_, rota) if ctx.debug && rota.starts_with("/v1/debug/") => rotear_debug(req, ctx, rota),
@@ -262,7 +271,62 @@ fn eh_json(req: &Requisicao) -> bool {
         .is_some_and(|tipo| tipo.trim().eq_ignore_ascii_case("application/json"))
 }
 
-/// Corpo do `/v1/comando` (o mesmo formato do M3).
+/// Milissegundos desde 1970 no relógio do host (o do container é o mesmo).
+pub fn agora_desde_1970_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
+}
+
+/// O evento como o `/v1/debug/eventos` mostra: só o que passou na
+/// validação, a hora de chegada e os nomes dos campos descartados.
+fn registro_de_debug(lido: &Lido, recebido_ms: u64) -> Value {
+    let mut registro = serde_json::to_value(&lido.evento).unwrap_or_else(|_| json!({}));
+    if let Some(mapa) = registro.as_object_mut() {
+        mapa.insert("recebido_ms".into(), json!(recebido_ms));
+        if !lido.descartados.is_empty() {
+            mapa.insert("descartados".into(), json!(lido.descartados));
+        }
+    }
+    registro
+}
+
+/// `POST /v1/evento`: valida (decisão 0019) e entrega ao laço principal.
+fn receber_evento(req: &Requisicao, ctx: &Contexto) -> (u16, String) {
+    if !eh_json(req) {
+        ctx.comp.evento_recusado();
+        return (415, erro_json("Content-Type precisa ser application/json"));
+    }
+    let lido = match evento::ler(&req.corpo) {
+        Ok(lido) => lido,
+        Err(motivo) => {
+            ctx.comp.evento_recusado();
+            return (400, erro_json(&motivo.to_string()));
+        }
+    };
+    let Some(canal) = &ctx.comandos else {
+        ctx.comp.evento_recusado();
+        return (503, erro_json("laço principal indisponível"));
+    };
+    let recebido_ms = agora_desde_1970_ms();
+    let registro = registro_de_debug(&lido, recebido_ms);
+    let recebido = Recebido {
+        evento: lido.evento,
+        recebido_ms,
+    };
+    match canal.try_send(Comando::Evento(Box::new(recebido))) {
+        Ok(()) => {
+            ctx.comp.evento_aceito(|| registro);
+            (204, String::new())
+        }
+        Err(_) => {
+            ctx.comp.evento_recusado();
+            (503, erro_json("laço principal ocupado"))
+        }
+    }
+}
+
+/// Corpo do `/v1/comando`, o mesmo para todos os comandos.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PedidoComando {
@@ -279,8 +343,10 @@ struct PedidoAprovacao {
     sha256: String,
 }
 
-/// `POST /v1/comando`: aprovar e revogar personagem (os comandos do M3,
-/// `tocar`, `esconder` e `mostrar`, chegam com ele).
+/// `POST /v1/comando`: as reações do M3 (`tocar <reação>`, `esconder`,
+/// `mostrar`, ainda sem persistir) e as aprovações de personagem do M2
+/// (`aprovar_skin`, `revogar_skin`), com as mesmas checagens de `Host`,
+/// `X-Pet` e `Content-Type`.
 fn receber_comando(req: &Requisicao, ctx: &Contexto) -> (u16, String) {
     if !eh_json(req) {
         return (415, erro_json("Content-Type precisa ser application/json"));
@@ -296,65 +362,99 @@ fn receber_comando(req: &Requisicao, ctx: &Contexto) -> (u16, String) {
             );
         }
     };
-    let _vez = ctx.aprovando.lock().unwrap_or_else(|e| e.into_inner());
-    let resposta = match (pedido.cmd.as_str(), pedido.arg) {
-        ("aprovar_skin", Some(arg)) => {
-            let Ok(PedidoAprovacao { id, sha256 }) = serde_json::from_value(arg) else {
-                return (
-                    400,
-                    erro_json(r#"aprovar_skin leva arg {"id": "…", "sha256": "…"}"#),
-                );
-            };
-            match aprovacao::aprovar(&id, &sha256, &ctx.onde.busca, &ctx.onde.estado) {
-                Ok(r) => {
-                    info!("skin «{}» aprovada (sha {})", r.id, &r.sha256[..12]);
-                    json!({
-                        "id": r.id,
-                        "sha256": r.sha256,
-                        "aprovada_em_ms": r.aprovada_em_ms,
-                        "snapshot": aprovacao::pasta_da_skin(&ctx.onde.estado, &r.id),
-                    })
-                }
-                Err(e) => return (e.status(), erro_json(&e.mensagem())),
-            }
+    let comando = match (pedido.cmd.as_str(), pedido.arg) {
+        ("tocar", Some(Value::String(reacao))) if evento::eh_enum(&reacao) => {
+            Comando::Tocar(reacao)
         }
-        ("revogar_skin", Some(arg)) => {
-            let id = match &arg {
-                Value::String(id) => id.clone(),
-                outro => match outro.get("id").and_then(Value::as_str) {
-                    Some(id) if outro.as_object().is_some_and(|o| o.len() == 1) => id.to_owned(),
-                    _ => {
-                        return (
-                            400,
-                            erro_json(r#"revogar_skin leva arg "id" ou {"id": "…"}"#),
-                        );
-                    }
-                },
-            };
-            match aprovacao::revogar(&id, &ctx.onde.estado) {
-                Ok(revogada) => {
-                    info!(
-                        "skin «{id}»: aprovação {}",
-                        if revogada { "revogada" } else { "não existia" }
-                    );
-                    json!({"id": id, "revogada": revogada})
-                }
-                Err(e) => return (e.status(), erro_json(&e.mensagem())),
-            }
+        ("tocar", _) => {
+            return (
+                400,
+                erro_json("tocar precisa de arg com o nome da reação ([a-z_], até 40)"),
+            );
         }
+        ("esconder", None) => Comando::Esconder,
+        ("mostrar", None) => Comando::Mostrar,
+        ("esconder" | "mostrar", Some(_)) => {
+            return (400, erro_json("esconder e mostrar não levam arg"));
+        }
+        ("aprovar_skin", Some(arg)) => return aprovar_skin(arg, ctx),
+        ("revogar_skin", Some(arg)) => return revogar_skin(&arg, ctx),
         ("aprovar_skin" | "revogar_skin", None) => {
             return (400, erro_json("falta o arg"));
         }
         _ => {
             return (
                 400,
-                erro_json("cmd desconhecido: use aprovar_skin ou revogar_skin"),
+                erro_json(
+                    "cmd desconhecido: use tocar, esconder, mostrar, aprovar_skin ou revogar_skin",
+                ),
             );
         }
     };
-    // A aprovação já está gravada; o laço escolhe o personagem de novo e a
-    // resposta só sai depois (com prazo), para quem pediu ver o resultado.
-    let mut resposta = resposta;
+    let Some(canal) = &ctx.comandos else {
+        return (503, erro_json("laço principal indisponível"));
+    };
+    match canal.try_send(comando) {
+        Ok(()) => (204, String::new()),
+        Err(_) => (503, erro_json("laço principal ocupado")),
+    }
+}
+
+/// `aprovar_skin {id, sha256}` (decisão 0026): uma aprovação por vez.
+fn aprovar_skin(arg: Value, ctx: &Contexto) -> (u16, String) {
+    let Ok(PedidoAprovacao { id, sha256 }) = serde_json::from_value(arg) else {
+        return (
+            400,
+            erro_json(r#"aprovar_skin leva arg {"id": "…", "sha256": "…"}"#),
+        );
+    };
+    let _vez = ctx.aprovando.lock().unwrap_or_else(|e| e.into_inner());
+    match aprovacao::aprovar(&id, &sha256, &ctx.onde.busca, &ctx.onde.estado) {
+        Ok(r) => {
+            info!("skin «{}» aprovada (sha {})", r.id, &r.sha256[..12]);
+            let resposta = json!({
+                "id": r.id,
+                "sha256": r.sha256,
+                "aprovada_em_ms": r.aprovada_em_ms,
+                "snapshot": aprovacao::pasta_da_skin(&ctx.onde.estado, &r.id),
+            });
+            (200, escolher_de_novo(resposta, ctx).to_string())
+        }
+        Err(e) => (e.status(), erro_json(&e.mensagem())),
+    }
+}
+
+/// `revogar_skin "<id>"` ou `{"id": …}` (decisão 0026).
+fn revogar_skin(arg: &Value, ctx: &Contexto) -> (u16, String) {
+    let id = match arg {
+        Value::String(id) => id.clone(),
+        outro => match outro.get("id").and_then(Value::as_str) {
+            Some(id) if outro.as_object().is_some_and(|o| o.len() == 1) => id.to_owned(),
+            _ => {
+                return (
+                    400,
+                    erro_json(r#"revogar_skin leva arg "id" ou {"id": "…"}"#),
+                );
+            }
+        },
+    };
+    let _vez = ctx.aprovando.lock().unwrap_or_else(|e| e.into_inner());
+    match aprovacao::revogar(&id, &ctx.onde.estado) {
+        Ok(revogada) => {
+            info!(
+                "skin «{id}»: aprovação {}",
+                if revogada { "revogada" } else { "não existia" }
+            );
+            let resposta = json!({"id": id, "revogada": revogada});
+            (200, escolher_de_novo(resposta, ctx).to_string())
+        }
+        Err(e) => (e.status(), erro_json(&e.mensagem())),
+    }
+}
+
+/// A aprovação já está gravada; o laço escolhe o personagem de novo e a
+/// resposta só sai depois (com prazo), para quem pediu ver o resultado.
+fn escolher_de_novo(mut resposta: Value, ctx: &Contexto) -> Value {
     if let Some(canal) = &ctx.comandos {
         let (feito, espera) = mpsc::sync_channel(1);
         let aplicado = canal.send(Comando::RecarregarPersonagem(feito)).is_ok()
@@ -365,18 +465,21 @@ fn receber_comando(req: &Requisicao, ctx: &Contexto) -> (u16, String) {
         resposta["aplicado"] = json!(aplicado);
         resposta["personagem"] = ctx.comp.estado_json()["skin"].clone();
     }
-    (200, resposta.to_string())
+    resposta
 }
 
 /// Rotas de debug (só com `PET_DEBUG=1`).
 fn rotear_debug(req: &Requisicao, ctx: &Contexto, rota: &str) -> (u16, String) {
     let esperado = match rota {
-        "/v1/debug/quadro" => "GET",
+        "/v1/debug/quadro" | "/v1/debug/eventos" => "GET",
         "/v1/debug/esconder" | "/v1/debug/mostrar" | "/v1/debug/estresse" => "POST",
         _ => return (404, erro_json("rota desconhecida")),
     };
     if req.metodo != esperado {
         return (405, erro_json(&format!("use {esperado}")));
+    }
+    if rota == "/v1/debug/eventos" {
+        return (200, ctx.comp.eventos_debug_json().to_string());
     }
     let Some(canal) = &ctx.comandos else {
         return (503, erro_json("laço principal indisponível"));
@@ -519,7 +622,17 @@ fn atender(mut fluxo: TcpStream, ctx: &Contexto) {
     let (status, corpo) = match ler_requisicao(&mut fluxo) {
         Ok(req) => {
             let resposta = rotear(&req, ctx);
-            depurar!("{} {} -> {}", req.metodo, req.caminho, resposta.0);
+            // Só a rota (sem a query, cortada): nada do corpo vai para log.
+            let rota: String = req
+                .caminho
+                .split('?')
+                .next()
+                .unwrap_or_default()
+                .chars()
+                .take(64)
+                .collect();
+            let metodo: String = req.metodo.chars().take(16).collect();
+            depurar!("{metodo} {rota} -> {}", resposta.0);
             resposta
         }
         Err(erro) => match erro.status() {
@@ -550,16 +663,17 @@ mod testes {
         ler_requisicao(&mut Cursor::new(bruto.as_bytes().to_vec()))
     }
 
-    fn contexto() -> Contexto {
+    /// Como o daemon monta: o mesmo `debug` no contexto e no estado.
+    fn contexto_com(debug: bool) -> Contexto {
         let comp = Arc::new(Compartilhado::novo(
             ConfigEfetiva::carregar(None, |_| None),
-            false,
+            debug,
         ));
         comp.bater();
         Contexto {
             comp,
             porta_publica: 27380,
-            debug: false,
+            debug,
             comandos: None,
             onde: crate::personagem::Onde {
                 busca: Vec::new(),
@@ -571,31 +685,156 @@ mod testes {
         }
     }
 
+    fn contexto() -> Contexto {
+        contexto_com(false)
+    }
+
     /// Contexto de debug com o canal ligado a um receptor do teste.
     fn contexto_debug() -> (
         Contexto,
         smithay_client_toolkit::reexports::calloop::channel::Channel<Comando>,
     ) {
-        let (canal, recebe) = smithay_client_toolkit::reexports::calloop::channel::sync_channel(4);
+        let (canal, recebe) = smithay_client_toolkit::reexports::calloop::channel::sync_channel(16);
         let ctx = Contexto {
-            debug: true,
             comandos: Some(canal),
-            ..contexto()
+            ..contexto_com(true)
         };
         (ctx, recebe)
     }
 
-    fn post(caminho: &str, corpo: &str) -> Requisicao {
+    /// POST com `Content-Type` (`None`: sem o cabeçalho).
+    fn post_tipo(caminho: &str, tipo: Option<&str>, corpo: &str) -> Requisicao {
+        let tipo = tipo.map_or_else(String::new, |t| format!("Content-Type: {t}\r\n"));
         ler(&format!(
-            "POST {caminho} HTTP/1.1\r\nHost: 127.0.0.1:27380\r\nX-Pet: 1\r\nContent-Length: {}\r\n\r\n{corpo}",
+            "POST {caminho} HTTP/1.1\r\nHost: 127.0.0.1:27380\r\nX-Pet: 1\r\n{tipo}Content-Length: {}\r\n\r\n{corpo}",
             corpo.len()
         ))
         .unwrap()
     }
 
     fn post_json(caminho: &str, corpo: &str) -> Requisicao {
+        post_tipo(caminho, Some("application/json"), corpo)
+    }
+
+    /// Tudo o que chegou no canal, na ordem.
+    fn drenar(
+        recebe: smithay_client_toolkit::reexports::calloop::channel::Channel<Comando>,
+    ) -> Vec<Comando> {
+        use smithay_client_toolkit::reexports::calloop::{EventLoop, channel::Event};
+        let mut laco = EventLoop::<Vec<Comando>>::try_new().unwrap();
+        laco.handle()
+            .insert_source(recebe, |evento, _, lista: &mut Vec<Comando>| {
+                if let Event::Msg(c) = evento {
+                    lista.push(c);
+                }
+            })
+            .unwrap();
+        let mut recebidos = Vec::new();
+        laco.dispatch(Some(Duration::from_millis(50)), &mut recebidos)
+            .unwrap();
+        recebidos
+    }
+
+    #[test]
+    fn evento_valido_vai_para_o_laco() {
+        let (ctx, recebe) = contexto_debug();
+        let corpo = r#"{"v":1,"e":"Stop","sid":"s-1","ts":1790020208123,"prompt":"SEGREDO-1"}"#;
+        assert_eq!(rotear(&post_json("/v1/evento", corpo), &ctx).0, 204);
+        // Com parâmetros no Content-Type também vale.
+        let req = post_tipo(
+            "/v1/evento",
+            Some("Application/JSON; charset=utf-8"),
+            r#"{"v":1,"e":"SessionEnd"}"#,
+        );
+        assert_eq!(rotear(&req, &ctx).0, 204);
+        let estado = ctx.comp.estado_json();
+        assert_eq!(estado["eventos"]["aceitos"], 2);
+        let debug = ctx.comp.eventos_debug_json().to_string();
+        assert!(debug.contains("\"sid\":\"s-1\""), "{debug}");
+        assert!(!debug.contains("SEGREDO"), "{debug}");
+        drop(ctx);
+        let recebidos = drenar(recebe);
+        assert_eq!(recebidos.len(), 2);
+        let Comando::Evento(r) = &recebidos[0] else {
+            panic!("esperava evento: {:?}", recebidos[0]);
+        };
+        assert_eq!(r.evento.e, "Stop");
+        assert_eq!(r.evento.sid.as_deref(), Some("s-1"));
+        assert_eq!(r.evento.ts, Some(1_790_020_208_123));
+        assert!(r.recebido_ms > 1_700_000_000_000, "relógio de parede");
+    }
+
+    #[test]
+    fn evento_invalido_recusado() {
+        let (ctx, recebe) = contexto_debug();
+        let valido = r#"{"v":1,"e":"Stop"}"#;
+        for (req, status) in [
+            (post_tipo("/v1/evento", Some("text/plain"), valido), 415),
+            (post_tipo("/v1/evento", None, valido), 415),
+            (post_json("/v1/evento", "{lixo"), 400),
+            (post_json("/v1/evento", r#"{"e":"Stop"}"#), 400),
+            (post_json("/v1/evento", r#"{"v":1}"#), 400),
+            (post_json("/v1/evento", r#"{"v":2,"e":"Stop"}"#), 400),
+            (post_json("/v1/evento", r#"[1,"Stop"]"#), 400),
+        ] {
+            let (obtido, corpo) = rotear(&req, &ctx);
+            assert_eq!(obtido, status, "{corpo}");
+        }
+        let ok = "Host: 127.0.0.1:27380\r\nX-Pet: 1\r\n";
+        assert_eq!(rotear(&get("/v1/evento", ok), &ctx).0, 405);
+        assert_eq!(ctx.comp.estado_json()["eventos"]["recusados"], 7);
+        drop(ctx);
+        assert!(drenar(recebe).is_empty());
+    }
+
+    #[test]
+    fn evento_sem_laco_da_503() {
+        let ctx = contexto();
+        assert_eq!(
+            rotear(&post_json("/v1/evento", r#"{"v":1,"e":"Stop"}"#), &ctx).0,
+            503
+        );
+    }
+
+    #[test]
+    fn comandos() {
+        let (ctx, recebe) = contexto_debug();
+        for (corpo, status) in [
+            (r#"{"cmd":"tocar","arg":"nod"}"#, 204),
+            (r#"{"cmd":"esconder"}"#, 204),
+            (r#"{"cmd":"mostrar","arg":null}"#, 204),
+            (r#"{"cmd":"tocar"}"#, 400),
+            (r#"{"cmd":"tocar","arg":"Nod!"}"#, 400),
+            (r#"{"cmd":"tocar","arg":3}"#, 400),
+            (r#"{"cmd":"esconder","arg":"30m"}"#, 400),
+            (r#"{"cmd":"soneca"}"#, 400),
+            (r#"{"cmd":"tocar","arg":"nod","x":1}"#, 400),
+            (r#"["tocar","nod"]"#, 400),
+            ("lixo", 400),
+        ] {
+            let (obtido, resposta) = rotear(&post_json("/v1/comando", corpo), &ctx);
+            assert_eq!(obtido, status, "{corpo}: {resposta}");
+        }
+        let req = post_tipo("/v1/comando", Some("text/plain"), r#"{"cmd":"mostrar"}"#);
+        assert_eq!(rotear(&req, &ctx).0, 415);
+        drop(ctx);
+        let recebidos: Vec<String> = drenar(recebe).iter().map(|c| format!("{c:?}")).collect();
+        assert_eq!(recebidos, vec!["Tocar(\"nod\")", "Esconder", "Mostrar"]);
+    }
+
+    #[test]
+    fn debug_eventos_so_em_debug() {
+        let ok = "Host: 127.0.0.1:27380\r\nX-Pet: 1\r\n";
+        assert_eq!(rotear(&get("/v1/debug/eventos", ok), &contexto()).0, 404);
+        let (ctx, _recebe) = contexto_debug();
+        let (status, corpo) = rotear(&get("/v1/debug/eventos", ok), &ctx);
+        assert_eq!((status, corpo.as_str()), (200, r#"{"eventos":[]}"#));
+        assert_eq!(rotear(&post_json("/v1/debug/eventos", "{}"), &ctx).0, 405);
+    }
+
+    fn post(caminho: &str, corpo: &str) -> Requisicao {
         ler(&format!(
-            "POST {caminho} HTTP/1.1\r\nHost: 127.0.0.1:27380\r\nX-Pet: 1\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{corpo}",
+            "POST {caminho} HTTP/1.1\r\nHost: 127.0.0.1:27380\r\nX-Pet: 1\r\nContent-Length: {}\r\n\r\n{corpo}",
             corpo.len()
         ))
         .unwrap()

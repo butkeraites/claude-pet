@@ -8,7 +8,9 @@
 //!   frame callback nem animação (revisão de viabilidade);
 //! - **descoberta** a cada 2 s, só enquanto espera o compositor;
 //! - a **conexão Wayland** ([`WaylandSource`]) enquanto há sessão;
-//! - o **pipe de sinais** (SIGTERM/SIGINT) para encerrar sem atraso.
+//! - o **pipe de sinais** (SIGTERM/SIGINT) para encerrar sem atraso;
+//! - o **canal de comandos** das outras threads: eventos dos hooks,
+//!   `/v1/comando` e rotas de debug.
 //!
 //! Erro na conexão Wayland (EOF, erro de protocolo) sai do `dispatch` do
 //! calloop: aí a sessão é derrubada inteira e o laço volta a esperar.
@@ -30,9 +32,10 @@ use smithay_client_toolkit::reexports::calloop::{
 use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
 
 use pet_core::aprovacao::Origem;
+use pet_core::evento;
 use pet_core::skin::Skin;
 
-use crate::comando::Comando;
+use crate::comando::{Comando, Recebido};
 use crate::descoberta::{self, Espera, Reconexao};
 use crate::estado::{Compartilhado, InfoSkin, Painel, Tela};
 use crate::personagem::{self, Escolha, Onde};
@@ -214,7 +217,8 @@ impl Laco {
         Ok(())
     }
 
-    /// Comandos das outras threads (rotas de debug e aprovações).
+    /// Comandos das outras threads (eventos, `/v1/comando` com reações e
+    /// aprovações, debug).
     pub fn instalar_comandos(&mut self, canal: Channel<Comando>) -> Result<(), String> {
         self.handle
             .insert_source(canal, |evento, _, laco| {
@@ -228,12 +232,15 @@ impl Laco {
 
     fn comando(&mut self, comando: Comando) {
         match comando {
+            Comando::Evento(recebido) => self.evento(*recebido),
+            Comando::Tocar(reacao) => match self.sessao_mut().map(|s| s.tocar(&reacao)) {
+                Some(true) => info!("tocar: «{reacao}»"),
+                Some(false) => aviso!("tocar: sem personagem, ou a skin não tem «{reacao}»"),
+                None => aviso!("tocar «{reacao}» sem compositor"),
+            },
             Comando::Esconder | Comando::Mostrar => {
                 self.visivel = matches!(comando, Comando::Mostrar);
-                info!(
-                    "debug: {}",
-                    if self.visivel { "mostrar" } else { "esconder" }
-                );
+                info!("{}", if self.visivel { "mostrar" } else { "esconder" });
                 let visivel = self.visivel;
                 if let Some(sessao) = self.sessao_mut() {
                     sessao.definir_visivel(visivel);
@@ -254,6 +261,17 @@ impl Laco {
                 let _ = feito.try_send(());
             }
         }
+    }
+
+    /// Um evento do Claude Code. No log só vão o nome do evento e o começo
+    /// do id da sessão (decisão 0019).
+    fn evento(&mut self, recebido: Recebido) {
+        let ev = &recebido.evento;
+        depurar!(
+            "evento {} da sessão {}",
+            ev.e,
+            ev.sid.as_deref().map_or_else(|| "?".into(), evento::curto)
+        );
     }
 
     /// (Re)arma o batimento de 5 s. Chamado na partida e depois de um erro
