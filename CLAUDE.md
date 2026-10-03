@@ -42,6 +42,11 @@ no susto e no mergulho, caindo na cabeça depois do pouso (decisões
 config é relido a cada aprovação (`zeca-contorno` sem reiniciar). A pilha de
 dev (`PET_DEBUG=1`) mostra a skin xadrez `_teste`, ou o personagem aprovado
 com `PET_DEBUG_PERSONAGEM=1`. Formato, arte e aprovação em `docs/SKINS.md`.
+**Pendente:** a conferência na tela da arte revista (nitidez, foto
+mascarada, reaprovação com o pet na tela) e a medição de custo com o
+personagem: a sessão ficou bloqueada. Com a tela acesa e desbloqueada, rode
+`scripts/verificar-ao-vivo.sh --personagem` e `scripts/medir-custo.sh
+--personagem` (aprovam só para o teste e revogam no fim).
 
 ## Comandos
 
