@@ -7,6 +7,7 @@
 pub mod animador;
 pub mod aprovacao;
 pub mod cena;
+pub mod cerebro;
 pub mod confete;
 pub mod config;
 pub mod estados;

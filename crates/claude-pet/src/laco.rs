@@ -10,7 +10,12 @@
 //! - a **conexão Wayland** ([`WaylandSource`]) enquanto há sessão;
 //! - o **pipe de sinais** (SIGTERM/SIGINT) para encerrar sem atraso;
 //! - o **canal de comandos** das outras threads: eventos dos hooks,
-//!   `/v1/comando` e rotas de debug.
+//!   `/v1/comando` e rotas de debug;
+//! - o **prazo do cérebro** (acomodação do Stop, sessões que expiram), um
+//!   timer só, rearmado depois de cada evento.
+//!
+//! O cérebro ([`Cerebro`]) mora aqui, no laço, e funciona com ou sem
+//! compositor: sem tela, as reações só ficam no `/v1/estado`.
 //!
 //! Erro na conexão Wayland (EOF, erro de protocolo) sai do `dispatch` do
 //! calloop: aí a sessão é derrubada inteira e o laço volta a esperar.
@@ -32,12 +37,15 @@ use smithay_client_toolkit::reexports::calloop::{
 use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
 
 use pet_core::aprovacao::Origem;
+use pet_core::cerebro::{Agora, Cerebro, ConfigCerebro, Reacao};
+use pet_core::config::ConfigEfetiva;
 use pet_core::evento;
 use pet_core::skin::Skin;
 
 use crate::comando::{Comando, Recebido};
 use crate::descoberta::{self, Espera, Reconexao};
 use crate::estado::{Compartilhado, InfoSkin, Painel, Tela};
+use crate::ingress::agora_desde_1970_ms;
 use crate::personagem::{self, Escolha, Onde};
 use crate::wl;
 
@@ -72,8 +80,13 @@ pub struct Laco {
     /// `claude-pet.toml`, relido a cada aprovação: trocar `aparencia.skin`
     /// (o `zeca-contorno`, por exemplo) vale sem reiniciar o container.
     arquivo_config: Option<PathBuf>,
-    /// O pet deve estar na tela (o debug pode esconder e mostrar).
+    /// O pet deve estar na tela (`/v1/comando` pode esconder e mostrar).
     visivel: bool,
+    cerebro: Cerebro,
+    /// Timer do próximo prazo do cérebro.
+    prazo_cerebro: Option<RegistrationToken>,
+    /// Origem do relógio monotônico do cérebro.
+    inicio: Instant,
     pub parar: bool,
 }
 
@@ -95,14 +108,16 @@ struct Viva {
 }
 
 impl Laco {
+    /// `config` é a da partida: dela saem a skin configurada e a config do
+    /// cérebro; `arquivo_config` é de onde ela é relida a cada aprovação.
     pub fn novo(
         comp: Arc<Compartilhado>,
         handle: LoopHandle<'static, Laco>,
         base: PathBuf,
         curto: PathBuf,
         onde: Onde,
-        configurada: String,
         arquivo_config: Option<PathBuf>,
+        config: &ConfigEfetiva,
     ) -> Laco {
         let mut laco = Laco {
             comp,
@@ -117,9 +132,12 @@ impl Laco {
             skin: None,
             na_tela: None,
             onde,
-            configurada,
+            configurada: config.texto("aparencia.skin").to_owned(),
             arquivo_config,
             visivel: true,
+            cerebro: Cerebro::novo(ConfigCerebro::de(&config.config())),
+            prazo_cerebro: None,
+            inicio: Instant::now(),
             parar: false,
         };
         laco.escolher_personagem();
@@ -190,6 +208,24 @@ impl Laco {
                 sessao.trocar_skin(skin, visivel);
             }
         }
+    }
+
+    /// O relógio do cérebro: parede (o mesmo do `ts` dos hooks) e
+    /// monotônico desde a partida.
+    fn agora(&self) -> Agora {
+        Agora {
+            parede_ms: agora_desde_1970_ms(),
+            mono_ms: self.inicio.elapsed().as_millis() as u64,
+        }
+    }
+
+    /// Publica o estado inicial do cérebro (sem sessões).
+    pub fn iniciar_cerebro(&mut self) {
+        info!(
+            "cérebro: sessões de origem {}",
+            self.cerebro.config().origens.join(", ")
+        );
+        self.depois_do_cerebro(Vec::new());
     }
 
     /// A sessão Wayland, se conectada.
@@ -263,8 +299,8 @@ impl Laco {
         }
     }
 
-    /// Um evento do Claude Code. No log só vão o nome do evento e o começo
-    /// do id da sessão (decisão 0019).
+    /// Um evento do Claude Code vai para o cérebro. No log só vão o nome do
+    /// evento e o começo do id da sessão (decisão 0019).
     fn evento(&mut self, recebido: Recebido) {
         let ev = &recebido.evento;
         depurar!(
@@ -272,6 +308,59 @@ impl Laco {
             ev.e,
             ev.sid.as_deref().map_or_else(|| "?".into(), evento::curto)
         );
+        let agora = self.agora();
+        let reacoes = self.cerebro.receber(ev, recebido.recebido_ms, agora);
+        self.depois_do_cerebro(reacoes);
+    }
+
+    /// Toca as reações, publica o cérebro e rearma o prazo dele.
+    fn depois_do_cerebro(&mut self, reacoes: Vec<Reacao>) {
+        for reacao in &reacoes {
+            self.reagir(reacao);
+        }
+        self.comp.publicar_cerebro(&self.cerebro.resumo());
+        self.armar_prazo_cerebro();
+    }
+
+    fn reagir(&mut self, reacao: &Reacao) {
+        info!(
+            "reação {}{} da sessão {}{}",
+            reacao.nome,
+            reacao
+                .nivel
+                .map_or_else(String::new, |n| format!(" ({n:?})")),
+            reacao.sid8,
+            if reacao.teste { " (teste)" } else { "" }
+        );
+        match self.sessao_mut().map(|s| s.tocar(reacao.nome)) {
+            Some(true) => {}
+            Some(false) => depurar!("reação {} sem animação na tela", reacao.nome),
+            None => depurar!("reação {} sem compositor", reacao.nome),
+        }
+    }
+
+    fn armar_prazo_cerebro(&mut self) {
+        if let Some(token) = self.prazo_cerebro.take() {
+            self.handle.remove(token);
+        }
+        let Some(prazo) = self.cerebro.proximo_prazo() else {
+            return;
+        };
+        let quando = self.inicio + Duration::from_millis(prazo);
+        let inserido = self
+            .handle
+            .insert_source(Timer::from_deadline(quando), |_, _, laco| {
+                // Este timer acaba aqui; o próximo é armado abaixo.
+                laco.prazo_cerebro = None;
+                let agora = laco.agora();
+                let reacoes = laco.cerebro.tique(agora);
+                laco.depois_do_cerebro(reacoes);
+                TimeoutAction::Drop
+            });
+        match inserido {
+            Ok(token) => self.prazo_cerebro = Some(token),
+            Err(e) => erro!("não consegui armar o prazo do cérebro: {e}"),
+        }
     }
 
     /// (Re)arma o batimento de 5 s. Chamado na partida e depois de um erro

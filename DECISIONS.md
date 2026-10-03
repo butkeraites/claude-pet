@@ -419,6 +419,57 @@ processo local. Descartar campo por campo, em vez de recusar o evento,
 mantém o pet funcionando depois de uma atualização do Claude Code; `v` e
 `e` são o mínimo para rotear.
 
+## 0020 — Cérebro mínimo do M3: sessões, turnos e acomodação do Stop (2026-10-03)
+
+**Problema:** o M3 liga o primeiro elo hook → reação sem pintar o M5 num
+canto. Os hooks são async e chegam fora de ordem; um Stop pode ser seguido
+de mais trabalho (Stop hook de outro plugin); `claude -p`, SDK e IDE criam
+sessões sem terminal; o `bin/pet testar` roda ao lado da sessão real do
+Claude que o chama; e sessões morrem sem `SessionEnd`.
+**Escolha:**
+- Core puro (`pet_core::cerebro`) com relógio injetado: parede (o mesmo do
+  `ts` dos hooks) para ordem e duração, monotônico para os prazos. O `ts` só
+  vale a até 6 h da hora de chegada carimbada no ingress; fora disso vale a
+  chegada.
+- Sessões por `sid`, só das origens em `sessoes.origens` (padrão `["cli"]`;
+  evento sem `ent` não conta). Eventos de teste vivem num mundo à parte
+  (chave `(teste, sid)`) e somem 60 s depois do último evento; sessão real
+  sem eventos some em 12 h; no máximo 64 de cada tipo.
+- Turnos por `prompt_id`. O `UserPromptSubmit` abre o turno (t0); evento de
+  um turno que ninguém abriu (pet reiniciado, prompt atrasado) abre um
+  turno implícito; um id novo encerra o turno aberto: com Stop pendente
+  comemora na hora, sem Stop foi abandonado (Esc) e fecha sem festa.
+- Componentes por turno: ferramentas de trabalho (Edit, Write, MultiEdit,
+  NotebookEdit, Bash, também as que falharam), outras, arquivos únicos
+  (`arq`), soma de `dur`, subagentes, falhas e ferramentas de subagentes.
+  Ferramenta de subagente conta para o turno em que ele nasceu e não muda o
+  estado da sessão. O `SubagentStart` chega com `agente` (o `agent_id` é o
+  do subagente que nasce), mas vale como evento da thread principal.
+- Stop: acomodação de 0,8 s, cancelada só por um evento de trabalho da
+  thread principal (PreToolUse, PostToolUse, PostToolUseFailure,
+  PermissionRequest, SubagentStart, PreCompact, PostCompact) da mesma
+  sessão e do mesmo turno com `ts` posterior ao Stop. Dedupe por
+  `(sid, turno)`, lembrando os últimos 32 turnos fechados de cada sessão.
+- Fecham sem festa: ferramenta interrompida (`intr`), `idle_prompt` com
+  turno aberto e sem Stop, `StopFailure` e `SessionEnd`.
+- T0 (nenhuma ferramenta de trabalho, nenhum subagente, nenhum arquivo
+  editado) → `nod`; o resto → T1, `done_small`. `celebracao.modo`:
+  `desligada` não reage, `discreta` só acena, `sempre_grande` é igual ao
+  proporcional até o M5 trazer níveis maiores.
+- `SessionEnd` sempre larga a sessão com o turno e a acomodação; `bye` só
+  quando não sobra sessão do mesmo tipo (a skin de teste não tem `bye`, e o
+  tchau não anima no M3).
+- `/v1/estado`: `sessoes` (8 caracteres do `sid`, projeto, origem, estado,
+  contadores, hora do último evento), `ultima_reacao` (nome, `sid8`,
+  projeto, hora, nível, teste), `turnos` (os últimos 20, com todos os
+  componentes; `relogio_ms` só para calibrar, nunca pontua) e
+  `cerebro.ignorados`, a contagem do que não contou, por motivo.
+**Por quê:** a ordem dos hooks async é a do relógio do host no início do
+script, não a de chegada; 0,8 s cobre o atraso de um PostToolUse sem
+segurar a festa. O filtro de origem e o isolamento dos testes vêm da
+revisão de produto. O M5 pontua T2/T3, correntes e escalada em cima dos
+mesmos componentes, sem mudar o fio nem o registro.
+
 ## 0023 — O Zeca é o Parrot 2 no visual "Malandro rosa" (2026-10-03)
 
 **Problema:** a decisão 0001 previa troca de paleta (bico amarelo, peito

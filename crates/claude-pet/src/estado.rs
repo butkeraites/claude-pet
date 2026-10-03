@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::{Mutex, RwLock};
 use std::time::{Duration, Instant};
 
+use pet_core::cerebro::Resumo;
 use pet_core::config::ConfigEfetiva;
 use pet_core::geometria::Ret;
 use serde::Serialize;
@@ -109,6 +110,8 @@ pub struct Compartilhado {
     ultimo_evento_ms: AtomicU64,
     /// Os últimos eventos validados, só em debug.
     eventos_debug: Mutex<VecDeque<Value>>,
+    /// O que o cérebro publicou (sessões, última reação, turnos).
+    cerebro: RwLock<Value>,
 }
 
 impl Compartilhado {
@@ -125,7 +128,14 @@ impl Compartilhado {
             eventos_recusados: AtomicU64::new(0),
             ultimo_evento_ms: AtomicU64::new(0),
             eventos_debug: Mutex::new(VecDeque::new()),
+            cerebro: RwLock::new(Value::Null),
         }
+    }
+
+    /// Publicado pelo laço principal depois de cada evento e prazo.
+    pub fn publicar_cerebro(&self, resumo: &Resumo) {
+        let valor = serde_json::to_value(resumo).unwrap_or(Value::Null);
+        *self.cerebro.write().expect("lock do cérebro envenenado") = valor;
     }
 
     /// Um evento de hook aceito. Em debug, `validado` (só os campos que
@@ -220,6 +230,8 @@ impl Compartilhado {
         let config = self.config.read().expect("lock da config envenenado");
         let painel = self.painel.read().expect("lock do painel envenenado");
         let skin = self.skin.read().expect("lock da skin envenenado");
+        let cerebro = self.cerebro.read().expect("lock do cérebro envenenado");
+        let do_cerebro = |chave: &str, vazio: Value| cerebro.get(chave).cloned().unwrap_or(vazio);
         json!({
             "versao": pet_core::VERSAO,
             "tela": self.tela().nome(),
@@ -238,6 +250,13 @@ impl Compartilhado {
             "shm_bytes": painel.shm_bytes,
             "reacao": painel.reacao,
             "eventos": self.eventos_json(),
+            "sessoes": do_cerebro("sessoes", json!([])),
+            "ultima_reacao": do_cerebro("ultima_reacao", Value::Null),
+            "turnos": do_cerebro("turnos", json!([])),
+            "cerebro": {
+                "origens": do_cerebro("origens", json!([])),
+                "ignorados": do_cerebro("ignorados", json!({})),
+            },
             "skin": &*skin,
             "config": &*config,
         })
@@ -322,6 +341,47 @@ mod testes {
         let eventos = lista["eventos"].as_array().unwrap();
         assert_eq!(eventos.len(), EVENTOS_DEBUG);
         assert_eq!(eventos[0]["n"], 5, "os mais velhos saem primeiro");
+    }
+
+    #[test]
+    fn cerebro_aparece_no_estado() {
+        use pet_core::cerebro::{Agora, Cerebro, ConfigCerebro};
+        use pet_core::evento::Evento;
+        let c = novo();
+        let estado = c.estado_json();
+        assert_eq!(estado["sessoes"], json!([]));
+        assert!(estado["ultima_reacao"].is_null());
+        let mut cerebro = Cerebro::novo(ConfigCerebro::default());
+        let agora = Agora {
+            parede_ms: 1_790_000_000_000,
+            mono_ms: 0,
+        };
+        let ev = Evento {
+            e: "Stop".into(),
+            sid: Some("0123456789abcdef".into()),
+            turno: Some("p1".into()),
+            ent: Some("cli".into()),
+            proj: Some("claude-pet".into()),
+            ..Evento::default()
+        };
+        cerebro.receber(&ev, agora.parede_ms, agora);
+        let depois = Agora {
+            parede_ms: agora.parede_ms + 900,
+            mono_ms: 900,
+        };
+        cerebro.tique(depois);
+        c.publicar_cerebro(&cerebro.resumo());
+        let estado = c.estado_json();
+        assert_eq!(estado["sessoes"][0]["sid8"], "01234567");
+        assert_eq!(estado["sessoes"][0]["proj"], "claude-pet");
+        assert_eq!(estado["ultima_reacao"]["nome"], "nod");
+        assert_eq!(estado["ultima_reacao"]["sid8"], "01234567");
+        assert_eq!(estado["turnos"][0]["nivel"], "T0");
+        assert_eq!(estado["cerebro"]["origens"], json!(["cli"]));
+        assert!(
+            !estado.to_string().contains("0123456789abcdef"),
+            "só o sid curto"
+        );
     }
 
     #[test]

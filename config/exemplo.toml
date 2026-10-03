@@ -10,3 +10,9 @@ skin = "zeca"
 [celebracao]
 # proporcional | sempre_grande | discreta | desligada
 modo = "proporcional"
+
+[sessoes]
+# De onde vêm as sessões do Claude Code que o pet acompanha
+# ($CLAUDE_CODE_ENTRYPOINT): "cli" é o terminal. Acrescente "sdk-cli" para
+# contar também as execuções `claude -p`. Ou PET_SESSOES_ORIGENS="cli,sdk-cli".
+origens = ["cli"]
