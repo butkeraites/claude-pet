@@ -253,3 +253,98 @@ vida funciona. O custo no compositor, que é o que decide entre a camada
 única do tamanho do monitor e o plano B (superfície pequena de repouso +
 palco temporário, decisão 0005), ainda não foi medido; até lá a camada única
 continua sendo o desenho, e o M1 não fecha sem essas duas medições.
+
+## 0018 — Revisão do M1: ritmo sem reserva, saída confirmada e custo sob carga (2026-10-02)
+
+**Problema:** três revisões adversariais do M1 acharam, conferido no código:
+- **mostrar logo depois de esconder se perdia:** a camada que estava saindo
+  morria em seguida e o pet ficava escondido para sempre;
+- **fantasma possível ao esconder:**
+  - no SIGTERM o quadro transparente só ia com `flush` e o processo saía.
+    O libwayland-server destrói um cliente que desligou sem ler o que ainda
+    estava no socket;
+  - logo depois de uma troca de escala o esconder pulava o quadro
+    transparente.
+- **a reserva de 5 s da decisão 0016 continuava fazendo commit com a tela
+  apagada**, empilhando frame callbacks (uns 720 por hora). "Não gasta nada
+  com a tela apagada" estava errado;
+- **a linha "Commits parado: 2 no último minuto" da decisão 0017 não mede o
+  orçamento:** foi tirada com DPMS, menos de um minuto depois da subida;
+- **o `scripts/medir-custo.sh` não via o custo que decide entre a camada
+  única e o plano B:** uma camada transparente do tamanho do monitor, sempre
+  mapeada, entra em toda repintura que os outros causam.
+
+**Escolha:**
+- **Ritmo:**
+  - no máximo um frame callback pendente, sem prazo de reserva. Callback não
+    se perde: só não vem enquanto o monitor não desenha;
+  - com a tela apagada, o pet faz o primeiro commit e depois nenhum. Medido ao
+    vivo: 0 commits em 20 s e em 10 s.
+- **Mostrar e esconder** viram função pura e testada:
+  - mostrar durante a saída cancela a saída e força o quadro do pet;
+  - esconder decide pelos pixels que o compositor guarda, e não pela cena
+    guardada.
+- **Saída do processo:** quadro transparente, destruição da camada e um
+  `wl_display.sync` com prazo de 1 s. Ao vivo: "o compositor processou o
+  quadro transparente e a destruição", parada em 377 ms.
+- **Orçamento parado garantido pelo animador para qualquer skin:**
+  - a pausa antes de cada rajada cresce até o trecho caber em 2 commits/s;
+  - nenhum quadro dura menos de 34 ms (rajadas de até 30 fps).
+  - Na skin `_teste` nada muda: 7 commits a cada 9,18 s, ≈ 0,76/s, calculado.
+- **Descoberta:**
+  - prova de vida com prazo de 3 s antes do registro, que não tem prazo;
+  - nenhuma conexão na instância em backoff;
+  - symlinks curtos só numa pasta própria;
+  - rearmar o batimento depois de um erro não bate.
+- **FALLBACK e 0x0:** um `enter` no FALLBACK (ou num monitor sem tamanho) e
+  um `configure` 0x0 nunca viram casa do pet. A camada espera um monitor de
+  verdade (`new_output`) e é recriada.
+- **Custo (`scripts/medir-custo.sh`):**
+  - escondido × parado intercalados em 3 rodadas, com média e faixa;
+  - fase nova com carga de repintura invisível (`cargo xtask carga`): uma
+    camada BACKGROUND transparente que faz commit a cada frame callback e
+    repinta o monitor inteiro no ritmo dele, como um vídeo em tela cheia;
+  - estresse;
+  - cada transição conferida (estado, commits/s esperados, carga rodando,
+    tela acesa).
+- **Critério do custo estrutural** (provisório, até haver números): com a
+  carga, o pet parado pode somar até +1 ponto de CPU do Hyprland e +5 pontos
+  de GPU ocupada sobre o pet escondido. Estourou → plano B (decisão 0005).
+- **Verificação ao vivo** ganhou:
+  - esconder e mostrar seguidos;
+  - pixel velho (onde o quadro é transparente tem de aparecer o fundo);
+  - fantasma logo depois de esconder e durante o SIGTERM da troca para a
+    produção (`cargo xtask fantasma`, comparando com capturas sem o pet);
+  - commits numa janela fixa, só com a tela acesa.
+- **`bin/pet foto`** em debug mostra só os pixels opacos do pet.
+
+**Por quê:** cada correção fecha um caminho em que o pet some sem querer,
+deixa um fantasma ou gasta com a tela apagada. Neste host o
+`render:direct_scanout` é 0 (consulta de leitura), então a camada única
+não está bloqueando scanout direto; se o Renan ligar, o custo de vídeo em
+tela cheia muda e a medição sob carga tem de ser refeita.
+
+A tela ficou apagada (DPMS) também nesta sessão. Continuam sem número:
+- nitidez na tela;
+- pixel velho e fantasma;
+- ritmo parado com a tela acesa;
+- custo no Hyprland, com e sem carga;
+- clique manual;
+- fotos do PR.
+
+O portão do M1 segue aberto. Os números entram numa decisão nova quando
+`scripts/verificar-ao-vivo.sh` e `scripts/medir-custo.sh` rodarem com a
+tela acesa.
+
+Ao vivo com a tela apagada passaram:
+- camada no nível 3 de eDP-1;
+- esconder e mostrar seguidos;
+- imagem de 4 684 kB;
+- RSS de 11,0 MiB;
+- CPU parado de 0,01%;
+- 0 commits em 10 s;
+- região de input só no corpo;
+- restart em 651 ms, no mesmo lugar;
+- saída confirmada;
+- `kill -9` com RestartCount 0 → 1, de volta em 471 ms;
+- "aguardando compositor" sem compositor.

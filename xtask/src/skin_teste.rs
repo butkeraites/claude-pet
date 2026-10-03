@@ -266,6 +266,23 @@ mod testes {
         assert_eq!(gerar().unwrap().0, png, "PNG muda entre execuções");
     }
 
+    /// O que está no git é exatamente o que o gerador produz: mudou o
+    /// gerador sem rodar `cargo xtask skin-teste` (ou mexeu nos arquivos à
+    /// mão), este teste avisa.
+    #[test]
+    fn arquivos_commitados_sao_os_do_gerador() {
+        let pasta = crate::raiz().join("skins/_teste");
+        let (png, folha, skin) = gerar().unwrap();
+        let ler = |nome: &str| std::fs::read(pasta.join(nome)).unwrap();
+        let aviso = "skins/_teste desatualizada: rode `cargo xtask skin-teste`";
+        assert!(ler("sheet.png") == png, "{aviso} (sheet.png)");
+        assert!(
+            ler("sheet.json") == folha.as_bytes(),
+            "{aviso} (sheet.json)"
+        );
+        assert!(ler("skin.json") == skin.as_bytes(), "{aviso} (skin.json)");
+    }
+
     #[test]
     fn quadros_diferentes_tem_pixels_diferentes() {
         let (png, folha, skin) = gerar().unwrap();

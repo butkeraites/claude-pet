@@ -323,6 +323,97 @@ mod testes {
         assert!(!r.passou());
     }
 
+    /// Ponta a ponta com o quadro de verdade: a pose da skin `_teste` em
+    /// D=5, do mesmo jeito que o /v1/debug/quadro a entrega, composta sobre
+    /// uma "tela" de fundo variado como o compositor faria. Passa no lugar
+    /// certo; falha deslocada 1 pixel e redimensionada 0,5% (o filtro
+    /// bilinear de um `grim -g`).
+    #[test]
+    fn quadro_real_da_skin_de_teste_ponta_a_ponta() {
+        use pet_core::cena::{Elemento, rgba_do_sprite};
+        use pet_core::geometria::Ret;
+        use pet_core::skin::Skin;
+
+        const D: i32 = 5;
+        const CELULA: (i32, i32) = (123, 77);
+        const TELA: (i32, i32) = (400, 330);
+        let skin = Skin::carregar(&crate::raiz().join("skins/_teste")).unwrap();
+        let pose = skin.tags[skin.tags_do_estado("idle")[0]].de;
+        let sprite = Elemento::Sprite {
+            quadro: pose,
+            x: CELULA.0,
+            y: CELULA.1,
+            d: D,
+            espelhar: false,
+        };
+        let area = Ret::novo(CELULA.0, CELULA.1, 48 * D, 48 * D);
+        let esperado = Imagem::de_rgba(area.w, area.h, rgba_do_sprite(&skin, &sprite, area));
+
+        // A tela com o pet composto ("over", alfa direto) em CELULA + desvio.
+        let tela = |dx: i32, dy: i32| {
+            let mut rgba = Vec::with_capacity((TELA.0 * TELA.1 * 4) as usize);
+            for y in 0..TELA.1 {
+                for x in 0..TELA.0 {
+                    let fundo = [(x * 3) as u8, (y * 5) as u8, ((x ^ y) & 255) as u8];
+                    let (ex, ey) = (x - CELULA.0 - dx, y - CELULA.1 - dy);
+                    let e = if (0..area.w).contains(&ex) && (0..area.h).contains(&ey) {
+                        super::rgba(&esperado, ex, ey)
+                    } else {
+                        [0; 4]
+                    };
+                    let a = e[3] as u32;
+                    for k in 0..3 {
+                        rgba.push(((e[k] as u32 * a + fundo[k] as u32 * (255 - a)) / 255) as u8);
+                    }
+                    rgba.push(255);
+                }
+            }
+            Imagem::de_rgba(TELA.0, TELA.1, rgba)
+        };
+        // Bilinear em volta da origem, como uma escala de 1.005.
+        let redimensionada = |img: &Imagem, s: f64| {
+            let mut rgba = Vec::with_capacity(img.rgba.len());
+            for y in 0..img.altura {
+                for x in 0..img.largura {
+                    let (fx, fy) = (x as f64 / s, y as f64 / s);
+                    let (x0, y0) = (fx.floor() as i32, fy.floor() as i32);
+                    let (tx, ty) = (fx - x0 as f64, fy - y0 as f64);
+                    let px = |i: i32, j: i32| {
+                        super::rgba(img, i.min(img.largura - 1), j.min(img.altura - 1))
+                    };
+                    for k in 0..3 {
+                        let v = px(x0, y0)[k] as f64 * (1.0 - tx) * (1.0 - ty)
+                            + px(x0 + 1, y0)[k] as f64 * tx * (1.0 - ty)
+                            + px(x0, y0 + 1)[k] as f64 * (1.0 - tx) * ty
+                            + px(x0 + 1, y0 + 1)[k] as f64 * tx * ty;
+                        rgba.push(v.round() as u8);
+                    }
+                    rgba.push(255);
+                }
+            }
+            Imagem::de_rgba(img.largura, img.altura, rgba)
+        };
+
+        let p = Parametros {
+            x: CELULA.0,
+            y: CELULA.1,
+            d: D,
+            grade: CELULA,
+            tolerancia: 2,
+        };
+        let certa = comparar(&tela(0, 0), &esperado, &p).unwrap();
+        assert!(certa.passou(), "{certa:?}");
+        assert!(
+            certa.pixels_opacos > 20_000 && certa.blocos > 800,
+            "{certa:?}"
+        );
+        assert_eq!(certa.maior_desvio, 0);
+        let deslocada = comparar(&tela(1, 0), &esperado, &p).unwrap();
+        assert!(!deslocada.passou() && deslocada.blocos_irregulares > 100);
+        let borrada = comparar(&redimensionada(&tela(0, 0), 1.005), &esperado, &p).unwrap();
+        assert!(!borrada.passou() && borrada.blocos_irregulares > 100);
+    }
+
     #[test]
     fn grade_com_fase_e_area_fora_da_captura() {
         let e = esperado();

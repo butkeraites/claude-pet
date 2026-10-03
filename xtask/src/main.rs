@@ -4,6 +4,8 @@
 //! `skin-teste` e `nitidez` no M1; `skin-importar`, `zeca`, `lint-skin`,
 //! `cobertura`, `contato` e `fonte` no M2.
 
+mod carga;
+mod fantasma;
 mod nitidez;
 mod skin_teste;
 
@@ -16,6 +18,11 @@ const COMANDOS: &[(&str, &str)] = &[
         "gera a skin xadrez de QA em skins/_teste (M1)",
     ),
     ("nitidez", "confere blocos D×D numa captura do grim (M1)"),
+    (
+        "fantasma",
+        "confere que o pet não deixa pixels velhos na tela (M1)",
+    ),
+    ("carga", "repintura invisível da tela para medir custo (M1)"),
     (
         "skin-importar",
         "importa um pack (.aseprite ou tiras PNG) (M2)",
@@ -77,6 +84,24 @@ fn main() -> ExitCode {
                     "uso: cargo xtask nitidez --captura <png> --esperado <png> --x X --y Y --d D [--grade X,Y] [--tolerancia 2]"
                 );
                 ExitCode::from(2)
+            }
+        },
+        Some("fantasma") => match fantasma::executar(&args[1..]) {
+            Ok(true) => ExitCode::SUCCESS,
+            Ok(false) => ExitCode::FAILURE,
+            Err(e) => {
+                eprintln!("fantasma: {e}");
+                eprintln!(
+                    "uso: cargo xtask fantasma --base <png> [--base <png>…] --depois <png> [--esperado <png>] [--tolerancia 2]"
+                );
+                ExitCode::from(2)
+            }
+        },
+        Some("carga") => match carga::executar(&args[1..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("carga: {e}");
+                ExitCode::FAILURE
             }
         },
         Some(nome) if COMANDOS.iter().any(|(n, _)| *n == nome) => {

@@ -759,7 +759,9 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "pet-core",
+ "rustix",
  "serde_json",
+ "smithay-client-toolkit",
 ]
 
 [[package]]

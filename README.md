@@ -15,8 +15,9 @@ terminal:
 Pode ser arrastado com o mouse para qualquer lugar e sempre aparece no
 monitor que está em foco. Sem som.
 
-> **Estado:** em construção (M0). Veja `PLANO.md` para os marcos e
-> `PROGRESS.md` para o andamento.
+> **Estado:** em construção. O M1 (overlay) está na branch `m1-overlay`,
+> com o portão aberto: falta medir nitidez e custo com a tela acesa. Veja
+> `PLANO.md` para os marcos e `PROGRESS.md` para o andamento.
 
 ## Requisitos
 

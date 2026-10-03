@@ -15,12 +15,23 @@ O plano completo, com marcos M0–M7 e como verificar cada um, está em
 
 ## Estado do repositório
 
-**M0 (fundação) concluído; M1 (overlay) na branch `m1-overlay`, esperando
-o PR.** O daemon acha o Hyprland pelo `hyprland.lock`, conecta ao Wayland
-(Rust puro, SCTK), cria a camada OVERLAY `claude-pet` no monitor focado e
-desenha a skin em blocos D×D de pixels do monitor, com orçamento de
-commits. Repositório privado em `github.com/butkeraites/claude-pet`. Ainda
-não há arte (M2) nem hooks (M3).
+**M0 (fundação) concluído. M1 (overlay) implementado e revisado na branch
+`m1-overlay`, mas o portão do M1 continua ABERTO** (decisões 0017 e 0018).
+A tela ficou apagada (DPMS) nas duas sessões. Falta, com ela acesa:
+- nitidez, pixel velho e fantasma: `scripts/verificar-ao-vivo.sh`;
+- custo no Hyprland, com a fase de carga: `scripts/medir-custo.sh`. É o
+  número que decide entre a camada única e o plano B;
+- o clique manual;
+- as fotos do PR: `bin/pet foto` com a pilha de dev.
+
+Não abra nem mescle o PR do M1 antes disso, e registre os números numa
+decisão nova.
+
+O daemon acha o Hyprland pelo `hyprland.lock`, conecta ao Wayland (Rust
+puro, SCTK), cria a camada OVERLAY `claude-pet` no monitor focado e desenha
+a skin em blocos D×D de pixels do monitor, com orçamento de commits.
+Repositório privado em `github.com/butkeraites/claude-pet`. Ainda não há
+arte (M2) nem hooks (M3).
 
 O Renan precisa **comprar o pack** *Cute Parrots!* (exclusiveOlive,
 itch.io) para o M2. Até lá a produção fica conectada e escondida
@@ -38,10 +49,10 @@ Fora dele, use `~/.cargo/bin/cargo`.
 | `bin/pet subir` / `parar` / `logs` / `estado` | compose e estado do pet |
 | `~/.cargo/bin/cargo test` | testes do workspace (os quadros dourados regeneram com `PET_ATUALIZAR_OURO=1`) |
 | `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build` | modo desenvolvimento (sem restart, debug, skin `_teste`) |
-| `bin/pet foto` | captura o pet (grim no monitor inteiro + recorte por `sprite_disp`) |
+| `bin/pet foto` | foto do pet (grim no monitor inteiro); em debug, só os pixels opacos do pet sobre fundo neutro |
 | `scripts/verificar-ao-vivo.sh` | verificação do M1 na tela de verdade; termina com a produção de pé |
-| `scripts/medir-custo.sh` | CPU do Hyprland, GPU e commits/s: escondido, parado e estresse |
-| `cargo xtask skin-teste` / `nitidez` | gera a skin xadrez; compara captura e quadro esperado |
+| `scripts/medir-custo.sh` | CPU do Hyprland, GPU e commits/s: escondido × parado, com e sem carga de repintura, e estresse |
+| `cargo xtask skin-teste` / `nitidez` / `fantasma` / `carga` | gera a skin xadrez; compara captura e quadro esperado; acha pixel velho e fantasma; repintura invisível para medir custo |
 
 ## Arquitetura em uma tela
 
@@ -96,6 +107,15 @@ Fora dele, use `~/.cargo/bin/cargo`.
   a resposta é 411.
 - Nunca capture com `grim -g`: a geometria lógica passa por filtro
   bilinear. Use `grim -o <monitor>` e recorte em pixels do monitor.
+- Com a tela apagada o pet não faz commit nenhum depois do primeiro quadro:
+  ele espera o frame callback, que só vem quando o monitor desenha
+  (decisão 0018). O ritmo parado só se mede com a tela acesa.
+- Captura do monitor tem o que estiver na tela (janelas, texto): fica em
+  `tmp/` e é apagada; para o git e para PR, só a foto mascarada do pet.
+- O `shellcheck` não está instalado no host (o `bin/pet verificar` pula).
+  Rodado pela imagem oficial, que depois foi removida:
+  `docker run --rm --network none -v "$PWD:/mnt:ro" -w /mnt
+  koalaman/shellcheck:stable -x bin/pet scripts/*.sh`.
 
 ## Convenções
 

@@ -93,6 +93,21 @@ foto() {
   fi
 }
 
+# Regra de ouro checável no código (decisão 0006): o daemon nunca abre o
+# socket de comandos do Hyprland nem chama hyprctl. Olha só o código de
+# produção (o que vem antes de `#[cfg(test)]`), fora de comentários; os
+# testes podem criar um `.socket.sock` falso para provar que ninguém conecta.
+daemon_sem_socket_de_comandos() {
+  local achados
+  achados="$(find crates/claude-pet/src -name '*.rs' -print0 |
+    xargs -0 awk '/^#\[cfg\(test\)\]/ {nextfile} {print FILENAME ":" FNR ":" $0}' |
+    grep -E '\.socket\.sock|hyprctl' | grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true)"
+  if [ -n "$achados" ]; then
+    printf 'o daemon cita o socket de comandos do Hyprland ou o hyprctl:\n%s\n' "$achados" >&2
+    return 1
+  fi
+}
+
 verificar() {
   local falhou=0
   passo() {
@@ -106,6 +121,7 @@ verificar() {
   }
   passo "cargo fmt" cargo fmt --all --check
   passo "pet-core sem Wayland" core_sem_wayland
+  passo "daemon sem socket de comandos" daemon_sem_socket_de_comandos
   passo "cargo clippy" cargo clippy --all-targets --quiet -- -D warnings
   passo "cargo test" cargo test --quiet
   passo "compose" docker compose config -q
