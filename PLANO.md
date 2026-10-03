@@ -640,10 +640,10 @@ claude-pet/
 ### M3 — Esqueleto andante: hook → reação
 
 **Tarefas:**
-- fio v1 com validação: `/v1/evento`, `/v1/comando`, `/v1/debug/eventos`;
-- plugin (manifests, 13 hooks, `avisar.sh`) e testes canário;
-- cérebro mínimo: sessões, acomodação e dedupe do Stop, T0 aceno contra T1 pulinho;
-- marketplace local pela worktree estável.
+- **T3.1** fio v1 com validação: `/v1/evento` (Host, Content-Type, `X-Pet`, até 8 KiB; 204, 400, 415), `/v1/comando` (`tocar`, `esconder`, `mostrar`), `/v1/debug/eventos` (só debug); o evento chega ao laço principal pelo canal do calloop; o animador toca uma reação uma vez e volta à pose;
+- **T3.2** plugin (manifests, 13 hooks, `avisar.sh`) e testes canário;
+- **T3.3** cérebro mínimo: sessões (só `ent = cli` por padrão), turnos por `prompt_id`, acomodação e dedupe do Stop, T0 aceno contra T1 pulinho, eventos de teste com TTL de 60 s; `/v1/estado.sessoes`, `.ultima_reacao` e `.turnos`;
+- **T3.4** `bin/pet testar`, gate interativo ao vivo com `--plugin-dir`; o marketplace local pela worktree estável entra só depois do merge na `main`.
 
 **Testes canário:**
 - `SEGREDO-n` plantado em todo campo de conteúdo; nada disso pode sair do script;
