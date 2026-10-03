@@ -563,6 +563,31 @@ impl Sessao {
         }
     }
 
+    /// Larga a camada atual e cria outra (output NULL: o monitor focado)
+    /// depois de [`RECRIAR_APOS_FECHAR`], para o monitor assentar. Usado no
+    /// `closed` e quando aparece um monitor de verdade para uma camada que
+    /// caiu no FALLBACK. A camada largada aqui nunca tem pixels do pet (o
+    /// compositor já a fechou, ou ela nunca desenhou).
+    fn recriar_depois(&mut self) {
+        self.cancelar_relogio();
+        self.superficie = None;
+        self.palco = None;
+        self.publicar();
+        let timer = Timer::from_duration(RECRIAR_APOS_FECHAR);
+        let inserido = self.handle.insert_source(timer, |_, _, laco| {
+            if let Some(sessao) = laco.sessao_mut()
+                && sessao.visivel
+                && sessao.superficie.is_none()
+            {
+                sessao.criar_superficie();
+            }
+            TimeoutAction::Drop
+        });
+        if let Err(e) = inserido {
+            erro!("não consegui agendar a recriação da camada: {e}");
+        }
+    }
+
     fn escala_preferida(&mut self, objeto: &WpFractionalScaleV1, escala_120: u32) {
         let Some(superficie) = self.superficie.as_mut() else {
             return;
@@ -659,23 +684,7 @@ impl LayerShellHandler for Sessao {
             "a camada foi fechada pelo compositor; recriando em {} ms",
             RECRIAR_APOS_FECHAR.as_millis()
         );
-        self.cancelar_relogio();
-        self.superficie = None;
-        self.palco = None;
-        self.publicar();
-        let timer = Timer::from_duration(RECRIAR_APOS_FECHAR);
-        let inserido = self.handle.insert_source(timer, |_, _, laco| {
-            if let Some(sessao) = laco.sessao_mut()
-                && sessao.visivel
-                && sessao.superficie.is_none()
-            {
-                sessao.criar_superficie();
-            }
-            TimeoutAction::Drop
-        });
-        if let Err(e) = inserido {
-            erro!("não consegui agendar a recriação da camada: {e}");
-        }
+        self.recriar_depois();
     }
 
     fn configure(
@@ -719,6 +728,15 @@ impl OutputHandler for Sessao {
 
     fn new_output(&mut self, _: &Connection, _: &QueueHandle<Self>, saida: wl_output::WlOutput) {
         info!("monitor: {}", descrever_saida(&self.saidas, &saida));
+        let utilizavel = saida::monitor(&self.saidas, &saida).is_some_and(|m| m.utilizavel());
+        let sem_casa = self.superficie.as_ref().is_some_and(Superficie::sem_casa);
+        if utilizavel && sem_casa {
+            info!(
+                "apareceu um monitor de verdade; recriando a camada em {} ms",
+                RECRIAR_APOS_FECHAR.as_millis()
+            );
+            self.recriar_depois();
+        }
     }
 
     fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, saida: wl_output::WlOutput) {

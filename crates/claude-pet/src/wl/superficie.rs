@@ -109,7 +109,8 @@ pub struct Prontidao {
 
 impl Prontidao {
     /// `do_enter`: o monitor do `enter`, se veio. `reserva`: o primeiro
-    /// monitor utilizável, usado só depois do prazo do `enter`.
+    /// monitor utilizável, usado só depois do prazo do `enter`. Um `enter`
+    /// no FALLBACK (ou num monitor sem tamanho) nunca vira casa do pet.
     pub fn decidir(
         &self,
         entrou: bool,
@@ -121,6 +122,7 @@ impl Prontidao {
             return None;
         }
         let monitor = match (entrou, self.prazo_enter) {
+            (true, _) if do_enter.is_some_and(|m| !m.utilizavel()) => return None,
             (true, _) => do_enter,
             (false, true) => reserva,
             (false, false) => return None,
@@ -166,6 +168,10 @@ pub struct Superficie {
     /// Escondendo: o último quadro enviado é transparente e a superfície
     /// morre no próximo frame callback (ou num prazo curto).
     pub saindo: bool,
+    /// A camada caiu num monitor que não serve de casa (FALLBACK ou sem
+    /// tamanho) ou recebeu um configure 0x0: não desenha e espera um monitor
+    /// de verdade aparecer para ser recriada.
+    sem_casa: bool,
     /// Região de input pedida por último, em coordenadas lógicas da
     /// superfície (`None`: vazia, nenhum clique é do pet).
     regiao: Option<Ret>,
@@ -219,6 +225,7 @@ impl Superficie {
             em_voo: None,
             pendente: false,
             saindo: false,
+            sem_casa: false,
             regiao: None,
             seq: 0,
             ultimo_commit: None,
@@ -252,7 +259,10 @@ impl Superficie {
         shm: &Shm,
     ) -> Result<bool, String> {
         if largura == 0 || altura == 0 {
-            return Err(format!("configure sem tamanho ({largura}x{altura})"));
+            self.sem_casa = true;
+            return Err(format!(
+                "configure sem tamanho ({largura}x{altura}); esperando um monitor de verdade"
+            ));
         }
         self.prontidao.logico = Some((largura, altura));
         self.viewport.set_destination(largura as i32, altura as i32);
@@ -299,6 +309,15 @@ impl Superficie {
     /// mudou (inclusive na primeira vez que fica pronta).
     pub fn resolver(&mut self, saidas: &OutputState) -> Option<Pronta> {
         let do_enter = self.saida.as_ref().and_then(|s| saida::monitor(saidas, s));
+        if let Some(m) = do_enter.as_ref().filter(|m| !m.utilizavel())
+            && !self.sem_casa
+        {
+            info!(
+                "a camada caiu em {} (sem tamanho ou FALLBACK): o pet espera um monitor de verdade",
+                m.nome
+            );
+            self.sem_casa = true;
+        }
         let reserva = saida::primeiro_utilizavel(saidas).map(|(_, m)| m);
         let nova =
             self.prontidao
@@ -362,6 +381,11 @@ impl Superficie {
     /// Já enviou algum quadro de verdade (há o que limpar ao esconder).
     pub fn desenhou(&self) -> bool {
         self.ultima_cena.is_some()
+    }
+
+    /// Caiu num monitor que não serve de casa: espera ser recriada.
+    pub fn sem_casa(&self) -> bool {
+        self.sem_casa
     }
 
     /// Bytes de SHM do buffer do monitor.
@@ -544,6 +568,29 @@ mod testes {
         assert_eq!(pronta.escala, 1.0);
         assert_eq!(pronta.origem, OrigemEscala::Padrao);
         assert_eq!(pronta.monitor, None);
+    }
+
+    #[test]
+    fn enter_no_fallback_ou_sem_tamanho_nunca_vira_casa() {
+        let mut p = mapeada();
+        p.escala_120 = Some(180);
+        p.prazo_escala = true;
+        p.prazo_enter = true;
+        let fallback = Monitor {
+            nome: saida::RESERVA_DO_HYPRLAND.into(),
+            logico: (1920, 1080),
+            modo: Some((1920, 1080)),
+        };
+        let zerado = Monitor {
+            nome: "HDMI-A-1".into(),
+            logico: (0, 0),
+            modo: None,
+        };
+        // Nem com os prazos vencidos e um monitor de reserva à mão: o enter
+        // diz onde a camada está, e lá o pet não aparece.
+        assert_eq!(p.decidir(true, Some(&fallback), Some(&edp())), None);
+        assert_eq!(p.decidir(true, Some(&zerado), Some(&edp())), None);
+        assert!(p.decidir(true, Some(&edp()), None).is_some());
     }
 
     #[test]
