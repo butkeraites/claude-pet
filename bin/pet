@@ -30,7 +30,8 @@ uso: bin/pet <comando>
   parar         para o pet
   logs          acompanha os logs
   estado        mostra /v1/estado (o que o pet está vendo e pensando)
-  foto          captura o pet na tela (grim no monitor inteiro, recorte exato)
+  foto          foto do pet na tela (grim no monitor inteiro, recorte exato;
+                em debug, só os pixels do pet sobre fundo neutro)
   reconstruir   reconstrói a imagem com bases atualizadas e sobe de novo
   dev           modo desenvolvimento em primeiro plano (debug, sem restart)
   verificar     portão antes de todo commit: fmt, clippy, testes, compose, plugin
@@ -54,38 +55,42 @@ core_sem_wayland() {
   fi
 }
 
-# Captura o monitor inteiro com o grim (transformação identidade: pixel do
-# monitor = pixel da imagem) e recorta pelo sprite_disp do /v1/estado, que já
-# está em pixels do monitor. Nunca usa `grim -g`: a geometria lógica passa
-# por um filtro bilinear em meio pixel (revisão de viabilidade).
+# Foto do pet (captura por scripts/capturar-pet.sh: grim no monitor inteiro,
+# nunca `grim -g`). Com PET_DEBUG=1 a foto mostra SÓ os pixels opacos do pet
+# (máscara = alfa 255 do quadro esperado) sobre um fundo neutro: nada do que
+# está atrás dele sai na imagem, e é essa que pode ir para um PR. Sem debug,
+# recorta a célula inteira e avisa que a imagem inclui o fundo. A captura do
+# monitor inteiro é sempre apagada, até quando algo falha no meio.
+FOTO_PASTA=""
 foto() {
-  local estado monitor dpms base x y w h
-  if ! estado="$(api /v1/estado)"; then
-    echo "o pet não respondeu em ${URL} — está de pé? (bin/pet subir)" >&2
-    return 1
-  fi
-  monitor="$(jq -r '.monitor // empty' <<<"$estado")"
-  if [ -z "$monitor" ] || [ "$(jq -r '.sprite_disp == null' <<<"$estado")" = true ]; then
-    echo "o pet não está na tela (tela: $(jq -r .tela <<<"$estado"))" >&2
-    return 1
-  fi
-  # Consulta só de leitura; com a tela apagada o grim espera para sempre.
-  dpms="$(hyprctl -j monitors | jq -r --arg m "$monitor" '.[] | select(.name == $m) | .dpmsStatus')"
-  if [ "$dpms" = false ]; then
-    echo "a tela de ${monitor} está apagada (DPMS): o grim só captura com ela acesa" >&2
-    return 1
-  fi
-  read -r x y w h < <(jq -r '.sprite_disp | "\(.x) \(.y) \(.w) \(.h)"' <<<"$estado")
+  local base x y w h
   mkdir -p "$RAIZ/tmp/fotos"
-  base="$RAIZ/tmp/fotos/$(date +%Y%m%d-%H%M%S)"
-  if ! timeout 10 grim -o "$monitor" "$base-monitor.png"; then
-    echo "o grim falhou ao capturar ${monitor}" >&2
-    rm -f "$base-monitor.png"
+  FOTO_PASTA="$(mktemp -d "$RAIZ/tmp/fotos/.captura-XXXXXX")"
+  trap 'rm -rf "${FOTO_PASTA:-}"' EXIT
+  if ! "$RAIZ/scripts/capturar-pet.sh" "$FOTO_PASTA"; then
     return 1
   fi
-  magick "$base-monitor.png" -crop "${w}x${h}+${x}+${y}" +repage "$base.png"
-  rm -f "$base-monitor.png"
-  printf '%s\n' "$base.png"
+  base="$RAIZ/tmp/fotos/$(date +%Y%m%d-%H%M%S)"
+  if [ -f "$FOTO_PASTA/esperado.png" ]; then
+    read -r x y w h < <(jq -r '"\(.x) \(.y) \(.w) \(.h)"' "$FOTO_PASTA/quadro.json")
+    if ! magick "$FOTO_PASTA/monitor.png" -crop "${w}x${h}+${x}+${y}" +repage \
+      \( "$FOTO_PASTA/esperado.png" -alpha extract -threshold 99.9% \) \
+      -compose CopyOpacity -composite \
+      -background '#202028' -compose Over -flatten "$base.png" ||
+      ! magick "$base.png" -filter point -resize 300% "$base-x3.png"; then
+      echo "o magick falhou ao montar a foto" >&2
+      return 1
+    fi
+    printf '%s\n%s\n' "$base.png" "$base-x3.png"
+  else
+    read -r x y w h < <(jq -r '.sprite_disp | "\(.x) \(.y) \(.w) \(.h)"' "$FOTO_PASTA/estado.json")
+    if ! magick "$FOTO_PASTA/monitor.png" -crop "${w}x${h}+${x}+${y}" +repage "$base.png"; then
+      echo "o magick falhou ao recortar a foto" >&2
+      return 1
+    fi
+    echo "aviso: sem PET_DEBUG a foto inclui o que estiver atrás do pet; não anexe em lugar público" >&2
+    printf '%s\n' "$base.png"
+  fi
 }
 
 verificar() {
