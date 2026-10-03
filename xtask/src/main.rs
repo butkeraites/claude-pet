@@ -4,8 +4,11 @@
 //! `skin-teste` e `nitidez` no M1; `skin-importar`, `zeca`, `lint-skin`,
 //! `cobertura`, `contato` e `fonte` no M2.
 
+mod args;
 mod carga;
 mod fantasma;
+mod folha;
+mod importar;
 mod nitidez;
 mod skin_teste;
 
@@ -101,6 +104,14 @@ fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("carga: {e}");
+                ExitCode::FAILURE
+            }
+        },
+        Some("skin-importar") => match importar::executar(&args[1..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("skin-importar: {e}");
+                eprintln!("{}", importar::USO);
                 ExitCode::FAILURE
             }
         },

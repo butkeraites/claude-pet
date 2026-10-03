@@ -10,6 +10,8 @@ publish = false
 [dependencies]
 pet-core.workspace = true
 serde_json.workspace = true
+# Lê o .aseprite dos packs (skin-importar, zeca).
+asefile = "0.3.8"
 # Só para `cargo xtask carga` (cliente Wayland do host); o pet-core continua
 # sem Wayland.
 smithay-client-toolkit.workspace = true
