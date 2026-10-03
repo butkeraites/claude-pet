@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use pet_core::animador::Repouso;
 use pet_core::cena::Elemento;
-use pet_core::geometria;
+use pet_core::geometria::{self, Ret};
 use pet_core::skin::Skin;
 
 /// Onde e em que escala o pet é desenhado numa superfície.
@@ -52,6 +52,30 @@ impl Pet {
         }
     }
 
+    /// A célula do sprite em pixels do monitor, recortada à tela: o
+    /// `sprite_disp` do `/v1/estado` (a foto e a nitidez recortam por ele).
+    pub fn sprite_disp(&self, palco: &Palco) -> Option<Ret> {
+        let (w, h) = self.skin.ancoras.celula;
+        Ret::novo(palco.x, palco.y, w * palco.d, h * palco.d).intersecao(&Ret::novo(
+            0,
+            0,
+            palco.tela.0,
+            palco.tela.1,
+        ))
+    }
+
+    /// A região clicável (área de toque da skin) em coordenadas lógicas da
+    /// superfície, arredondada para fora; o resto da tela continua
+    /// recebendo os cliques normalmente.
+    pub fn regiao_de_toque(&self, palco: &Palco) -> Option<Ret> {
+        let toque = self
+            .skin
+            .ancoras
+            .toque_no_monitor(palco.x, palco.y, palco.d, false)
+            .intersecao(&Ret::novo(0, 0, palco.tela.0, palco.tela.1))?;
+        Some(geometria::para_logico_por_fora(toque, palco.escala))
+    }
+
     /// O sprite agora e o instante da próxima troca de quadro.
     pub fn sprite(&self, palco: &Palco, agora_ms: u64) -> (Elemento, u64) {
         let (quadro, proxima) = self.repouso.em(agora_ms);
@@ -91,6 +115,23 @@ mod testes {
         // Corpo (toque 10..38) termina a 24 px da direita; pés a 24 px do chão.
         assert_eq!(palco.x + 38 * 5, 1896);
         assert_eq!(palco.y + 45 * 5, 1176);
+    }
+
+    #[test]
+    fn sprite_disp_e_regiao_de_toque() {
+        let pet = pet();
+        let palco = pet.palco((1280, 800), 1.5, (1920, 1200));
+        // Célula 240x240 em (1706, 951): passa 26 px da borda direita.
+        assert_eq!(
+            pet.sprite_disp(&palco),
+            Some(Ret::novo(1706, 951, 214, 240))
+        );
+        // Toque [10,13,28,32] × 5 = (1756, 1016, 140, 160) em pixels do
+        // monitor → (1170.67.., 677.33.., …) lógicos, arredondado para fora.
+        assert_eq!(
+            pet.regiao_de_toque(&palco),
+            Some(Ret::novo(1170, 677, 94, 107))
+        );
     }
 
     #[test]

@@ -166,6 +166,12 @@ pub struct Superficie {
     /// Escondendo: o último quadro enviado é transparente e a superfície
     /// morre no próximo frame callback (ou num prazo curto).
     pub saindo: bool,
+    /// Região de input pedida por último, em coordenadas lógicas da
+    /// superfície (`None`: vazia, nenhum clique é do pet).
+    regiao: Option<Ret>,
+    /// Commits de quadro feitos nesta superfície e quando foi o último.
+    seq: u64,
+    ultimo_commit: Option<Instant>,
 }
 
 /// O que aconteceu num pedido de desenho.
@@ -213,6 +219,9 @@ impl Superficie {
             em_voo: None,
             pendente: false,
             saindo: false,
+            regiao: None,
+            seq: 0,
+            ultimo_commit: None,
         }
     }
 
@@ -310,6 +319,46 @@ impl Superficie {
         Some(nova)
     }
 
+    /// Pede uma região de input nova (vale no próximo commit). Devolve se
+    /// mudou; repetir a mesma região não manda nada ao compositor.
+    pub fn definir_regiao(
+        &mut self,
+        regiao: Option<Ret>,
+        compositor: &CompositorState,
+    ) -> Result<bool, String> {
+        if self.regiao == regiao {
+            return Ok(false);
+        }
+        let nova = Region::new(compositor).map_err(|e| format!("região de input: {e}"))?;
+        if let Some(r) = regiao {
+            nova.add(r.x, r.y, r.w, r.h);
+        }
+        self.camada
+            .wl_surface()
+            .set_input_region(Some(nova.wl_region()));
+        self.regiao = regiao;
+        Ok(true)
+    }
+
+    pub fn regiao(&self) -> Option<Ret> {
+        self.regiao
+    }
+
+    /// Commit só de estado (região de input), sem quadro novo.
+    pub fn commit_de_estado(&mut self) {
+        self.camada.commit();
+    }
+
+    /// A cena do último quadro enviado.
+    pub fn cena_atual(&self) -> Option<&[Elemento]> {
+        self.ultima_cena.as_deref()
+    }
+
+    /// Número do último commit de quadro e há quanto tempo foi.
+    pub fn ultimo_quadro(&self) -> (u64, Option<Duration>) {
+        (self.seq, self.ultimo_commit.map(|t| t.elapsed()))
+    }
+
     /// Já enviou algum quadro de verdade (há o que limpar ao esconder).
     pub fn desenhou(&self) -> bool {
         self.ultima_cena.is_some()
@@ -388,7 +437,10 @@ impl Superficie {
         // O 1x1 do mapeamento saiu de cena.
         self.inicial = None;
         self.ultima_cena = Some(cena.to_vec());
-        self.em_voo = Some(Instant::now());
+        let agora = Instant::now();
+        self.em_voo = Some(agora);
+        self.ultimo_commit = Some(agora);
+        self.seq += 1;
         self.pendente = false;
         Ok(Desenho::Enviado {
             retangulos: danos.len(),

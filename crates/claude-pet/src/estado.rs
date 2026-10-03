@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use pet_core::config::ConfigEfetiva;
+use pet_core::geometria::Ret;
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -17,16 +18,19 @@ pub const LIMITE_SAUDE: Duration = Duration::from_secs(30);
 pub enum Tela {
     /// Sem compositor: antes do login, depois do logout, ou Hyprland caído.
     Aguardando = 0,
-    /// Conectado ao Wayland e ao Hyprland (a partir do M1).
+    /// Conectado, com personagem.
     Ativa = 1,
+    /// Conectado, mas sem personagem aprovado: o pet fica escondido
+    /// (decisão 0011; a skin de teste nunca substitui o personagem).
+    SemPersonagem = 2,
 }
 
 impl Tela {
     fn de_u8(valor: u8) -> Self {
-        if valor == Tela::Ativa as u8 {
-            Tela::Ativa
-        } else {
-            Tela::Aguardando
+        match valor {
+            1 => Tela::Ativa,
+            2 => Tela::SemPersonagem,
+            _ => Tela::Aguardando,
         }
     }
 
@@ -34,14 +38,40 @@ impl Tela {
         match self {
             Tela::Aguardando => "aguardando",
             Tela::Ativa => "ativa",
+            Tela::SemPersonagem => "sem_personagem",
         }
     }
+}
+
+/// Qual skin está na tela e por quê (fixo desde a partida no M1).
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct InfoSkin {
+    /// A skin carregada; `None` quando não há personagem.
+    pub id: Option<String>,
+    /// A skin pedida (a de teste em debug, senão a configurada).
+    pub pedida: String,
+    pub avisos: Vec<String>,
 }
 
 /// O que a sessão Wayland publica para o `/v1/estado` (escrito só pela
 /// thread principal; o ingress só lê).
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Painel {
+    /// Nome do monitor da camada (`wl_output` v4).
+    pub monitor: Option<String>,
+    /// Escala do monitor (`preferred_scale` ÷ 120).
+    pub escala: Option<f64>,
+    /// Pixels do monitor por pixel de arte.
+    pub d: Option<i32>,
+    /// Célula do sprite em pixels do monitor, relativa ao monitor e
+    /// recortada a ele (a foto e a checagem de nitidez recortam por aqui).
+    pub sprite_disp: Option<Ret>,
+    /// Região clicável, em pixels lógicos da superfície.
+    pub regiao_entrada: Option<Ret>,
+    /// O pet está desenhado na tela.
+    pub visivel: bool,
+    /// Teste de estresse rodando.
+    pub estresse: bool,
     /// Commits Wayland no último minuto (orçamento: até 120 parado).
     pub commits_por_min: usize,
     pub commits_total: u64,
@@ -57,6 +87,7 @@ pub struct Compartilhado {
     tela: AtomicU8,
     config: RwLock<ConfigEfetiva>,
     painel: RwLock<Painel>,
+    skin: RwLock<InfoSkin>,
     debug: bool,
 }
 
@@ -68,6 +99,7 @@ impl Compartilhado {
             tela: AtomicU8::new(Tela::Aguardando as u8),
             config: RwLock::new(config),
             painel: RwLock::new(Painel::default()),
+            skin: RwLock::new(InfoSkin::default()),
             debug,
         }
     }
@@ -95,6 +127,10 @@ impl Compartilhado {
         self.tela.store(tela as u8, Ordering::Relaxed);
     }
 
+    pub fn definir_skin(&self, info: InfoSkin) {
+        *self.skin.write().expect("lock da skin envenenado") = info;
+    }
+
     pub fn publicar_painel(&self, painel: Painel) {
         *self.painel.write().expect("lock do painel envenenado") = painel;
     }
@@ -112,15 +148,24 @@ impl Compartilhado {
     pub fn estado_json(&self) -> Value {
         let config = self.config.read().expect("lock da config envenenado");
         let painel = self.painel.read().expect("lock do painel envenenado");
+        let skin = self.skin.read().expect("lock da skin envenenado");
         json!({
             "versao": pet_core::VERSAO,
             "tela": self.tela().nome(),
             "desde_s": self.inicio.elapsed().as_secs(),
             "batimento_ms": self.idade_batimento().as_millis() as u64,
             "debug": self.debug,
+            "monitor": painel.monitor,
+            "escala": painel.escala,
+            "d": painel.d,
+            "sprite_disp": painel.sprite_disp,
+            "regiao_entrada": painel.regiao_entrada,
+            "visivel": painel.visivel,
+            "estresse": painel.estresse,
             "commits_por_min": painel.commits_por_min,
             "commits_total": painel.commits_total,
             "shm_bytes": painel.shm_bytes,
+            "skin": &*skin,
             "config": &*config,
         })
     }
@@ -158,20 +203,38 @@ mod testes {
     fn painel_aparece_no_estado() {
         let c = novo();
         c.publicar_painel(Painel {
+            monitor: Some("eDP-1".into()),
+            escala: Some(1.5),
+            d: Some(5),
+            sprite_disp: Some(Ret::novo(1706, 951, 214, 240)),
             commits_por_min: 42,
             commits_total: 7,
             shm_bytes: 9_216_000,
+            ..Painel::default()
+        });
+        c.definir_skin(InfoSkin {
+            id: None,
+            pedida: "zeca".into(),
+            avisos: vec!["não encontrada".into()],
         });
         let estado = c.estado_json();
+        assert_eq!(estado["monitor"], "eDP-1");
+        assert_eq!(estado["escala"], 1.5);
+        assert_eq!(estado["sprite_disp"]["w"], 214);
+        assert_eq!(estado["skin"]["pedida"], "zeca");
+        assert!(estado["skin"]["id"].is_null());
         assert_eq!(estado["commits_por_min"], 42);
         assert_eq!(estado["commits_total"], 7);
         assert_eq!(estado["shm_bytes"], 9_216_000);
     }
 
     #[test]
-    fn tela_ativa() {
+    fn telas() {
         let c = novo();
         c.definir_tela(Tela::Ativa);
         assert_eq!(c.tela(), Tela::Ativa);
+        c.definir_tela(Tela::SemPersonagem);
+        assert_eq!(c.tela(), Tela::SemPersonagem);
+        assert_eq!(c.saude_json()["tela"], "sem_personagem");
     }
 }

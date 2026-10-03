@@ -11,11 +11,12 @@ use std::time::Duration;
 
 use pet_core::config::ConfigEfetiva;
 use smithay_client_toolkit::reexports::calloop::EventLoop;
+use smithay_client_toolkit::reexports::calloop::channel;
 
 use crate::ambiente::Ambiente;
-use crate::estado::Compartilhado;
+use crate::estado::{Compartilhado, InfoSkin};
 use crate::laco::Laco;
-use crate::{descoberta, ingress, personagem, vigia};
+use crate::{comando, descoberta, ingress, personagem, vigia};
 
 pub fn rodar() -> ExitCode {
     let ambiente = match Ambiente::ler(|nome| std::env::var(nome).ok()) {
@@ -49,7 +50,13 @@ pub fn rodar() -> ExitCode {
         ),
     }
     let comp = Arc::new(Compartilhado::novo(config, ambiente.debug));
+    comp.definir_skin(InfoSkin {
+        id: escolha.skin.as_ref().map(|s| s.id.clone()),
+        pedida: escolha.pedida.clone(),
+        avisos: escolha.avisos.clone(),
+    });
     comp.bater();
+    let (canal, comandos) = channel::sync_channel(comando::CAPACIDADE);
 
     let ouvinte = match TcpListener::bind(ambiente.escuta) {
         Ok(o) => o,
@@ -61,6 +68,8 @@ pub fn rodar() -> ExitCode {
     let ctx = Arc::new(ingress::Contexto {
         comp: Arc::clone(&comp),
         porta_publica: ambiente.porta_publica,
+        debug: ambiente.debug,
+        comandos: Some(canal),
     });
     if let Err(e) = thread::Builder::new()
         .name("ingress".into())
@@ -91,6 +100,10 @@ pub fn rodar() -> ExitCode {
     );
     if let Err(e) = laco.instalar_sinais() {
         erro!("não consegui tratar SIGTERM/SIGINT: {e}");
+        return ExitCode::FAILURE;
+    }
+    if let Err(e) = laco.instalar_comandos(comandos) {
+        erro!("não consegui ligar o canal de comandos: {e}");
         return ExitCode::FAILURE;
     }
     laco.armar_batimento();
@@ -217,6 +230,8 @@ mod testes {
         let ctx = Arc::new(ingress::Contexto {
             comp,
             porta_publica: endereco.port(),
+            debug: false,
+            comandos: None,
         });
         thread::spawn(move || ingress::servir(ouvinte, ctx));
         assert!(checar_saude(endereco));

@@ -7,22 +7,33 @@
 //! As rotas `/v1/*` só aceitam `Host` de loopback na porta pública e o
 //! cabeçalho `X-Pet: 1`: isso barra requisições disparadas por navegador
 //! (DNS rebinding, CSRF).
+//!
+//! Com `PET_DEBUG=1` existem também as rotas `/v1/debug/*` (mesmas
+//! checagens): `quadro` (o RGBA esperado do sprite, para a checagem de
+//! nitidez), `esconder`, `mostrar` e `estresse`. Sem debug elas respondem
+//! 404, como se não existissem.
 
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
+use pet_core::skin::codificar_png;
 use serde_json::json;
+use smithay_client_toolkit::reexports::calloop::channel::SyncSender;
 
+use crate::comando::{Comando, QuadroEsperado};
 use crate::estado::Compartilhado;
 
 pub const LIMITE_CABECALHOS: usize = 8 * 1024;
 pub const LIMITE_CORPO: usize = 8 * 1024;
 const MAX_CONEXOES: usize = 16;
 const TEMPO_LIMITE: Duration = Duration::from_secs(1);
+/// Quanto o `/v1/debug/quadro` espera o laço principal responder.
+const ESPERA_QUADRO: Duration = Duration::from_secs(2);
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Requisicao {
@@ -68,6 +79,10 @@ impl ErroHttp {
 pub struct Contexto {
     pub comp: Arc<Compartilhado>,
     pub porta_publica: u16,
+    /// Rotas `/v1/debug/*` ligadas (`PET_DEBUG=1`).
+    pub debug: bool,
+    /// Canal para o laço principal.
+    pub comandos: Option<SyncSender<Comando>>,
 }
 
 pub fn ler_requisicao(entrada: &mut impl Read) -> Result<Requisicao, ErroHttp> {
@@ -155,6 +170,7 @@ pub fn escrever_resposta(saida: &mut impl Write, status: u16, corpo: &str) -> io
         204 => "No Content",
         400 => "Bad Request",
         403 => "Forbidden",
+        409 => "Conflict",
         404 => "Not Found",
         405 => "Method Not Allowed",
         411 => "Length Required",
@@ -214,8 +230,111 @@ pub fn rotear(req: &Requisicao, ctx: &Contexto) -> (u16, String) {
     match (req.metodo.as_str(), caminho) {
         ("GET", "/v1/estado") => (200, ctx.comp.estado_json().to_string()),
         (_, "/v1/estado") => (405, erro_json("use GET")),
+        (_, rota) if ctx.debug && rota.starts_with("/v1/debug/") => rotear_debug(req, ctx, rota),
         _ => (404, erro_json("rota desconhecida")),
     }
+}
+
+/// Rotas de debug (só com `PET_DEBUG=1`).
+fn rotear_debug(req: &Requisicao, ctx: &Contexto, rota: &str) -> (u16, String) {
+    let esperado = match rota {
+        "/v1/debug/quadro" => "GET",
+        "/v1/debug/esconder" | "/v1/debug/mostrar" | "/v1/debug/estresse" => "POST",
+        _ => return (404, erro_json("rota desconhecida")),
+    };
+    if req.metodo != esperado {
+        return (405, erro_json(&format!("use {esperado}")));
+    }
+    let Some(canal) = &ctx.comandos else {
+        return (503, erro_json("laço principal indisponível"));
+    };
+    let comando = match rota {
+        "/v1/debug/quadro" => return pedir_quadro(canal),
+        "/v1/debug/esconder" => Comando::Esconder,
+        "/v1/debug/mostrar" => Comando::Mostrar,
+        _ => match parametros_estresse(&req.corpo) {
+            Ok((fps, segundos)) => Comando::Estresse { fps, segundos },
+            Err(motivo) => return (400, erro_json(&motivo)),
+        },
+    };
+    match canal.try_send(comando) {
+        Ok(()) => (204, String::new()),
+        Err(_) => (503, erro_json("laço principal ocupado")),
+    }
+}
+
+/// `{"fps":30,"segundos":15}`; corpo vazio usa esses padrões.
+fn parametros_estresse(corpo: &[u8]) -> Result<(u32, u32), String> {
+    if corpo.iter().all(u8::is_ascii_whitespace) {
+        return Ok((30, 15));
+    }
+    let valor: serde_json::Value =
+        serde_json::from_slice(corpo).map_err(|_| "corpo precisa ser JSON".to_owned())?;
+    let campo = |nome: &str, padrao: u64, max: u64| -> Result<u32, String> {
+        match valor.get(nome) {
+            None => Ok(padrao as u32),
+            Some(v) => v
+                .as_u64()
+                .filter(|n| (1..=max).contains(n))
+                .map(|n| n as u32)
+                .ok_or_else(|| format!("{nome} precisa ser inteiro entre 1 e {max}")),
+        }
+    };
+    Ok((campo("fps", 30, 60)?, campo("segundos", 15, 120)?))
+}
+
+fn pedir_quadro(canal: &SyncSender<Comando>) -> (u16, String) {
+    let (resposta, recebe) = mpsc::sync_channel(1);
+    if canal.try_send(Comando::Quadro(resposta)).is_err() {
+        return (503, erro_json("laço principal ocupado"));
+    }
+    match recebe.recv_timeout(ESPERA_QUADRO) {
+        Ok(Some(quadro)) => match quadro_json(&quadro) {
+            Ok(corpo) => (200, corpo),
+            Err(motivo) => (500, erro_json(&motivo)),
+        },
+        Ok(None) => (409, erro_json("o pet não está na tela")),
+        Err(_) => (503, erro_json("o laço principal não respondeu")),
+    }
+}
+
+fn quadro_json(q: &QuadroEsperado) -> Result<String, String> {
+    let png = codificar_png(q.area.w as u32, q.area.h as u32, &q.rgba)?;
+    Ok(json!({
+        "monitor": q.monitor,
+        "x": q.area.x,
+        "y": q.area.y,
+        "w": q.area.w,
+        "h": q.area.h,
+        "d": q.d,
+        "grade": {"x": q.grade.0, "y": q.grade.1},
+        "seq": q.seq,
+        "idade_ms": q.idade_ms,
+        "png_base64": base64(&png),
+    })
+    .to_string())
+}
+
+/// Base64 padrão (RFC 4648, com `=`).
+pub fn base64(dados: &[u8]) -> String {
+    const ALFABETO: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut saida = String::with_capacity(dados.len().div_ceil(3) * 4);
+    for bloco in dados.chunks(3) {
+        let b = [
+            bloco[0],
+            bloco.get(1).copied().unwrap_or(0),
+            bloco.get(2).copied().unwrap_or(0),
+        ];
+        let n = (b[0] as u32) << 16 | (b[1] as u32) << 8 | b[2] as u32;
+        for i in 0..4 {
+            if i <= bloco.len() {
+                saida.push(ALFABETO[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                saida.push('=');
+            }
+        }
+    }
+    saida
 }
 
 /// Aceita conexões para sempre, uma thread curta por conexão (no máximo
@@ -307,7 +426,129 @@ mod testes {
         Contexto {
             comp,
             porta_publica: 27380,
+            debug: false,
+            comandos: None,
         }
+    }
+
+    /// Contexto de debug com o canal ligado a um receptor do teste.
+    fn contexto_debug() -> (
+        Contexto,
+        smithay_client_toolkit::reexports::calloop::channel::Channel<Comando>,
+    ) {
+        let (canal, recebe) = smithay_client_toolkit::reexports::calloop::channel::sync_channel(4);
+        let ctx = Contexto {
+            debug: true,
+            comandos: Some(canal),
+            ..contexto()
+        };
+        (ctx, recebe)
+    }
+
+    fn post(caminho: &str, corpo: &str) -> Requisicao {
+        ler(&format!(
+            "POST {caminho} HTTP/1.1\r\nHost: 127.0.0.1:27380\r\nX-Pet: 1\r\nContent-Length: {}\r\n\r\n{corpo}",
+            corpo.len()
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn rotas_de_debug_nao_existem_sem_debug() {
+        let ctx = contexto();
+        let ok = "Host: 127.0.0.1:27380\r\nX-Pet: 1\r\n";
+        assert_eq!(rotear(&get("/v1/debug/quadro", ok), &ctx).0, 404);
+        assert_eq!(rotear(&post("/v1/debug/esconder", ""), &ctx).0, 404);
+    }
+
+    #[test]
+    fn rotas_de_debug_mandam_comandos() {
+        let (ctx, recebe) = contexto_debug();
+        assert_eq!(rotear(&post("/v1/debug/esconder", ""), &ctx).0, 204);
+        assert_eq!(rotear(&post("/v1/debug/mostrar", ""), &ctx).0, 204);
+        assert_eq!(
+            rotear(
+                &post("/v1/debug/estresse", r#"{"fps":20,"segundos":3}"#),
+                &ctx
+            )
+            .0,
+            204
+        );
+        assert_eq!(
+            rotear(&post("/v1/debug/estresse", "{\"fps\":0}"), &ctx).0,
+            400
+        );
+        assert_eq!(rotear(&post("/v1/debug/estresse", "lixo"), &ctx).0, 400);
+        let ok = "Host: 127.0.0.1:27380\r\nX-Pet: 1\r\n";
+        assert_eq!(rotear(&get("/v1/debug/esconder", ok), &ctx).0, 405);
+        assert_eq!(rotear(&get("/v1/debug/nada", ok), &ctx).0, 404);
+        // As mesmas checagens de Host e X-Pet valem para o debug.
+        assert_eq!(
+            rotear(
+                &get("/v1/debug/quadro", "Host: evil.com:27380\r\nX-Pet: 1\r\n"),
+                &ctx
+            )
+            .0,
+            403
+        );
+        drop(ctx);
+        let mut recebidos = Vec::new();
+        let mut laco =
+            smithay_client_toolkit::reexports::calloop::EventLoop::<Vec<String>>::try_new()
+                .unwrap();
+        laco.handle()
+            .insert_source(recebe, |evento, _, lista: &mut Vec<String>| {
+                if let smithay_client_toolkit::reexports::calloop::channel::Event::Msg(c) = evento {
+                    lista.push(format!("{c:?}"));
+                }
+            })
+            .unwrap();
+        laco.dispatch(Some(Duration::from_millis(50)), &mut recebidos)
+            .unwrap();
+        assert_eq!(
+            recebidos,
+            vec![
+                "Esconder".to_owned(),
+                "Mostrar".to_owned(),
+                "Estresse { fps: 20, segundos: 3 }".to_owned()
+            ]
+        );
+    }
+
+    #[test]
+    fn parametros_do_estresse() {
+        assert_eq!(parametros_estresse(b""), Ok((30, 15)));
+        assert_eq!(parametros_estresse(br#"{"segundos":5}"#), Ok((30, 5)));
+        assert!(parametros_estresse(br#"{"fps":61}"#).is_err());
+        assert!(parametros_estresse(br#"{"segundos":-1}"#).is_err());
+    }
+
+    #[test]
+    fn base64_rfc4648() {
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foo"), "Zm9v");
+        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
+        assert_eq!(base64(&[0xff, 0xfe, 0x00]), "//4A");
+    }
+
+    #[test]
+    fn quadro_vira_json_com_png() {
+        let q = QuadroEsperado {
+            monitor: "eDP-1".into(),
+            area: pet_core::geometria::Ret::novo(10, 20, 2, 1),
+            grade: (10, 20),
+            d: 5,
+            seq: 3,
+            idade_ms: 1500,
+            rgba: vec![255, 0, 0, 255, 0, 0, 0, 0],
+        };
+        let v: serde_json::Value = serde_json::from_str(&quadro_json(&q).unwrap()).unwrap();
+        assert_eq!(v["monitor"], "eDP-1");
+        assert_eq!(v["w"], 2);
+        assert_eq!(v["grade"]["y"], 20);
+        assert!(v["png_base64"].as_str().unwrap().starts_with("iVBORw0KGgo"));
     }
 
     fn get(caminho: &str, extra: &str) -> Requisicao {

@@ -21,6 +21,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use signal_hook::consts::{SIGINT, SIGTERM};
+use smithay_client_toolkit::reexports::calloop::channel::{self, Channel};
 use smithay_client_toolkit::reexports::calloop::generic::Generic;
 use smithay_client_toolkit::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay_client_toolkit::reexports::calloop::{
@@ -30,6 +31,7 @@ use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
 
 use pet_core::skin::Skin;
 
+use crate::comando::Comando;
 use crate::descoberta::{self, Reconexao};
 use crate::estado::{Compartilhado, Painel, Tela};
 use crate::wl;
@@ -54,6 +56,8 @@ pub struct Laco {
     ultima_espera: Option<String>,
     /// O personagem (só a skin de teste, em debug, no M1).
     skin: Option<Rc<Skin>>,
+    /// O pet deve estar na tela (o debug pode esconder e mostrar).
+    visivel: bool,
     pub parar: bool,
 }
 
@@ -84,6 +88,7 @@ impl Laco {
             batimento: None,
             ultima_espera: None,
             skin,
+            visivel: true,
             parar: false,
         }
     }
@@ -111,6 +116,42 @@ impl Laco {
             })
             .map_err(|e| std::io::Error::other(e.to_string()))?;
         Ok(())
+    }
+
+    /// Comandos das outras threads (rotas de debug no M1).
+    pub fn instalar_comandos(&mut self, canal: Channel<Comando>) -> Result<(), String> {
+        self.handle
+            .insert_source(canal, |evento, _, laco| {
+                if let channel::Event::Msg(comando) = evento {
+                    laco.comando(comando);
+                }
+            })
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
+    fn comando(&mut self, comando: Comando) {
+        match comando {
+            Comando::Esconder | Comando::Mostrar => {
+                self.visivel = matches!(comando, Comando::Mostrar);
+                info!(
+                    "debug: {}",
+                    if self.visivel { "mostrar" } else { "esconder" }
+                );
+                let visivel = self.visivel;
+                if let Some(sessao) = self.sessao_mut() {
+                    sessao.definir_visivel(visivel);
+                }
+            }
+            Comando::Estresse { fps, segundos } => match self.sessao_mut() {
+                Some(sessao) => sessao.estresse(fps, segundos),
+                None => aviso!("debug: estresse pedido sem compositor"),
+            },
+            Comando::Quadro(resposta) => {
+                let quadro = self.sessao_mut().and_then(|s| s.quadro_esperado());
+                let _ = resposta.try_send(quadro);
+            }
+        }
     }
 
     /// (Re)arma o batimento de 5 s. Chamado na partida e depois de um erro
@@ -223,9 +264,14 @@ impl Laco {
             assinatura,
             desde: agora,
         });
-        self.comp.definir_tela(Tela::Ativa);
+        self.comp.definir_tela(if self.skin.is_some() {
+            Tela::Ativa
+        } else {
+            Tela::SemPersonagem
+        });
+        let visivel = self.visivel;
         if let Some(sessao) = self.sessao_mut() {
-            sessao.definir_visivel(true);
+            sessao.definir_visivel(visivel);
         }
         None
     }

@@ -30,6 +30,7 @@ uso: bin/pet <comando>
   parar         para o pet
   logs          acompanha os logs
   estado        mostra /v1/estado (o que o pet está vendo e pensando)
+  foto          captura o pet na tela (grim no monitor inteiro, recorte exato)
   reconstruir   reconstrói a imagem com bases atualizadas e sobe de novo
   dev           modo desenvolvimento em primeiro plano (debug, sem restart)
   verificar     portão antes de todo commit: fmt, clippy, testes, compose, plugin
@@ -51,6 +52,40 @@ core_sem_wayland() {
     printf 'pet-core depende de:\n%s\n' "$proibidas" >&2
     return 1
   fi
+}
+
+# Captura o monitor inteiro com o grim (transformação identidade: pixel do
+# monitor = pixel da imagem) e recorta pelo sprite_disp do /v1/estado, que já
+# está em pixels do monitor. Nunca usa `grim -g`: a geometria lógica passa
+# por um filtro bilinear em meio pixel (revisão de viabilidade).
+foto() {
+  local estado monitor dpms base x y w h
+  if ! estado="$(api /v1/estado)"; then
+    echo "o pet não respondeu em ${URL} — está de pé? (bin/pet subir)" >&2
+    return 1
+  fi
+  monitor="$(jq -r '.monitor // empty' <<<"$estado")"
+  if [ -z "$monitor" ] || [ "$(jq -r '.sprite_disp == null' <<<"$estado")" = true ]; then
+    echo "o pet não está na tela (tela: $(jq -r .tela <<<"$estado"))" >&2
+    return 1
+  fi
+  # Consulta só de leitura; com a tela apagada o grim espera para sempre.
+  dpms="$(hyprctl -j monitors | jq -r --arg m "$monitor" '.[] | select(.name == $m) | .dpmsStatus')"
+  if [ "$dpms" = false ]; then
+    echo "a tela de ${monitor} está apagada (DPMS): o grim só captura com ela acesa" >&2
+    return 1
+  fi
+  read -r x y w h < <(jq -r '.sprite_disp | "\(.x) \(.y) \(.w) \(.h)"' <<<"$estado")
+  mkdir -p "$RAIZ/tmp/fotos"
+  base="$RAIZ/tmp/fotos/$(date +%Y%m%d-%H%M%S)"
+  if ! timeout 10 grim -o "$monitor" "$base-monitor.png"; then
+    echo "o grim falhou ao capturar ${monitor}" >&2
+    rm -f "$base-monitor.png"
+    return 1
+  fi
+  magick "$base-monitor.png" -crop "${w}x${h}+${x}+${y}" +repage "$base.png"
+  rm -f "$base-monitor.png"
+  printf '%s\n' "$base.png"
 }
 
 verificar() {
@@ -103,6 +138,7 @@ case "$comando" in
       exit 1
     fi
     ;;
+  foto) foto ;;
   reconstruir) docker compose build --pull pet && docker compose up -d pet ;;
   dev) docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build ;;
   verificar) verificar ;;

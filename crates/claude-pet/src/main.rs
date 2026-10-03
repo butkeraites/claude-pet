@@ -9,6 +9,7 @@
 mod registro;
 
 mod ambiente;
+mod comando;
 mod daemon;
 mod descoberta;
 mod estado;

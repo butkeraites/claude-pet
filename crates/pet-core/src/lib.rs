@@ -6,6 +6,7 @@
 
 pub mod animador;
 pub mod cena;
+pub mod confete;
 pub mod config;
 pub mod geometria;
 pub mod raster;

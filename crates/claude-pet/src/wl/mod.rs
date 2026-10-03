@@ -17,6 +17,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use pet_core::cena::{self, Elemento};
+use pet_core::confete::Chuva;
 use pet_core::skin::Skin;
 
 use smithay_client_toolkit as sctk;
@@ -25,7 +27,9 @@ use smithay_client_toolkit::output::{OutputHandler, OutputState};
 use smithay_client_toolkit::reexports::calloop::{LoopHandle, RegistrationToken};
 use smithay_client_toolkit::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay_client_toolkit::reexports::client::globals::{GlobalList, registry_queue_init};
-use smithay_client_toolkit::reexports::client::protocol::{wl_output, wl_surface};
+use smithay_client_toolkit::reexports::client::protocol::{
+    wl_output, wl_pointer, wl_seat, wl_surface,
+};
 use smithay_client_toolkit::reexports::client::{
     Connection, Dispatch, EventQueue, QueueHandle, delegate_noop,
 };
@@ -33,15 +37,22 @@ use smithay_client_toolkit::reexports::protocols::wp::fractional_scale::v1::clie
 use smithay_client_toolkit::reexports::protocols::wp::fractional_scale::v1::client::wp_fractional_scale_v1::{
     self, WpFractionalScaleV1,
 };
+use smithay_client_toolkit::reexports::protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::{
+    Shape, WpCursorShapeDeviceV1,
+};
 use smithay_client_toolkit::reexports::protocols::wp::viewporter::client::wp_viewport::WpViewport;
 use smithay_client_toolkit::reexports::protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
 use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
+use smithay_client_toolkit::seat::pointer::cursor_shape::CursorShapeManager;
+use smithay_client_toolkit::seat::pointer::{PointerEvent, PointerEventKind, PointerHandler};
+use smithay_client_toolkit::seat::{Capability, SeatHandler, SeatState};
 use smithay_client_toolkit::shell::wlr_layer::{
     LayerShell, LayerShellHandler, LayerSurface, LayerSurfaceConfigure,
 };
 use smithay_client_toolkit::shm::{Shm, ShmHandler};
 use smithay_client_toolkit::{delegate_registry, registry_handlers};
 
+use crate::comando::QuadroEsperado;
 use crate::estado::{Compartilhado, Painel};
 use crate::laco::Laco;
 use crate::pet::{Palco, Pet};
@@ -67,6 +78,18 @@ const RECRIAR_APOS_FECHAR: Duration = Duration::from_millis(250);
 const ESPERA_DESTRUIR: Duration = Duration::from_millis(50);
 /// Janela da contagem de commits.
 const JANELA_COMMITS: Duration = Duration::from_secs(60);
+/// Confetes do teste de estresse, sempre com a mesma semente: medições
+/// repetidas veem as mesmas trajetórias.
+const CONFETES: usize = 40;
+const SEMENTE_CONFETE: u64 = 7;
+
+/// Teste de estresse em curso (`/v1/debug/estresse`).
+struct Estresse {
+    chuva: Chuva,
+    intervalo: Duration,
+    ultimo_passo: Instant,
+    fim: Instant,
+}
 
 /// Commits Wayland: o total e os do último minuto (orçamento da decisão
 /// 0005: média de até 2/s parado, 0 dormindo, rajadas de até 30 fps).
@@ -122,6 +145,11 @@ pub struct Sessao {
     relogio: Option<RegistrationToken>,
     commits: Commits,
     comp: Arc<Compartilhado>,
+    assentos: SeatState,
+    ponteiro: Option<wl_pointer::WlPointer>,
+    cursores: Option<CursorShapeManager>,
+    forma_do_cursor: Option<WpCursorShapeDeviceV1>,
+    estresse: Option<Estresse>,
 }
 
 /// Resultado do handshake: a conexão, a fila e o estado que ela despacha.
@@ -166,6 +194,8 @@ pub fn conectar(
     let fracional = globais
         .bind::<WpFractionalScaleManagerV1, _, _>(&qh, 1..=1, ())
         .ok();
+    let assentos = SeatState::new(&globais, &qh);
+    let cursores = CursorShapeManager::bind(&globais, &qh).ok();
     let sessao = Sessao {
         registro: RegistryState::new(&globais),
         saidas: OutputState::new(&globais, &qh),
@@ -185,6 +215,11 @@ pub fn conectar(
         relogio: None,
         commits: Commits::default(),
         comp,
+        assentos,
+        ponteiro: None,
+        cursores,
+        forma_do_cursor: None,
+        estresse: None,
     };
     Ok(Conexao {
         conexao,
@@ -221,14 +256,76 @@ impl Sessao {
         self.inicio.elapsed().as_millis() as u64
     }
 
-    /// Publica as medidas da sessão no `/v1/estado`.
+    /// Publica o que a sessão sabe no `/v1/estado`.
     pub fn publicar(&mut self) {
+        let superficie = self.superficie.as_ref();
+        let pronta = superficie.and_then(Superficie::pronta);
+        let visivel = superficie.is_some_and(|s| s.desenhou() && !s.saindo);
+        let (d, sprite_disp) = match (&self.palco, &self.pet) {
+            (Some(palco), Some(pet)) if visivel => (Some(palco.d), pet.sprite_disp(palco)),
+            _ => (None, None),
+        };
         let painel = Painel {
+            monitor: pronta.and_then(|p| p.monitor.clone()),
+            escala: pronta.map(|p| p.escala),
+            d,
+            sprite_disp,
+            regiao_entrada: superficie.and_then(Superficie::regiao),
+            visivel,
+            estresse: self.estresse.is_some(),
             commits_por_min: self.commits.por_minuto(Instant::now()),
             commits_total: self.commits.total,
-            shm_bytes: self.superficie.as_ref().map_or(0, Superficie::bytes_shm),
+            shm_bytes: superficie.map_or(0, Superficie::bytes_shm),
         };
         self.comp.publicar_painel(painel);
+    }
+
+    /// O sprite como está na tela agora, para a checagem de nitidez.
+    pub fn quadro_esperado(&self) -> Option<QuadroEsperado> {
+        let superficie = self.superficie.as_ref()?;
+        if superficie.saindo {
+            return None;
+        }
+        let pronta = superficie.pronta()?;
+        let pet = self.pet.as_ref()?;
+        let palco = self.palco.as_ref()?;
+        let sprite = superficie
+            .cena_atual()?
+            .iter()
+            .find(|e| matches!(e, Elemento::Sprite { .. }))?;
+        let Elemento::Sprite { x, y, d, .. } = *sprite else {
+            return None;
+        };
+        let area = pet.sprite_disp(palco)?;
+        let (seq, idade) = superficie.ultimo_quadro();
+        Some(QuadroEsperado {
+            monitor: pronta.monitor.clone().unwrap_or_default(),
+            area,
+            grade: (x, y),
+            d,
+            seq,
+            idade_ms: idade.map_or(0, |t| t.as_millis() as u64),
+            rgba: cena::rgba_do_sprite(pet.skin(), sprite, area),
+        })
+    }
+
+    /// Confete pela tela inteira por `segundos`, a `fps` quadros por
+    /// segundo; depois volta ao repouso.
+    pub fn estresse(&mut self, fps: u32, segundos: u32) {
+        let Some(palco) = self.palco else {
+            aviso!("debug: estresse pedido com o pet fora da tela");
+            return;
+        };
+        let agora = Instant::now();
+        let lado = (palco.d * 3).max(4);
+        self.estresse = Some(Estresse {
+            chuva: Chuva::nova(CONFETES, palco.tela, lado, SEMENTE_CONFETE),
+            intervalo: Duration::from_secs(1) / fps.max(1),
+            ultimo_passo: agora,
+            fim: agora + Duration::from_secs(segundos as u64),
+        });
+        info!("debug: estresse com {CONFETES} confetes a {fps} fps por {segundos} s");
+        self.desenhar();
     }
 
     fn contar_commit(&mut self) {
@@ -276,6 +373,7 @@ impl Sessao {
 
     fn esconder(&mut self) {
         self.cancelar_relogio();
+        self.estresse = None;
         let (Some(superficie), Some(pet)) = (self.superficie.as_mut(), self.pet.as_ref()) else {
             self.superficie = None;
             return;
@@ -285,6 +383,9 @@ impl Sessao {
             return;
         }
         superficie.saindo = true;
+        if let Err(e) = superficie.definir_regiao(None, &self.compositor) {
+            aviso!("região de input ao esconder: {e}");
+        }
         let geracao = superficie.geracao;
         match superficie.desenhar(&[], pet.skin(), &self.shm, &self.qh, true) {
             Ok(Desenho::Enviado { .. }) => self.contar_commit(),
@@ -305,23 +406,50 @@ impl Sessao {
     /// Desenha o quadro de agora (se a camada está pronta e algo mudou) e
     /// agenda a próxima troca.
     fn desenhar(&mut self) {
+        let agora = Instant::now();
         let agora_ms = self.agora_ms();
-        let (Some(superficie), Some(pet), Some(palco)) = (
-            self.superficie.as_mut(),
-            self.pet.as_ref(),
-            self.palco.as_ref(),
-        ) else {
+        let Some(palco) = self.palco else {
+            return;
+        };
+        let (Some(superficie), Some(pet)) = (self.superficie.as_mut(), self.pet.as_ref()) else {
             return;
         };
         if superficie.saindo {
             return;
         }
-        let (cena, proxima) = pet.cena(palco, agora_ms);
+        let (mut cena, mut proxima) = pet.cena(&palco, agora_ms);
+        if self.estresse.as_ref().is_some_and(|e| agora >= e.fim) {
+            self.estresse = None;
+            info!("debug: estresse acabou");
+        }
+        if let Some(estresse) = self.estresse.as_mut() {
+            if agora.duration_since(estresse.ultimo_passo) >= estresse.intervalo {
+                estresse.chuva.passo(palco.tela);
+                estresse.ultimo_passo = agora;
+            }
+            cena.extend(estresse.chuva.elementos());
+            let passo = (estresse.ultimo_passo + estresse.intervalo).min(estresse.fim);
+            let passo_ms = passo.saturating_duration_since(self.inicio).as_millis() as u64;
+            proxima = Some(proxima.map_or(passo_ms, |p| p.min(passo_ms)));
+        }
+        let regiao = pet.regiao_de_toque(&palco);
+        let mudou_regiao = superficie
+            .definir_regiao(regiao, &self.compositor)
+            .unwrap_or_else(|e| {
+                aviso!("região de input: {e}");
+                false
+            });
         let resultado = superficie.desenhar(&cena, pet.skin(), &self.shm, &self.qh, false);
         match resultado {
             Ok(Desenho::Enviado { retangulos, area }) => {
                 self.contar_commit();
-                depurar!("quadro enviado: {retangulos} retângulo(s) de dano, {area} px");
+                if self.estresse.is_none() {
+                    depurar!("quadro enviado: {retangulos} retângulo(s) de dano, {area} px");
+                }
+            }
+            Ok(Desenho::SemMudanca) if mudou_regiao => {
+                superficie.commit_de_estado();
+                self.contar_commit();
             }
             Ok(Desenho::SemMudanca | Desenho::Adiado) => {}
             Err(e) => aviso!("desenho: {e}"),
@@ -621,11 +749,84 @@ impl ProvidesRegistryState for Sessao {
     fn registry(&mut self) -> &mut RegistryState {
         &mut self.registro
     }
-    registry_handlers![OutputState];
+    registry_handlers![OutputState, SeatState];
 }
 
 delegate_registry!(Sessao);
 sctk::delegate_dispatch2!(Sessao);
+
+impl SeatHandler for Sessao {
+    fn seat_state(&mut self) -> &mut SeatState {
+        &mut self.assentos
+    }
+
+    fn new_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
+
+    fn new_capability(
+        &mut self,
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+        assento: wl_seat::WlSeat,
+        capacidade: Capability,
+    ) {
+        if capacidade != Capability::Pointer || self.ponteiro.is_some() {
+            return;
+        }
+        match self.assentos.get_pointer(qh, &assento) {
+            Ok(ponteiro) => {
+                self.forma_do_cursor = self
+                    .cursores
+                    .as_ref()
+                    .map(|c| c.get_shape_device(&ponteiro, qh));
+                self.ponteiro = Some(ponteiro);
+            }
+            Err(e) => aviso!("ponteiro: {e}"),
+        }
+    }
+
+    fn remove_capability(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: wl_seat::WlSeat,
+        capacidade: Capability,
+    ) {
+        if capacidade == Capability::Pointer {
+            if let Some(forma) = self.forma_do_cursor.take() {
+                forma.destroy();
+            }
+            if let Some(ponteiro) = self.ponteiro.take() {
+                ponteiro.release();
+            }
+        }
+    }
+
+    fn remove_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
+}
+
+impl PointerHandler for Sessao {
+    /// No M1 o ponteiro só troca o cursor para "pegar" em cima do pet; o
+    /// arraste chega no M4. Coordenadas nunca vão para o log.
+    fn pointer_frame(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_pointer::WlPointer,
+        eventos: &[PointerEvent],
+    ) {
+        for evento in eventos {
+            let nossa = self
+                .superficie
+                .as_ref()
+                .is_some_and(|s| s.eh(&evento.surface));
+            if let (true, PointerEventKind::Enter { serial }) = (nossa, &evento.kind)
+                && let Some(forma) = &self.forma_do_cursor
+            {
+                forma.set_shape(*serial, Shape::Grab);
+            }
+        }
+    }
+}
 
 impl Drop for Sessao {
     fn drop(&mut self) {
