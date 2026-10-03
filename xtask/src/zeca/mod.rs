@@ -35,7 +35,13 @@ use crate::importar::{self, Importado, TABELA_CUTE_PARROTS, Tiras};
 use arte::{Ajuste, Arte};
 use compor::{Analise, Protegidas, Relatorio, Vestido};
 
-pub const USO: &str = "uso: cargo xtask zeca --pack <zip|pasta> [--contorno] [--saida <pasta>] [--arte <pasta>] [--ancoras]";
+pub const USO: &str = "uso: cargo xtask zeca --pack <zip|pasta> [--contorno] [--saida <pasta>] [--arte <pasta>] [--ancoras] [--estrito]";
+
+/// Distância mínima do chapéu solto à borda da célula (o contorno creme de
+/// 1 pixel cabe e ainda sobra 1).
+pub const FOLGA_BORDA: i32 = 2;
+/// Maior salto do centro do chapéu solto entre dois quadros seguidos.
+pub const SALTO_SOLTO: i32 = 3;
 
 /// Um quadro da folha do Zeca: o corpo (quadro do pack) e o que vai por cima.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,10 +105,16 @@ fn posicoes(importado: &Importado) -> Vec<Option<(String, usize)>> {
     posicao
 }
 
-fn aplicar(base: Option<compor::Colocacao>, ajuste: Option<&Ajuste>) -> Option<compor::Colocacao> {
+fn aplicar(
+    base: Option<compor::Colocacao>,
+    ajuste: Option<&Ajuste>,
+    variante_padrao: &str,
+    onde: &str,
+) -> Result<Option<compor::Colocacao>, String> {
     match ajuste {
-        Some(a) => compor::ajustar(base, a),
-        None => base,
+        Some(a) => compor::ajustar(base, a, variante_padrao)
+            .map_err(|e| format!("ancoras.json, {onde}: {e}")),
+        None => Ok(base),
     }
 }
 
@@ -113,9 +125,23 @@ fn vestir_pack(
     fontes: &[Option<usize>],
     arte: &Arte,
     avisos: &mut Vec<String>,
-) -> Vec<Vestido> {
+) -> Result<Vec<Vestido>, String> {
     let posicao = posicoes(importado);
     let regra = &arte.ancoras.regra;
+    // Toda correção por quadro aponta para um quadro que existe na tag.
+    for (tag, at) in &arte.ancoras.tags {
+        if let Some(t) = importado.tags.iter().find(|t| &t.nome == tag) {
+            let n = t.ate - t.de + 1;
+            for indice in at.quadros.keys() {
+                if indice.parse::<usize>().is_ok_and(|i| i >= n) {
+                    return Err(format!(
+                        "ancoras.json, tag {tag}: quadro «{indice}», mas a tag tem {n} quadros (0 a {})",
+                        n - 1
+                    ));
+                }
+            }
+        }
+    }
     (0..importado.quadros.len())
         .map(|b| {
             let a = analises[b];
@@ -127,7 +153,8 @@ fn vestir_pack(
             let mut chapeu = compor::pela_regra(olho, &regra.chapeu);
             let mut gravata = compor::pela_regra(olho, &regra.gravata);
             if let Some((tag, i)) = &posicao[b] {
-                if olho.is_none() && !arte.zeca.skin.excluir.contains(tag) {
+                let excluida = arte.zeca.skin.excluir.contains(tag);
+                if olho.is_none() && !excluida {
                     avisos.push(format!(
                         "{tag}[{i}]: sem olho {}; só âncora manual",
                         if a.clarao {
@@ -137,40 +164,113 @@ fn vestir_pack(
                         }
                     ));
                 }
-                if let Some(at) = arte.ancoras.tags.get(tag) {
-                    chapeu = aplicar(chapeu, at.chapeu.as_ref());
-                    gravata = aplicar(gravata, at.gravata.as_ref());
+                if let (Some(at), false) = (arte.ancoras.tags.get(tag), excluida) {
+                    let (vc, vg) = (&regra.chapeu.variante, &regra.gravata.variante);
+                    let onde = format!("{tag}[{i}]");
+                    chapeu = aplicar(chapeu, at.chapeu.as_ref(), vc, &onde)?;
+                    gravata = aplicar(gravata, at.gravata.as_ref(), vg, &onde)?;
                     if let Some(q) = at.quadros.get(&i.to_string()) {
-                        chapeu = aplicar(chapeu, q.chapeu.as_ref());
-                        gravata = aplicar(gravata, q.gravata.as_ref());
+                        chapeu = aplicar(chapeu, q.chapeu.as_ref(), vc, &onde)?;
+                        gravata = aplicar(gravata, q.gravata.as_ref(), vg, &onde)?;
                     }
                 }
             }
-            Vestido {
+            Ok(Vestido {
                 chapeu,
                 gravata,
                 branco: a.clarao,
-            }
+            })
         })
         .collect()
 }
 
-/// As tags do Zeca: as do pack (menos as excluídas), as do chapéu voando no
-/// lugar das originais e as compostas no fim.
+/// Quadros de uma tag do pack na ordem em que ela toca (a direção do
+/// Aseprite, como `pet_core::animador::sequencia`): as tags do Zeca saem
+/// sempre `forward`, com a ordem já expandida.
+fn sequencia_do_pack(t: &TagFolha) -> Result<Vec<usize>, String> {
+    let ida: Vec<usize> = (t.de..=t.ate).collect();
+    let miolo: Vec<usize> = if ida.len() > 2 {
+        ida[1..ida.len() - 1].to_vec()
+    } else {
+        Vec::new()
+    };
+    Ok(match t.direcao.as_str() {
+        "forward" => ida,
+        "reverse" => ida.into_iter().rev().collect(),
+        "pingpong" => ida.iter().chain(miolo.iter().rev()).copied().collect(),
+        "pingpong_reverse" => ida.iter().rev().chain(miolo.iter()).copied().collect(),
+        outra => return Err(format!("tag «{}» com direção «{outra}»", t.nome)),
+    })
+}
+
+/// Os quadros de um voo do chapéu sobre os corpos da tag `t` do pack.
+fn quadros_do_voo(
+    nome: &str,
+    voo: &arte::Voo,
+    t: &TagFolha,
+    vestidos: &[Vestido],
+    arte: &Arte,
+) -> Result<Vec<QuadroZeca>, String> {
+    voo.quadros
+        .iter()
+        .enumerate()
+        .map(|(i, q)| {
+            let corpo = t.de + q.corpo;
+            if corpo > t.ate {
+                return Err(format!(
+                    "chapeu_voando.json, {nome}[{i}]: corpo {} além dos {} quadros de «{}»",
+                    q.corpo,
+                    t.ate - t.de + 1,
+                    t.nome
+                ));
+            }
+            let base = &vestidos[corpo];
+            let chapeu = compor::chapeu_do_voo(&q.chapeu, base.chapeu.as_ref(), &arte.sprites)
+                .map_err(|e| format!("chapeu_voando.json, {nome}[{i}]: {e}"))?;
+            Ok(QuadroZeca {
+                corpo,
+                ms: q.ms,
+                solto: !q.chapeu.assentado,
+                vestido: Vestido {
+                    chapeu,
+                    ..base.clone()
+                },
+            })
+        })
+        .collect()
+}
+
+/// As tags do Zeca: as do pack (menos as excluídas, na ordem e direção do
+/// pack), as do chapéu voando no lugar das originais, as tags novas do
+/// chapéu voando (com `base`) e as compostas no fim.
 fn roteiro(
     importado: &Importado,
     vestidos: &[Vestido],
     arte: &Arte,
 ) -> Result<Vec<TagZeca>, String> {
-    for nome in arte.voos.tags.keys() {
-        if importado.tags.iter().all(|t| &t.nome != nome) {
-            return Err(format!(
-                "chapeu_voando.json: a tag «{nome}» não existe no pack"
-            ));
+    let do_pack = |nome: &str| importado.tags.iter().find(|t| t.nome == nome);
+    for (nome, voo) in &arte.voos.tags {
+        match &voo.base {
+            None if do_pack(nome).is_none() => {
+                return Err(format!(
+                    "chapeu_voando.json: a tag «{nome}» não existe no pack (para uma tag nova, dê a «base»)"
+                ));
+            }
+            Some(base) if do_pack(base).is_none() => {
+                return Err(format!(
+                    "chapeu_voando.json, «{nome}»: a base «{base}» não existe no pack"
+                ));
+            }
+            Some(_) if do_pack(nome).is_some() => {
+                return Err(format!(
+                    "chapeu_voando.json: «{nome}» já é uma tag do pack; a tag nova precisa de outro nome"
+                ));
+            }
+            _ => {}
         }
     }
     for nome in arte.ancoras.tags.keys() {
-        if importado.tags.iter().all(|t| &t.nome != nome) {
+        if do_pack(nome).is_none() {
             return Err(format!("ancoras.json: a tag «{nome}» não existe no pack"));
         }
     }
@@ -179,34 +279,10 @@ fn roteiro(
         if arte.zeca.skin.excluir.contains(&t.nome) {
             continue;
         }
-        let quadros = match arte.voos.tags.get(&t.nome) {
-            Some(voo) => voo
-                .quadros
-                .iter()
-                .enumerate()
-                .map(|(i, q)| {
-                    let corpo = t.de + q.corpo;
-                    if corpo > t.ate {
-                        return Err(format!(
-                            "chapeu_voando.json, {}[{i}]: corpo {} além dos {} quadros da tag",
-                            t.nome,
-                            q.corpo,
-                            t.ate - t.de + 1
-                        ));
-                    }
-                    let base = &vestidos[corpo];
-                    Ok(QuadroZeca {
-                        corpo,
-                        ms: q.ms,
-                        solto: !q.chapeu.assentado,
-                        vestido: Vestido {
-                            chapeu: compor::chapeu_do_voo(&q.chapeu, base.chapeu.as_ref()),
-                            ..base.clone()
-                        },
-                    })
-                })
-                .collect::<Result<Vec<_>, String>>()?,
-            None => (t.de..=t.ate)
+        let quadros = match arte.voos.tags.get(&t.nome).filter(|v| v.base.is_none()) {
+            Some(voo) => quadros_do_voo(&t.nome, voo, t, vestidos, arte)?,
+            None => sequencia_do_pack(t)?
+                .into_iter()
                 .map(|corpo| QuadroZeca {
                     corpo,
                     ms: importado.quadros[corpo].duracao_ms,
@@ -219,6 +295,17 @@ fn roteiro(
             nome: t.nome.clone(),
             original: t.original.clone(),
             quadros,
+        });
+    }
+    for (nome, voo) in &arte.voos.tags {
+        let Some(base) = &voo.base else {
+            continue;
+        };
+        let t = do_pack(base).expect("conferida acima");
+        tags.push(TagZeca {
+            nome: nome.clone(),
+            original: t.original.clone(),
+            quadros: quadros_do_voo(nome, voo, t, vestidos, arte)?,
         });
     }
     for c in &arte.zeca.composicao {
@@ -244,6 +331,56 @@ fn roteiro(
         });
     }
     Ok(tags)
+}
+
+/// O chapéu solto anda num caminho limpo: entre dois quadros seguidos no ar,
+/// o centro não pula mais de [`SALTO_SOLTO`] pixels e a altura muda de
+/// sentido no máximo uma vez (sobe e desce, sem tremer).
+fn conferir_caminhos(tags: &[TagZeca], arte: &Arte, avisos: &mut Vec<String>) {
+    for t in tags {
+        let mut trecho: Vec<(usize, (i32, i32))> = Vec::new();
+        let fechar = |trecho: &mut Vec<(usize, (i32, i32))>, avisos: &mut Vec<String>| {
+            let mut sentidos = Vec::new();
+            for par in trecho.windows(2) {
+                let ((i, a), (j, b)) = (par[0], par[1]);
+                let salto = (a.0 - b.0).abs().max((a.1 - b.1).abs());
+                if salto > 2 * SALTO_SOLTO {
+                    avisos.push(format!(
+                        "{}: o centro do chapéu solto pula {} px entre os quadros {i} e {j} (máximo {SALTO_SOLTO})",
+                        t.nome,
+                        salto as f32 / 2.0
+                    ));
+                }
+                let dy = (b.1 - a.1).signum();
+                if dy != 0 && sentidos.last() != Some(&dy) {
+                    sentidos.push(dy);
+                }
+            }
+            if sentidos.len() > 2 {
+                let alturas: Vec<String> = trecho
+                    .iter()
+                    .map(|(_, c)| format!("{}", c.1 as f32 / 2.0))
+                    .collect();
+                avisos.push(format!(
+                    "{}: o chapéu solto sobe e desce aos trancos (centro y: {})",
+                    t.nome,
+                    alturas.join(", ")
+                ));
+            }
+            trecho.clear();
+        };
+        for (i, q) in t.quadros.iter().enumerate() {
+            let centro = match (&q.vestido.chapeu, q.solto) {
+                (Some(c), true) => arte.sprites.get(&c.variante).map(|s| compor::centro2(c, s)),
+                _ => None,
+            };
+            match centro {
+                Some(c) => trecho.push((i, c)),
+                None => fechar(&mut trecho, avisos),
+            }
+        }
+        fechar(&mut trecho, avisos);
+    }
 }
 
 fn caixa(rgba: &[u8], celula: (u32, u32)) -> Option<[i32; 4]> {
@@ -282,8 +419,9 @@ pub fn montar(importado: &Importado, arte: &Arte, variante: Variante) -> Result<
         .collect();
     let refs: Vec<&[u8]> = corpos.iter().map(Vec::as_slice).collect();
     let fontes = compor::fontes_de_clarao(&refs, &analises);
-    let vestidos = vestir_pack(importado, &analises, &fontes, arte, &mut avisos);
+    let vestidos = vestir_pack(importado, &analises, &fontes, arte, &mut avisos)?;
     let tags = roteiro(importado, &vestidos, arte)?;
+    conferir_caminhos(&tags, arte, &mut avisos);
     let posicao = posicoes(importado);
     let pos = |c: &Option<compor::Colocacao>| match c {
         Some(c) => format!("{} ({}, {})", c.variante, c.x, c.y),
@@ -312,13 +450,20 @@ pub fn montar(importado: &Importado, arte: &Arte, variante: Variante) -> Result<
         .collect();
 
     // Paleta travada no pack (regras de estilo): toda cor nossa existe na
-    // paleta do .aseprite.
+    // paleta do .aseprite, e nenhuma é preto (#000000 nunca é contorno; no
+    // pack ele é só o índice transparente, que o importador já tira).
+    let mut nossas: Vec<[u8; 4]> = arte.paleta.letras.values().copied().collect();
+    nossas.push(arte.paleta.contorno);
+    nossas.extend(arte.paleta.troca.iter().map(|(_, para)| *para));
+    if let Some(preto) = nossas.iter().find(|c| c[..3] == [0, 0, 0]) {
+        return Err(format!(
+            "cor {} nos acessórios: o contorno é a tinta do pack, nunca preto",
+            arte::hex(*preto)
+        ));
+    }
     if importado.paleta.is_empty() {
         avisos.push("paleta do pack indisponível (tiras PNG): conferência de cores pulada".into());
     } else {
-        let mut nossas: Vec<[u8; 4]> = arte.paleta.letras.values().copied().collect();
-        nossas.push(arte.paleta.contorno);
-        nossas.extend(arte.paleta.troca.iter().map(|(_, para)| *para));
         for c in nossas {
             if !importado.paleta.iter().any(|p| p[..3] == c[..3]) {
                 avisos.push(format!("cor {} fora da paleta do pack", arte::hex(c)));
@@ -326,9 +471,15 @@ pub fn montar(importado: &Importado, arte: &Arte, variante: Variante) -> Result<
         }
     }
 
+    let tinta = *arte
+        .paleta
+        .letras
+        .get(&'#')
+        .ok_or("paleta.toml: falta a letra «#» (a tinta do contorno)")?;
     let protegidas = Protegidas {
         olho: &arte.paleta.olho,
         bico: &arte.paleta.bico,
+        tinta,
     };
     let mut cache: HashMap<(usize, Vestido), Vec<u8>> = HashMap::new();
     let mut quadros = Vec::new();
@@ -347,37 +498,69 @@ pub fn montar(importado: &Importado, arte: &Arte, variante: Variante) -> Result<
                         &arte.sprites,
                         arte.paleta.clarao,
                         &protegidas,
+                        q.solto,
                     )?;
                     let Relatorio {
                         fora,
                         sobre_olho,
                         sobre_bico,
+                        fora_do_corpo,
+                        sangria,
+                        afundado,
+                        flutuando,
                     } = r;
+                    let quadro = format!("{}[{i}]", t.nome);
                     for (n, o_que) in [
-                        (fora, "fora da célula"),
-                        (sobre_olho, "sobre o olho"),
-                        (sobre_bico, "sobre o bico"),
+                        (fora, "pixel(s) de acessório fora da célula"),
+                        (sobre_olho, "pixel(s) de acessório sobre o olho"),
+                        (sobre_bico, "pixel(s) de acessório sobre o bico"),
+                        (
+                            fora_do_corpo,
+                            "pixel(s) da gravata fora do miolo do corpo, não desenhados (o contorno do pack ganha): mude a gravata em ancoras.json",
+                        ),
+                        (
+                            sangria,
+                            "pixel(s) de cor de acessório encostados no transparente, sem tinta em volta",
+                        ),
+                        (afundado, "pixel(s) do chapéu assentado afundando no corpo"),
                     ] {
                         if n > 0 {
-                            avisos.push(format!(
-                                "{}[{i}]: {n} pixel(s) de acessório {o_que}",
-                                t.nome
-                            ));
+                            avisos.push(format!("{quadro}: {n} {o_que}"));
                         }
+                    }
+                    if flutuando {
+                        avisos.push(format!("{quadro}: chapéu assentado sem encostar na cabeça"));
                     }
                     if let (true, Some(chapeu)) = (q.solto, &q.vestido.chapeu)
                         && let Some(sprite) = arte.sprites.get(&chapeu.variante)
-                        && let Some(d) = compor::distancia(&corpos[q.corpo], celula, chapeu, sprite)
-                        && d < compor::FOLGA_SOLTO
                     {
-                        avisos.push(format!(
-                            "{}[{i}]: chapéu solto a {d} px do corpo (com menos de {} o contorno creme junta os dois)",
-                            t.nome,
-                            compor::FOLGA_SOLTO
-                        ));
+                        if let Some(d) = compor::distancia(&corpos[q.corpo], celula, chapeu, sprite)
+                            && d < compor::FOLGA_SOLTO
+                        {
+                            avisos.push(format!(
+                                "{quadro}: chapéu solto a {d} px do corpo (com menos de {} o contorno creme junta os dois)",
+                                compor::FOLGA_SOLTO
+                            ));
+                        }
+                        let borda = (chapeu.x)
+                            .min(chapeu.y)
+                            .min(celula.0 as i32 - (chapeu.x + sprite.largura))
+                            .min(celula.1 as i32 - (chapeu.y + sprite.altura));
+                        if borda < FOLGA_BORDA {
+                            avisos.push(format!(
+                                "{quadro}: chapéu solto a {borda} px da borda da célula (mínimo {FOLGA_BORDA})"
+                            ));
+                        }
                     }
                     if variante == Variante::Contorno {
+                        let antes = compor::manchas(&rgba, celula);
                         compor::contornar(&mut rgba, celula, arte.paleta.contorno);
+                        let depois = compor::manchas(&rgba, celula);
+                        if depois < antes {
+                            avisos.push(format!(
+                                "{quadro}: o contorno creme juntou manchas soltas ({antes} → {depois})"
+                            ));
+                        }
                     }
                     cache.insert(chave, rgba.clone());
                     rgba
@@ -428,6 +611,7 @@ pub fn montar(importado: &Importado, arte: &Arte, variante: Variante) -> Result<
         &arte.sprites,
         arte.paleta.clarao,
         &protegidas,
+        false,
     )?;
     let caixa_pose = caixa(&pose_rgba, celula).ok_or("a pose parada está vazia")?;
     let toque = z.skin.toque.unwrap_or(caixa_pose);
@@ -506,7 +690,7 @@ pub fn executar(lista: &[String]) -> Result<(), String> {
     let a = Args::ler(
         lista,
         &["--pack", "--saida", "--arte"],
-        &["--contorno", "--ancoras"],
+        &["--contorno", "--ancoras", "--estrito"],
     )?;
     let pack_caminho = PathBuf::from(a.obrigatorio("--pack")?);
     let variante = if a.bandeira("--contorno") {
@@ -538,6 +722,19 @@ pub fn executar(lista: &[String]) -> Result<(), String> {
     });
     let importado = importar::ler_com_reserva(&p2.aseprite, tiras)?;
     let m = montar(&importado, &arte, variante)?;
+    let novos: Vec<&String> = m
+        .avisos
+        .iter()
+        .filter(|a| !arte.aceitos.contains(a))
+        .collect();
+    if a.bandeira("--estrito") && !novos.is_empty() {
+        let lista: Vec<String> = novos.iter().map(|a| format!("  aviso: {a}")).collect();
+        return Err(format!(
+            "{} aviso(s) novo(s) na arte (--estrito; nada foi gravado). Corrija em arte/zeca/ ou, se for do próprio pack e já olhado, ponha em arte/zeca/avisos-aceitos.txt:\n{}",
+            novos.len(),
+            lista.join("\n")
+        ));
+    }
     let f = folha::montar(
         m.celula,
         &m.quadros,
@@ -586,7 +783,11 @@ pub fn executar(lista: &[String]) -> Result<(), String> {
         }
     }
     for aviso in m.avisos.iter().chain(&skin.avisos) {
-        println!("aviso: {aviso}");
+        if arte.aceitos.contains(aviso) {
+            println!("aviso aceito: {aviso}");
+        } else {
+            println!("aviso: {aviso}");
+        }
     }
     Ok(())
 }
@@ -732,6 +933,7 @@ mod testes {
         arte.voos.tags.insert(
             "hurt".into(),
             arte::Voo {
+                base: None,
                 quadros: vec![
                     arte::QuadroVoo {
                         corpo: 0,
@@ -783,6 +985,176 @@ mod testes {
         // Corpo de voo além da tag é erro.
         arte.voos.tags.get_mut("hurt").unwrap().quadros[0].corpo = 7;
         assert!(montar(&i, &arte, Variante::Simples).is_err());
+    }
+
+    /// Um pack sintético com o layout do Cute Parrots (21 tags, 90 quadros,
+    /// clarão no primeiro quadro de Fly Hurt, Hurt e Death), para conferir a
+    /// arte de verdade (`arte/zeca`) sem o pack, que nunca entra no repo.
+    fn pack_sintetico() -> Importado {
+        const QUANTOS: [usize; 21] = [
+            4, 6, 3, 4, 3, 3, 4, 3, 10, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 6,
+        ];
+        let mut quadros = Vec::new();
+        let mut tags = Vec::new();
+        for (nome, n) in TABELA_CUTE_PARROTS.iter().zip(QUANTOS) {
+            let de = quadros.len();
+            let clarao = matches!(*nome, "Fly Hurt" | "Hurt" | "Death");
+            for i in 0..n {
+                quadros.push(QuadroFolha {
+                    rgba: papagaio(0, (i % 2) as i32, clarao && i == 0),
+                    duracao_ms: 100,
+                });
+            }
+            tags.push(TagFolha {
+                nome: importar::normalizar(nome),
+                original: Some((*nome).to_owned()),
+                de,
+                ate: quadros.len() - 1,
+                direcao: "forward".into(),
+            });
+        }
+        assert_eq!(quadros.len(), 90);
+        Importado {
+            celula: (48, 48),
+            quadros,
+            tags,
+            origem: importar::Origem::Aseprite,
+            aviso: None,
+            paleta: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_arte_do_repositorio_monta_sobre_o_layout_do_pack() {
+        let arte = Arte::carregar(&crate::raiz().join("arte/zeca")).unwrap();
+        let m = montar(&pack_sintetico(), &arte, Variante::Contorno).unwrap();
+        let tag = |nome: &str| m.tags.iter().find(|t| t.nome == nome).unwrap();
+        assert!(m.tags.iter().all(|t| t.nome != "death"), "o Zeca não morre");
+        assert_eq!(
+            tag("dive_end").quadros.len(),
+            4,
+            "o chapéu não cai no mergulho: o mergulho tem os 4 quadros do pack"
+        );
+        let pouso = tag("landing_mergulho");
+        assert!(
+            pouso.quadros[0].solto,
+            "no pouso do mergulho o chapéu ainda está no ar"
+        );
+        assert!(!pouso.quadros.last().unwrap().solto, "e termina na cabeça");
+        let grande = tag("big_flight");
+        assert_eq!(
+            grande.quadros.last().unwrap().corpo,
+            tag("landing_mergulho").quadros.last().unwrap().corpo
+        );
+        // O pouso comum continua com o chapéu na cabeça o tempo todo.
+        assert!(tag("landing").quadros.iter().all(|q| !q.solto));
+        // Toda tag dos estados existe (o montar confere) e o idle começa sentado.
+        assert!(m.skin_json.contains("\"sit_idle\""));
+    }
+
+    #[test]
+    fn dados_errados_da_arte_sao_erro_e_nao_somem() {
+        let base = Arte::carregar(&crate::raiz().join("arte/zeca")).unwrap();
+        let pack = pack_sintetico();
+        // Correção para um quadro que a tag não tem.
+        let mut arte = base.clone();
+        arte.ancoras
+            .tags
+            .get_mut("dive_end")
+            .unwrap()
+            .quadros
+            .insert("7".into(), arte::AjustesQuadro::default());
+        let erro = montar(&pack, &arte, Variante::Simples).unwrap_err();
+        assert!(erro.contains("quadro «7»"), "{erro}");
+        // Deslocar uma peça escondida pela tag é erro, não um nada calado.
+        let mut arte = base.clone();
+        arte.ancoras
+            .tags
+            .get_mut("dive_start")
+            .unwrap()
+            .quadros
+            .insert(
+                "1".into(),
+                arte::AjustesQuadro {
+                    gravata: Some(Ajuste {
+                        dx: Some(1),
+                        ..Ajuste::default()
+                    }),
+                    ..arte::AjustesQuadro::default()
+                },
+            );
+        let erro = montar(&pack, &arte, Variante::Simples).unwrap_err();
+        assert!(erro.contains("dive_start[1]"), "{erro}");
+        // Tag nova do chapéu voando com o nome de uma tag do pack.
+        let mut arte = base.clone();
+        let voo = arte.voos.tags.remove("landing_mergulho").unwrap();
+        arte.voos.tags.insert("walk".into(), voo);
+        assert!(montar(&pack, &arte, Variante::Simples).is_err());
+    }
+
+    #[test]
+    fn direcao_do_pack_vira_ordem_dos_quadros() {
+        let t = |direcao: &str| TagFolha {
+            nome: "t".into(),
+            original: None,
+            de: 2,
+            ate: 5,
+            direcao: direcao.into(),
+        };
+        assert_eq!(sequencia_do_pack(&t("forward")), Ok(vec![2, 3, 4, 5]));
+        assert_eq!(sequencia_do_pack(&t("reverse")), Ok(vec![5, 4, 3, 2]));
+        assert_eq!(
+            sequencia_do_pack(&t("pingpong")),
+            Ok(vec![2, 3, 4, 5, 4, 3])
+        );
+        assert_eq!(
+            sequencia_do_pack(&t("pingpong_reverse")),
+            Ok(vec![5, 4, 3, 2, 3, 4])
+        );
+        assert!(sequencia_do_pack(&t("de lado")).is_err());
+    }
+
+    #[test]
+    fn caminho_do_chapeu_solto_sem_tranco() {
+        let arte = Arte::carregar(&crate::raiz().join("arte/zeca")).unwrap();
+        let solto = |cx: i32, cy: i32| QuadroZeca {
+            corpo: 0,
+            ms: 100,
+            solto: true,
+            vestido: Vestido {
+                // «chapeu» tem 11x5: canto = centro − (5, 2).
+                chapeu: Some(compor::Colocacao {
+                    variante: "chapeu".into(),
+                    x: cx - 5,
+                    y: cy - 2,
+                }),
+                ..Vestido::default()
+            },
+        };
+        let tag = |centros: &[(i32, i32)]| TagZeca {
+            nome: "t".into(),
+            original: None,
+            quadros: centros.iter().map(|&(x, y)| solto(x, y)).collect(),
+        };
+        let mut avisos = Vec::new();
+        conferir_caminhos(
+            &[tag(&[(26, 9), (26, 7), (26, 7), (27, 8), (27, 10)])],
+            &arte,
+            &mut avisos,
+        );
+        assert!(
+            avisos.is_empty(),
+            "sobe e desce, passos pequenos: {avisos:?}"
+        );
+        conferir_caminhos(&[tag(&[(26, 9), (26, 4)])], &arte, &mut avisos);
+        assert!(avisos[0].contains("pula 5 px"), "{avisos:?}");
+        avisos.clear();
+        conferir_caminhos(
+            &[tag(&[(26, 7), (26, 5), (26, 7), (26, 5)])],
+            &arte,
+            &mut avisos,
+        );
+        assert!(avisos[0].contains("aos trancos"), "{avisos:?}");
     }
 
     #[test]

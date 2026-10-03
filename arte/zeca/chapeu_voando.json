@@ -1,71 +1,79 @@
 {
   "_sobre": [
-    "Chapéu voa e volta (decisão 0024): no mergulho e no susto o chapéu sai da cabeça, dá uma cambalhota no ar e cai de volta nela.",
-    "Cada tag daqui troca os quadros da tag do pack: corpo (índice do quadro do pack dentro da tag), ms (duração) e chapeu.",
-    "chapeu solto: variante, x e y absolutos na célula (canto superior esquerdo do desenho). chapeu assentado: o encaixe normal daquele corpo, com dx/dy e variante opcionais.",
-    "Cambalhota no sentido horário: chapeu (0°), chapeu-inclinado-dir (~20°), chapeu-de-lado-dir (90°), chapeu-de-ponta-cabeca (180°), chapeu-de-lado-esq (270°), chapeu-inclinado-esq (~340°).",
-    "Na volta, o chapéu cai amassado (chapeu-amassado, dy +1) e desamassa no quadro seguinte.",
-    "Folgas: o chapéu solto fica a 2 px ou mais da borda da célula e a 4 px ou mais do corpo, para o contorno creme caber e não virar uma ponte entre os dois (cargo xtask zeca avisa)."
+    "Chapéu voa e volta (decisões 0024 e 0028): no mergulho e no susto o chapéu sai da cabeça, dá uma cambalhota no ar e cai de volta nela.",
+    "Cada tag daqui troca os quadros da tag do pack de mesmo nome: corpo (índice do quadro do pack dentro da tag), ms (duração) e chapeu. Com «base», a chave vira uma tag nova feita com os corpos da tag base, que continua como está.",
+    "chapeu solto: a variante e o centro (cx, cy) na célula; o canto sai do tamanho da variante. Girar em volta do mesmo centro não faz o chapéu pular (11x5 de pé, 5x11 de lado). Também aceita x/y (canto superior esquerdo).",
+    "chapeu assentado: o encaixe normal daquele corpo, com dx/dy e variante opcionais.",
+    "Cambalhota no sentido horário: chapeu (0°), chapeu-inclinado-dir (~20°), chapeu-de-lado-dir (90°), chapeu-de-ponta-cabeca (180°), chapeu-de-lado-esq (270°), chapeu-inclinado-esq (~340°). Na volta, o chapéu cai amassado (chapeu-amassado, dy +1) e desamassa no quadro seguinte.",
+    "Caminho limpo: entre dois quadros no ar o centro anda no máximo 3 px e a altura muda de sentido uma vez só (sobe e desce). Folgas: o chapéu solto fica a 4 px ou mais do corpo e a 2 px ou mais da borda, para o contorno creme caber sem virar ponte. O cargo xtask zeca confere tudo isso."
   ],
   "tags": {
     "hurt": {
-      "_nota": "Susto: o chapéu pula no clarão (branco como a silhueta), gira enquanto o Zeca se encolhe e cai de volta quando ele se endireita.",
+      "_nota": "Susto: o chapéu pula no clarão (branco como a silhueta), gira em cima da cabeça enquanto o Zeca se encolhe (centro fixo) e cai de volta quando ele se endireita.",
       "quadros": [
-        {"corpo": 0, "ms": 80, "chapeu": {"variante": "chapeu", "x": 21, "y": 7}},
-        {"corpo": 1, "ms": 90, "chapeu": {"variante": "chapeu-inclinado-dir", "x": 21, "y": 4}},
-        {"corpo": 2, "ms": 100, "chapeu": {"variante": "chapeu-de-lado-dir", "x": 24, "y": 2}},
-        {"corpo": 2, "ms": 100, "chapeu": {"variante": "chapeu-de-ponta-cabeca", "x": 20, "y": 2}},
-        {"corpo": 2, "ms": 100, "chapeu": {"variante": "chapeu-de-lado-esq", "x": 22, "y": 3}},
-        {"corpo": 3, "ms": 90, "chapeu": {"variante": "chapeu-inclinado-esq", "x": 21, "y": 5}},
+        {"corpo": 0, "ms": 80, "chapeu": {"variante": "chapeu", "cx": 26, "cy": 9}},
+        {"corpo": 1, "ms": 90, "chapeu": {"variante": "chapeu-inclinado-dir", "cx": 26, "cy": 7}},
+        {"corpo": 2, "ms": 100, "chapeu": {"variante": "chapeu-de-lado-dir", "cx": 26, "cy": 7}},
+        {"corpo": 2, "ms": 100, "chapeu": {"variante": "chapeu-de-ponta-cabeca", "cx": 26, "cy": 7}},
+        {"corpo": 2, "ms": 100, "chapeu": {"variante": "chapeu-de-lado-esq", "cx": 26, "cy": 7}},
+        {"corpo": 3, "ms": 90, "chapeu": {"variante": "chapeu-inclinado-esq", "cx": 26, "cy": 8}},
         {"corpo": 3, "ms": 80, "chapeu": {"assentado": true, "variante": "chapeu-amassado", "dy": 1}},
         {"corpo": 3, "ms": 200, "chapeu": {"assentado": true}}
       ]
     },
     "fly_hurt": {
-      "_nota": "Susto em pleno voo: mesma cambalhota, com as asas batendo (os quadros 1 a 3 se repetem).",
+      "_nota": "Susto em pleno voo: a mesma cambalhota num arco (sobe, vira de ponta-cabeça no alto e desce), com as asas batendo (os quadros 1 a 3 se repetem).",
       "quadros": [
-        {"corpo": 0, "ms": 80, "chapeu": {"variante": "chapeu", "x": 24, "y": 10}},
-        {"corpo": 1, "ms": 90, "chapeu": {"variante": "chapeu-inclinado-dir", "x": 25, "y": 7}},
-        {"corpo": 2, "ms": 100, "chapeu": {"variante": "chapeu-de-lado-dir", "x": 28, "y": 2}},
-        {"corpo": 3, "ms": 100, "chapeu": {"variante": "chapeu-de-ponta-cabeca", "x": 24, "y": 2}},
-        {"corpo": 1, "ms": 100, "chapeu": {"variante": "chapeu-de-lado-esq", "x": 26, "y": 3}},
-        {"corpo": 2, "ms": 90, "chapeu": {"variante": "chapeu-inclinado-esq", "x": 24, "y": 8}},
+        {"corpo": 0, "ms": 80, "chapeu": {"variante": "chapeu", "cx": 29, "cy": 12}},
+        {"corpo": 1, "ms": 90, "chapeu": {"variante": "chapeu-inclinado-dir", "cx": 29, "cy": 10}},
+        {"corpo": 2, "ms": 100, "chapeu": {"variante": "chapeu-de-lado-dir", "cx": 29, "cy": 8}},
+        {"corpo": 3, "ms": 100, "chapeu": {"variante": "chapeu-de-ponta-cabeca", "cx": 29, "cy": 7}},
+        {"corpo": 1, "ms": 100, "chapeu": {"variante": "chapeu-de-lado-esq", "cx": 29, "cy": 8}},
+        {"corpo": 2, "ms": 90, "chapeu": {"variante": "chapeu-inclinado-esq", "cx": 29, "cy": 10}},
         {"corpo": 3, "ms": 80, "chapeu": {"assentado": true, "variante": "chapeu-amassado", "dy": 1}},
         {"corpo": 1, "ms": 100, "chapeu": {"assentado": true}}
       ]
     },
     "dive_start": {
-      "_nota": "Ele mergulha e o chapéu fica no ar: a cabeça sai de baixo dele e o chapéu começa a tombar.",
+      "_nota": "Ele mergulha e a cabeça sai de baixo do chapéu: na célula (presa ao Zeca), o chapéu fica para cima e para trás e começa a tombar.",
       "quadros": [
         {"corpo": 0, "ms": 100, "chapeu": {"assentado": true}},
-        {"corpo": 1, "ms": 100, "chapeu": {"variante": "chapeu", "x": 24, "y": 9}},
-        {"corpo": 2, "ms": 100, "chapeu": {"variante": "chapeu", "x": 25, "y": 4}},
-        {"corpo": 3, "ms": 100, "chapeu": {"variante": "chapeu-inclinado-dir", "x": 27, "y": 2}}
+        {"corpo": 1, "ms": 100, "chapeu": {"variante": "chapeu", "cx": 33, "cy": 10}},
+        {"corpo": 2, "ms": 100, "chapeu": {"variante": "chapeu", "cx": 35, "cy": 7}},
+        {"corpo": 3, "ms": 100, "chapeu": {"variante": "chapeu-inclinado-dir", "cx": 36, "cy": 7}}
       ]
     },
     "dive_loop": {
-      "_nota": "Mergulho em laço: o chapéu fica para trás, em cima dele, dando cambalhotas (uma volta por ciclo).",
+      "_nota": "Mergulho em laço: o chapéu gira no ar, em cima e atrás dele, uma volta por ciclo de 4 quadros e sempre no mesmo centro, para o laço emendar.",
       "quadros": [
-        {"corpo": 0, "ms": 100, "chapeu": {"variante": "chapeu-de-lado-dir", "x": 31, "y": 2}},
-        {"corpo": 1, "ms": 100, "chapeu": {"variante": "chapeu-de-ponta-cabeca", "x": 26, "y": 2}},
-        {"corpo": 2, "ms": 100, "chapeu": {"variante": "chapeu-de-lado-esq", "x": 30, "y": 2}},
-        {"corpo": 3, "ms": 100, "chapeu": {"variante": "chapeu", "x": 26, "y": 3}}
+        {"corpo": 0, "ms": 100, "chapeu": {"variante": "chapeu-de-lado-dir", "cx": 36, "cy": 7}},
+        {"corpo": 1, "ms": 100, "chapeu": {"variante": "chapeu-de-ponta-cabeca", "cx": 36, "cy": 7}},
+        {"corpo": 2, "ms": 100, "chapeu": {"variante": "chapeu-de-lado-esq", "cx": 36, "cy": 7}},
+        {"corpo": 3, "ms": 100, "chapeu": {"variante": "chapeu", "cx": 36, "cy": 7}}
       ]
     },
     "dive_end": {
-      "_nota": "Saindo do mergulho: o chapéu completa a cambalhota, cai em cima da cabeça amassado e desamassa enquanto ele plana.",
+      "_nota": "Saindo do mergulho: o chapéu continua a cambalhota e começa a descer enquanto ele volta à horizontal. Ainda não cai: quem o pega é o pouso (landing_mergulho).",
       "quadros": [
-        {"corpo": 0, "ms": 100, "chapeu": {"variante": "chapeu-de-lado-dir", "x": 34, "y": 2}},
-        {"corpo": 1, "ms": 100, "chapeu": {"variante": "chapeu-de-ponta-cabeca", "x": 25, "y": 2}},
-        {"corpo": 2, "ms": 100, "chapeu": {"variante": "chapeu-de-lado-esq", "x": 26, "y": 3}},
-        {"corpo": 3, "ms": 80, "chapeu": {"variante": "chapeu-inclinado-esq", "x": 23, "y": 7}},
-        {"corpo": 3, "ms": 70, "chapeu": {"assentado": true, "variante": "chapeu-torto-esq", "dy": -2}},
+        {"corpo": 0, "ms": 100, "chapeu": {"variante": "chapeu-de-lado-dir", "cx": 36, "cy": 7}},
+        {"corpo": 1, "ms": 100, "chapeu": {"variante": "chapeu-de-ponta-cabeca", "cx": 36, "cy": 7}},
+        {"corpo": 2, "ms": 100, "chapeu": {"variante": "chapeu-de-lado-esq", "cx": 34, "cy": 8}},
+        {"corpo": 3, "ms": 100, "chapeu": {"variante": "chapeu-inclinado-esq", "cx": 32, "cy": 8}}
+      ]
+    },
+    "landing_mergulho": {
+      "base": "landing",
+      "_nota": "O pouso do voo grande (big_flight): o Zeca pousa e se levanta com o chapéu ainda caindo; um instante depois ele cai em cheio na cabeça (amassado) e desamassa. O pouso comum (landing) não muda.",
+      "quadros": [
+        {"corpo": 0, "ms": 100, "chapeu": {"variante": "chapeu", "cx": 31, "cy": 9}},
+        {"corpo": 1, "ms": 100, "chapeu": {"variante": "chapeu", "cx": 30, "cy": 10}},
+        {"corpo": 2, "ms": 150, "chapeu": {"variante": "chapeu", "cx": 27, "cy": 10}},
         {"corpo": 3, "ms": 80, "chapeu": {"assentado": true, "variante": "chapeu-amassado", "dy": 1}},
-        {"corpo": 3, "ms": 150, "chapeu": {"assentado": true}}
+        {"corpo": 3, "ms": 200, "chapeu": {"assentado": true}}
       ]
     },
     "landing": {
-      "_nota": "Pouso: o chapéu se reassenta com o tranco (amassa no impacto e volta).",
+      "_nota": "Pouso comum (soltar depois de arrastar, voo curto): o chapéu se reassenta com o tranco (sobe 1 pixel e amassa no impacto).",
       "quadros": [
         {"corpo": 0, "ms": 100, "chapeu": {"assentado": true}},
         {"corpo": 1, "ms": 100, "chapeu": {"assentado": true, "dy": -1}},

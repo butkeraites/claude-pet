@@ -203,7 +203,10 @@ pub struct Ancoras {
 
 /// O chapéu num quadro do voo: `assentado` usa o encaixe normal daquele
 /// corpo (com `dx`/`dy` e `variante` opcionais, para pulinhos e amassados);
-/// senão, `variante`, `x` e `y` absolutos na célula.
+/// senão, a `variante` solta na célula, pelo canto superior esquerdo (`x`,
+/// `y`) ou pelo centro (`cx`, `cy`). O centro é o jeito de desenhar uma
+/// cambalhota: as variantes têm tamanhos diferentes (11x5 de pé, 5x11 de
+/// lado), e girar em volta do mesmo centro não faz o chapéu pular.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ChapeuVoo {
@@ -212,6 +215,8 @@ pub struct ChapeuVoo {
     pub variante: Option<String>,
     pub x: Option<i32>,
     pub y: Option<i32>,
+    pub cx: Option<i32>,
+    pub cy: Option<i32>,
     pub dx: Option<i32>,
     pub dy: Option<i32>,
 }
@@ -230,6 +235,12 @@ pub struct QuadroVoo {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Voo {
+    /// Sem `base`, o voo troca os quadros da tag do pack de mesmo nome. Com
+    /// `base`, vira uma tag nova (o nome da chave) feita com os corpos da tag
+    /// `base`, que continua como está: por exemplo o pouso do voo grande, em
+    /// que o chapéu do mergulho ainda está no ar.
+    #[serde(default)]
+    pub base: Option<String>,
     pub quadros: Vec<QuadroVoo>,
     #[serde(default)]
     pub _nota: Option<String>,
@@ -304,6 +315,9 @@ pub struct Arte {
     pub ancoras: Ancoras,
     pub voos: Voos,
     pub zeca: ZecaToml,
+    /// Avisos do `zeca` já olhados e aceitos (`avisos-aceitos.txt`, um por
+    /// linha, `#` comenta): com `--estrito`, só aviso novo reprova.
+    pub aceitos: Vec<String>,
 }
 
 fn ler(pasta: &Path, nome: &str) -> Result<String, String> {
@@ -324,6 +338,13 @@ impl Arte {
                 return Err("paleta.toml: «.» é sempre transparente".into());
             }
             letras.insert(c, cor(valor)?);
+        }
+        for (letra, valor) in &p.letras {
+            if cor(valor)?[..3] == [0, 0, 0] {
+                return Err(format!(
+                    "paleta.toml: «{letra}» = #000000; o contorno é a tinta do pack (#1D2427), nunca preto"
+                ));
+            }
         }
         let paleta = Paleta {
             olho: p
@@ -373,12 +394,23 @@ impl Arte {
             .map_err(|e| format!("chapeu_voando.json: {e}"))?;
         let zeca: ZecaToml =
             toml::from_str(&ler(pasta, "zeca.toml")?).map_err(|e| format!("zeca.toml: {e}"))?;
+        let aceitos = match fs::read_to_string(pasta.join("avisos-aceitos.txt")) {
+            Ok(texto) => texto
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .map(str::to_owned)
+                .collect(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(e) => return Err(format!("avisos-aceitos.txt: {e}")),
+        };
         let arte = Arte {
             paleta,
             sprites,
             ancoras,
             voos,
             zeca,
+            aceitos,
         };
         arte.conferir_variantes()?;
         Ok(arte)
@@ -401,17 +433,34 @@ impl Arte {
             for q in a.quadros.values() {
                 ajustes.extend(q.chapeu.iter().chain(q.gravata.iter()));
             }
-            for v in ajustes.iter().filter_map(|aj| aj.variante.as_ref()) {
-                if !self.sprites.contains_key(v) {
+            for aj in &ajustes {
+                if let Some(v) = &aj.variante
+                    && !self.sprites.contains_key(v)
+                {
                     return Err(format!(
                         "ancoras.json, tag {tag}: variante «{v}» não existe em acessorios/"
                     ));
                 }
-            }
-            for indice in a.quadros.keys() {
-                if indice.parse::<usize>().is_err() {
+                let mexe = aj.variante.is_some()
+                    || aj.x.is_some()
+                    || aj.y.is_some()
+                    || aj.dx.is_some()
+                    || aj.dy.is_some();
+                if aj.oculto && mexe {
                     return Err(format!(
-                        "ancoras.json, tag {tag}: quadro «{indice}» não é um índice"
+                        "ancoras.json, tag {tag}: «oculto» junto com posição ou variante não faz sentido"
+                    ));
+                }
+            }
+            // O índice tem de ser o número escrito do jeito simples: «01» ou
+            // «+1» passariam no parse e nunca casariam com quadro nenhum.
+            for indice in a.quadros.keys() {
+                let ok = indice
+                    .parse::<usize>()
+                    .is_ok_and(|n| n.to_string() == *indice);
+                if !ok {
+                    return Err(format!(
+                        "ancoras.json, tag {tag}: quadro «{indice}» não é um índice (0, 1, 2…)"
                     ));
                 }
             }
@@ -426,9 +475,18 @@ impl Arte {
                         "chapeu_voando.json, {tag}[{i}]: variante «{v}» não existe em acessorios/"
                     ));
                 }
-                if !c.assentado && (c.variante.is_none() || c.x.is_none() || c.y.is_none()) {
+                let canto = c.x.is_some() || c.y.is_some();
+                let centro = c.cx.is_some() || c.cy.is_some();
+                if c.assentado && (canto || centro) {
                     return Err(format!(
-                        "chapeu_voando.json, {tag}[{i}]: chapéu solto precisa de variante, x e y"
+                        "chapeu_voando.json, {tag}[{i}]: chapéu assentado só aceita variante, dx e dy"
+                    ));
+                }
+                let par = |a: Option<i32>, b: Option<i32>| a.is_some() && b.is_some();
+                let posicao = (par(c.x, c.y) && !centro) || (par(c.cx, c.cy) && !canto);
+                if !c.assentado && (c.variante.is_none() || !posicao) {
+                    return Err(format!(
+                        "chapeu_voando.json, {tag}[{i}]: chapéu solto precisa de variante e de x/y ou cx/cy (um par só)"
                     ));
                 }
                 if q.ms == 0 {
@@ -464,6 +522,68 @@ mod testes {
         );
         assert!(Sprite::de_grade("x\n", &letras).is_err(), "letra sem cor");
         assert!(Sprite::de_grade("; só comentário\n", &letras).is_err());
+    }
+
+    /// Copia `arte/zeca` para uma pasta temporária e troca um texto num
+    /// arquivo, para provar que dado errado é recusado ao carregar.
+    fn arte_com(nome: &str, arquivo: &str, de: &str, para: &str) -> Result<Arte, String> {
+        let origem = crate::raiz().join("arte/zeca");
+        let pasta =
+            std::env::temp_dir().join(format!("claude-pet-arte-{}-{nome}", std::process::id()));
+        let _ = fs::remove_dir_all(&pasta);
+        fs::create_dir_all(pasta.join("acessorios")).unwrap();
+        for entrada in fs::read_dir(&origem)
+            .unwrap()
+            .chain(fs::read_dir(origem.join("acessorios")).unwrap())
+        {
+            let caminho = entrada.unwrap().path();
+            if caminho.is_file() {
+                let relativo = caminho.strip_prefix(&origem).unwrap();
+                fs::copy(&caminho, pasta.join(relativo)).unwrap();
+            }
+        }
+        let alvo = pasta.join(arquivo);
+        let texto = fs::read_to_string(&alvo).unwrap();
+        assert!(texto.contains(de), "«{de}» não está em {arquivo}");
+        fs::write(&alvo, texto.replacen(de, para, 1)).unwrap();
+        let arte = Arte::carregar(&pasta);
+        let _ = fs::remove_dir_all(&pasta);
+        arte
+    }
+
+    #[test]
+    fn dado_torto_e_recusado_ao_carregar() {
+        // Índice de quadro que nunca casaria («01» não é «1»).
+        let erro = arte_com(
+            "indice",
+            "ancoras.json",
+            "\"9\": {\"gravata\"",
+            "\"09\": {\"gravata\"",
+        )
+        .unwrap_err();
+        assert!(erro.contains("«09»"), "{erro}");
+        // Esconder e mexer ao mesmo tempo.
+        let erro = arte_com(
+            "oculto",
+            "ancoras.json",
+            "\"oculto\": true}",
+            "\"oculto\": true, \"dx\": 1}",
+        )
+        .unwrap_err();
+        assert!(erro.contains("oculto"), "{erro}");
+        // Chapéu solto com canto e centro juntos.
+        let erro = arte_com(
+            "centro",
+            "chapeu_voando.json",
+            "\"cx\": 26, \"cy\": 9}",
+            "\"cx\": 26, \"cy\": 9, \"x\": 1, \"y\": 1}",
+        )
+        .unwrap_err();
+        assert!(erro.contains("um par só"), "{erro}");
+        // Preto nunca é cor dos acessórios.
+        let erro = arte_com("preto", "paleta.toml", "\"#1D2427\"", "\"#000000\"").unwrap_err();
+        assert!(erro.contains("#000000"), "{erro}");
+        assert!(arte_com("igual", "zeca.toml", "zeca", "zeca").is_ok());
     }
 
     #[test]

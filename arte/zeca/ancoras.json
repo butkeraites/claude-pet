@@ -1,9 +1,10 @@
 {
   "_sobre": [
-    "Encaixe do chapéu e da gravata no Zeca, quadro a quadro (decisão 0023).",
+    "Encaixe do chapéu e da gravata no Zeca, quadro a quadro (decisões 0023 e 0028).",
     "regra: onde cada peça fica em relação ao canto superior esquerdo do olho branco do pack.",
-    "tags: correções por tag do pack (valem para todos os quadros da tag) e por quadro (índice dentro da tag, a partir de 0).",
-    "Ajuste: oculto (tira a peça), variante (outro desenho de acessorios/), x/y (absolutos na célula), dx/dy (somam).",
+    "tags: correções por tag do pack (valem para todos os quadros da tag) e por quadro (índice dentro da tag, a partir de 0, escrito sem zeros à esquerda).",
+    "Ajuste: oculto (tira a peça), variante (outro desenho de acessorios/), x/y (absolutos na célula), dx/dy (somam). Num quadro em que a tag escondeu a peça, x e y a criam de novo (com a variante da regra, se não vier outra); deslocar uma peça que não existe é erro.",
+    "A gravata vai no miolo do peito, sempre dentro do contorno do pack (no pack, toda cor fica cercada pela tinta): pixel que cairia no contorno ou no ar não é desenhado e o cargo xtask zeca avisa.",
     "Gravata oculta = o peito está virado para longe (cabeça baixa comendo, mergulho de cabeça para baixo)."
   ],
   "regra": {
@@ -11,45 +12,62 @@
     "gravata": {"variante": "gravata", "dx": 1, "dy": 6}
   },
   "tags": {
-    "eating": {
-      "_nota": "Cabeça baixa bicando (quadros 2 a 8): o peito fica escondido debaixo da cabeça.",
+    "sit_idle": {
+      "_nota": "Quadros 2 e 3 (a respiração baixa a cabeça 1 pixel): a gravata desce com ela e vai 1 pixel para a esquerda, para não pisar no canto do contorno do peito nem encostar no bico.",
       "quadros": {
+        "2": {"gravata": {"dx": -1}},
+        "3": {"gravata": {"dx": -1}}
+      }
+    },
+    "sleep": {
+      "_nota": "Mesmo corpo do sit_idle: quadros 2 e 3 com a gravata 1 pixel para a esquerda.",
+      "quadros": {
+        "2": {"gravata": {"dx": -1}},
+        "3": {"gravata": {"dx": -1}}
+      }
+    },
+    "eating": {
+      "_nota": "Quadros 1 e 9 (cabeça indo para a frente): a gravata 1 pixel à esquerda, dentro do contorno do peito e longe do canto do bico. Quadros 2 a 8 (cabeça baixa bicando): o peito fica escondido debaixo da cabeça.",
+      "quadros": {
+        "1": {"gravata": {"dx": -1}},
         "2": {"gravata": {"oculto": true}},
         "3": {"gravata": {"oculto": true}},
         "4": {"gravata": {"oculto": true}},
         "5": {"gravata": {"oculto": true}},
         "6": {"gravata": {"oculto": true}},
         "7": {"gravata": {"oculto": true}},
-        "8": {"gravata": {"oculto": true}}
+        "8": {"gravata": {"oculto": true}},
+        "9": {"gravata": {"dx": -1}}
       }
     },
     "take_off": {
-      "_nota": "Quadro 2: abaixa a cabeça para pegar impulso (a pose do comendo); quadro 3 já é voo.",
+      "_nota": "Quadro 1: a pose do eating[1]. Quadro 2: abaixa a cabeça para pegar impulso (peito escondido). Quadro 3 já é voo: a gravata no pescoço, como no fly.",
       "quadros": {
+        "1": {"gravata": {"dx": -1}},
         "2": {"gravata": {"oculto": true}},
-        "3": {"gravata": {"dx": -3, "dy": -2}}
+        "3": {"gravata": {"dx": -5, "dy": -2}}
       }
     },
     "fly": {
-      "_nota": "No voo a garganta fica embaixo da cabeça: a gravata desce para a linha do queixo, atrás do bico (encostada no bico ela se confunde com ele).",
-      "gravata": {"dx": -3, "dy": -2}
+      "_nota": "No voo a cabeça fica na horizontal e o pescoço, embaixo dela, é o que se vê do peito: a gravata vai para o pescoço, atrás do olho e longe do bico (encostada no bico ela vira bico), inteira dentro do contorno.",
+      "gravata": {"dx": -5, "dy": -2}
     },
-    "glide": {"gravata": {"dx": -3, "dy": -2}},
-    "bite": {"gravata": {"dx": -3, "dy": -2}},
-    "fly_hurt": {"gravata": {"dx": -3, "dy": -2}},
+    "glide": {"gravata": {"dx": -5, "dy": -2}},
+    "bite": {"gravata": {"dx": -5, "dy": -2}},
+    "fly_hurt": {"gravata": {"dx": -5, "dy": -2}},
     "dive_start": {
-      "_nota": "Quadro 0 ainda é voo; do 1 em diante ele gira de cabeça para baixo e o peito some.",
+      "_nota": "Quadro 0 ainda é voo reto: a gravata no pescoço, abaixo da cabeça. Do 1 em diante ele gira de cabeça para baixo e o peito some.",
       "gravata": {"oculto": true},
       "quadros": {
-        "0": {"gravata": {"x": 25, "y": 24}}
+        "0": {"gravata": {"x": 24, "y": 23}}
       }
     },
     "dive_loop": {"gravata": {"oculto": true}},
     "dive_end": {
-      "_nota": "Volta do mergulho: o peito reaparece no último quadro, já na horizontal.",
+      "_nota": "Volta do mergulho: o peito reaparece no último quadro, já na horizontal (a pose do dive_start[0]).",
       "gravata": {"oculto": true},
       "quadros": {
-        "3": {"gravata": {"variante": "gravata", "x": 25, "y": 24}}
+        "3": {"gravata": {"x": 24, "y": 23}}
       }
     },
     "landing": {

@@ -573,3 +573,75 @@ quadros idênticos: o animador comparava pelo índice do quadro.
 **Por quê:** a nitidez depende só do caminho D×D, mas o portão pede a prova
 com o personagem de verdade. Cada commit repinta o monitor (decisão 0005),
 então pose repetida não pode custar repintura.
+
+## 0028 — Revisão da arte do Zeca: gravata dentro do contorno, chapéu que gira no centro e cai depois do pouso (2026-10-03)
+
+**Problema:** três revisões do M2 acharam, e a máquina confirmou, defeitos
+na arte e no encaixe:
+- a gravata pintava rosa por cima do contorno de 1 pixel do pack em 27 das
+  70 células (16 tocadas por estados); no pack, toda cor que não é o branco
+  fica cercada pela tinta, e no comendo/decolando a gravata emendava no
+  contorno do bico (a "gravata que vira bico" da decisão 0023);
+- uma correção de `ancoras.json` (a gravata do `dive_start[0]`) sumia calada,
+  e índices como «01» passavam sem casar com quadro nenhum;
+- o chapéu solto era posto pelo canto: trocando entre variantes 11x5 e 5x11
+  o centro pulava 3 a 6 pixels (no laço do mergulho, um tremor de 10 Hz);
+- no mergulho o chapéu voltava para a cabeça ainda no ar (`dive_end` com
+  680 ms) e o pouso o amassava de novo, quando o pedido foi "cai de volta na
+  cabeça no pouso";
+- o Zeca parado fazia 1,20 commit/s medido (1,28 calculado): pela medida do
+  M1 (+0,58 ponto de CPU do Hyprland a 0,70 commit/s, decisão 0005), a conta
+  linear dá ~+1 ponto, no limite do orçamento.
+
+**Escolha:**
+- **Gravata no miolo do corpo:** ela só pinta pixel opaco com os 4 vizinhos
+  opacos; pixel que cairia no contorno da silhueta ou no ar não é desenhado
+  (o contorno do pack ganha) e o `cargo xtask zeca` avisa. As posições foram
+  acertadas em `ancoras.json`: respiração do sentado e do sono 1 pixel à
+  esquerda (a opção de subir 1 pixel encostava no bico), comendo/decolando
+  1 pixel à esquerda, e no voo a gravata vai para o pescoço (canto em
+  olho.x − 4, olho.y + 4), inteira dentro do contorno e longe do bico. O chapéu assentado aprovado não
+  mudou; a ponta de palha da aba, sem tinta em cima, é do desenho aprovado e
+  é a única abertura permitida.
+- **Checagens novas no `zeca`:** cor de acessório encostada no transparente
+  fora das aberturas do próprio desenho; chapéu assentado afundando no corpo
+  ou sem encostar nele; chapéu solto a menos de 4 pixels do corpo ou 2 da
+  borda; o centro do chapéu solto pulando mais de 3 pixels ou mudando de
+  sentido mais de uma vez; o contorno creme juntando manchas soltas. Com
+  `--estrito` (o `bin/pet skin-instalar` usa), aviso que não está em
+  `arte/zeca/avisos-aceitos.txt` reprova antes de gravar. Aceito hoje, com o
+  porquê no arquivo, só um: no `zeca-contorno`, o risco branco da mordida do
+  pack (tag `bite`, que nenhum estado toca) emenda no bico.
+- **Dado errado é erro:** num quadro em que a tag escondeu a peça, `x`/`y`
+  criam de novo (com a variante da regra); deslocar o que não existe, índice
+  fora da tag ou não canônico, `oculto` junto com posição, chapéu solto com
+  canto e centro juntos, ou `#000000` nas cores nossas param o `zeca`. A
+  conferência de paleta tira o índice transparente do `.aseprite` (no pack,
+  `#000000`) e o lint avisa preto puro. Tags do pack com outra direção são
+  expandidas na ordem certa.
+- **Chapéu solto pelo centro** (`cx`, `cy` em `chapeu_voando.json`): a
+  cambalhota gira em volta de um ponto fixo. Susto: sobe no clarão, gira
+  parado em cima da cabeça e cai quando ele se endireita. Susto em voo: um
+  arco (12 → 7 → 10). Mergulho: o chapéu fica para trás, gira num centro fixo
+  durante o laço, desce enquanto ele sai do mergulho, e só cai na cabeça
+  **depois do pouso** — tag nova `landing_mergulho` (corpos do `landing`, no
+  fim do `big_flight`): ele pousa, se levanta, o chapéu cai em cheio
+  (amassado) e desamassa. `dive_end` voltou aos 400 ms do pack. O pouso comum
+  (`land`, voo curto) continua com o tranco de um amassado só.
+- **Parado mais calmo:** `idle = sit_idle, sit_idle, sit_idle,
+  stand_look_sit` — três respiradas e uma levantada a cada ~18 s, 0,88
+  commit/s calculado, perto do 0,70–0,80 medido no M1; o `repouso.gif` mostra
+  20 s, um ciclo inteiro.
+- **Para o M6:** o chapéu solto mora em coordenadas da célula. Se o M6 mover
+  a célula pela tela durante as tags do mergulho (o T3 atravessando a tela),
+  o chapéu vai junto com o Zeca e a piada some: ou a célula fica parada na
+  vertical enquanto `dive_start`/`dive_loop`/`dive_end`/`landing_mergulho`
+  tocam, ou o chapéu vira uma trilha separada (variante e posição por quadro
+  nos dados da skin) que o M6 põe na tela.
+
+**Por quê:** a gravata cercada pela tinta é a regra de estilo do próprio
+pack, e o contorno da silhueta ganhando garante isso mesmo com dado errado.
+Girar em volta do centro é o que uma cambalhota faz. O chapéu caindo depois
+do pouso é o pedido do Renan ("cai de volta na cabeça no pouso") e a piada
+fica melhor com um instante de espera. O parado mais calmo cabe no custo
+medido do M1 sem depender de uma conta linear.
