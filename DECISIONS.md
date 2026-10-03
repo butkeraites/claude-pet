@@ -196,3 +196,60 @@ componentes clippy e rustfmt; a versão exata do compilador fica fixada na
 imagem de build `rust:1.98.1-alpine3.24`.
 **Por quê:** nada muda no sistema sem o Renan pedir, e o binário que roda
 continua reprodutível.
+
+## 0016 — Parado barato, um quadro em voo e esconder sem fantasma (2026-10-02)
+
+**Problema:** cada commit da camada repinta o monitor inteiro no Hyprland
+0.56.2 (decisão 0005), então a tag `idle` em laço estouraria o orçamento de
+2 commits/s. E, medido no M1: com a tela apagada (DPMS) o Hyprland não
+desenha, não manda frame callback e o `grim` espera para sempre; camadas
+destruídas ficam no `hyprctl -j layers` com `pid: -1` até a tela acender.
+**Escolha:**
+- parado = pose fixa (primeiro quadro da primeira tag de `idle`) e, a cada
+  4 s, uma rajada que toca uma das tags de `idle` uma vez, alternando entre
+  elas; com a skin de teste dá menos de 1 commit/s;
+- um quadro em voo de cada vez, pelo frame callback; se ele não chegar em
+  5 s, o próximo quadro segue mesmo assim (tela apagada: no máximo 1 commit
+  a cada 5 s, sem congelar a animação por um callback perdido);
+- esconder (debug ou SIGTERM) = região de input vazia, quadro transparente
+  com commit, e a superfície só morre no frame callback seguinte ou 50 ms
+  depois.
+**Por quê:** cabe no orçamento sem perder a animação, não gasta nada com a
+tela apagada e o fade de saída do Hyprland fotografa um quadro vazio, sem
+fantasma.
+
+## 0017 — Medições do M1 nesta máquina (2026-10-02)
+
+**Problema:** o M1 é o portão do motor: o overlay tem de ser nítido,
+barato no compositor, pequeno no container e aguentar reinício, crash e
+falta de compositor (PLANO.md, verificação do M1).
+**Escolha:** registrar o que `scripts/verificar-ao-vivo.sh` mediu (eDP-1,
+1920x1200, escala 1.5) e o que ficou pendente:
+
+| Item | Medido | Orçamento |
+|---|---|---|
+| Camada | `claude-pet` no nível 3 de eDP-1, 1280x800 lógicos em (640,0); `preferred_scale` 180/120; buffer 1920x1200; D=5, célula em (1706, 951) | nível 3, retângulo do monitor |
+| Imagem | 4,68 MB (`docker image inspect`; 16,5 MB no `docker image ls` do containerd) | < 40 MB |
+| RSS do container | 12,4 MiB com o pet parado (9 216 000 bytes são o SHM do buffer) | < 64 MiB |
+| CPU do container parado | 0,02% (média de 5 amostras) | < 1% |
+| Commits parado | 2 no último minuto | ≤ 120/min |
+| Região de input | 94x107 lógicos em (1170, 677): só o corpo | só o corpo |
+| `docker compose restart pet` | de volta em 659 ms, no mesmo lugar | ~3 s |
+| `kill -9` pelo host | RestartCount 0 → 1, de volta em 489 ms | sobe |
+| Sem compositor | "aguardando compositor: runtime do usuário ainda não existe" | loga e espera |
+| Nitidez na tela | **pendente** | ±2 por canal, blocos D×D uniformes |
+| Custo no Hyprland | **pendente** | parado ≤ +1 ponto de CPU, ≤ 2 commits/s |
+| Clique ao lado do pet | **manual, pendente** | chega na janela de baixo |
+
+A tela ficou apagada (DPMS) a sessão inteira, e assim o Hyprland não
+desenha: não há captura para a nitidez nem repintura para medir. O
+`cargo xtask nitidez` foi provado numa captura sintética (passa no lugar
+certo; falha com 1 pixel de deslocamento e com um redimensionamento de
+0,5%). Com a tela acesa: `scripts/verificar-ao-vivo.sh` (nitidez) e
+`scripts/medir-custo.sh` (tabela escondido/parado/estresse), e os números
+entram aqui como decisão nova.
+**Por quê:** o container cabe com folga em todos os orçamentos e o ciclo de
+vida funciona. O custo no compositor, que é o que decide entre a camada
+única do tamanho do monitor e o plano B (superfície pequena de repouso +
+palco temporário, decisão 0005), ainda não foi medido; até lá a camada única
+continua sendo o desenho, e o M1 não fecha sem essas duas medições.

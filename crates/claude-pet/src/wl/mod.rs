@@ -345,6 +345,7 @@ impl Sessao {
         } else {
             self.esconder();
         }
+        self.publicar();
     }
 
     /// Antes de sair do processo: esconde e despeja os pedidos no socket.
@@ -399,6 +400,7 @@ impl Sessao {
         self.depois(ESPERA_DESTRUIR, geracao, |sessao| {
             if sessao.superficie.as_ref().is_some_and(|s| s.saindo) {
                 sessao.superficie = None;
+                sessao.publicar();
             }
         });
     }
@@ -605,6 +607,7 @@ impl CompositorHandler for Sessao {
         superficie.quadro_mostrado();
         if superficie.saindo {
             self.superficie = None;
+            self.publicar();
         } else if superficie.pendente {
             self.desenhar();
         }
@@ -653,6 +656,7 @@ impl LayerShellHandler for Sessao {
         self.cancelar_relogio();
         self.superficie = None;
         self.palco = None;
+        self.publicar();
         let timer = Timer::from_duration(RECRIAR_APOS_FECHAR);
         let inserido = self.handle.insert_source(timer, |_, _, laco| {
             if let Some(sessao) = laco.sessao_mut()

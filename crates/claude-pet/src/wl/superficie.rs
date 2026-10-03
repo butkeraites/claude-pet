@@ -406,6 +406,16 @@ impl Superficie {
         }
         let (largura, altura) = pronta.buffer();
         let tela = Ret::novo(0, 0, largura, altura);
+        let danos = match &self.ultima_cena {
+            None => vec![tela],
+            Some(antes) => raster::consolidar_danos(&cena::danos(antes, cena, skin), tela),
+        };
+        if danos.is_empty() {
+            // Mudou só fora da tela: nada para mostrar, nenhum commit.
+            self.ultima_cena = Some(cena.to_vec());
+            self.pendente = false;
+            return Ok(Desenho::SemMudanca);
+        }
         if self.lona.is_none() {
             self.lona = Some(Lona::nova(shm, largura, altura)?);
         }
@@ -413,10 +423,6 @@ impl Superficie {
             return Err("sem buffer".into());
         };
         let vez = lona.pegar()?;
-        let danos = match &self.ultima_cena {
-            None => vec![tela],
-            Some(antes) => raster::consolidar_danos(&cena::danos(antes, cena, skin), tela),
-        };
         let regioes = if vez.redesenhar_tudo {
             vec![tela]
         } else {

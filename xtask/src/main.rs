@@ -4,6 +4,7 @@
 //! `skin-teste` e `nitidez` no M1; `skin-importar`, `zeca`, `lint-skin`,
 //! `cobertura`, `contato` e `fonte` no M2.
 
+mod nitidez;
 mod skin_teste;
 
 use std::path::PathBuf;
@@ -67,6 +68,17 @@ fn main() -> ExitCode {
                 }
             }
         }
+        Some("nitidez") => match nitidez::executar(&args[1..]) {
+            Ok(true) => ExitCode::SUCCESS,
+            Ok(false) => ExitCode::FAILURE,
+            Err(e) => {
+                eprintln!("nitidez: {e}");
+                eprintln!(
+                    "uso: cargo xtask nitidez --captura <png> --esperado <png> --x X --y Y --d D [--grade X,Y] [--tolerancia 2]"
+                );
+                ExitCode::from(2)
+            }
+        },
         Some(nome) if COMANDOS.iter().any(|(n, _)| *n == nome) => {
             eprintln!("cargo xtask {nome}: ainda não implementado (veja PLANO.md)");
             ExitCode::FAILURE
