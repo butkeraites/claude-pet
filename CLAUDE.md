@@ -31,14 +31,17 @@ hooks (M3).
 **M2 (Zeca) na branch `m2-zeca`:** o pack *Cute Parrots!* (exclusiveOlive,
 zip em `~/Downloads`, fora do repo) vira o Zeca: Parrot 2 verde no visual
 "Malandro rosa" (bico rosa original, chapéu-palheta de faixa laranja,
-gravata-borboleta rosa) e o "chapéu voa e volta" no susto e no mergulho
-(decisões 0023–0025). `bin/pet skin-instalar <zip>` gera `skins-locais/zeca`
-e `zeca-contorno` (fora do git) e as prévias em `tmp/previa-zeca-m2/`. O
-Zeca só aparece depois de `bin/pet subir` e `bin/pet skin-aprovar zeca`
-(decisão 0026); sem aprovação, a produção fica conectada e escondida (`tela:
-sem_personagem`). A pilha de dev (`PET_DEBUG=1`) mostra a skin xadrez
-`_teste`, ou o personagem aprovado com `PET_DEBUG_PERSONAGEM=1`. Formato,
-arte e aprovação em `docs/SKINS.md`.
+gravata-borboleta rosa dentro do contorno do pack) e o "chapéu voa e volta"
+no susto e no mergulho, caindo na cabeça depois do pouso (decisões
+0023–0025 e a revisão 0028). `bin/pet skin-instalar <zip>` gera
+`skins-locais/zeca` e `zeca-contorno` (fora do git) e as prévias em
+`tmp/previa-zeca-m2/`. O Zeca só aparece depois de `bin/pet subir` e
+`bin/pet skin-aprovar zeca`, que só aprova a skin da folha de contato vista
+(decisões 0026 e 0029); sem aprovação, a produção fica conectada e escondida
+(`tela: sem_personagem`). Aprovar e revogar trocam na tela na hora, e o
+config é relido a cada aprovação (`zeca-contorno` sem reiniciar). A pilha de
+dev (`PET_DEBUG=1`) mostra a skin xadrez `_teste`, ou o personagem aprovado
+com `PET_DEBUG_PERSONAGEM=1`. Formato, arte e aprovação em `docs/SKINS.md`.
 
 ## Comandos
 
@@ -55,11 +58,11 @@ Fora dele, use `~/.cargo/bin/cargo`.
 | `scripts/verificar-ao-vivo.sh` | verificação do M1 na tela de verdade; termina com a produção de pé |
 | `scripts/medir-custo.sh` | CPU do Hyprland, GPU e commits/s: escondido × parado, com e sem carga de repintura, e estresse |
 | `cargo xtask skin-teste` / `nitidez` / `fantasma` / `carga` | gera a skin xadrez; compara captura e quadro esperado; acha pixel velho e fantasma; repintura invisível para medir custo |
-| `bin/pet skin-instalar <zip\|pasta>` | o pack vira o Zeca em `skins-locais/` (com e sem contorno), com lint, cobertura e prévias em `tmp/previa-zeca-m2/` |
-| `bin/pet skin-aprovar [id]` / `skin-revogar [id]` | aprova o conteúdo exato da skin vista na folha de contato (cópia em `/state`) ou tira a aprovação |
-| `cargo xtask zeca --pack <zip\|pasta> [--contorno] [--ancoras]` | monta o Zeca; `--ancoras` mostra o encaixe quadro a quadro |
-| `cargo xtask skin-importar` / `lint-skin` / `cobertura` / `contato` | importa um pack; confere a skin; estados cobertos; folha de contato e GIFs |
-| `scripts/verificar-ao-vivo.sh --personagem` | a verificação do M1 com o personagem aprovado no lugar da `_teste` |
+| `bin/pet skin-instalar <zip\|pasta>` | o pack vira o Zeca em `skins-locais/` (com e sem contorno, `--estrito`), com lint, cobertura (`--nativos mvp`) e prévias em `tmp/previa-zeca-m2/` |
+| `bin/pet skin-aprovar [id]` / `skin-revogar [id]` | aprova o conteúdo exato da skin da folha de contato vista (impressão digital conferida; cópia em `/state`) ou tira a aprovação |
+| `cargo xtask zeca --pack <zip\|pasta> [--contorno] [--ancoras] [--estrito]` | monta o Zeca; `--ancoras` mostra o encaixe quadro a quadro; `--estrito` reprova aviso fora de `arte/zeca/avisos-aceitos.txt` |
+| `cargo xtask skin-importar` / `lint-skin` / `cobertura` / `contato` | importa um pack; confere a skin; estados cobertos (`--nativos mvp`); folha de contato com a impressão digital e GIFs (escuro e claro lado a lado) |
+| `scripts/verificar-ao-vivo.sh --personagem` / `scripts/medir-custo.sh --personagem` | a verificação e a medição do M1 com o personagem no lugar da `_teste` (aprovam só para o teste se faltar aprovação e revogam no fim) |
 
 ## Arquitetura em uma tela
 
@@ -86,11 +89,13 @@ Fora dele, use `~/.cargo/bin/cargo`.
   `omarchy` e com consentimento do Renan.
 - **Arte:** o pack e tudo derivado dele (sheet, GIFs, folhas de contato,
   fotos) ficam em `skins-locais/` ou `tmp/` (gitignored), nunca no git nem
-  em `docs/`. Só `arte/zeca/` (acessórios, âncoras, trajetórias) é nossa e
-  vai para o git. A skin `_teste` nunca vira personagem.
+  em `docs/`; o xtask recusa gravar arte de pack em outra pasta do repo. Só
+  `arte/zeca/` (acessórios, âncoras, trajetórias) é nossa e vai para o git.
+  A skin `_teste` nunca vira personagem.
 - **Personagem só com aprovação:** o Zeca aparece só com a impressão
-  digital aprovada pelo Renan (`bin/pet skin-aprovar`, decisão 0026). Nunca
-  aprove por ele: aprovação de teste se revoga no fim.
+  digital aprovada pelo Renan (`bin/pet skin-aprovar`, decisões 0026 e 0029).
+  Nunca aprove por ele: aprovação de teste se revoga no fim (os scripts ao
+  vivo fazem isso sozinhos, até numa falha).
 - **Orçamento de commits Wayland:** média ≤ 2/s parado, 0 dormindo,
   rajadas ≤ 30 fps (decisão 0005).
 - **Registro por tarefa:** cada tarefa ganha uma linha no `PROGRESS.md` e um
@@ -123,7 +128,8 @@ Fora dele, use `~/.cargo/bin/cargo`.
   ele espera o frame callback, que só vem quando o monitor desenha
   (decisão 0018). O ritmo parado só se mede com a tela acesa.
 - Captura do monitor tem o que estiver na tela (janelas, texto): fica em
-  `tmp/` e é apagada; para o git e para PR, só a foto mascarada do pet.
+  `tmp/` e é apagada. Para o git e para PR, só a foto mascarada da skin
+  `_teste`; a foto do Zeca tem pixels do pack e fica em `tmp/`.
 - **Sessão bloqueada:** o lock do Omarchy (quickshell, ext-session-lock)
   apaga a tela depois de um tempo parado e, bloqueado, o Hyprland desenha só a
   tela de senha: nenhuma camada aparece, nem acendendo a tela. O logind não

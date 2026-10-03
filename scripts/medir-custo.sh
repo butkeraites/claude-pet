@@ -26,7 +26,24 @@
 # de CPU do Hyprland e +5 pontos de GPU. Estourou → plano B (superfície
 # pequena de repouso + palco temporário). Do Hyprland só usa consultas de
 # leitura (`hyprctl -j monitors|layers`). No fim deixa a produção de pé.
+#
+# `--personagem` (M2): mede com o personagem aprovado (PET_DEBUG_PERSONAGEM=1)
+# no lugar da `_teste`: o repouso do Zeca tem outro ritmo de commits. Sem
+# aprovação, aprova só para a medição (`bin/pet skin-aprovar`, que exige a
+# folha de contato da mesma skin) e revoga no fim, até se algo falhar.
 set -uo pipefail
+
+PERSONAGEM=0
+case "${1:-}" in
+  --personagem) PERSONAGEM=1 ;;
+  "") ;;
+  *)
+    echo "uso: scripts/medir-custo.sh [--personagem]" >&2
+    exit 2
+    ;;
+esac
+# O compose de dev repassa esta variável ao container.
+export PET_DEBUG_PERSONAGEM="$PERSONAGEM"
 
 RAIZ="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 cd "$RAIZ" || exit 1
@@ -61,11 +78,28 @@ parar() {
 }
 
 CARGA_PID=""
+CONF=""
+APROVOU_PARA_TESTE=0
+aprovada_no_volume() {
+  docker compose exec -T pet test -f "/state/skins/$1/aprovacao.json" >/dev/null 2>&1
+}
 restaurar() {
   [ -n "$CARGA_PID" ] && kill "$CARGA_PID" 2>/dev/null
-  echo "▸ deixando a pilha de produção de pé (sem personagem → pet escondido)"
+  echo "▸ deixando a pilha de produção de pé"
   "${PROD[@]}" up -d >/dev/null 2>&1 || echo "não consegui subir a produção" >&2
-  esperar_campo 20 .tela sem_personagem || true
+  if [ "$APROVOU_PARA_TESTE" = 1 ]; then
+    esperar_campo 20 .tela ativa || true
+    if "$RAIZ/bin/pet" skin-revogar "$CONF" >/dev/null 2>&1; then
+      echo "  aprovação de teste de «$CONF» revogada: quem aprova é o Renan"
+    else
+      echo "✗ NÃO consegui revogar a aprovação de teste de «$CONF»: rode bin/pet skin-revogar $CONF" >&2
+    fi
+  fi
+  for _ in $(seq 1 200); do
+    case "$(campo .tela)" in ativa | sem_personagem) break ;; esac
+    sleep 0.1
+  done
+  printf '  produção: tela=%s\n' "$(campo .tela)"
 }
 trap restaurar EXIT
 
@@ -82,7 +116,20 @@ tela_acesa || parar "a tela de $MONITOR está apagada (DPMS): o Hyprland não de
 echo "▸ compilando o xtask (carga) e subindo a pilha de desenvolvimento"
 cargo build -q -p xtask || parar "falha ao compilar o xtask"
 "${DEV[@]}" up -d --build >/dev/null 2>&1 || parar "falha ao subir a pilha dev"
+if [ "$PERSONAGEM" = 1 ]; then
+  for _ in $(seq 1 50); do
+    CONF="$(campo '.config.chaves["aparencia.skin"].valor')"
+    [ -n "$CONF" ] && [ "$CONF" != null ] && break
+    sleep 0.2
+  done
+  if ! aprovada_no_volume "$CONF"; then
+    echo "▸ «$CONF» sem aprovação: aprovando só para a medição (revogada no fim)"
+    "$RAIZ/bin/pet" skin-aprovar "$CONF" || parar "aprovação de teste de «$CONF» falhou"
+    APROVOU_PARA_TESTE=1
+  fi
+fi
 esperar_campo 20 .visivel true || parar "o pet não apareceu"
+echo "  pet: $(campo .skin.id), D=$(campo .d)"
 echo "  (não mexa no mouse nem no teclado durante a medição: ~$(((RODADAS * 4 * (FASE + 4) + FASE_ESTRESSE + 30) / 60)) min)"
 
 cpu_h() { awk '{print $14 + $15}' "/proc/$PID_H/stat"; }

@@ -422,15 +422,15 @@ As outras sessões aparecem como selos: um contador "+N", uma bandeirinha com a 
    - `sheet.png`;
    - `sheet.json` (Aseprite json-array, com tags e duração por quadro);
    - o esqueleto do `skin.json`.
-3. **Virar Zeca:** `cargo xtask zeca` produz `skins-locais/zeca/`.
-   - **Recolor:** uma tabela de troca de paleta, `arte/zeca/paleta.toml`, deixa o corpo verde em dois tons, com bico amarelo e peito creme. A base é a variante mais próxima do verde.
-   - **Acessórios:** chapéu-palheta e gravata-borboleta, desenhados por nós em grades de texto (`arte/zeca/acessorios/`, commitados) com uma faixa laranja própria.
-   - **Regras de estilo dos acessórios:** contorno de 1px na cor mais escura da rampa do pack (nunca `#000000`) e paleta travada no pack, mais uma rampa nova.
+3. **Virar Zeca:** `cargo xtask zeca` produz `skins-locais/zeca/` (detalhes em `docs/SKINS.md`).
+   - **Base e cores (decisão 0023, escolha do Renan):** o Parrot 2 verde no visual "Malandro rosa": o bico rosa original fica (a troca de paleta em `arte/zeca/paleta.toml` é vazia).
+   - **Acessórios:** chapéu-palheta de faixa laranja e gravata-borboleta rosa, desenhados por nós em grades de texto (`arte/zeca/acessorios/`, commitados).
+   - **Regras de estilo dos acessórios:** contorno de 1px na tinta do pack (nunca `#000000`), toda cor cercada pela tinta como no pack, paleta travada no pack e no máximo uma rampa nova (a da palha).
    - **Encaixe quadro a quadro:**
      - âncora da cabeça detectada pelo olho branco do pack, com correções manuais em `arte/zeca/ancoras.json`;
-     - espelhamento conforme a direção;
-     - em mergulho, voo de costas ou sono, o chapéu muda de variante ou some.
-   - **Contorno creme externo (opcional):** 1 pixel de arte em volta do bicho, para ler no tema escuro hackerman. Você decide vendo a folha de contato com e sem ele. A licença permite editar.
+     - a gravata só no miolo do peito, dentro do contorno do pack; some quando o peito está virado para longe (decisão 0028);
+     - **chapéu voa e volta** (decisões 0024 e 0028): no susto e no mergulho o chapéu sai da cabeça, dá uma cambalhota em volta de um centro fixo e cai de volta nela (no fim do susto; no mergulho, depois do pouso). Dormindo, o chapéu fica.
+   - **Contorno creme externo (opcional):** 1 pixel de arte em volta do bicho, para ler no tema escuro hackerman. Duas skins, `zeca` e `zeca-contorno`; você decide vendo a folha de contato e os GIFs (fundo escuro e claro lado a lado). A licença permite editar.
 4. **Mapa de estados** (fica em `skin.json`; as *receitas* do core criam o que faltar a partir de poses-chave):
 
 | Estado | Tags do pack |
@@ -452,9 +452,10 @@ As outras sessões aparecem como selos: um contador "+N", uma bandeirinha com a 
 | oi / tchau | Chirp + aceno / poof |
 | (nunca usado) | Death |
 
-5. **Aprovação (portão humano):**
-   - `cargo xtask contato` gera a folha de contato (todas as tags, sobre fundo escuro e claro, ×4) e GIFs em `previa/`.
-   - Você aprova a folha e uma demonstração ao vivo antes de o Zeca virar o personagem.
+5. **Aprovação (portão humano, decisões 0026 e 0029):**
+   - `cargo xtask contato` gera a folha de contato (todas as tags, sobre fundo escuro e claro, ×4, com a impressão digital da skin) e GIFs; o `bin/pet skin-instalar` põe as cópias em `tmp/previa-zeca-m2/`.
+   - Você aprova a folha (`bin/pet skin-aprovar`, que só aceita a skin da folha que você viu) antes de o Zeca virar o personagem.
+   - A demonstração ao vivo é a própria aprovação: aprovar põe o Zeca na tela na hora; se não gostar, `bin/pet skin-revogar` o esconde de novo, também na hora.
    - Um snapshot aprovado vai para `/state` e serve de reserva se a skin quebrar.
 6. **Sem personagem aprovado, o pet fica escondido** (estado `sem_personagem`, visível em `bin/pet doutor`).
    - A skin xadrez `_teste` só aparece com `PET_DEBUG=1` ou numa demonstração explícita que se esconde sozinha depois de cerca de 10 s.
@@ -631,8 +632,8 @@ claude-pet/
 **Se o pack ainda não tiver sido comprado:** o M3 vem antes. O pet só aparece em debug ou demonstração.
 
 **Verificação:**
-- `lint-skin` sem erros;
-- `cobertura.md` sem estados "faltando" no MVP;
+- `lint-skin` sem erros e `cargo xtask zeca --estrito` sem aviso novo;
+- `cobertura.md` com os estados do MVP (a tabela do item 4) nativos: `cargo xtask cobertura --nativos mvp`;
 - a nitidez do M1 continua passando com o Zeca;
 - **você aprova a folha de contato e a demonstração ao vivo.**
 

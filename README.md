@@ -54,8 +54,11 @@ bin/pet subir                         # a skin entra na imagem local
 bin/pet skin-aprovar zeca             # depois de ver a folha de contato
 ```
 
-Sem aprovação o Zeca fica escondido. O chapéu, a gravata e o encaixe são
-arte deste repositório (`arte/zeca/`); detalhes em `docs/SKINS.md`.
+Sem aprovação o Zeca fica escondido, e a aprovação só vale para a skin da
+folha de contato que você viu. Para o Zeca com contorno creme, ponha
+`aparencia.skin = "zeca-contorno"` em `config/claude-pet.toml` e aprove
+`zeca-contorno`. O chapéu, a gravata e o encaixe são arte deste repositório
+(`arte/zeca/`); detalhes em `docs/SKINS.md`.
 
 ### Hooks do Claude Code
 

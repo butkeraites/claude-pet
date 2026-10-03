@@ -26,18 +26,24 @@
 # parado saem como NÃO VERIFICADOS (contam como falha).
 #
 # No fim, mesmo se algo falhar, deixa a pilha de PRODUÇÃO de pé: sem
-# personagem aprovado, o pet fica escondido (tela sem_personagem).
+# personagem aprovado, o pet fica escondido (tela sem_personagem); com a skin
+# configurada aprovada pelo Renan, a produção a mostra (tela ativa), e a
+# checagem de fantasma na troca para a produção fica de fora (a produção
+# desenha no mesmo lugar).
 #
 # `--personagem` (M2): a pilha de desenvolvimento mostra o personagem
 # APROVADO (PET_DEBUG_PERSONAGEM=1, decisão 0026) em vez da skin `_teste`, e a
 # nitidez, o pixel velho e o fantasma ao esconder são conferidos com o Zeca.
-# Aprove antes (`bin/pet skin-aprovar`); a produção também o mostra (tela
-# ativa). A checagem de fantasma na troca para a produção não vale nesse
-# modo (a produção desenha o mesmo Zeca no mesmo lugar) e fica de fora.
+# Sem aprovação, o script aprova só para o teste (`bin/pet skin-aprovar`, que
+# exige a folha de contato da mesma skin) e REVOGA no fim, até se algo falhar
+# no meio: o pet termina escondido, como estava. Também confere que aprovar
+# de novo com o pet na tela não o congela.
 #
 # Do Hyprland só usa consultas de leitura (`hyprctl -j monitors|layers`).
-# Capturas do monitor e recortes com o fundo são apagados no fim; o que fica
-# (para o PR) mostra só os pixels opacos do pet sobre um fundo neutro.
+# Capturas do monitor e recortes com o fundo são apagados no fim. O que fica
+# mostra só os pixels opacos do pet sobre um fundo neutro: com a `_teste`
+# pode ir para o PR; com o personagem (pixels de pack comprado) fica em tmp/
+# e nunca vai para o git (decisão 0011).
 set -uo pipefail
 
 RAIZ="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
@@ -94,14 +100,34 @@ esperar_campo() {
   return 1
 }
 
+# A skin configurada (aparencia.skin) e se ela tem aprovação no volume
+# /state (o mesmo para dev e produção).
+CONF=""
+APROVOU_PARA_TESTE=0
+skin_configurada() { campo '.config.chaves["aparencia.skin"].valor'; }
+aprovada_no_volume() {
+  docker compose exec -T pet test -f "/state/skins/$1/aprovacao.json" >/dev/null 2>&1
+}
+
 RESTAURADO=0
 restaurar() {
   [ "$RESTAURADO" = 1 ] && return 0
   RESTAURADO=1
   rm -rf "$PRIVADO"
-  echo "▸ deixando a pilha de produção de pé (esperado: tela $ESPERADO_PROD)"
   docker rm -f claude-pet-sem-compositor >/dev/null 2>&1 || true
+  if [ "$APROVOU_PARA_TESTE" = 1 ]; then
+    ESPERADO_PROD=sem_personagem
+  fi
+  echo "▸ deixando a pilha de produção de pé (esperado: tela $ESPERADO_PROD)"
   "${PROD[@]}" up -d >/dev/null 2>&1 || echo "não consegui subir a produção" >&2
+  if [ "$APROVOU_PARA_TESTE" = 1 ]; then
+    esperar_campo 20 .tela ativa || true
+    if "$RAIZ/bin/pet" skin-revogar "$CONF" >/dev/null 2>&1; then
+      echo "  aprovação de teste de «$CONF» revogada: quem aprova é o Renan"
+    else
+      echo "✗ NÃO consegui revogar a aprovação de teste de «$CONF»: rode bin/pet skin-revogar $CONF" >&2
+    fi
+  fi
   esperar_campo 20 .tela "$ESPERADO_PROD" || true
   printf '  produção: tela=%s visivel=%s\n' "$(campo .tela)" "$(campo .visivel)"
 }
@@ -116,6 +142,25 @@ echo "▸ subindo a pilha de desenvolvimento (PET_DEBUG=1, $QUEM)"
 if ! "${DEV[@]}" up -d --build >"$SAIDA/build.log" 2>&1; then
   falhou "subida da pilha de desenvolvimento (veja $SAIDA/build.log)"
   exit 1
+fi
+for _ in $(seq 1 50); do
+  CONF="$(skin_configurada)"
+  [ -n "$CONF" ] && [ "$CONF" != null ] && break
+  sleep 0.2
+done
+if [ "$PERSONAGEM" = 1 ]; then
+  if ! aprovada_no_volume "$CONF"; then
+    echo "▸ «$CONF» sem aprovação: aprovando só para o teste (revogada no fim)"
+    if "$RAIZ/bin/pet" skin-aprovar "$CONF"; then
+      APROVOU_PARA_TESTE=1
+    else
+      falhou "aprovação de teste de «$CONF» (gere as prévias com bin/pet skin-instalar)"
+      exit 1
+    fi
+  fi
+elif aprovada_no_volume "$CONF"; then
+  # A produção vai mostrar o personagem aprovado pelo Renan.
+  ESPERADO_PROD=ativa
 fi
 if esperar_campo 20 .tela ativa && esperar_campo 10 .visivel true &&
   curl -fsS -m 3 "${URL}/saude" >/dev/null; then
@@ -247,6 +292,33 @@ else
   fi
 fi
 
+# --- 5b. aprovar de novo com o pet na tela (--personagem) -----------------------
+# A revisão do M2 achou o pet congelado depois de uma aprovação com ele na
+# tela (o palco sumia). Aprovar de novo não pode parar o desenho. Só quando a
+# aprovação é a deste teste ou já é a da versão da imagem: se o Renan aprovou
+# uma versão anterior (o pet mostra a cópia de /state), aprovar de novo
+# trocaria a aprovação dele, e isso o script nunca faz.
+if [ "$PERSONAGEM" = 1 ] && [ "$APROVOU_PARA_TESTE" != 1 ] && [ "$(campo .skin.origem)" != imagem ]; then
+  manual "aprovar de novo com o pet na tela: fora (a aprovação do Renan é de outra versão da skin; o script não a troca)"
+elif [ "$PERSONAGEM" = 1 ]; then
+  K0="$(campo .commits_total)"
+  "$RAIZ/bin/pet" skin-aprovar "$CONF" >/dev/null 2>&1
+  sleep 1
+  ANDOU=0
+  for _ in $(seq 1 60); do
+    [ "$(campo .commits_total)" -gt "$K0" ] && { ANDOU=1; break; }
+    sleep 0.25
+  done
+  if [ "$(campo '.visivel and .d != null and .sprite_disp != null')" = true ] &&
+    api /v1/debug/quadro >/dev/null 2>&1 && [ "$ANDOU" = 1 ]; then
+    passou "aprovar de novo com o pet na tela: continua desenhando (d=$(campo .d), commits seguem)"
+  elif [ "$ACESA" != true ]; then
+    falhou "aprovar de novo com o pet na tela: NÃO VERIFICADO — $MOTIVO (sem frame callback não há commits)"
+  else
+    falhou "aprovar de novo com o pet na tela: visivel=$(campo .visivel) d=$(campo .d) sprite_disp=$(campo_json .sprite_disp), commits $K0 → $(campo .commits_total)"
+  fi
+fi
+
 # --- 6. orçamentos do container ---------------------------------------------------
 CONTAINER="$("${DEV[@]}" ps -q pet)"
 TAMANHO="$(docker image inspect claude-pet:local --format '{{.Size}}')"
@@ -334,9 +406,9 @@ fi
 
 # --- 9. troca para a produção sem fantasma, e crash ----------------------------
 echo "▸ trocando para a pilha de produção (SIGTERM no daemon de dev)"
-if [ "$PERSONAGEM" = 1 ]; then
+if [ "$ESPERADO_PROD" = ativa ]; then
   "${PROD[@]}" up -d >/dev/null 2>&1
-  manual "SIGTERM sem fantasma: fora no --personagem (a produção desenha o mesmo personagem no mesmo lugar; conferido no M1 com a _teste)"
+  manual "SIGTERM sem fantasma: fora quando a produção mostra o personagem (desenha no mesmo lugar; conferido no M1 com a _teste)"
 elif [ "$ACESA" = true ] && read -r SX SY SW SH < <(campo '.sprite_disp | "\(.x) \(.y) \(.w) \(.h)"') &&
   [ -n "$SX" ] && [ "$SX" != null ]; then
   T="$PRIVADO/troca"
