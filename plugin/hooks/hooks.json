@@ -1,0 +1,150 @@
+{
+  "description": "Conta ao claude-pet (o Zeca, no 127.0.0.1:27380) o que o Claude Code está fazendo: só metadados (evento, ids, ferramenta, contagens, hash do arquivo editado, nome da pasta do projeto). Hooks async que nunca imprimem nada e sempre saem 0.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "async": true,
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" SessionStart || true"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "async": true,
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" UserPromptSubmit || true"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "AskUserQuestion|ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "async": true,
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" PreToolUse || true"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "async": true,
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" PostToolUse || true"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "async": true,
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" PostToolUseFailure || true"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "async": true,
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" PermissionRequest || true"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt|worker_permission_prompt|elicitation_dialog|elicitation_url_dialog|agent_needs_input|idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "async": true,
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" Notification || true"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "async": true,
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" SubagentStart || true"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "async": true,
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" PreCompact || true"
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "async": true,
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" PostCompact || true"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "async": true,
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" Stop || true"
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "async": true,
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" StopFailure || true"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "async": true,
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" SessionEnd || true"
+          }
+        ]
+      }
+    ]
+  }
+}
