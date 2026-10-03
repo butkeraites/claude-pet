@@ -645,3 +645,61 @@ Girar em volta do centro é o que uma cambalhota faz. O chapéu caindo depois
 do pouso é o pedido do Renan ("cai de volta na cabeça no pouso") e a piada
 fica melhor com um instante de espera. O parado mais calmo cabe no custo
 medido do M1 sem depender de uma conta linear.
+
+## 0029 — Aprovação amarrada à folha de contato, config relida e troca com o pet na tela (2026-10-03)
+
+**Problema:** a revisão do M2 achou, e o código confirmou:
+- **pet congelado:** aprovar ou revogar com o pet na tela (inclusive a
+  reaprovação da decisão 0026, cópia → imagem) apagava o palco e o
+  `resolver` da camada não o refazia, porque só avisa quando monitor ou escala
+  mudam: o último quadro da skin velha ficava parado na tela, com
+  `/v1/estado.d` nulo;
+- **`zeca-contorno` inalcançável:** o daemon lia `aparencia.skin` só na
+  partida, e o `bin/pet subir` não recria o container quando só o config
+  (montado de fora) muda;
+- **aprovação sem a folha:** o `skin-aprovar` conferia host × imagem, mas nada
+  ligava a skin à folha de contato que o Renan olhou;
+- **impressão instável:** o `sheet.json` levava a versão do pet, e subir a
+  versão pediria aprovar de novo a mesma arte;
+- o `skin-instalar` descompactava com `unzip` em `/tmp` (sem teto) e não
+  usava o leitor de zip conferido do xtask; prévias e folha podiam ser
+  gravadas em pasta do git (`docs/`, `arte/`); o `verificar-ao-vivo.sh`
+  deixava a aprovação de teste se fosse interrompido e, depois da aprovação de
+  verdade, reprovaria a produção por não estar escondida.
+
+**Escolha:**
+- **Troca com o pet na tela:** com a camada pronta, o palco (D e posição) é
+  refeito na hora e o quadro novo vai com a tela toda; uma escolha igual à da
+  tela (mesmo id, impressão e origem: aprovar de novo, revogar outro id) não
+  mexe em nada. Conferido com um daemon nativo ligado ao Hyprland de verdade
+  (porta e `/state` de rascunho): aprovar, aprovar de novo, trocar para o
+  `zeca-contorno` com o pet na tela (D = 8, célula refeita) e revogar.
+- **Config relida a cada aprovação ou revogação:** para usar o contorno,
+  `aparencia.skin = "zeca-contorno"` em `config/claude-pet.toml` e `bin/pet
+  skin-aprovar zeca-contorno`, sem reiniciar.
+- **Aprova-se o que foi visto:** o `cargo xtask contato` põe a impressão
+  digital no título da folha e no `contato-<id>.sha256`; o `bin/pet
+  skin-aprovar` recusa se a folha de `tmp/previa-zeca-m2/` não existe ou é de
+  outra versão da skin. Depois de reconstruir a skin: `bin/pet skin-instalar`
+  (gera as prévias de novo), olhar, `bin/pet subir`, `bin/pet skin-aprovar`.
+- **`sheet.json` sem a versão do pet.**
+- **`skin-instalar`** passa o zip direto ao `cargo xtask zeca` (lido em
+  memória: CRC, teto de 64 MiB, sem extrair nada), monta com `--estrito` e
+  exige os estados do MVP nativos (`cargo xtask cobertura --nativos mvp`, a
+  tabela do PLANO, item 4: só com `idle` tudo caía em reserva e o portão nunca
+  reprovava).
+- **Arte de pack só fora do git:** importador, `zeca` e `contato` de uma skin
+  não redistribuível só gravam, dentro do repo, em `skins-locais/` e `tmp/`.
+  Foto do Zeca (`bin/pet foto`, verificação ao vivo) fica em `tmp/`.
+- **Scripts ao vivo:** `verificar-ao-vivo.sh --personagem` e
+  `medir-custo.sh --personagem` aprovam só para o teste quando falta aprovação
+  e revogam no fim, até numa falha; o modo normal lê do volume se o Renan já
+  aprovou e espera a produção de acordo. O `--personagem` também aprova de
+  novo com o pet na tela e confere que ele continua desenhando.
+- A GIF de prévia mostra o fundo escuro e o claro lado a lado, para escolher
+  o contorno creme vendo os dois temas em movimento.
+
+**Por quê:** a aprovação é o portão humano do personagem (decisão 0026): ela
+precisa valer para a arte da folha vista, poder trocar o personagem sem
+congelar a tela nem reiniciar, e nenhum teste pode terminar com o Zeca
+aprovado no lugar do Renan.

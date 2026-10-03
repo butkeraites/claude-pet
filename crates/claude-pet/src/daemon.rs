@@ -30,7 +30,7 @@ pub fn rodar() -> ExitCode {
         aviso!("XDG_RUNTIME_DIR privado: {e}");
     }
 
-    let config = carregar_config(&ambiente);
+    let config = carregar_config(&ambiente.arquivo_config());
     for aviso in &config.avisos {
         aviso!("config: {aviso}");
     }
@@ -81,6 +81,7 @@ pub fn rodar() -> ExitCode {
         curto,
         ambiente.onde(),
         configurada,
+        Some(ambiente.arquivo_config()),
     );
     if let Err(e) = laco.instalar_sinais() {
         erro!("não consegui tratar SIGTERM/SIGINT: {e}");
@@ -158,9 +159,9 @@ fn checar_saude(escuta: SocketAddr) -> bool {
     resposta.starts_with(b"HTTP/1.1 200 ")
 }
 
-fn carregar_config(ambiente: &Ambiente) -> ConfigEfetiva {
-    let caminho = ambiente.arquivo_config();
-    let texto = match std::fs::read_to_string(&caminho) {
+/// Config efetiva: o arquivo (se houver), depois as variáveis `PET_*`.
+pub fn carregar_config(caminho: &Path) -> ConfigEfetiva {
+    let texto = match std::fs::read_to_string(caminho) {
         Ok(texto) => Some(texto),
         Err(e) if e.kind() == ErrorKind::NotFound => None,
         Err(e) => {

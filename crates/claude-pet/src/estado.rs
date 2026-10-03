@@ -132,6 +132,11 @@ impl Compartilhado {
         self.tela.store(tela as u8, Ordering::Relaxed);
     }
 
+    /// Config relida (a cada aprovação; decisão 0029).
+    pub fn definir_config(&self, config: ConfigEfetiva) {
+        *self.config.write().expect("lock da config envenenado") = config;
+    }
+
     pub fn definir_skin(&self, info: InfoSkin) {
         *self.skin.write().expect("lock da skin envenenado") = info;
     }

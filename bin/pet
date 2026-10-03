@@ -40,8 +40,9 @@ uso: bin/pet <comando>
                 cobertura e as prévias em tmp/previa-zeca-m2/)
   skin-aprovar [id]
                 aprova o personagem que você viu na folha de contato (padrão:
-                a skin configurada); só vale se a imagem tiver exatamente
-                esses arquivos; guarda uma cópia aprovada em /state
+                a skin configurada); só vale se a skin for a da folha e a
+                imagem tiver exatamente esses arquivos; guarda uma cópia
+                aprovada em /state
   skin-revogar [id]
                 tira a aprovação: o pet volta a ficar escondido
   reconstruir   reconstrói a imagem com bases atualizadas e sobe de novo
@@ -243,7 +244,22 @@ skin_aprovar() {
     return 1
   }
   sha="$(impressao_da_skin "$pasta")"
-  echo "aprovando «$id» ($pasta, sha ${sha:0:12}), a da folha tmp/previa-zeca-m2/contato-$id.png"
+  # Aprova-se o que foi visto (decisão 0026): a folha de contato traz a
+  # impressão digital da skin no título e no contato-<id>.sha256; se a skin
+  # mudou depois das prévias, a folha não é mais a que vai para a tela.
+  local folha="$PREVIAS/contato-$id.png" vista
+  vista="$(cat "$PREVIAS/contato-$id.sha256" 2>/dev/null || true)"
+  if [ -z "$vista" ]; then
+    echo "não achei a folha de contato de «$id» ($folha): gere as prévias e olhe antes de aprovar" >&2
+    echo "  (bin/pet skin-instalar <zip>, ou cargo xtask contato $pasta --copia $PREVIAS)" >&2
+    return 1
+  fi
+  if [ "$vista" != "$sha" ]; then
+    echo "a skin «$id» mudou depois da folha de contato (folha: sha ${vista:0:12}; skin: sha ${sha:0:12})." >&2
+    echo "  Gere as prévias de novo e olhe antes de aprovar: cargo xtask contato $pasta --copia $PREVIAS" >&2
+    return 1
+  fi
+  echo "aprovando «$id» ($pasta, sha ${sha:0:12}), a da folha $folha"
   if ! comando_pet "$(jq -cn --arg id "$id" --arg sha "$sha" \
     '{cmd: "aprovar_skin", arg: {id: $id, sha256: $sha}}')"; then
     echo "o pet não respondeu em ${URL} — está de pé? (bin/pet subir)" >&2
@@ -258,7 +274,8 @@ skin_aprovar() {
   pedida="$(skin_pedida || true)"
   if [ -n "$pedida" ] && [ "$pedida" != "$id" ]; then
     echo "atenção: o pet está configurado para «$pedida»; para usar «$id», ponha" \
-      "aparencia.skin = \"$id\" em config/claude-pet.toml e rode bin/pet subir" >&2
+      "aparencia.skin = \"$id\" em config/claude-pet.toml (o pet relê o config a cada" \
+      "aprovação) e rode bin/pet skin-aprovar $id de novo" >&2
   fi
 }
 
