@@ -80,7 +80,7 @@ Fora dele, use `~/.cargo/bin/cargo`.
 | `bin/pet verificar` | portão antes de **todo** commit: fmt, clippy, testes, compose, plugin |
 | `bin/pet subir` / `parar` / `logs` / `estado` | compose e estado do pet |
 | `bin/pet testar rapido` / `pequeno` | eventos sintéticos pelo `avisar.sh` de verdade (`PET_TESTE=1`) → `nod` / `done_small` |
-| `bin/pet tocar <reação>` / `esconder` / `mostrar` | `/v1/comando` (não persiste) |
+| `bin/pet tocar <reação>` / `esconder` / `mostrar` | `/v1/comando` (não persiste); o `tocar` diz a tag que a skin tocou e se apareceu na tela |
 | `claude --plugin-dir ~/Documents/claude-pet/plugin` | o plugin numa sessão só (até o merge, nunca instalar) |
 | `~/.cargo/bin/cargo test` | testes do workspace (os quadros dourados regeneram com `PET_ATUALIZAR_OURO=1`) |
 | `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build` | modo desenvolvimento (sem restart, debug, skin `_teste`) |
@@ -111,10 +111,11 @@ Fora dele, use `~/.cargo/bin/cargo`.
   0020 e 0032), que mora no laço principal, conta os prazos da chegada de
   cada evento e funciona mesmo sem compositor.
 - Comandos chegam por `POST /v1/comando`, sempre `{"cmd", "arg"}`: as
-  reações (`tocar`, `esconder`, `mostrar`; 204) e as aprovações
-  (`aprovar_skin`, `revogar_skin`; 200 depois de o laço trocar o
-  personagem), com as mesmas checagens de `Host`, `X-Pet` e `Content-Type`
-  (decisão 0030). Uma reação toca a tag do estado de mesmo nome no
+  reações (`tocar`, 200 com a tag e se apareceu na tela; `esconder` e
+  `mostrar`, 204) e as aprovações (`aprovar_skin`, `revogar_skin`; 200
+  depois de o laço trocar o personagem), com as mesmas checagens de `Host`,
+  `X-Pet` e `Content-Type` (decisões 0030 e 0033). Só as aprovações passam
+  pelo cadeado: uma reação nunca espera uma aprovação. Uma reação toca a tag do estado de mesmo nome no
   `skin.json`, ou a reserva do catálogo (`pet_core::estados`), nunca o
   repouso.
 

@@ -36,7 +36,8 @@ uso: bin/pet <comando>
                   verdade (PET_TESTE=1: isolados das sessões reais e
                   esquecidos em 60 s) e mostra a reação: rapido → nod,
                   pequeno → done_small
-  tocar REAÇÃO    toca uma reação (nod, done_small, wave, alert, …)
+  tocar REAÇÃO    toca uma reação (nod, done_small, wave, alert, …) e diz a
+                  tag que a skin tocou e se ela apareceu na tela
   esconder        esconde o pet (até mostrar ou reiniciar)
   mostrar         mostra o pet de novo
   foto            foto do pet na tela (grim no monitor inteiro, recorte exato;
@@ -77,8 +78,8 @@ comando_pet() {
   RESPOSTA="${saida%$'\n'*}"
 }
 
-# tocar, esconder e mostrar: o pet responde 204; senão, mostra o motivo que
-# ele devolveu.
+# esconder e mostrar: o pet responde 204; senão, mostra o motivo que ele
+# devolveu.
 comando() {
   if ! comando_pet "$1"; then
     echo "o pet não respondeu em ${URL} — está de pé? (bin/pet subir)" >&2
@@ -87,6 +88,29 @@ comando() {
   if [ "$STATUS" != 204 ]; then
     printf 'o pet recusou (%s): %s\n' "$STATUS" \
       "$(jq -r '.erro // empty' <<<"$RESPOSTA" 2>/dev/null || true)" >&2
+    return 1
+  fi
+}
+
+# tocar <reação>: o pet toca e responde o que fez (decisão 0033): 200 com a
+# tag e se ela apareceu na tela (sem compositor ou escondido, não aparece:
+# sai 1); 409 sem personagem aprovado; 400 se a skin não sabe tocar.
+tocar_reacao() {
+  if ! comando_pet "$(jq -nc --arg r "$1" '{cmd: "tocar", arg: $r}')"; then
+    echo "o pet não respondeu em ${URL} — está de pé? (bin/pet subir)" >&2
+    return 1
+  fi
+  if [ "$STATUS" != 200 ]; then
+    printf 'o pet recusou (%s): %s\n' "$STATUS" \
+      "$(jq -r '.erro // empty' <<<"$RESPOSTA" 2>/dev/null || true)" >&2
+    return 1
+  fi
+  local tag
+  tag="$(jq -r .tag <<<"$RESPOSTA")"
+  if [ "$(jq -r .tocou <<<"$RESPOSTA")" = true ]; then
+    printf 'tocou «%s» (tag %s)\n' "$1" "$tag"
+  else
+    printf '«%s» não apareceu: %s (tag %s)\n' "$1" "$(jq -r .motivo <<<"$RESPOSTA")" "$tag" >&2
     return 1
   fi
 }
@@ -456,7 +480,7 @@ case "$comando" in
       echo "uso: bin/pet tocar <reação>" >&2
       exit 2
     fi
-    comando "$(jq -nc --arg r "$1" '{cmd: "tocar", arg: $r}')"
+    tocar_reacao "$1"
     ;;
   esconder) comando '{"cmd": "esconder"}' ;;
   mostrar) comando '{"cmd": "mostrar"}' ;;

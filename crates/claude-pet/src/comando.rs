@@ -46,12 +46,30 @@ pub struct Recebido {
     pub chegada: Instant,
 }
 
+/// O que um `tocar` do `/v1/comando` fez (decisão 0033).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Tocou {
+    /// Tocou na tela a tag `tag` da skin.
+    NaTela { tag: String },
+    /// A skin sabe tocar (`tag`), mas não há onde mostrar: sem compositor,
+    /// ou o pet escondido.
+    ForaDaTela { tag: String, motivo: &'static str },
+    /// Nenhum personagem aprovado.
+    SemPersonagem,
+    /// A skin não tem estado, reserva nem tag com esse nome.
+    Desconhecida { skin: String },
+}
+
 #[derive(Debug)]
 pub enum Comando {
     /// Evento do Claude Code (`POST /v1/evento`).
     Evento(Box<Recebido>),
-    /// Toca uma reação uma vez (`/v1/comando` `tocar`).
-    Tocar(String),
+    /// Toca uma reação uma vez (`/v1/comando` `tocar`); o laço responde o
+    /// que fez.
+    Tocar {
+        reacao: String,
+        resposta: SyncSender<Tocou>,
+    },
     Esconder,
     Mostrar,
     /// Confete pela tela inteira, para medir o custo no compositor.

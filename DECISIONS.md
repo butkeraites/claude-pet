@@ -1076,3 +1076,37 @@ dupla. Isto corrige a 0020: a acomodação cobre hooks fora de ordem dentro de
 0,8 s, e o Stop segurado é coberto pela reabertura. Corrige também a 0022: o
 teto dos arquivos fecha o último mapa do cérebro que crescia com dado de
 fora.
+
+## 0033 — O `tocar` responde o que o pet fez, e reação nunca espera o cadeado das aprovações (2026-10-03)
+
+**Problema:** a revisão adversarial da integração (lentes do cérebro e do
+processo) achou duas pontas soltas no `/v1/comando` unificado da 0030:
+- O comando respondia de dois jeitos. As aprovações davam 200 com o
+  resultado, depois de o laço trocar o personagem. O `tocar` dava 204
+  sempre, com o nome só validado por `[a-z_]`. Sem personagem aprovado, sem
+  compositor ou com um nome que a skin não sabe tocar, o `bin/pet tocar`
+  saía 0 calado, e só o log do daemon avisava.
+- A 0030 promete que só as aprovações passam pelo cadeado ("uma reação
+  nunca espera uma aprovação"), mas nenhum teste segurava isso. O
+  `receber_comando` do M2 pegava o cadeado no começo para qualquer comando,
+  e voltar a esse formato passaria na suíte inteira.
+
+**Escolha:**
+- O `tocar` vai ao laço e espera a resposta por até 2 s (o mesmo prazo das
+  aprovações e do quadro de debug), sem passar pelo cadeado. Respostas:
+  - 200 com `{"reacao", "tocou", "tag", "motivo"}`: `tocou` diz se a
+    reação apareceu na tela, e `motivo` diz por que não (sem compositor, ou
+    o pet escondido; escondido, não toca);
+  - 409 sem personagem aprovado;
+  - 400 se a skin não tem estado, reserva nem tag com esse nome.
+- `esconder` e `mostrar` continuam 204 na hora.
+- O `bin/pet tocar` mostra a tag que a skin tocou e sai 1, com o motivo,
+  quando a reação não aparece.
+- Um teste prende o cadeado: `tocar`, `esconder` e `mostrar` respondem na
+  hora, e a revogação espera até ele soltar. Com o cadeado posto no `tocar`
+  (mutação), o teste reprova.
+
+**Por quê:** um comando de depuração que sai 0 sem ter feito nada esconde
+justamente o que se queria ver: o personagem sem aprovação, o compositor
+fora. Esperar o laço custa milissegundos. O cadeado continua só onde há
+disco e troca de personagem.

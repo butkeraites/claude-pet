@@ -117,14 +117,27 @@ fn reacoes_e_aprovacoes_pelo_mesmo_comando() {
     // O CLI fala com o mesmo `/v1/comando` para as reações do M3 e as
     // aprovações do M2 (decisão 0030).
     let d = Daemon::subir(true);
-    for args in [["tocar", "nod"], ["esconder", ""], ["mostrar", ""]] {
-        let args: Vec<&str> = args.into_iter().filter(|a| !a.is_empty()).collect();
+    for args in [["esconder"], ["mostrar"]] {
         let (ok, saida, erro) = pet(&d, &args);
         assert!(ok, "{args:?}: {saida}{erro}");
     }
+    // O `tocar` conta o que o pet fez (decisão 0033): sem compositor, a
+    // reação não aparece, e o CLI sai com erro dizendo por quê.
+    let (ok, _, erro) = pet(&d, &["tocar", "nod"]);
+    assert!(!ok);
+    assert!(
+        erro.contains("«nod» não apareceu: sem compositor (tag wave)"),
+        "{erro}"
+    );
     let (ok, _, erro) = pet(&d, &["tocar", "Nod!"]);
     assert!(!ok);
     assert!(erro.contains("o pet recusou (400)"), "{erro}");
+    let (ok, _, erro) = pet(&d, &["tocar", "nada_disso"]);
+    assert!(!ok);
+    assert!(
+        erro.contains("o pet recusou (400): a skin «_teste» não tem «nada_disso»"),
+        "{erro}"
+    );
     let (ok, saida, erro) = pet(&d, &["skin-revogar", "zeca"]);
     assert!(ok, "{saida}{erro}");
     assert!(saida.contains("«zeca» não estava aprovada"), "{saida}");

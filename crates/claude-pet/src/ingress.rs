@@ -15,8 +15,11 @@
 //!   (decisão 0019, [`pet_core::evento`]); 204, ou 400 sem `v`/`e` válidos.
 //!   Vai para o laço principal pelo canal do calloop.
 //! - `POST /v1/comando`, sempre `{"cmd": …, "arg": …}` e mais nada:
-//!   - `tocar` com o nome da reação, `esconder` e `mostrar` (M3, decisão
-//!     0019) vão para o laço principal sem esperar; 204, e nada persiste;
+//!   - `tocar` com o nome da reação (M3, decisões 0019 e 0033) espera o laço
+//!     principal tocar (até 2 s) e responde 200 com a tag que a skin tocou e
+//!     se ela apareceu na tela; 409 sem personagem aprovado, 400 se a skin
+//!     não sabe tocar. `esconder` e `mostrar` vão ao laço sem esperar (204).
+//!     Nada persiste, e nenhuma reação passa pelo cadeado das aprovações;
 //!   - `aprovar_skin` com `{"id", "sha256"}` aprova o conteúdo exato da skin
 //!     da imagem e guarda a cópia em `/state`; `revogar_skin` com o id apaga
 //!     a aprovação (M2, decisão 0026). Uma por vez; a resposta (200, JSON)
@@ -43,7 +46,7 @@ use serde_json::{Value, json};
 use smithay_client_toolkit::reexports::calloop::channel::SyncSender;
 
 use crate::aprovacao;
-use crate::comando::{Comando, QuadroEsperado, Recebido};
+use crate::comando::{Comando, QuadroEsperado, Recebido, Tocou};
 use crate::estado::Compartilhado;
 use crate::personagem::Onde;
 
@@ -51,8 +54,9 @@ pub const LIMITE_CABECALHOS: usize = 8 * 1024;
 pub const LIMITE_CORPO: usize = 8 * 1024;
 const MAX_CONEXOES: usize = 16;
 const TEMPO_LIMITE: Duration = Duration::from_secs(1);
-/// Quanto o `/v1/debug/quadro` espera o laço principal responder.
-const ESPERA_QUADRO: Duration = Duration::from_secs(2);
+/// Quanto uma rota espera o laço principal responder (o quadro de debug, a
+/// troca de personagem de uma aprovação, um `tocar`).
+const ESPERA_LACO: Duration = Duration::from_secs(2);
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Requisicao {
@@ -366,7 +370,7 @@ fn receber_comando(req: &Requisicao, ctx: &Contexto) -> (u16, String) {
     };
     let comando = match (pedido.cmd.as_str(), pedido.arg) {
         ("tocar", Some(Value::String(reacao))) if evento::eh_enum(&reacao) => {
-            Comando::Tocar(reacao)
+            return tocar(reacao, ctx);
         }
         ("tocar", _) => {
             return (
@@ -399,6 +403,44 @@ fn receber_comando(req: &Requisicao, ctx: &Contexto) -> (u16, String) {
     match canal.try_send(comando) {
         Ok(()) => (204, String::new()),
         Err(_) => (503, erro_json("laço principal ocupado")),
+    }
+}
+
+/// `tocar <reação>`: o laço principal toca e conta o que fez (decisão
+/// 0033). Não passa pelo cadeado das aprovações: uma reação nunca espera uma
+/// aprovação (decisão 0030). O nome já passou por `[a-z_]{1,40}`.
+fn tocar(reacao: String, ctx: &Contexto) -> (u16, String) {
+    let Some(canal) = &ctx.comandos else {
+        return (503, erro_json("laço principal indisponível"));
+    };
+    let (resposta, espera) = mpsc::sync_channel(1);
+    let pedido = Comando::Tocar {
+        reacao: reacao.clone(),
+        resposta,
+    };
+    if canal.try_send(pedido).is_err() {
+        return (503, erro_json("laço principal ocupado"));
+    }
+    match espera.recv_timeout(ESPERA_LACO) {
+        Ok(Tocou::NaTela { tag }) => (
+            200,
+            json!({"reacao": reacao, "tocou": true, "tag": tag}).to_string(),
+        ),
+        Ok(Tocou::ForaDaTela { tag, motivo }) => (
+            200,
+            json!({"reacao": reacao, "tocou": false, "tag": tag, "motivo": motivo}).to_string(),
+        ),
+        Ok(Tocou::SemPersonagem) => (
+            409,
+            erro_json("sem personagem aprovado: nada para tocar (bin/pet skin-aprovar)"),
+        ),
+        Ok(Tocou::Desconhecida { skin }) => (
+            400,
+            erro_json(&format!(
+                "a skin «{skin}» não tem «{reacao}»: nem estado, nem reserva, nem tag"
+            )),
+        ),
+        Err(_) => (503, erro_json("o laço principal não respondeu")),
     }
 }
 
@@ -460,7 +502,7 @@ fn escolher_de_novo(mut resposta: Value, ctx: &Contexto) -> Value {
     if let Some(canal) = &ctx.comandos {
         let (feito, espera) = mpsc::sync_channel(1);
         let aplicado = canal.send(Comando::RecarregarPersonagem(feito)).is_ok()
-            && espera.recv_timeout(ESPERA_QUADRO).is_ok();
+            && espera.recv_timeout(ESPERA_LACO).is_ok();
         if !aplicado {
             aviso!("o laço principal não confirmou a troca de personagem");
         }
@@ -526,7 +568,7 @@ fn pedir_quadro(canal: &SyncSender<Comando>) -> (u16, String) {
     if canal.try_send(Comando::Quadro(resposta)).is_err() {
         return (503, erro_json("laço principal ocupado"));
     }
-    match recebe.recv_timeout(ESPERA_QUADRO) {
+    match recebe.recv_timeout(ESPERA_LACO) {
         Ok(Some(quadro)) => match quadro_json(&quadro) {
             Ok(corpo) => (200, corpo),
             Err(motivo) => (500, erro_json(&motivo)),
@@ -801,8 +843,9 @@ mod testes {
     #[test]
     fn comandos() {
         let (ctx, recebe) = contexto_debug();
+        let laco = laco_de_teste(recebe, Tocou::NaTela { tag: "nod".into() });
         for (corpo, status) in [
-            (r#"{"cmd":"tocar","arg":"nod"}"#, 204),
+            (r#"{"cmd":"tocar","arg":"nod"}"#, 200),
             (r#"{"cmd":"esconder"}"#, 204),
             (r#"{"cmd":"mostrar","arg":null}"#, 204),
             (r#"{"cmd":"tocar"}"#, 400),
@@ -820,8 +863,115 @@ mod testes {
         let req = post_tipo("/v1/comando", Some("text/plain"), r#"{"cmd":"mostrar"}"#);
         assert_eq!(rotear(&req, &ctx).0, 415);
         drop(ctx);
-        let recebidos: Vec<String> = drenar(recebe).iter().map(|c| format!("{c:?}")).collect();
-        assert_eq!(recebidos, vec!["Tocar(\"nod\")", "Esconder", "Mostrar"]);
+        assert_eq!(
+            laco.join().unwrap(),
+            vec!["Tocar(nod)", "Esconder", "Mostrar"]
+        );
+    }
+
+    #[test]
+    fn tocar_responde_o_que_o_laco_fez() {
+        // O `tocar` espera o laço (decisão 0033): a tag que a skin tocou e se
+        // apareceu na tela; sem personagem, 409; nome que a skin não sabe,
+        // 400.
+        for (tocou, status, trecho) in [
+            (
+                Tocou::NaTela {
+                    tag: "chirp".into(),
+                },
+                200,
+                r#""tag":"chirp","tocou":true"#,
+            ),
+            (
+                Tocou::ForaDaTela {
+                    tag: "wave".into(),
+                    motivo: "sem compositor",
+                },
+                200,
+                r#""motivo":"sem compositor","reacao":"nod","tag":"wave","tocou":false"#,
+            ),
+            (Tocou::SemPersonagem, 409, "sem personagem aprovado"),
+            (
+                Tocou::Desconhecida {
+                    skin: "zeca".into(),
+                },
+                400,
+                "a skin «zeca» não tem «nod»",
+            ),
+        ] {
+            let (canal, recebe) =
+                smithay_client_toolkit::reexports::calloop::channel::sync_channel(4);
+            let laco = laco_de_teste(recebe, tocou);
+            let ctx = Contexto {
+                comandos: Some(canal),
+                ..contexto()
+            };
+            let (obtido, corpo) = rotear(
+                &post_json("/v1/comando", r#"{"cmd":"tocar","arg":"nod"}"#),
+                &ctx,
+            );
+            assert_eq!(obtido, status, "{corpo}");
+            assert!(corpo.contains(trecho), "{corpo}");
+            drop(ctx);
+            assert_eq!(laco.join().unwrap(), vec!["Tocar(nod)"]);
+        }
+    }
+
+    #[test]
+    fn reacao_nunca_espera_uma_aprovacao() {
+        // Só as aprovações passam pelo cadeado (decisão 0030): com o cadeado
+        // preso, `tocar`, `esconder` e `mostrar` respondem na hora, e uma
+        // revogação espera até o cadeado soltar.
+        let (canal, recebe) = smithay_client_toolkit::reexports::calloop::channel::sync_channel(16);
+        let laco = laco_de_teste(recebe, Tocou::NaTela { tag: "nod".into() });
+        let ctx = Arc::new(Contexto {
+            comandos: Some(canal),
+            ..contexto()
+        });
+        let vez = ctx.aprovando.lock().unwrap();
+        let (feito, espera) = mpsc::channel();
+        let pedir = |corpo: &'static str| {
+            let ctx = Arc::clone(&ctx);
+            let feito = feito.clone();
+            thread::spawn(move || {
+                let status = rotear(&post_json("/v1/comando", corpo), &ctx).0;
+                feito.send((corpo, status)).unwrap();
+            })
+        };
+        let reacoes = [
+            pedir(r#"{"cmd":"tocar","arg":"nod"}"#),
+            pedir(r#"{"cmd":"esconder"}"#),
+            pedir(r#"{"cmd":"mostrar"}"#),
+        ];
+        let mut respondidas = Vec::new();
+        for _ in 0..3 {
+            let resposta = espera
+                .recv_timeout(Duration::from_secs(1))
+                .expect("uma reação esperou o cadeado das aprovações");
+            respondidas.push(resposta.1);
+        }
+        respondidas.sort_unstable();
+        assert_eq!(respondidas, vec![200, 204, 204]);
+        let revogacao = pedir(r#"{"cmd":"revogar_skin","arg":"zeca"}"#);
+        assert!(
+            espera.recv_timeout(Duration::from_millis(300)).is_err(),
+            "a revogação passou pelo cadeado preso"
+        );
+        drop(vez);
+        let (_, status) = espera.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(status, 200);
+        for pedido in reacoes.into_iter().chain([revogacao]) {
+            pedido.join().unwrap();
+        }
+        drop(ctx);
+        let recebidos = laco.join().unwrap();
+        assert_eq!(
+            recebidos
+                .iter()
+                .filter(|c| *c == "RecarregarPersonagem")
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -829,7 +979,7 @@ mod testes {
         // As reações do M3 e as aprovações do M2 dividem o `/v1/comando`,
         // com o mesmo formato e as mesmas checagens (decisão 0030).
         let (canal, recebe) = smithay_client_toolkit::reexports::calloop::channel::sync_channel(16);
-        let laco = laco_que_confirma(recebe);
+        let laco = laco_de_teste(recebe, Tocou::NaTela { tag: "nod".into() });
         let ctx = Contexto {
             comandos: Some(canal),
             ..contexto()
@@ -857,15 +1007,16 @@ mod testes {
             let a_mais = corpo.replacen('{', r#"{"x":1,"#, 1);
             assert_eq!(rotear(&post_json("/v1/comando", &a_mais), &ctx).0, 400);
         }
-        // Aceitos: a reação vai sem esperar (204); a revogação espera o laço
-        // escolher o personagem de novo (200, com o resultado).
+        // Aceitos: a reação responde o que o laço tocou (200, decisão 0033);
+        // a revogação espera o laço escolher o personagem de novo (200, com
+        // o resultado).
         assert_eq!(
             rotear(
                 &post_json("/v1/comando", r#"{"cmd":"tocar","arg":"nod"}"#),
                 &ctx
             )
             .0,
-            204
+            200
         );
         let (status, resposta) = rotear(
             &post_json("/v1/comando", r#"{"cmd":"revogar_skin","arg":"zeca"}"#),
@@ -886,9 +1037,10 @@ mod testes {
             assert!(resposta.contains(cmd), "{resposta}");
         }
         drop(ctx);
+        let recebidos = laco.join().unwrap();
         assert_eq!(
-            laco.join().unwrap(),
-            1,
+            recebidos,
+            vec!["Tocar(nod)", "RecarregarPersonagem"],
             "só a revogação troca de personagem"
         );
     }
@@ -915,7 +1067,7 @@ mod testes {
     fn comando_aprova_e_revoga_e_avisa_o_laco() {
         let a = crate::aprovacao::testes::Ambiente::novo("ingress");
         let (canal, recebe) = smithay_client_toolkit::reexports::calloop::channel::sync_channel(4);
-        let laco = laco_que_confirma(recebe);
+        let laco = laco_de_teste(recebe, Tocou::SemPersonagem);
         let ctx = Contexto {
             comandos: Some(canal),
             onde: crate::personagem::Onde {
@@ -952,34 +1104,40 @@ mod testes {
         drop(ctx);
         assert_eq!(
             laco.join().unwrap(),
-            3,
+            vec!["RecarregarPersonagem"; 3],
             "aprovou, revogou e revogou de novo: 3 trocas"
         );
     }
 
-    /// Um "laço principal" numa thread: confirma cada troca de personagem e
-    /// devolve quantas foram quando o canal fecha.
-    fn laco_que_confirma(
+    /// Um "laço principal" numa thread: confirma cada troca de personagem,
+    /// responde cada `tocar` com `tocou` e devolve, quando o canal fecha, os
+    /// comandos que chegaram, na ordem.
+    fn laco_de_teste(
         recebe: smithay_client_toolkit::reexports::calloop::channel::Channel<Comando>,
-    ) -> thread::JoinHandle<usize> {
+        tocou: Tocou,
+    ) -> thread::JoinHandle<Vec<String>> {
         use smithay_client_toolkit::reexports::calloop::EventLoop;
         use smithay_client_toolkit::reexports::calloop::channel::Event;
         thread::spawn(move || {
-            let mut laco = EventLoop::<(usize, bool)>::try_new().unwrap();
+            let mut laco = EventLoop::<(Vec<String>, bool)>::try_new().unwrap();
             laco.handle()
                 .insert_source(
                     recebe,
-                    |evento, _, estado: &mut (usize, bool)| match evento {
+                    move |evento, _, estado: &mut (Vec<String>, bool)| match evento {
                         Event::Msg(Comando::RecarregarPersonagem(feito)) => {
-                            estado.0 += 1;
+                            estado.0.push("RecarregarPersonagem".into());
                             let _ = feito.try_send(());
                         }
-                        Event::Msg(_) => {}
+                        Event::Msg(Comando::Tocar { reacao, resposta }) => {
+                            estado.0.push(format!("Tocar({reacao})"));
+                            let _ = resposta.try_send(tocou.clone());
+                        }
+                        Event::Msg(outro) => estado.0.push(format!("{outro:?}")),
                         Event::Closed => estado.1 = true,
                     },
                 )
                 .unwrap();
-            let mut estado = (0, false);
+            let mut estado = (Vec::new(), false);
             while !estado.1 {
                 laco.dispatch(Some(Duration::from_millis(20)), &mut estado)
                     .unwrap();

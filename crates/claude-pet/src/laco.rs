@@ -37,13 +37,14 @@ use smithay_client_toolkit::reexports::calloop::{
 };
 use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
 
+use pet_core::animador;
 use pet_core::aprovacao::Origem;
 use pet_core::cerebro::{Agora, Cerebro, ConfigCerebro, Reacao};
 use pet_core::config::ConfigEfetiva;
 use pet_core::evento;
 use pet_core::skin::Skin;
 
-use crate::comando::{Comando, Recebido};
+use crate::comando::{Comando, Recebido, Tocou};
 use crate::descoberta::{self, Espera, Reconexao};
 use crate::estado::{Compartilhado, InfoSkin, Painel, Tela};
 use crate::ingress::agora_desde_1970_ms;
@@ -298,11 +299,20 @@ impl Laco {
     fn comando(&mut self, comando: Comando) {
         match comando {
             Comando::Evento(recebido) => self.evento(*recebido),
-            Comando::Tocar(reacao) => match self.sessao_mut().map(|s| s.tocar(&reacao)) {
-                Some(true) => info!("tocar: «{reacao}»"),
-                Some(false) => aviso!("tocar: sem personagem, ou a skin não tem «{reacao}»"),
-                None => aviso!("tocar «{reacao}» sem compositor"),
-            },
+            Comando::Tocar { reacao, resposta } => {
+                let tocou = self.tocar(&reacao);
+                match &tocou {
+                    Tocou::NaTela { tag } => info!("tocar: «{reacao}» (tag {tag})"),
+                    Tocou::ForaDaTela { tag, motivo } => {
+                        aviso!("tocar: «{reacao}» (tag {tag}) fora da tela: {motivo}");
+                    }
+                    Tocou::SemPersonagem => aviso!("tocar: «{reacao}» sem personagem aprovado"),
+                    Tocou::Desconhecida { skin } => {
+                        aviso!("tocar: a skin «{skin}» não tem «{reacao}»");
+                    }
+                }
+                let _ = resposta.try_send(tocou);
+            }
             Comando::Esconder | Comando::Mostrar => {
                 self.visivel = matches!(comando, Comando::Mostrar);
                 info!("{}", if self.visivel { "mostrar" } else { "esconder" });
@@ -325,6 +335,39 @@ impl Laco {
                 self.escolher_personagem();
                 let _ = feito.try_send(());
             }
+        }
+    }
+
+    /// `tocar` do `/v1/comando`: a tag que a skin toca para a reação e se
+    /// ela apareceu (decisão 0033). Escondido, não toca.
+    fn tocar(&mut self, reacao: &str) -> Tocou {
+        let Some(skin) = self.skin.clone() else {
+            return Tocou::SemPersonagem;
+        };
+        let Some(tag) = animador::tag_da_reacao(&skin, reacao)
+            .and_then(|i| skin.tags.get(i))
+            .map(|t| t.nome.clone())
+        else {
+            return Tocou::Desconhecida {
+                skin: skin.id.clone(),
+            };
+        };
+        if !self.visivel {
+            return Tocou::ForaDaTela {
+                tag,
+                motivo: "o pet está escondido (bin/pet mostrar)",
+            };
+        }
+        match self.sessao_mut().map(|s| s.tocar(reacao)) {
+            Some(true) => Tocou::NaTela { tag },
+            Some(false) => Tocou::ForaDaTela {
+                tag,
+                motivo: "a sessão Wayland ainda não tem o personagem",
+            },
+            None => Tocou::ForaDaTela {
+                tag,
+                motivo: "sem compositor",
+            },
         }
     }
 

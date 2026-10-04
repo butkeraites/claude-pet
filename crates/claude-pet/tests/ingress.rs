@@ -96,10 +96,19 @@ fn debug_eventos_so_com_metadados() {
 #[test]
 fn comandos_de_ponta_a_ponta() {
     let d = Daemon::subir(true);
-    assert_eq!(
-        d.post_json("/v1/comando", r#"{"cmd":"tocar","arg":"nod"}"#)
-            .0,
-        204
+    // Sem compositor, o `tocar` diz a tag que a skin de teste tocaria e que
+    // ela não apareceu (decisão 0033); um nome que a skin não sabe é 400.
+    let (status, corpo) = d.post_json("/v1/comando", r#"{"cmd":"tocar","arg":"nod"}"#);
+    assert_eq!(status, 200, "{corpo}");
+    let resposta: serde_json::Value = serde_json::from_str(&corpo).unwrap();
+    assert_eq!(resposta["tocou"], false);
+    assert_eq!(resposta["tag"], "wave", "o nod cai no wave da _teste");
+    assert_eq!(resposta["motivo"], "sem compositor");
+    let (status, corpo) = d.post_json("/v1/comando", r#"{"cmd":"tocar","arg":"nada_disso"}"#);
+    assert_eq!(status, 400, "{corpo}");
+    assert!(
+        corpo.contains("a skin «_teste» não tem «nada_disso»"),
+        "{corpo}"
     );
     assert_eq!(d.post_json("/v1/comando", r#"{"cmd":"esconder"}"#).0, 204);
     assert_eq!(d.post_json("/v1/comando", r#"{"cmd":"mostrar"}"#).0, 204);
@@ -127,10 +136,15 @@ fn comandos_de_ponta_a_ponta() {
         d.cabecalhos()
     ));
     assert_eq!(status, 415);
-    // Sem compositor: o tocar chega ao laço e avisa que não há onde tocar.
-    let limite = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while !d.log().contains("tocar «nod» sem compositor") {
-        assert!(std::time::Instant::now() < limite, "{}", d.log());
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    assert!(
+        d.log()
+            .contains("tocar: «nod» (tag wave) fora da tela: sem compositor"),
+        "{}",
+        d.log()
+    );
+    // Sem personagem aprovado (produção sem aprovação): 409.
+    let producao = Daemon::subir(false);
+    let (status, corpo) = producao.post_json("/v1/comando", r#"{"cmd":"tocar","arg":"nod"}"#);
+    assert_eq!(status, 409, "{corpo}");
+    assert!(corpo.contains("sem personagem aprovado"), "{corpo}");
 }
