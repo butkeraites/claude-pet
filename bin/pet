@@ -30,6 +30,8 @@ uso: bin/pet <comando>
   parar         para o pet
   logs          acompanha os logs
   estado        mostra /v1/estado (o que o pet está vendo e pensando)
+  foto          foto do pet na tela (grim no monitor inteiro, recorte exato;
+                em debug, só os pixels do pet sobre fundo neutro)
   reconstruir   reconstrói a imagem com bases atualizadas e sobe de novo
   dev           modo desenvolvimento em primeiro plano (debug, sem restart)
   verificar     portão antes de todo commit: fmt, clippy, testes, compose, plugin
@@ -39,6 +41,71 @@ TEXTO
 
 api() {
   curl -fsS -m 3 -H 'X-Pet: 1' "${URL}$1"
+}
+
+# O core é puro (CLAUDE.md): nenhuma dependência normal, direta ou
+# transitiva, pode ser crate de Wayland ou do laço de eventos.
+core_sem_wayland() {
+  local proibidas
+  proibidas="$(cargo tree -p pet-core -e normal --prefix none --quiet |
+    grep -iE '^(wayland|smithay|calloop)' || true)"
+  if [ -n "$proibidas" ]; then
+    printf 'pet-core depende de:\n%s\n' "$proibidas" >&2
+    return 1
+  fi
+}
+
+# Foto do pet (captura por scripts/capturar-pet.sh: grim no monitor inteiro,
+# nunca `grim -g`). Com PET_DEBUG=1 a foto mostra SÓ os pixels opacos do pet
+# (máscara = alfa 255 do quadro esperado) sobre um fundo neutro: nada do que
+# está atrás dele sai na imagem, e é essa que pode ir para um PR. Sem debug,
+# recorta a célula inteira e avisa que a imagem inclui o fundo. A captura do
+# monitor inteiro é sempre apagada, até quando algo falha no meio.
+FOTO_PASTA=""
+foto() {
+  local base x y w h
+  mkdir -p "$RAIZ/tmp/fotos"
+  FOTO_PASTA="$(mktemp -d "$RAIZ/tmp/fotos/.captura-XXXXXX")"
+  trap 'rm -rf "${FOTO_PASTA:-}"' EXIT
+  if ! "$RAIZ/scripts/capturar-pet.sh" "$FOTO_PASTA"; then
+    return 1
+  fi
+  base="$RAIZ/tmp/fotos/$(date +%Y%m%d-%H%M%S)"
+  if [ -f "$FOTO_PASTA/esperado.png" ]; then
+    read -r x y w h < <(jq -r '"\(.x) \(.y) \(.w) \(.h)"' "$FOTO_PASTA/quadro.json")
+    if ! magick "$FOTO_PASTA/monitor.png" -crop "${w}x${h}+${x}+${y}" +repage \
+      \( "$FOTO_PASTA/esperado.png" -alpha extract -threshold 99.9% \) \
+      -compose CopyOpacity -composite \
+      -background '#202028' -compose Over -flatten "$base.png" ||
+      ! magick "$base.png" -filter point -resize 300% "$base-x3.png"; then
+      echo "o magick falhou ao montar a foto" >&2
+      return 1
+    fi
+    printf '%s\n%s\n' "$base.png" "$base-x3.png"
+  else
+    read -r x y w h < <(jq -r '.sprite_disp | "\(.x) \(.y) \(.w) \(.h)"' "$FOTO_PASTA/estado.json")
+    if ! magick "$FOTO_PASTA/monitor.png" -crop "${w}x${h}+${x}+${y}" +repage "$base.png"; then
+      echo "o magick falhou ao recortar a foto" >&2
+      return 1
+    fi
+    echo "aviso: sem PET_DEBUG a foto inclui o que estiver atrás do pet; não anexe em lugar público" >&2
+    printf '%s\n' "$base.png"
+  fi
+}
+
+# Regra de ouro checável no código (decisão 0006): o daemon nunca abre o
+# socket de comandos do Hyprland nem chama hyprctl. Olha só o código de
+# produção (o que vem antes de `#[cfg(test)]`), fora de comentários; os
+# testes podem criar um `.socket.sock` falso para provar que ninguém conecta.
+daemon_sem_socket_de_comandos() {
+  local achados
+  achados="$(find crates/claude-pet/src -name '*.rs' -print0 |
+    xargs -0 awk '/^#\[cfg\(test\)\]/ {nextfile} {print FILENAME ":" FNR ":" $0}' |
+    grep -E '\.socket\.sock|hyprctl' | grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true)"
+  if [ -n "$achados" ]; then
+    printf 'o daemon cita o socket de comandos do Hyprland ou o hyprctl:\n%s\n' "$achados" >&2
+    return 1
+  fi
 }
 
 verificar() {
@@ -53,6 +120,8 @@ verificar() {
     fi
   }
   passo "cargo fmt" cargo fmt --all --check
+  passo "pet-core sem Wayland" core_sem_wayland
+  passo "daemon sem socket de comandos" daemon_sem_socket_de_comandos
   passo "cargo clippy" cargo clippy --all-targets --quiet -- -D warnings
   passo "cargo test" cargo test --quiet
   passo "compose" docker compose config -q
@@ -90,6 +159,7 @@ case "$comando" in
       exit 1
     fi
     ;;
+  foto) foto ;;
   reconstruir) docker compose build --pull pet && docker compose up -d pet ;;
   dev) docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build ;;
   verificar) verificar ;;

@@ -15,14 +15,23 @@ O plano completo, com marcos M0–M7 e como verificar cada um, está em
 
 ## Estado do repositório
 
-**M0 (fundação) concluído.** Existe o esqueleto: workspace Rust, daemon
-que responde `/saude` e `/v1/estado` (estado `tela: aguardando`), Docker
-(imagem de ~4 MB, healthy) e o CLI `bin/pet`. Repositório privado em
-`github.com/butkeraites/claude-pet`. Ainda não há janela na tela (M1), arte
-(M2) nem hooks (M3).
+**M0 (fundação) concluído. M1 (overlay) concluído na branch `m1-overlay`,
+com o portão fechado com a tela acesa** (atualização da decisão 0005):
+nitidez exata, sem fantasma, parado a 0,70 commit/s e +0,58 ponto de CPU do
+Hyprland; sob repintura de tela cheia, +0,20 de CPU e +1,6 de GPU. A camada
+única fica; o plano B não é necessário. Fotos em `docs/fotos/m1/`. Falta só
+o clique manual (clicar ao lado do pet chega na janela de baixo).
 
-O Renan precisa **comprar o pack** *Cute Parrots!* (exclusiveOlive,
-itch.io) para o M2. Até lá, o pet só aparece em modo debug com a skin
+O daemon acha o Hyprland pelo `hyprland.lock`, conecta ao Wayland (Rust
+puro, SCTK), cria a camada OVERLAY `claude-pet` no monitor focado e desenha
+a skin em blocos D×D de pixels do monitor, com orçamento de commits.
+Repositório privado em `github.com/butkeraites/claude-pet`. Ainda não há
+arte (M2) nem hooks (M3).
+
+O Renan **já comprou o pack** *Cute Parrots!* (exclusiveOlive): o zip fica
+fora do repositório (`~/Downloads`), e o Zeca nasce do Parrot 2, que já é
+verde (M2). Até a skin ser aprovada, a produção fica conectada e escondida
+(`tela: sem_personagem`); só a pilha de dev (`PET_DEBUG=1`) mostra a skin
 xadrez `_teste`.
 
 ## Comandos
@@ -34,8 +43,12 @@ Fora dele, use `~/.cargo/bin/cargo`.
 |---|---|
 | `bin/pet verificar` | portão antes de **todo** commit: fmt, clippy, testes, compose, plugin |
 | `bin/pet subir` / `parar` / `logs` / `estado` | compose e estado do pet |
-| `~/.cargo/bin/cargo test` | testes do workspace |
-| `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build` | modo desenvolvimento (sem restart, debug) |
+| `~/.cargo/bin/cargo test` | testes do workspace (os quadros dourados regeneram com `PET_ATUALIZAR_OURO=1`) |
+| `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build` | modo desenvolvimento (sem restart, debug, skin `_teste`) |
+| `bin/pet foto` | foto do pet (grim no monitor inteiro); em debug, só os pixels opacos do pet sobre fundo neutro |
+| `scripts/verificar-ao-vivo.sh` | verificação do M1 na tela de verdade; termina com a produção de pé |
+| `scripts/medir-custo.sh` | CPU do Hyprland, GPU e commits/s: escondido × parado, com e sem carga de repintura, e estresse |
+| `cargo xtask skin-teste` / `nitidez` / `fantasma` / `carga` | gera a skin xadrez; compara captura e quadro esperado; acha pixel velho e fantasma; repintura invisível para medir custo |
 
 ## Arquitetura em uma tela
 
@@ -82,6 +95,23 @@ Fora dele, use `~/.cargo/bin/cargo`.
   o container.
 - `docker kill` cancela a política de restart; para simular crash, mate o
   processo pelo host (`kill -9`).
+- Com a tela apagada (DPMS) o Hyprland não desenha: o `grim` espera para
+  sempre (use `timeout` e confira `dpmsStatus`), não chega frame callback e
+  camadas destruídas ficam no `hyprctl -j layers` com `pid: -1` até a tela
+  acender. A checagem de camada filtra `pid > 0`.
+- Toda POST no ingress precisa de `Content-Length` (curl: `-d ''`); sem ele
+  a resposta é 411.
+- Nunca capture com `grim -g`: a geometria lógica passa por filtro
+  bilinear. Use `grim -o <monitor>` e recorte em pixels do monitor.
+- Com a tela apagada o pet não faz commit nenhum depois do primeiro quadro:
+  ele espera o frame callback, que só vem quando o monitor desenha
+  (decisão 0018). O ritmo parado só se mede com a tela acesa.
+- Captura do monitor tem o que estiver na tela (janelas, texto): fica em
+  `tmp/` e é apagada; para o git e para PR, só a foto mascarada do pet.
+- O `shellcheck` não está instalado no host (o `bin/pet verificar` pula).
+  Rodado pela imagem oficial, que depois foi removida:
+  `docker run --rm --network none -v "$PWD:/mnt:ro" -w /mnt
+  koalaman/shellcheck:stable -x bin/pet scripts/*.sh`.
 
 ## Convenções
 

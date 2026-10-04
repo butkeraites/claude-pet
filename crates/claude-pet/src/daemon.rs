@@ -3,22 +3,20 @@
 use std::io::{ErrorKind, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
 use pet_core::config::ConfigEfetiva;
-use signal_hook::consts::{SIGINT, SIGTERM};
+use smithay_client_toolkit::reexports::calloop::EventLoop;
+use smithay_client_toolkit::reexports::calloop::channel;
 
 use crate::ambiente::Ambiente;
-use crate::estado::Compartilhado;
-use crate::{ingress, vigia};
-
-/// Intervalo do batimento do laço principal. No M1 vira um timer do calloop.
-const BATIMENTO: Duration = Duration::from_millis(250);
+use crate::estado::{Compartilhado, InfoSkin};
+use crate::laco::Laco;
+use crate::{comando, descoberta, ingress, personagem, vigia};
 
 pub fn rodar() -> ExitCode {
     let ambiente = match Ambiente::ler(|nome| std::env::var(nome).ok()) {
@@ -36,8 +34,29 @@ pub fn rodar() -> ExitCode {
     for aviso in &config.avisos {
         aviso!("config: {aviso}");
     }
+    let escolha = personagem::escolher(
+        ambiente.debug,
+        config.texto("aparencia.skin"),
+        &ambiente.skins,
+    );
+    for aviso in &escolha.avisos {
+        aviso!("personagem: {aviso}");
+    }
+    match &escolha.skin {
+        Some(skin) => info!("personagem: skin «{}» ({})", skin.id, skin.nome),
+        None => info!(
+            "sem personagem (pedida: «{}»): o pet fica escondido",
+            escolha.pedida
+        ),
+    }
     let comp = Arc::new(Compartilhado::novo(config, ambiente.debug));
+    comp.definir_skin(InfoSkin {
+        id: escolha.skin.as_ref().map(|s| s.id.clone()),
+        pedida: escolha.pedida.clone(),
+        avisos: escolha.avisos.clone(),
+    });
     comp.bater();
+    let (canal, comandos) = channel::sync_channel(comando::CAPACIDADE);
 
     let ouvinte = match TcpListener::bind(ambiente.escuta) {
         Ok(o) => o,
@@ -49,6 +68,8 @@ pub fn rodar() -> ExitCode {
     let ctx = Arc::new(ingress::Contexto {
         comp: Arc::clone(&comp),
         porta_publica: ambiente.porta_publica,
+        debug: ambiente.debug,
+        comandos: Some(canal),
     });
     if let Err(e) = thread::Builder::new()
         .name("ingress".into())
@@ -59,12 +80,34 @@ pub fn rodar() -> ExitCode {
     }
     vigia::iniciar(Arc::clone(&comp));
 
-    let parar = Arc::new(AtomicBool::new(false));
-    for sinal in [SIGTERM, SIGINT] {
-        if let Err(e) = signal_hook::flag::register(sinal, Arc::clone(&parar)) {
-            aviso!("não consegui tratar o sinal {sinal}: {e}");
+    let mut eventos: EventLoop<'static, Laco> = match EventLoop::try_new() {
+        Ok(eventos) => eventos,
+        Err(e) => {
+            erro!("não consegui criar o laço de eventos: {e}");
+            return ExitCode::FAILURE;
         }
+    };
+    let base = descoberta::base_do_usuario(&ambiente.runtime_host);
+    let curto = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    let mut laco = Laco::novo(
+        Arc::clone(&comp),
+        eventos.handle(),
+        base.clone(),
+        curto,
+        escolha.skin.map(std::rc::Rc::new),
+    );
+    if let Err(e) = laco.instalar_sinais() {
+        erro!("não consegui tratar SIGTERM/SIGINT: {e}");
+        return ExitCode::FAILURE;
     }
+    if let Err(e) = laco.instalar_comandos(comandos) {
+        erro!("não consegui ligar o canal de comandos: {e}");
+        return ExitCode::FAILURE;
+    }
+    laco.armar_batimento();
+    laco.armar_descoberta(Duration::ZERO);
 
     info!(
         "claude-pet {} escutando em {} (porta pública {}){}",
@@ -74,18 +117,18 @@ pub fn rodar() -> ExitCode {
         if ambiente.debug { ", modo debug" } else { "" }
     );
     depurar!(
-        "config em {}, estado em {}, runtime do host em {}",
+        "config em {}, estado em {}",
         ambiente.arquivo_config().display(),
         ambiente.pasta_estado.display(),
-        ambiente.runtime_host.display()
     );
-    info!("aguardando compositor (a conexão Wayland chega no M1)");
+    info!("procurando o compositor em {}", base.display());
 
-    while !parar.load(Ordering::Relaxed) {
-        comp.bater();
-        thread::sleep(BATIMENTO);
+    while !laco.parar {
+        if let Err(e) = eventos.dispatch(None, &mut laco) {
+            laco.falha_no_laco(e);
+        }
     }
-    info!("encerrando: sinal recebido");
+    laco.encerrar();
     ExitCode::SUCCESS
 }
 
@@ -187,6 +230,8 @@ mod testes {
         let ctx = Arc::new(ingress::Contexto {
             comp,
             porta_publica: endereco.port(),
+            debug: false,
+            comandos: None,
         });
         thread::spawn(move || ingress::servir(ouvinte, ctx));
         assert!(checar_saude(endereco));

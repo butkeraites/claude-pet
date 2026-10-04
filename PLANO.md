@@ -584,16 +584,12 @@ claude-pet/
 ### M1 — Overlay nítido e barato (portão)
 
 **Tarefas:**
-- descoberta e reconexão;
-- sessão Wayland (camada NULL, primeiro mapeamento 1x1, escala fracionária + viewporter);
-- raster D×D com SlotPool novo por superfície;
-- dano em lista;
-- região de input;
-- cursor;
-- `/v1/estado.sprite_disp` (retângulo em pixels do monitor);
-- `/v1/debug/quadro`;
-- `bin/pet foto`;
-- skin `_teste`, só em modo debug.
+- **T1.1** descoberta e reconexão (assinatura mais nova, `hyprland.lock`, `connect()` de prova, backoff só na mesma assinatura);
+- **T1.2** sessão Wayland (camada NULL, primeiro mapeamento 1x1, escala fracionária + viewporter, batimento de 5 s);
+- **T1.3** core: skin (Aseprite json-array), raster D×D, animador mínimo; `cargo xtask skin-teste`; quadros dourados;
+- **T1.4** renderização SHM com SlotPool novo por superfície, dano em lista, ritmo por estado e esconder sem fantasma;
+- **T1.5** região de input, cursor, `/v1/estado.sprite_disp` (retângulo em pixels do monitor), `/v1/debug/quadro`, `bin/pet foto`; skin `_teste` só em modo debug;
+- **T1.6** `scripts/verificar-ao-vivo.sh`, `cargo xtask nitidez`, medições de custo registradas em DECISIONS.
 
 **Verificação** (`scripts/verificar-ao-vivo.sh`):
 1. **Posição:** `hyprctl -j layers` mostra `claude-pet` no nível 3 do monitor focado, com o retângulo lógico do monitor.

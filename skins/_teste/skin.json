@@ -1,0 +1,83 @@
+{
+  "autor": "claude-pet",
+  "celula": [
+    48,
+    48
+  ],
+  "corpo_px": 32,
+  "dados": "sheet.json",
+  "escala_padrao": 4,
+  "estados": {
+    "alert": [
+      "alert"
+    ],
+    "dangle": [
+      "dangle"
+    ],
+    "done_big": [
+      "done_big"
+    ],
+    "done_medium": [
+      "done_medium"
+    ],
+    "done_small": [
+      "done_small"
+    ],
+    "error": [
+      "error"
+    ],
+    "giggle": [
+      "giggle"
+    ],
+    "idle": [
+      "idle",
+      "blink"
+    ],
+    "land": [
+      "land"
+    ],
+    "poof_in": [
+      "poof_in"
+    ],
+    "poof_out": [
+      "poof_out"
+    ],
+    "ready": [
+      "ready"
+    ],
+    "sleep": [
+      "sleep"
+    ],
+    "thinking": [
+      "thinking"
+    ],
+    "waiting": [
+      "waiting"
+    ],
+    "wave": [
+      "wave"
+    ],
+    "working": [
+      "working"
+    ],
+    "yawn": [
+      "yawn"
+    ]
+  },
+  "folha": "sheet.png",
+  "formato": 1,
+  "id": "_teste",
+  "licenca": "MIT",
+  "nome": "Xadrez de teste (QA, nunca é personagem)",
+  "pe": [
+    24,
+    45
+  ],
+  "redistribuivel": true,
+  "toque": [
+    10,
+    13,
+    28,
+    32
+  ]
+}

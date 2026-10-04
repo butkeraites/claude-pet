@@ -8,6 +8,12 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+pet-core.workspace = true
+serde_json.workspace = true
+# Só para `cargo xtask carga` (cliente Wayland do host); o pet-core continua
+# sem Wayland.
+smithay-client-toolkit.workspace = true
+rustix.workspace = true
 
 [lints]
 workspace = true
