@@ -2,7 +2,8 @@
 //!
 //! Os comandos chegam junto com os marcos que precisam deles (PLANO.md):
 //! `skin-teste` e `nitidez` no M1; `skin-importar`, `zeca`, `lint-skin`,
-//! `cobertura`, `contato` e `fonte` no M2.
+//! `cobertura` e `contato` no M2; `fonte` (a monogram dos balões) e
+//! `globais` (os protocolos que o compositor oferece) no M4.
 
 mod args;
 mod carga;
@@ -10,6 +11,7 @@ mod cobertura;
 mod contato;
 mod fantasma;
 mod folha;
+mod fonte;
 mod fonte_mini;
 mod importar;
 mod lint;
@@ -43,7 +45,10 @@ const COMANDOS: &[(&str, &str)] = &[
         "lista estados nativos, por receita e faltando (M2)",
     ),
     ("contato", "folha de contato e GIFs de prévia (M2)"),
-    ("fonte", "monta o atlas da fonte monogram (M2)"),
+    (
+        "fonte",
+        "assa a fonte monogram dos balões no pet-core (M4); --conferir só confere",
+    ),
 ];
 
 /// Raiz do repositório (o xtask mora em `<raiz>/xtask`).
@@ -147,6 +152,13 @@ fn main() -> ExitCode {
                 eprintln!("cobertura: {e}");
                 eprintln!("uso: cargo xtask cobertura <pasta> [--saida <arquivo.md>]");
                 ExitCode::from(2)
+            }
+        },
+        Some("fonte") => match fonte::executar(&raiz(), &args[1..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("fonte: {e}");
+                ExitCode::FAILURE
             }
         },
         Some("skin-importar") => match importar::executar(&args[1..]) {

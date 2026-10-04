@@ -23,6 +23,7 @@
 //! cresce para o palco inteiro só enquanto arrasta.
 
 pub mod arraste;
+pub mod balao;
 mod desktop;
 pub mod janelas;
 mod pet;
@@ -48,6 +49,7 @@ use crate::plataforma::{
 use crate::skin::Skin;
 
 pub use arraste::{Arraste, Gesto};
+pub use balao::Balao;
 pub use desktop::{EstadoDesktop, PainelDesktop};
 pub use pet::{Palco, Pet};
 pub use posicoes::{Fracao, Posicoes};
@@ -101,6 +103,8 @@ pub struct Painel {
     /// A fase da viagem para o monitor em foco (`poof`, `saindo`,
     /// `chegando`, `entrando`), se houver uma.
     pub viagem: Option<&'static str>,
+    /// As linhas do balão na tela, se houver um.
+    pub balao: Option<Vec<String>>,
     /// O desktop: a fonte dos eventos, o monitor em foco, a janela ativa (só
     /// o endereço) e o que a conexão sabe fazer.
     pub desktop: PainelDesktop,
@@ -168,6 +172,12 @@ pub struct Motor {
     chave_do_monitor: Option<String>,
     /// Seguir o monitor ativo (decisão 0051).
     seguir: Seguir,
+    /// O balão na tela (decisão 0052).
+    balao: Option<Balao>,
+    /// Parede − monotônico, do último [`Agora`] que o Motor viu: a hora de
+    /// parede de um instante do relógio do laço (o "há quanto tempo" do
+    /// balão).
+    deslocamento_parede: u64,
 }
 
 impl Motor {
@@ -188,7 +198,62 @@ impl Motor {
             posicoes_novas: false,
             chave_do_monitor: None,
             seguir: Seguir::default(),
+            balao: None,
+            deslocamento_parede: 0,
         }
+    }
+
+    /// Acerta o relógio de parede pelo de agora (o núcleo chama a cada lote).
+    pub fn acertar_relogio(&mut self, agora: Agora) {
+        self.deslocamento_parede = agora.parede_ms.saturating_sub(agora.mono_ms);
+    }
+
+    /// A hora de parede (ms desde 1970) de um instante do relógio do laço.
+    fn parede(&self, mono_ms: u64) -> u64 {
+        mono_ms + self.deslocamento_parede
+    }
+
+    // --- o balão (decisão 0052) ----------------------------------------------
+
+    /// Mostra um balão com `linhas` em cima do pet (some sozinho).
+    pub fn mostrar_balao(
+        &mut self,
+        ov: Option<&mut dyn Overlay>,
+        linhas: Vec<String>,
+        agora_ms: u64,
+    ) {
+        self.balao = Some(Balao::novo(linhas, agora_ms));
+        if let Some(ov) = ov {
+            self.desenhar(ov, agora_ms, false);
+        }
+    }
+
+    /// O balão na tela agora.
+    pub fn balao(&self, agora_ms: u64) -> Option<&Balao> {
+        self.balao.as_ref().filter(|b| agora_ms < b.ate_ms)
+    }
+
+    /// As sessões abertas, uma por linha (projeto, estado e há quanto
+    /// tempo), as reais antes das de teste, a mais recente primeiro.
+    pub fn linhas_das_sessoes(&self, agora_ms: u64) -> Vec<String> {
+        let agora = self.parede(agora_ms);
+        let mut sessoes = self.cerebro.resumo().sessoes;
+        sessoes.sort_by_key(|s| (s.teste, std::cmp::Reverse(s.ultimo_evento_ms)));
+        if sessoes.is_empty() {
+            return vec!["nenhuma sessão do Claude aberta".into()];
+        }
+        sessoes
+            .iter()
+            .map(|s| {
+                balao::linha_da_sessao(
+                    s.proj.as_deref(),
+                    balao::estado(s),
+                    s.estado_desde_ms,
+                    agora,
+                    s.teste,
+                )
+            })
+            .collect()
     }
 
     // --- posições salvas (decisão 0049) --------------------------------------
@@ -241,11 +306,13 @@ impl Motor {
 
     /// Um evento do Claude Code, no relógio da chegada (decisão 0032).
     pub fn evento(&mut self, ev: &Evento, recebido_ms: u64, agora: Agora) -> Vec<Reacao> {
+        self.acertar_relogio(agora);
         self.cerebro.receber(ev, recebido_ms, agora)
     }
 
     /// O prazo do cérebro venceu (acomodação do Stop, sessões que expiram).
     pub fn tique(&mut self, agora: Agora) -> Vec<Reacao> {
+        self.acertar_relogio(agora);
         self.cerebro.tique(agora)
     }
 
@@ -519,6 +586,7 @@ impl Motor {
     /// desenhado e a viagem não é rápida) ou a saída direta.
     fn comecar_viagem(&mut self, ov: &mut dyn Overlay, pouso: Option<Pouso>, agora_ms: u64) {
         self.largar_o_arraste(agora_ms);
+        self.balao = None;
         let desenhado = ov.fase() == (Fase::Viva { conteudo: true }) && self.palco.is_some();
         let rapida = self.seguir.comecar(agora_ms, pouso, desenhado);
         info!(
@@ -651,6 +719,7 @@ impl Motor {
             Gesto::Nada => {}
             Gesto::Apertou => punho.janela().cursor(Cursor::Agarrar),
             Gesto::Comecou => {
+                self.balao = None;
                 if let Some(pet) = self.pet.as_mut() {
                     pet.segurar(ARRASTADO, agora_ms);
                 }
@@ -740,11 +809,14 @@ impl Motor {
         }
     }
 
-    /// Um clique no pet: o esquerdo dá a risadinha (no M4 ele também leva ao
-    /// terminal de uma sessão, T4.10); o direito, a soneca (T4.7).
+    /// Um clique no pet: o esquerdo dá a risadinha e mostra o balão com as
+    /// sessões abertas (levar ao terminal de uma sessão chega na T4.10); o
+    /// direito, a soneca (T4.7).
     fn clique(&mut self, punho: &mut dyn Punho, botao: Botao, agora_ms: u64) {
         if botao == Botao::Esquerdo {
             self.tocar(Some(punho.janela()), RISADINHA, agora_ms);
+            let linhas = self.linhas_das_sessoes(agora_ms);
+            self.mostrar_balao(Some(punho.janela()), linhas, agora_ms);
         }
     }
 
@@ -763,6 +835,7 @@ impl Motor {
         evento: &EventoDesktop,
         agora: Agora,
     ) -> bool {
+        self.acertar_relogio(agora);
         if let EventoDesktop::MonitorEmFoco(nome) = evento {
             self.seguir.foco(nome.clone(), agora.mono_ms);
         }
@@ -814,6 +887,18 @@ impl Motor {
                 None if !entrando => cena.clear(),
                 None => {}
             }
+        }
+        // O balão em cima do corpo, até o prazo dele.
+        if let Some(balao) = self.balao.as_ref().filter(|b| agora_ms < b.ate_ms)
+            && let Some(corpo) = pet.toque_no_palco(&palco)
+        {
+            cena.extend(balao::elementos(
+                &balao.linhas,
+                corpo,
+                palco.area,
+                balao::dt(palco.d),
+            ));
+            proxima = Some(proxima.map_or(balao.ate_ms, |p| p.min(balao.ate_ms)));
         }
         if self.estresse.as_ref().is_some_and(|e| agora_ms >= e.fim_ms) {
             self.estresse = None;
@@ -870,6 +955,10 @@ impl Motor {
         let gesto = self.arraste.vencer(agora_ms);
         self.aplicar_gesto(punho, gesto, agora_ms);
         self.vencer_viagem(punho.janela(), agora_ms);
+        if self.balao.as_ref().is_some_and(|b| agora_ms >= b.ate_ms) {
+            self.balao = None;
+            self.desenhar(punho.janela(), agora_ms, false);
+        }
         self.vencer_animacao(punho.janela(), agora_ms);
     }
 
@@ -880,6 +969,7 @@ impl Motor {
             self.proximo_quadro,
             self.arraste.prazo(),
             self.seguir.prazo(),
+            self.balao.as_ref().map(|b| b.ate_ms),
         ]
         .into_iter()
         .flatten()
@@ -1038,6 +1128,7 @@ impl Motor {
                 .map(str::to_owned),
             arrastando: self.arraste.arrastando(),
             viagem: self.seguir.fase().map(FaseViagem::nome),
+            balao: self.balao(agora_ms).map(|b| b.linhas.clone()),
             desktop: painel_desktop,
         }
     }

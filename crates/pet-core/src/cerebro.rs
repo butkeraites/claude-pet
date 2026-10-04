@@ -247,6 +247,9 @@ pub struct ResumoSessao {
     pub ent: Option<String>,
     pub teste: bool,
     pub estado: EstadoSessao,
+    /// Desde quando a sessão está nesse estado (ms desde 1970): o "há
+    /// quanto tempo" do balão das sessões (M4).
+    pub estado_desde_ms: u64,
     pub turno_aberto: bool,
     pub acomodando: bool,
     /// Hora do último evento (ms desde 1970).
@@ -428,6 +431,8 @@ struct Sessao {
     proj: Option<String>,
     ent: Option<String>,
     estado: EstadoSessao,
+    /// Hora (parede) do evento que pôs a sessão no estado de agora.
+    estado_desde: u64,
     turno: Option<Turno>,
     trocado: Option<Trocado>,
     comemorado: Option<Comemorado>,
@@ -449,6 +454,7 @@ impl Sessao {
             proj: None,
             ent: None,
             estado: EstadoSessao::Parada,
+            estado_desde: agora.parede_ms,
             turno: None,
             trocado: None,
             comemorado: None,
@@ -860,6 +866,7 @@ impl Cerebro {
             sessao.ent.clone_from(&ev.ent);
         }
         let id = ev.turno.as_deref();
+        let estado_antes = sessao.estado;
 
         // Um evento de trabalho da thread principal: o SubagentStart vem com
         // o `agent_id` do subagente que nasce, mas quem o lança é a thread
@@ -1089,6 +1096,9 @@ impl Cerebro {
             }
             _ => ignorado = Some("evento_desconhecido"),
         }
+        if sessao.estado != estado_antes {
+            sessao.estado_desde = t;
+        }
         if let Some(motivo) = ignorado {
             self.ignorar(motivo);
         }
@@ -1226,6 +1236,7 @@ impl Cerebro {
                     ent: s.ent.clone(),
                     teste: s.teste,
                     estado: s.estado,
+                    estado_desde_ms: s.estado_desde,
                     turno_aberto: s.turno.is_some(),
                     acomodando: s.turno.as_ref().is_some_and(|t| t.stop.is_some()),
                     ultimo_evento_ms: s.ultimo_parede,

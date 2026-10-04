@@ -227,6 +227,7 @@ impl Compartilhado {
             "reacao": painel.reacao,
             "arrastando": painel.arrastando,
             "viagem": painel.viagem,
+            "balao": painel.balao,
             "desktop": painel.desktop,
             "eventos": self.eventos_json(),
             "sessoes": do_cerebro("sessoes", json!([])),

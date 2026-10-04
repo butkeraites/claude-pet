@@ -951,3 +951,84 @@ fn esconder_no_meio_da_viagem_desiste_e_a_janela_fechada_espera_a_nova() {
     motor.evento_overlay(&mut janela, EventoOverlay::Pronta, 600);
     assert_eq!(motor.painel(Some(&janela), 600).viagem, Some("entrando"));
 }
+
+// --- o balão (decisão 0052) -------------------------------------------------
+
+fn prompt_em(motor: &mut Motor, sid: &str, proj: &str, ms: u64) {
+    let ev = Evento {
+        e: "UserPromptSubmit".into(),
+        sid: Some(sid.into()),
+        turno: Some(format!("{sid}-p")),
+        ent: Some("cli".into()),
+        proj: Some(proj.into()),
+        ts: Some(PAREDE + ms),
+        ..Evento::default()
+    };
+    motor.evento(&ev, PAREDE + ms, em(ms));
+}
+
+fn tem_glifos(janela: &Falsa) -> bool {
+    janela
+        .cena
+        .as_ref()
+        .is_some_and(|c| c.iter().any(|e| matches!(e, Elemento::Glifo { .. })))
+}
+
+#[test]
+fn clique_sem_pendencia_mostra_as_sessoes_num_balao_que_some_sozinho() {
+    let (mut motor, mut janela) = ligado();
+    motor.acertar_relogio(em(0));
+    janela.mostrou();
+    let (x, y) = meio_do_corpo(&janela);
+    // Sem sessão nenhuma.
+    ponteiro(&mut motor, &mut janela, apertou(x, y), 100);
+    ponteiro(&mut motor, &mut janela, soltou(x, y), 150);
+    let p = motor.painel(Some(&janela), 150);
+    assert_eq!(
+        p.balao,
+        Some(vec!["nenhuma sessão do Claude aberta".to_owned()])
+    );
+    assert_eq!(p.reacao.as_deref(), Some(RISADINHA));
+    // Duas sessões: a mais recente primeiro, com o estado e há quanto tempo.
+    prompt_em(&mut motor, "aaaa1111", "api", 1_000);
+    prompt_em(&mut motor, "bbbb2222", "claude-pet", 31_000);
+    janela.mostrou();
+    ponteiro(&mut motor, &mut janela, apertou(x, y), 91_000);
+    ponteiro(&mut motor, &mut janela, soltou(x, y), 91_050);
+    let linhas = motor.painel(Some(&janela), 91_050).balao.unwrap();
+    assert_eq!(
+        linhas,
+        vec![
+            "claude-pet: pensando (1 min)".to_owned(),
+            "api: pensando (1 min)".to_owned()
+        ]
+    );
+    janela.mostrou();
+    motor.evento_overlay(&mut janela, EventoOverlay::Redesenhar, 91_060);
+    assert!(tem_glifos(&janela), "o texto na cena");
+    // Some sozinho no prazo (base + uma linha por segundo).
+    let ate = 91_050 + balao::BASE_MS + 2 * balao::POR_LINHA_MS;
+    assert!(motor.proximo_prazo().unwrap() <= ate);
+    janela.mostrou();
+    motor.vencer(&mut janela, ate);
+    assert_eq!(motor.painel(Some(&janela), ate).balao, None);
+    assert!(!tem_glifos(&janela), "o balão saiu da cena");
+}
+
+#[test]
+fn arrastar_ou_viajar_tira_o_balao() {
+    let (mut motor, mut janela) = ligado();
+    janela.mostrou();
+    motor.mostrar_balao(Some(&mut janela), vec!["oi".into()], 0);
+    assert!(motor.balao(10).is_some());
+    let (x, y) = meio_do_corpo(&janela);
+    ponteiro(&mut motor, &mut janela, apertou(x, y), 20);
+    ponteiro(&mut motor, &mut janela, moveu(x - 60, y), 30);
+    assert!(motor.balao(30).is_none(), "o arraste tira o balão");
+    ponteiro(&mut motor, &mut janela, soltou(x - 60, y), 40);
+    motor.mostrar_balao(Some(&mut janela), vec!["oi".into()], 50);
+    foco(&mut motor, &mut janela, "HDMI-A-1", 60);
+    janela.mostrou();
+    motor.vencer(&mut janela, 360);
+    assert!(motor.balao(360).is_none(), "a viagem tira o balão");
+}

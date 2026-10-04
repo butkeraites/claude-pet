@@ -20,8 +20,11 @@ O código deste repositório é MIT (`LICENSE`). Abaixo, o que vem de fora.
   (MIT). Só coordenadas e cores da paleta do pack; nenhum pixel do pack.
 - `skins/_teste/` — skin xadrez de QA gerada por `cargo xtask skin-teste`;
   MIT.
-
-## A incluir quando chegarem
-
-- **monogram** (fonte bitmap dos balões), por datagoblin — CC0 —
-  https://datagoblin.itch.io/monogram (M2/M6).
+- `assets/fonte/monogram/` — **monogram**, a fonte de pixel dos balões, de
+  Vinícius Menézio (datagoblin): https://datagoblin.itch.io/monogram, em
+  domínio público pela **CC0 1.0** (o texto da licença em
+  `assets/fonte/monogram/CC0-1.0.txt`, os créditos originais em
+  `credits.txt` e a origem em `LICENCA.md`). O repositório guarda só o JSON
+  de bitmaps do pacote; `cargo xtask fonte` o assa em
+  `crates/pet-core/src/fonte/glifos.rs`, que vai dentro do binário (decisão
+  0052). Obrigado, datagoblin!

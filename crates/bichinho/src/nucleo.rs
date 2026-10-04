@@ -384,6 +384,7 @@ impl Nucleo {
     /// ordem. Quem chama esvazia a caixa antes (decisão 0032).
     pub fn vencer(&mut self, mut ov: Option<&mut dyn Punho>) {
         let agora = self.agora_ms();
+        self.motor.acertar_relogio(self.agora());
         if let Some(ov) = janela(&mut ov) {
             ov.vencer(agora);
         }
@@ -416,6 +417,7 @@ impl Nucleo {
         let Some(ov) = ov else {
             return false;
         };
+        self.motor.acertar_relogio(self.agora());
         let mut mudou = false;
         for _ in 0..VOLTAS_DE_EVENTOS {
             let eventos = ov.janela().eventos();

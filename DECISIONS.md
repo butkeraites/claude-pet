@@ -2010,3 +2010,46 @@ arrastado e solto em outro monitor.
 para trás; o poof esconde o salto entre camadas (uma camada não atravessa
 monitores); e o pouso pelo ponto do desktop faz o arraste entre monitores
 terminar onde o Renan soltou.
+
+## 0052 — A fonte monogram (CC0) assada no core e o balão mínimo (2026-10-04)
+
+**Problema:** o clique sem pendência mostra um balão com as sessões abertas
+(decisão 0039), e o balão precisa de uma fonte de pixel com acento (o PLANO
+escolheu a monogram, CC0, para o M6; o M4 a puxa). A fonte tem de ser livre
+(CC0 ou OFL), com a licença no repositório, nítida como a arte (blocos
+inteiros de pixels do dispositivo) e sem nada baixado em tempo de execução.
+**Escolha (T4.6):**
+- **A monogram**, de Vinícius Menézio (datagoblin), CC0 1.0: baixada do
+  itch.io em 2026-10-04 (`monogram.zip`, sha256 81d05402…). O repositório
+  guarda só o `monogram-bitmap.json` do pacote (390 glifos com o latim
+  completo e os acentos do português; cada um em 12 linhas de bits, o bit 0
+  na coluna da esquerda; avanço de 6), o `credits.txt` original, o texto da
+  CC0 e um `LICENCA.md` com a origem e os sha256. O `NOTICE.md` dá o
+  crédito.
+- **Assada no core:** `cargo xtask fonte` gera
+  `crates/pet-core/src/fonte/glifos.rs` (uma tabela em ordem de código, já no
+  formato do `rustfmt`; `--conferir` só confere); um teste do core compara a
+  tabela com o JSON e um do xtask, o arquivo com o gerado. A fonte vai
+  dentro do binário. Sem o glifo, o do `?`.
+- **O glifo na cena:** `Elemento::Glifo` (o caractere, o canto, o bloco e a
+  cor), desenhado em blocos inteiros, um retângulo por trecho aceso de cada
+  linha; o dano é o retângulo dele, como o de um sprite.
+- **O balão mínimo** (`pet_core::motor::balao`): um quadro creme com borda
+  de tinta e cantos de um pixel cortados, o rabinho de dois pixels
+  apontando para o meio do corpo, o texto na monogram com um pixel da fonte
+  valendo metade do D (para cima; 3 pixels do dispositivo com o Zeca
+  pequeno no eDP-1). Fica em cima do corpo, preso dentro da área útil; sem
+  espaço em cima, embaixo, com o rabinho virado. Até 6 linhas (a sexta vira
+  "+ N") de até 36 caracteres (cortadas com "…"). Some sozinho: 5 s mais 1 s
+  por linha, até 12 s (dois commits: aparecer e sumir). O arraste e a viagem
+  para outro monitor o tiram. O `/v1/estado.balao` mostra as linhas.
+- **O clique esquerdo**, por enquanto: a risadinha e o balão com as sessões
+  abertas, uma por linha ("projeto: estado (há quanto tempo)", as reais
+  antes das de teste, a mais recente primeiro; "nenhuma sessão do Claude
+  aberta" sem nenhuma). O cérebro passou a guardar desde quando cada sessão
+  está no estado (`estado_desde_ms` no `/v1/estado.sessoes`). Levar ao
+  terminal de uma sessão pendente chega na T4.10, e o "pronto" com os avisos.
+**Por quê:** a monogram cobre o português, é de domínio público e foi feita
+para pixel art; assada no binário, não depende de arquivo nem de rede, e o
+teste garante que a tabela é a do pacote. O balão em blocos inteiros fica
+nítido como o Zeca; sumir sozinho mantém o orçamento de commits parado.
