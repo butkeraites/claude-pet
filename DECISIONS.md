@@ -2488,3 +2488,70 @@ desktop (T4.4 e T4.9).
 **Por quê:** a memória do daemon tem o que nunca pode ir ao disco, e um
 core dump é disco; e o anel só serve se um "não sei" for marcado como não
 sei, em vez de virar uma certeza velha.
+
+## 0062 — Revisão dos avisos e do clique: o foco só conta com o Renan presente, a volta do ciclo recomeça e cada clique espera a sua confirmação (2026-10-04)
+
+**Problema:** as revisões do M4 acharam três falhas nos avisos e no clique
+(T4.10).
+- **O pronto saía como visto com o Renan longe.** A regra "o pronto e o erro
+  saem com 10 s do terminal em foco" (decisão 0057) não sabia se havia
+  alguém olhando. Bloqueado, ou com a tela apagada, o Hyprland continua
+  contando como ativa a última janela que teve o foco (o `activated` do
+  foreign-toplevel e o `activewindowv2`): conferido na produção, com a
+  sessão bloqueada e o terminal como `desktop.janela_ativa`. Uma tarefa
+  longa que terminava com o Renan longe perdia o aviso 10 s depois. O mesmo
+  deixava o clique do `/v1/comando` "focar" uma janela já ativa com a sessão
+  bloqueada e dar o aviso como visto na hora; a verificação ao vivo do
+  T4.11 passou só por isso.
+- **A memória da volta do ciclo nunca expirava.** Uma sessão que o clique
+  visitou sem conseguir focar ficava "visitada" até todas as outras serem
+  visitadas: um clique horas depois pulava a mais urgente.
+- **Um segundo clique antes da confirmação apagava a do primeiro.** O
+  `focando` era um só: a ativação atrasada da primeira janela não marcava
+  mais o aviso dela.
+
+**Escolha (revisão do T4.10):**
+- **O Renan presente** (`EventoDesktop::Ocioso`, o `desktop.ocioso` no
+  `/v1/estado`): a `Sessao` liga o `ext_idle_notifier_v1` (o Hyprland 0.56.2
+  anuncia a v2; genérico, serve aos outros wlroots no M8) no `wl_seat` da
+  conexão e pede a notificação de entrada (`get_input_idle_notification`
+  na v2, que ignora quem segura a tela acesa, como um vídeo) com
+  `OCIOSO_MS` = 5 s; ela nasce "não ocioso", e o `idled` e o `resumed`
+  viram `Ocioso(true)` e `Ocioso(false)`. A conexão que cai deixa o valor em
+  "não se sabe".
+  - O pronto e o erro só saem pelo foco com o Renan presente: os 10 s contam
+    desde o mais tarde entre o aviso, a janela ficar ativa e o Renan voltar
+    a mexer, e param enquanto ele está longe. Como 5 s é menos que 10 s,
+    quem saiu logo antes do aviso já é dado como longe antes de o prazo
+    vencer. Sem saber se ele está (um desktop sem o protocolo, a conexão
+    caída), o pronto não sai pelo foco: fica até o clique ou o próximo
+    prompt, que já o resolvem.
+  - Uma janela já ativa só conta como vista na hora do clique com o Renan
+    presente. O aperto de verdade no pet conta como presença (o `resumed`
+    pode vir na mesma leva, depois); o clique do `/v1/comando` não, e com a
+    sessão bloqueada espera a confirmação, que não vem, e o balão diz que não
+    focou.
+- **A volta do ciclo recomeça** (`VOLTA_DO_CICLO_MS` = 15 s, o tempo de ler
+  o balão e clicar de novo): um clique mais tarde que isso depois do
+  anterior começa outra volta, do mais urgente.
+- **Cada clique espera a sua confirmação**: o `focando` virou uma lista (até
+  4); uma ativação marca o aviso de todo clique que esperava aquela janela,
+  e só o clique mais novo, sem outro esperando depois dele, mostra o balão
+  quando vence. O `/v1/estado.focando` mostra a janela do mais novo.
+- **Testes** no Motor em relógio falso: o pronto com o Renan longe fica e
+  sai 10 s depois de ele voltar (pausando se ele sair de novo), sem saber se
+  ele está o pronto não sai pelo foco, o clique de script com a sessão
+  bloqueada não vê a janela já ativa e o do mouse vê, um clique um minuto
+  depois volta ao mais urgente, e dois cliques seguidos têm os dois avisos
+  vistos; cada regra conferida por mutação. Ao vivo, num daemon de rascunho
+  sem personagem (porta 27399, parado com SIGTERM): o `ext_idle_notifier_v1
+  v2` ligado, `ocioso` falso na partida e verdadeiro 5 s depois (a sessão
+  bloqueada), e o `/proc/<pid>` do root (decisão 0061).
+- O `hyprland_lock_notifier_v1` (o Hyprland também anuncia) ficou de fora:
+  bloqueado, o Renan já está longe do teclado; ele pediria vendorar mais um
+  XML e escrever mais tabelas à mão.
+
+**Por quê:** "o terminal em foco" só quer dizer "o Renan viu" com ele ali;
+errar para o lado de deixar o aviso custa um clique, e errar para o outro
+apaga o que ele não viu. A volta do ciclo é para cliques seguidos, não para
+a tarde inteira.

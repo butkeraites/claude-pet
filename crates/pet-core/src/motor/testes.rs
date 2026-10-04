@@ -1546,11 +1546,22 @@ fn com_a_janela_ja_ativa_o_clique_ve_na_hora() {
     assert!(pendentes(&motor).is_empty());
 }
 
+/// O desktop conta que o Renan está longe do teclado e do mouse (`true`) ou
+/// mexendo (`false`).
+fn ocioso(motor: &mut Motor, longe: bool, ms: u64) {
+    motor.evento_desktop(
+        None,
+        &crate::plataforma::EventoDesktop::Ocioso(longe),
+        em(ms),
+    );
+}
+
 #[test]
 fn o_pronto_sai_com_10_s_do_terminal_em_foco_e_o_esperando_fica() {
     let mut motor = Motor::novo(ConfigCerebro::default());
     motor.acertar_relogio(em(0));
     ligar_desktop(&mut motor, 0);
+    ocioso(&mut motor, false, 0);
     ativou(&mut motor, Some("f00d01"), 1_000);
     prompt_em(&mut motor, "sessao-a", "api", 2_000);
     ativou(&mut motor, Some("f00d02"), 3_000);
@@ -1804,4 +1815,175 @@ fn o_hook_atrasado_e_o_comeco_nao_desfazem_a_janela_certa() {
         janela_da(&motor, "sessao-b").unwrap().endereco.as_deref(),
         Some("f00d04")
     );
+}
+
+// --- o Renan longe, a volta do ciclo e os cliques seguidos (decisão 0062) ----
+
+#[test]
+fn o_pronto_nao_sai_pelo_foco_com_o_renan_longe() {
+    let mut motor = Motor::novo(ConfigCerebro::default());
+    motor.acertar_relogio(em(0));
+    ligar_desktop(&mut motor, 0);
+    ocioso(&mut motor, false, 0);
+    ativou(&mut motor, Some("f00d01"), 1_000);
+    prompt_em(&mut motor, "sessao-a", "api", 2_000);
+    // O Renan sai com o terminal em foco (bloqueado, o Hyprland continua
+    // contando o terminal como ativo): longe 5 s depois da última tecla.
+    ocioso(&mut motor, true, 3_000 + OCIOSO_MS);
+    pronto_em(&mut motor, "sessao-a", "api", 60_000);
+    motor.tique(em(600_000));
+    assert_eq!(
+        pendentes(&motor),
+        vec![("sessao-a".to_owned(), TipoAviso::Pronto)],
+        "longe, o terminal em foco não é visto"
+    );
+    // Ele volta e mexe: conta 10 s daqui. No meio, longe de novo: pausa.
+    ocioso(&mut motor, false, 700_000);
+    assert_eq!(motor.prazo_do_cerebro(), Some(700_000 + VISTO_PELO_FOCO_MS));
+    ocioso(&mut motor, true, 705_000);
+    motor.tique(em(710_000));
+    assert_eq!(pendentes(&motor).len(), 1);
+    ocioso(&mut motor, false, 720_000);
+    motor.tique(em(729_999));
+    assert_eq!(pendentes(&motor).len(), 1);
+    motor.tique(em(730_000));
+    assert!(pendentes(&motor).is_empty(), "10 s com ele ali: viu");
+}
+
+#[test]
+fn sem_saber_se_o_renan_esta_o_pronto_so_sai_pelo_clique() {
+    // Um desktop que não conta se o Renan está (sem o protocolo, ou a
+    // conexão caiu): o terminal em foco nunca dá o pronto como visto.
+    let (mut motor, mut janela) = ligado();
+    motor.acertar_relogio(em(0));
+    ligar_desktop(&mut motor, 0);
+    ocioso(&mut motor, false, 0);
+    ativou(&mut motor, Some("f00d01"), 1_000);
+    prompt_em(&mut motor, "sessao-a", "api", 2_000);
+    motor.desconectou();
+    pronto_em(&mut motor, "sessao-a", "api", 3_000);
+    vencer_sem_conexao_ate(&mut motor, 60_000);
+    assert_eq!(pendentes(&motor).len(), 1);
+    assert_eq!(motor.painel(None, 60_000).desktop.ocioso, None);
+    // A conexão volta, sem contar: ainda não sai pelo foco.
+    motor.conectou(61_000);
+    motor.aplicar_visibilidade(&mut janela, 61_000);
+    motor.tique(em(120_000));
+    assert_eq!(pendentes(&motor).len(), 1);
+}
+
+#[test]
+fn com_o_renan_longe_o_clique_de_script_nao_ve_a_janela_ja_ativa() {
+    let (mut motor, mut janela) = ligado();
+    motor.acertar_relogio(em(0));
+    ligar_desktop(&mut motor, 0);
+    ocioso(&mut motor, false, 0);
+    ativou(&mut motor, Some("f00d01"), 1_000);
+    prompt_em(&mut motor, "sessao-a", "api", 2_000);
+    pronto_em(&mut motor, "sessao-a", "api", 3_000);
+    // Bloqueado: o terminal continua "ativo", o Renan longe. O clique do
+    // `/v1/comando` (um script) não conta como visto: espera o desktop.
+    ocioso(&mut motor, true, 9_000);
+    janela.desktop.janelas = alcas(&["f00d01"]);
+    janela.mostrou();
+    let clicou = motor.clicar(&mut janela, Botao::Esquerdo, 20_000);
+    assert!(
+        matches!(
+            clicou,
+            Clicou::Focou {
+                confirmado: false,
+                ..
+            }
+        ),
+        "{clicou:?}"
+    );
+    janela.mostrou();
+    motor.vencer(&mut janela, 20_000 + CONFIRMAR_FOCO_MS);
+    assert_eq!(pendentes(&motor).len(), 1, "o aviso fica");
+    let linhas = motor.painel(Some(&janela), 21_600).balao.unwrap();
+    assert_eq!(linhas[1], "não consegui focar a janela dela");
+    // O clique de verdade, com o mouse: o aperto no pet é o Renan ali, e a
+    // janela já ativa conta na hora.
+    janela.mostrou();
+    let (x, y) = meio_do_corpo(&janela);
+    ponteiro(&mut motor, &mut janela, apertou(x, y), 30_000);
+    ponteiro(&mut motor, &mut janela, soltou(x, y), 30_050);
+    assert!(pendentes(&motor).is_empty());
+    assert_eq!(
+        motor.painel(Some(&janela), 30_050).desktop.ocioso,
+        Some(false)
+    );
+}
+
+#[test]
+fn um_clique_muito_depois_recomeca_a_volta_do_mais_urgente() {
+    let (mut motor, mut janela) = ligado();
+    motor.acertar_relogio(em(0));
+    ligar_desktop(&mut motor, 0);
+    // C e E sem janela; D numa janela que o desktop não conhece mais.
+    prompt_em(&mut motor, "sessao-c", "api", 1_000);
+    pronto_em(&mut motor, "sessao-c", "api", 2_000);
+    prompt_em(&mut motor, "sessao-e", "doc", 2_500);
+    pronto_em(&mut motor, "sessao-e", "doc", 2_600);
+    ativou(&mut motor, Some("f00d04"), 3_000);
+    prompt_em(&mut motor, "sessao-d", "web", 4_000);
+    hook_em(&mut motor, "sessao-d", "web", "PermissionRequest", 5_000);
+    janela.mostrou();
+    let sid = |c: Clicou| match c {
+        Clicou::NaoFocou { sid8, .. } => sid8,
+        outro => panic!("{outro:?}"),
+    };
+    assert_eq!(
+        sid(motor.clicar(&mut janela, Botao::Esquerdo, 6_000)),
+        "sessao-d"
+    );
+    // Logo depois, a volta continua: C.
+    assert_eq!(
+        sid(motor.clicar(&mut janela, Botao::Esquerdo, 7_000)),
+        "sessao-c"
+    );
+    // Um minuto depois, outra volta: o mais urgente de novo (e não o E, o
+    // próximo da volta velha).
+    assert_eq!(
+        sid(motor.clicar(&mut janela, Botao::Esquerdo, 67_000)),
+        "sessao-d"
+    );
+}
+
+#[test]
+fn cliques_seguidos_esperam_cada_um_a_sua_confirmacao() {
+    let (mut motor, mut janela) = ligado();
+    motor.acertar_relogio(em(0));
+    ligar_desktop(&mut motor, 0);
+    ocioso(&mut motor, false, 0);
+    ativou(&mut motor, Some("f00d01"), 1_000);
+    prompt_em(&mut motor, "sessao-a", "api", 2_000);
+    ativou(&mut motor, Some("f00d02"), 3_000);
+    prompt_em(&mut motor, "sessao-b", "web", 4_000);
+    pronto_em(&mut motor, "sessao-a", "api", 5_000);
+    hook_em(&mut motor, "sessao-b", "web", "PermissionRequest", 6_000);
+    ativou(&mut motor, Some("f00d03"), 7_000);
+    janela.desktop.janelas = alcas(&["f00d01", "f00d02"]);
+    janela.mostrou();
+    // Dois cliques antes de o socket2 contar a primeira ativação.
+    let b = motor.clicar(&mut janela, Botao::Esquerdo, 8_000);
+    let a = motor.clicar(&mut janela, Botao::Esquerdo, 8_200);
+    assert!(
+        matches!(&b, Clicou::Focou { janela, .. } if janela == "f00d02"),
+        "{b:?}"
+    );
+    assert!(
+        matches!(&a, Clicou::Focou { janela, .. } if janela == "f00d01"),
+        "{a:?}"
+    );
+    assert_eq!(
+        motor.painel(Some(&janela), 8_200).focando.as_deref(),
+        Some("f00d01"),
+        "o mais novo"
+    );
+    // O Hyprland foca as duas, em ordem: os dois avisos saem.
+    ativou(&mut motor, Some("f00d02"), 8_300);
+    ativou(&mut motor, Some("f00d01"), 8_310);
+    assert!(pendentes(&motor).is_empty(), "{:?}", pendentes(&motor));
+    assert_eq!(motor.painel(Some(&janela), 8_400).focando, None);
 }

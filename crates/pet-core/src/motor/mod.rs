@@ -82,6 +82,17 @@ pub const SONECA_MS: u64 = 30 * 60 * 1000;
 pub const VISTO_PELO_FOCO_MS: u64 = 10_000;
 /// Quanto o clique espera o desktop contar que a janela ficou ativa.
 pub const CONFIRMAR_FOCO_MS: u64 = 1_500;
+/// Quantos focos pedidos pelo clique esperam a confirmação ao mesmo tempo
+/// (cliques seguidos; decisão 0062).
+const FOCANDO_MAX: usize = 4;
+/// Sem teclado nem mouse por isto, o Renan conta como longe: o terminal em
+/// foco não dá o pronto como visto (decisão 0062). Menor que o
+/// [`VISTO_PELO_FOCO_MS`]: quem saiu logo antes do aviso já é dado como
+/// longe antes de o prazo do visto vencer.
+pub const OCIOSO_MS: u64 = 5_000;
+/// O clique seguinte continua a volta do ciclo dos avisos só até isto depois
+/// do anterior; um clique depois recomeça do mais urgente (decisão 0062).
+pub const VOLTA_DO_CICLO_MS: u64 = 15_000;
 /// O coração da risadinha do clique que leva ao terminal.
 pub const CORACAO_MS: u64 = 1_200;
 
@@ -125,7 +136,8 @@ pub struct Painel {
     /// o endereço) e o que a conexão sabe fazer.
     pub desktop: PainelDesktop,
     /// O clique pediu o foco desta janela (o endereço) e espera o desktop
-    /// contar que ela ficou ativa (decisão 0057).
+    /// contar que ela ficou ativa (decisão 0057); com cliques seguidos, a do
+    /// mais novo (decisão 0062).
     pub focando: Option<String>,
 }
 
@@ -241,13 +253,18 @@ pub struct Motor {
     soneca_ate: Option<u64>,
     /// A janela do terminal de cada sessão (decisão 0055).
     identidades: janelas::Identidades,
-    /// O foco que o clique pediu e o desktop ainda não confirmou (decisão
-    /// 0057).
-    focando: Option<Focando>,
+    /// Os focos que o clique pediu e o desktop ainda não confirmou, do mais
+    /// velho ao mais novo (decisões 0057 e 0062).
+    focando: Vec<Focando>,
     /// As sessões que o clique já visitou nesta volta do ciclo de avisos.
     ciclo: Vec<janelas::Chave>,
+    /// Quando foi o último clique esquerdo (a volta do ciclo).
+    ultimo_clique_ms: Option<u64>,
     /// Desde quando (relógio do laço) a janela ativa de agora está ativa.
     ativa_desde: u64,
+    /// Desde quando (relógio do laço) o Renan mexe no teclado ou no mouse,
+    /// pelo desktop (decisão 0062).
+    presente_desde: u64,
     /// Até quando o coração da risadinha fica na tela.
     coracao_ate: Option<u64>,
     /// Um aviso saiu fora de um evento do Claude ou de um tique (o clique, o
@@ -277,9 +294,11 @@ impl Motor {
             deslocamento_parede: 0,
             soneca_ate: None,
             identidades: janelas::Identidades::default(),
-            focando: None,
+            focando: Vec::new(),
             ciclo: Vec::new(),
+            ultimo_clique_ms: None,
             ativa_desde: 0,
+            presente_desde: 0,
             coracao_ate: None,
             cerebro_mudou: false,
         }
@@ -516,8 +535,10 @@ impl Motor {
     pub fn desconectou(&mut self) {
         self.pet = None;
         self.palco = None;
-        self.focando = None;
+        self.focando.clear();
         self.coracao_ate = None;
+        // Quem contava se o Renan está era a conexão (decisão 0062).
+        self.desktop.ocioso = None;
         self.balao = None;
         self.arraste.cancelar();
         self.seguir.esquecer();
@@ -851,6 +872,12 @@ impl Motor {
 
     /// Um evento do ponteiro, no palco.
     fn ponteiro(&mut self, punho: &mut dyn Punho, evento: EventoPonteiro, agora_ms: u64) {
+        // Um aperto no pet é o Renan aqui, mesmo se o desktop ainda não
+        // contou que ele voltou (o `resumed` pode vir na mesma leva, depois).
+        if matches!(evento, EventoPonteiro::Apertou { .. }) && self.desktop.ocioso == Some(true) {
+            self.desktop.ocioso = Some(false);
+            self.presente_desde = agora_ms;
+        }
         let (Some(palco), true) = (self.palco, self.pet.is_some()) else {
             self.arraste.cancelar();
             return;
@@ -991,6 +1018,16 @@ impl Motor {
     }
 
     fn clique_esquerdo(&mut self, punho: &mut dyn Punho, agora_ms: u64) -> Clicou {
+        // Um clique muito depois do anterior começa outra volta: o primeiro
+        // vai sempre ao mais urgente, mesmo que um clique de horas atrás o
+        // tenha visitado sem conseguir focar.
+        if self
+            .ultimo_clique_ms
+            .is_none_or(|t| agora_ms.saturating_sub(t) > VOLTA_DO_CICLO_MS)
+        {
+            self.ciclo.clear();
+        }
+        self.ultimo_clique_ms = Some(agora_ms);
         let pendencias = self.cerebro.pendencias();
         self.ciclo
             .retain(|chave| pendencias.iter().any(|p| &p.chave == chave));
@@ -1048,7 +1085,11 @@ impl Motor {
         janela: Alca,
         agora_ms: u64,
     ) -> Clicou {
-        let ja_ativa = self.desktop.janela_ativa.as_ref() == Some(&janela);
+        // Com o Renan longe (a sessão bloqueada, um clique de script), a
+        // janela "ativa" pode ser só a última que teve o foco: não conta
+        // como vista na hora (decisão 0062).
+        let ja_ativa = self.desktop.janela_ativa.as_ref() == Some(&janela)
+            && self.desktop.ocioso != Some(true);
         let conta_trocas =
             self.desktop.ligado == Some(true) || punho.ver_desktop().capacidades().janela_ativa;
         let esperar = conta_trocas && !ja_ativa;
@@ -1059,7 +1100,12 @@ impl Motor {
             alvo.aviso.tipo.nome()
         );
         if esperar {
-            self.focando = Some(Focando {
+            // Cliques seguidos: cada foco espera a confirmação dele.
+            self.focando.retain(|f| f.chave != alvo.chave);
+            if self.focando.len() == FOCANDO_MAX {
+                self.focando.remove(0);
+            }
+            self.focando.push(Focando {
                 chave: alvo.chave.clone(),
                 janela: janela.clone(),
                 proj: alvo.proj.clone(),
@@ -1131,13 +1177,25 @@ impl Motor {
         let Some(ativa) = self.janela_em_foco() else {
             return Vec::new();
         };
+        // O terminal em foco só diz que o Renan viu com ele mexendo no
+        // teclado ou no mouse: bloqueado, com a tela apagada ou longe, a
+        // janela que teve o foco por último continua "ativa" (decisão 0062).
+        // Sem saber se ele está, também não.
+        if self.desktop.ocioso != Some(false) {
+            return Vec::new();
+        }
         self.cerebro
             .pendencias()
             .into_iter()
             .filter(|p| p.aviso.tipo != TipoAviso::Esperando)
             .filter(|p| self.janela_da_sessao(&p.chave) == Some(ativa))
             .map(|p| {
-                let prazo = p.aviso.desde_mono.max(self.ativa_desde) + VISTO_PELO_FOCO_MS;
+                let prazo = p
+                    .aviso
+                    .desde_mono
+                    .max(self.ativa_desde)
+                    .max(self.presente_desde)
+                    + VISTO_PELO_FOCO_MS;
                 (p, prazo)
             })
             .collect()
@@ -1229,6 +1287,11 @@ impl Motor {
         {
             self.ativa_desde = agora.mono_ms;
         }
+        // O Renan voltou ao teclado ou ao mouse (ou a conexão começou a
+        // contar): o pronto visto pelo foco conta daqui (decisão 0062).
+        if *evento == EventoDesktop::Ocioso(false) {
+            self.presente_desde = agora.mono_ms;
+        }
         // O foco que o clique pediu chegou: o aviso sai (decisão 0057). O
         // socket2 e o foreign-toplevel contam a ativação.
         let ativou = match evento {
@@ -1239,12 +1302,16 @@ impl Motor {
             | EventoDesktop::JanelaInicial { janela, .. } => Some(janela),
             _ => None,
         };
-        if let Some(janela) = ativou
-            && self.focando.as_ref().is_some_and(|f| &f.janela == janela)
-            && let Some(focando) = self.focando.take()
-        {
-            info!("clique: a janela {} ficou ativa", janela.0);
-            self.ver(&focando.chave);
+        if let Some(janela) = ativou {
+            let (vistos, esperando): (Vec<Focando>, Vec<Focando>) =
+                std::mem::take(&mut self.focando)
+                    .into_iter()
+                    .partition(|f| &f.janela == janela);
+            self.focando = esperando;
+            for focando in vistos {
+                info!("clique: a janela {} ficou ativa", janela.0);
+                self.ver(&focando.chave);
+            }
         }
         // A proteção de tela do Omarchy abriu ou fechou: o pet sai e volta
         // (decisão 0053).
@@ -1407,14 +1474,21 @@ impl Motor {
             self.desenhar(punho.janela(), agora_ms, false);
         }
         // O desktop não contou que a janela do clique ficou ativa: o aviso
-        // fica, e o balão diz.
-        if self.focando.as_ref().is_some_and(|f| agora_ms >= f.ate_ms)
-            && let Some(focando) = self.focando.take()
-        {
+        // fica, e o balão diz. Só o do clique mais novo: um clique depois
+        // desse ainda espera a confirmação dele.
+        let (vencidos, esperando): (Vec<Focando>, Vec<Focando>) = std::mem::take(&mut self.focando)
+            .into_iter()
+            .partition(|f| agora_ms >= f.ate_ms);
+        self.focando = esperando;
+        for focando in &vencidos {
             info!(
                 "clique: a janela {} não ficou ativa em {} ms",
                 focando.janela.0, CONFIRMAR_FOCO_MS
             );
+        }
+        if self.focando.is_empty()
+            && let Some(focando) = vencidos.last()
+        {
             self.balao_sem_foco(
                 punho.janela(),
                 focando.proj.as_deref(),
@@ -1447,9 +1521,7 @@ impl Motor {
         if self.coracao_ate.is_some_and(|ate| agora_ms >= ate) {
             self.coracao_ate = None;
         }
-        if self.focando.as_ref().is_some_and(|f| agora_ms >= f.ate_ms) {
-            self.focando = None;
-        }
+        self.focando.retain(|f| agora_ms < f.ate_ms);
         if self.proximo_quadro.is_some_and(|p| p <= agora_ms) {
             self.proximo_quadro = None;
         }
@@ -1465,7 +1537,7 @@ impl Motor {
             self.balao.as_ref().map(|b| b.ate_ms),
             self.soneca_ate,
             self.coracao_ate,
-            self.focando.as_ref().map(|f| f.ate_ms),
+            self.focando.iter().map(|f| f.ate_ms).min(),
         ]
         .into_iter()
         .flatten()
@@ -1629,7 +1701,7 @@ impl Motor {
                 .soneca(agora_ms)
                 .map(|ate| (ate - agora_ms).div_ceil(1000)),
             desktop: painel_desktop,
-            focando: self.focando.as_ref().map(|f| f.janela.0.clone()),
+            focando: self.focando.last().map(|f| f.janela.0.clone()),
         }
     }
 

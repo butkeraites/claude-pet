@@ -23,6 +23,9 @@ pub struct EstadoDesktop {
     /// As janelas da proteção de tela abertas (decisão 0053): com alguma, o
     /// pet se esconde.
     pub protetor: BTreeSet<Alca>,
+    /// O Renan está longe do teclado e do mouse (`None`: não se sabe; a
+    /// conexão não conta, ou caiu). Decisão 0062.
+    pub ocioso: Option<bool>,
 }
 
 impl EstadoDesktop {
@@ -74,6 +77,7 @@ impl EstadoDesktop {
                 }
             }
             EventoDesktop::Monitores => {}
+            EventoDesktop::Ocioso(ocioso) => self.ocioso = Some(*ocioso),
         }
         *self != antes
     }
@@ -95,6 +99,7 @@ impl EstadoDesktop {
             janelas: info.janelas,
             anel: self.anel.painel(),
             protetor_de_tela: !self.protetor.is_empty(),
+            ocioso: self.ocioso,
         }
     }
 
@@ -124,6 +129,8 @@ pub struct PainelDesktop {
     pub anel: Vec<PainelTroca>,
     /// A proteção de tela está na tela (o pet se esconde).
     pub protetor_de_tela: bool,
+    /// O Renan longe do teclado e do mouse (`null`: não se sabe).
+    pub ocioso: Option<bool>,
 }
 
 impl Default for PainelDesktop {
@@ -182,6 +189,14 @@ mod testes {
         // Num buraco, a semente entra (o foreign-toplevel diz a ativa).
         assert!(d.aplicar(&semente, 40));
         assert_eq!(d.janela_ativa, Some(Alca("outra".into())));
+        // Longe do teclado e do mouse, e de volta.
+        let (c, i) = vazio();
+        assert_eq!(d.painel(c, i).ocioso, None, "não se sabe");
+        assert!(d.aplicar(&EventoDesktop::Ocioso(true), 50));
+        assert!(!d.aplicar(&EventoDesktop::Ocioso(true), 51));
+        assert!(d.aplicar(&EventoDesktop::Ocioso(false), 60));
+        let (c, i) = vazio();
+        assert_eq!(d.painel(c, i).ocioso, Some(false));
     }
 
     #[test]

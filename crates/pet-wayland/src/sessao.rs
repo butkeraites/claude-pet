@@ -27,6 +27,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use pet_core::cena::Elemento;
 use pet_core::geometria::{self, Ret};
+use pet_core::motor::OCIOSO_MS;
 use pet_core::plataforma::{
     Alca, Botao, CapDesktop, CapOverlay, Cursor, Desenho, Desktop, ErroFoco, EventoDesktop,
     EventoOverlay, EventoPonteiro, Fase, InfoDesktop, InfoOverlay, Monitor, Overlay, Punho,
@@ -58,6 +59,10 @@ use smithay_client_toolkit::reexports::protocols::wp::fractional_scale::v1::clie
 use smithay_client_toolkit::reexports::protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::{
     Shape, WpCursorShapeDeviceV1,
 };
+use smithay_client_toolkit::reexports::protocols::ext::idle_notify::v1::client::ext_idle_notification_v1::{
+    self, ExtIdleNotificationV1,
+};
+use smithay_client_toolkit::reexports::protocols::ext::idle_notify::v1::client::ext_idle_notifier_v1::ExtIdleNotifierV1;
 use smithay_client_toolkit::reexports::protocols::wp::viewporter::client::wp_viewport::WpViewport;
 use smithay_client_toolkit::reexports::protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
 use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
@@ -87,6 +92,8 @@ use crate::toplevel::{self, Janelas};
 /// Os dois protocolos que focam janelas (decisão 0056).
 const FOREIGN_TOPLEVEL: &str = "zwlr_foreign_toplevel_manager_v1";
 const MAPEAMENTO: &str = "hyprland_toplevel_mapping_manager_v1";
+/// O que diz se o Renan está no teclado e no mouse (decisão 0062).
+const OCIOSIDADE: &str = "ext_idle_notifier_v1";
 
 /// O `WAYLAND_DEBUG` ligado para clientes: o backend do wayland-client
 /// imprime toda mensagem no stderr, com os argumentos — os títulos das
@@ -222,6 +229,10 @@ pub struct Sessao {
     mapeador: Option<HyprlandToplevelMappingManagerV1>,
     /// As janelas que o compositor anunciou (sem título nem app id).
     janelas: Janelas<ObjectId, ZwlrForeignToplevelHandleV1>,
+    /// O `ext_idle_notifier_v1` e a notificação do `wl_seat` desta conexão
+    /// (decisão 0062): o Renan longe do teclado e do mouse, e de volta.
+    ociosidade: Option<ExtIdleNotifierV1>,
+    notificacao: Option<ExtIdleNotificationV1>,
     /// O que o desktop desta conexão conta ao Motor (a semente da janela
     /// ativa).
     eventos_desktop: Vec<EventoDesktop>,
@@ -283,6 +294,17 @@ pub fn conectar(fluxo: UnixStream, inicio: Instant) -> Result<Conexao, String> {
     let mapeador = globais
         .bind::<HyprlandToplevelMappingManagerV1, _, _>(&qh, 1..=1, ())
         .ok();
+    let ociosidade = globais.bind::<ExtIdleNotifierV1, _, _>(&qh, 1..=2, ()).ok();
+    match &ociosidade {
+        Some(o) => info!(
+            "o Renan no teclado e no mouse: {OCIOSIDADE} v{} ligado",
+            o.version()
+        ),
+        None => aviso!(
+            "o compositor não oferece {OCIOSIDADE}: o pronto não sai pelo foco do terminal, só pelo \
+             clique ou pelo prompt seguinte"
+        ),
+    }
     match (&toplevels, &mapeador) {
         (Some(t), Some(m)) => info!(
             "focar janelas: {FOREIGN_TOPLEVEL} v{} e {MAPEAMENTO} v{} ligados",
@@ -306,7 +328,7 @@ pub fn conectar(fluxo: UnixStream, inicio: Instant) -> Result<Conexao, String> {
             .join(" nem ")
         ),
     }
-    let sessao = Sessao {
+    let mut sessao = Sessao {
         registro: RegistryState::new(&globais),
         saidas: OutputState::new(&globais, &qh),
         compositor,
@@ -328,8 +350,11 @@ pub fn conectar(fluxo: UnixStream, inicio: Instant) -> Result<Conexao, String> {
         toplevels,
         mapeador,
         janelas: Janelas::default(),
+        ociosidade,
+        notificacao: None,
         eventos_desktop: Vec::new(),
     };
+    sessao.contar_ociosidade();
     Ok(Conexao {
         conexao,
         fila,
@@ -431,6 +456,29 @@ impl Sessao {
             superficie.escala_preferida(escala_120);
             self.tentar_aprontar();
         }
+    }
+
+    /// Pede ao compositor para contar quando o Renan para de mexer no
+    /// teclado e no mouse por [`OCIOSO_MS`] e quando volta, no `wl_seat` desta
+    /// conexão (decisão 0062). Na versão 2 só a entrada conta: um vídeo que
+    /// segura a tela acesa não é o Renan ali. A notificação nasce "não
+    /// ocioso", e o Motor conta a presença daqui.
+    fn contar_ociosidade(&mut self) {
+        if self.notificacao.is_some() {
+            return;
+        }
+        let (Some(notificador), Some(assento)) = (&self.ociosidade, self.assentos.seats().next())
+        else {
+            return;
+        };
+        let prazo = OCIOSO_MS as u32;
+        let notificacao = if notificador.version() >= 2 {
+            notificador.get_input_idle_notification(prazo, &assento, &self.qh, ())
+        } else {
+            notificador.get_idle_notification(prazo, &assento, &self.qh, ())
+        };
+        self.notificacao = Some(notificacao);
+        self.eventos_desktop.push(EventoDesktop::Ocioso(false));
     }
 
     fn executar(&mut self, agendado: Agendado) {
@@ -689,6 +737,9 @@ impl Desktop for Sessao {
         if let Some(m) = &self.mapeador {
             protocolos.push(format!("{MAPEAMENTO} v{}", m.version()));
         }
+        if let (Some(o), Some(_)) = (&self.ociosidade, &self.notificacao) {
+            protocolos.push(format!("{OCIOSIDADE} v{}", o.version()));
+        }
         InfoDesktop {
             protocolos,
             janelas: self.janelas.com_endereco(),
@@ -777,6 +828,28 @@ impl Dispatch<ZwlrForeignToplevelHandleV1, ()> for Sessao {
         );
         if fechou {
             handle.destroy();
+        }
+    }
+}
+
+/// O Renan parou de mexer no teclado e no mouse, ou voltou (decisão 0062).
+impl Dispatch<ExtIdleNotificationV1, ()> for Sessao {
+    fn event(
+        sessao: &mut Self,
+        _: &ExtIdleNotificationV1,
+        evento: ext_idle_notification_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match evento {
+            ext_idle_notification_v1::Event::Idled => {
+                sessao.eventos_desktop.push(EventoDesktop::Ocioso(true));
+            }
+            ext_idle_notification_v1::Event::Resumed => {
+                sessao.eventos_desktop.push(EventoDesktop::Ocioso(false));
+            }
+            _ => {}
         }
     }
 }
@@ -1018,8 +1091,10 @@ impl Dispatch<WpFractionalScaleV1, ()> for Sessao {
     }
 }
 
-// Sem eventos: o gerente da escala fracionária, o viewporter e o viewport.
+// Sem eventos: o gerente da escala fracionária, o viewporter, o viewport e
+// o notificador da ociosidade.
 delegate_noop!(Sessao: WpFractionalScaleManagerV1);
+delegate_noop!(Sessao: ExtIdleNotifierV1);
 delegate_noop!(Sessao: WpViewporter);
 delegate_noop!(Sessao: WpViewport);
 
@@ -1038,7 +1113,10 @@ impl SeatHandler for Sessao {
         &mut self.assentos
     }
 
-    fn new_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
+    fn new_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {
+        // Um assento que chegou depois do registro: a ociosidade conta nele.
+        self.contar_ociosidade();
+    }
 
     fn new_capability(
         &mut self,

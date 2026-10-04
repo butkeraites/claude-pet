@@ -164,6 +164,7 @@ mod testes {
         assert_eq!(j.estado(&1, false, 50), None);
         assert!(j.estado(&2, true, 50).is_some());
         assert!(j.estado(&1, true, 60).is_some());
+        assert_eq!(j.estado(&2, false, 60), None, "a 2 deixou de ser a ativa");
         assert_eq!(j.achar("abc"), Some(&"h2"));
         assert_eq!(j.com_endereco(), 2);
         assert_eq!(j.ativa(), Some("5bbf4e6128f0"), "a 1 voltou a ser a ativa");

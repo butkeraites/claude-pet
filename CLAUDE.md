@@ -283,7 +283,12 @@ Fora dele, use `~/.cargo/bin/cargo`.
 - **Clique e sessão bloqueada:** bloqueado, o Hyprland recusa o `activate`
   do foreign-toplevel sem dizer nada; o clique espera 1,5 s o socket2 contar
   a troca (`/v1/estado.focando`) e só então marca o aviso como visto, ou diz
-  no balão que não focou. Uma janela que já está ativa conta na hora.
+  no balão que não focou. Bloqueado ou com a tela apagada, o Hyprland ainda
+  conta como ativa a última janela que teve o foco: por isso uma janela já
+  ativa só conta na hora, e o pronto só sai pelo foco, com o Renan no
+  teclado ou no mouse (`desktop.ocioso` falso, pelo `ext_idle_notifier_v1`
+  com 5 s; decisão 0062). O aperto de verdade no pet conta como presença;
+  o `bin/pet clique` não.
 - `bin/pet clique` com avisos de sessões reais pendentes foca terminais de
   verdade: não rode com o Renan trabalhando (o `verificar-m4.sh` usa sessões
   de teste e recusa com avisos reais, que vêm antes no ciclo).

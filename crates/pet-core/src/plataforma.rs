@@ -169,14 +169,19 @@ pub enum EventoDesktop {
     JanelaFechou(Alca),
     /// Um monitor entrou ou saiu.
     Monitores,
+    /// O Renan parou de mexer no teclado e no mouse há um tempo (`true`) ou
+    /// voltou a mexer (`false`; também o estado de partida de uma conexão
+    /// que sabe contar). Sem isto, não se sabe (decisão 0062).
+    Ocioso(bool),
 }
 
 /// O que a ligação com o desktop mostra no `/v1/estado`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct InfoDesktop {
-    /// Os protocolos que ela usa para focar janelas, ligados nesta conexão
-    /// (no Wayland: `zwlr_foreign_toplevel_manager_v1` e
-    /// `hyprland_toplevel_mapping_manager_v1`).
+    /// Os protocolos do desktop ligados nesta conexão: os de focar janelas
+    /// (no Wayland, `zwlr_foreign_toplevel_manager_v1` e
+    /// `hyprland_toplevel_mapping_manager_v1`) e o que diz se o Renan está no
+    /// teclado e no mouse (`ext_idle_notifier_v1`, decisão 0062).
     pub protocolos: Vec<String>,
     /// Janelas que ela sabe focar agora.
     pub janelas: usize,

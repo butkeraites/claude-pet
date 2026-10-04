@@ -191,7 +191,10 @@ tchau. Sem personagem aprovado, as reações ficam só em `bin/pet estado`
   pasta do projeto, o estado e há quanto tempo). Quando não dá para levar
   (a sessão começou antes de o pet subir, a janela fechou), o balão diz por
   quê. Uma resposta pronta também sai sozinha depois de uns 10 s com o
-  terminal dela em foco.
+  terminal dela em foco e você mexendo no teclado ou no mouse (longe, com a
+  sessão bloqueada ou a tela apagada, ela fica até o clique ou o próximo
+  prompt). Cliques seguidos passam de um aviso ao próximo; um clique mais
+  de 15 s depois do anterior volta ao mais urgente.
 - **Clique direito:** soneca de 30 minutos, com um "zZ" e só reações
   pequenas; outro clique direito acorda.
 - **Proteção de tela** do Omarchy: o Zeca se esconde e volta quando ela
