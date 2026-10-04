@@ -37,8 +37,9 @@ use std::rc::Rc;
 use serde::Serialize;
 
 use crate::animador;
+use crate::aviso::EVENTOS_COM_TERMINAL;
 use crate::cena::{self, Elemento};
-use crate::cerebro::{Agora, Cerebro, ConfigCerebro, Reacao, Resumo};
+use crate::cerebro::{self, Agora, Cerebro, ConfigCerebro, Reacao, Resumo};
 use crate::confete::{Chuva, Grade};
 use crate::evento::Evento;
 use crate::geometria::{Ret, Tamanho};
@@ -187,6 +188,8 @@ pub struct Motor {
     deslocamento_parede: u64,
     /// Até quando o pet cochila (o botão direito; decisão 0053).
     soneca_ate: Option<u64>,
+    /// A janela do terminal de cada sessão (decisão 0055).
+    identidades: janelas::Identidades,
 }
 
 impl Motor {
@@ -210,6 +213,7 @@ impl Motor {
             balao: None,
             deslocamento_parede: 0,
             soneca_ate: None,
+            identidades: janelas::Identidades::default(),
         }
     }
 
@@ -315,23 +319,52 @@ impl Motor {
     }
 
     /// Um evento do Claude Code, no relógio da chegada (decisão 0032).
+    ///
+    /// No `SessionStart` e no `UserPromptSubmit` de uma sessão que o cérebro
+    /// acompanha, casa a janela do terminal dela: a que o anel de ativações
+    /// diz que estava ativa na hora (`ts`) do hook (decisão 0055).
     pub fn evento(&mut self, ev: &Evento, recebido_ms: u64, agora: Agora) -> Vec<Reacao> {
         self.acertar_relogio(agora);
-        self.cerebro.receber(ev, recebido_ms, agora)
+        let reacoes = self.cerebro.receber(ev, recebido_ms, agora);
+        if EVENTOS_COM_TERMINAL.contains(&ev.e.as_str())
+            && let Some(sid) = &ev.sid
+        {
+            let chave = (ev.teste, sid.clone());
+            if self.cerebro.tem_sessao(&chave) {
+                let ts = cerebro::hora_do_evento(ev.ts, recebido_ms);
+                let achado = self.desktop.anel.em(ts);
+                self.identidades
+                    .observar(chave, achado, ev.term.clone(), ts);
+            }
+        }
+        self.esquecer_janelas_sem_sessao();
+        reacoes
     }
 
     /// O prazo do cérebro venceu (acomodação do Stop, sessões que expiram).
     pub fn tique(&mut self, agora: Agora) -> Vec<Reacao> {
         self.acertar_relogio(agora);
-        self.cerebro.tique(agora)
+        let reacoes = self.cerebro.tique(agora);
+        self.esquecer_janelas_sem_sessao();
+        reacoes
+    }
+
+    fn esquecer_janelas_sem_sessao(&mut self) {
+        let cerebro = &self.cerebro;
+        self.identidades.manter(|chave| cerebro.tem_sessao(chave));
     }
 
     pub fn prazo_do_cerebro(&self) -> Option<u64> {
         self.cerebro.proximo_prazo()
     }
 
+    /// O resumo do cérebro, com a janela de cada sessão.
     pub fn resumo(&self) -> Resumo {
-        self.cerebro.resumo()
+        let mut resumo = self.cerebro.resumo();
+        for sessao in &mut resumo.sessoes {
+            sessao.janela = self.identidades.resumo(&sessao.chave);
+        }
+        resumo
     }
 
     // --- personagem e janela -----------------------------------------------
@@ -886,6 +919,9 @@ impl Motor {
         self.acertar_relogio(agora);
         if let EventoDesktop::MonitorEmFoco(nome) = evento {
             self.seguir.foco(nome.clone(), agora.mono_ms);
+        }
+        if let EventoDesktop::JanelaFechou(janela) = evento {
+            self.identidades.fechou(janela);
         }
         let protetor_antes = self.desktop.protetor_ativo();
         let mudou = self.desktop.aplicar(evento, agora.parede_ms);

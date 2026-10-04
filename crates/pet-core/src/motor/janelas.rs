@@ -13,10 +13,11 @@
 //! foreign-toplevel diz estar ativa) só entra com o anel vazio ou num
 //! buraco: ela diz que a janela estava ativa, não desde quando.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 use serde::Serialize;
 
+use crate::evento::Terminal;
 use crate::plataforma::Alca;
 
 /// Trocas guardadas (só trocas de verdade: o mesmo endereço repetido não
@@ -183,6 +184,124 @@ impl Anel {
     }
 }
 
+/// Uma sessão do Claude: (é teste, `session_id`), como o cérebro.
+pub type Chave = (bool, String);
+
+/// O quanto se sabe da janela de uma sessão (decisão 0055).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Certeza {
+    /// A janela ativa na hora do prompt, sem troca perto.
+    Certa,
+    /// A janela trocou menos de 1 s antes do prompt.
+    Duvida,
+    /// O anel não cobre a hora (o pet acabou de subir, ou a fonte caiu).
+    SemAnel,
+    /// Nenhuma janela estava ativa na hora.
+    SemJanela,
+    /// A janela da sessão fechou.
+    Fechou,
+}
+
+impl Certeza {
+    /// Por que não dá para focar, em palavras (o balão).
+    pub fn motivo(self) -> &'static str {
+        match self {
+            Certeza::Certa => "",
+            Certeza::Duvida => "trocou de janela perto do prompt",
+            Certeza::SemAnel => "não vi a janela dela",
+            Certeza::SemJanela => "nenhuma janela estava ativa",
+            Certeza::Fechou => "a janela dela fechou",
+        }
+    }
+}
+
+/// A janela de uma sessão.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Identidade {
+    /// A janela (o terminal), quando se sabe; uma vez certa, fica até outra
+    /// certa trocá-la ou ela fechar.
+    pub janela: Option<Alca>,
+    pub certeza: Certeza,
+    /// Os ids de terminal do hook (só separam sessões dentro de um mesmo
+    /// terminal).
+    pub terminal: Option<Terminal>,
+    /// Hora (parede) do último prompt casado.
+    pub em_ms: u64,
+}
+
+/// A identidade de uma sessão no `/v1/estado.sessoes`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ResumoJanela {
+    /// O endereço da janela (o do `activewindowv2`), se se sabe.
+    pub endereco: Option<String>,
+    pub certeza: Certeza,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<Terminal>,
+}
+
+/// As janelas das sessões.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Identidades {
+    mapa: BTreeMap<Chave, Identidade>,
+}
+
+impl Identidades {
+    /// Um `SessionStart` ou `UserPromptSubmit` da sessão `chave`, na hora
+    /// `ts` (o `ts` do hook), com o que o anel achou nessa hora. Uma janela
+    /// certa troca a de antes; sem certeza, a de antes fica (o terminal de
+    /// uma sessão não muda), e só sem nenhuma a dúvida é guardada.
+    pub fn observar(&mut self, chave: Chave, achado: Achado, terminal: Option<Terminal>, ts: u64) {
+        let atual = self.mapa.entry(chave).or_insert(Identidade {
+            janela: None,
+            certeza: Certeza::SemAnel,
+            terminal: None,
+            em_ms: ts,
+        });
+        atual.em_ms = ts;
+        if terminal.is_some() {
+            atual.terminal = terminal;
+        }
+        match achado {
+            Achado::Janela(janela) => {
+                atual.janela = Some(janela);
+                atual.certeza = Certeza::Certa;
+            }
+            _ if atual.janela.is_some() => {}
+            Achado::Duvida => atual.certeza = Certeza::Duvida,
+            Achado::Nenhuma => atual.certeza = Certeza::SemJanela,
+            Achado::Desconhecida => atual.certeza = Certeza::SemAnel,
+        }
+    }
+
+    /// A janela fechou: as sessões nela ficam sem janela.
+    pub fn fechou(&mut self, janela: &Alca) {
+        for identidade in self.mapa.values_mut() {
+            if identidade.janela.as_ref() == Some(janela) {
+                identidade.janela = None;
+                identidade.certeza = Certeza::Fechou;
+            }
+        }
+    }
+
+    /// Só as sessões que ainda existem.
+    pub fn manter(&mut self, existe: impl Fn(&Chave) -> bool) {
+        self.mapa.retain(|chave, _| existe(chave));
+    }
+
+    pub fn de(&self, chave: &Chave) -> Option<&Identidade> {
+        self.mapa.get(chave)
+    }
+
+    pub fn resumo(&self, chave: &Chave) -> Option<ResumoJanela> {
+        self.mapa.get(chave).map(|i| ResumoJanela {
+            endereco: i.janela.as_ref().map(|a| a.0.clone()),
+            certeza: i.certeza,
+            terminal: i.terminal.clone(),
+        })
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
@@ -257,6 +376,67 @@ mod testes {
         terceiro.ativou(Some(a("foot1")), T0);
         terceiro.buraco(T0 + 1_000);
         assert!(terceiro.ativou(Some(a("foot1")), T0 + 2_000));
+    }
+
+    #[test]
+    fn identidade_certa_fica_e_a_duvida_nao_apaga() {
+        let mut ids = Identidades::default();
+        let s1 = (false, "s1".to_owned());
+        let tmux = Terminal {
+            tmux: Some("%3".into()),
+            ..Terminal::default()
+        };
+        ids.observar(s1.clone(), Achado::Duvida, None, T0);
+        assert_eq!(ids.de(&s1).unwrap().certeza, Certeza::Duvida);
+        assert_eq!(ids.de(&s1).unwrap().janela, None);
+        ids.observar(
+            s1.clone(),
+            Achado::Janela(a("foot1")),
+            Some(tmux.clone()),
+            T0 + 10,
+        );
+        assert_eq!(ids.de(&s1).unwrap().janela, Some(a("foot1")));
+        // Um prompt com dúvida não apaga a janela certa de antes.
+        ids.observar(s1.clone(), Achado::Duvida, None, T0 + 20);
+        let i = ids.de(&s1).unwrap();
+        assert_eq!(
+            (i.janela.clone(), i.certeza),
+            (Some(a("foot1")), Certeza::Certa)
+        );
+        assert_eq!(i.terminal, Some(tmux), "os ids de terminal ficam");
+        // Uma certa nova troca (o `--resume` em outro terminal).
+        ids.observar(s1.clone(), Achado::Janela(a("foot2")), None, T0 + 30);
+        assert_eq!(ids.de(&s1).unwrap().janela, Some(a("foot2")));
+        // A janela fechou.
+        ids.fechou(&a("foot2"));
+        let i = ids.de(&s1).unwrap();
+        assert_eq!((i.janela.clone(), i.certeza), (None, Certeza::Fechou));
+        assert_eq!(
+            ids.resumo(&s1).unwrap(),
+            ResumoJanela {
+                endereco: None,
+                certeza: Certeza::Fechou,
+                terminal: Some(Terminal {
+                    tmux: Some("%3".into()),
+                    ..Terminal::default()
+                })
+            }
+        );
+        // A sessão acabou.
+        ids.manter(|_| false);
+        assert!(ids.de(&s1).is_none());
+        let mut outras = Identidades::default();
+        outras.observar((true, "t".into()), Achado::Nenhuma, None, T0);
+        assert_eq!(
+            outras.de(&(true, "t".into())).unwrap().certeza,
+            Certeza::SemJanela
+        );
+        outras.observar((true, "u".into()), Achado::Desconhecida, None, T0);
+        assert_eq!(
+            outras.de(&(true, "u".into())).unwrap().certeza,
+            Certeza::SemAnel
+        );
+        assert!(!Certeza::Fechou.motivo().is_empty());
     }
 
     #[test]

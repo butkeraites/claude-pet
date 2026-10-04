@@ -24,10 +24,10 @@ pub const EVENTOS: [&str; 13] = [
     "StopFailure",
     "SessionEnd",
 ];
-/// Todas as chaves que o fio v1 pode ter.
-pub const CHAVES_DO_FIO: [&str; 23] = [
+/// Todas as chaves que o fio v1 pode ter (o `term` desde a decisão 0054).
+pub const CHAVES_DO_FIO: [&str; 24] = [
     "v", "e", "ts", "sid", "turno", "agente", "aid", "tool", "nt", "err", "src", "reason", "intr",
-    "sha", "bg", "bgt", "bgi", "dur", "arq", "proj", "ent", "dnd", "teste",
+    "sha", "bg", "bgt", "bgi", "dur", "arq", "proj", "ent", "dnd", "teste", "term",
 ];
 pub const EDICAO: [&str; 4] = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
 pub const SID: &str = "3f0c2a9e-1d2b-4c5d-8e9f-0a1b2c3d4e5f";

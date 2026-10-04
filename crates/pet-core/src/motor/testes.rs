@@ -1125,3 +1125,116 @@ fn botao_direito_cochila_30_min_com_o_zz_e_so_reacoes_pequenas() {
         "acordado, o pulinho de volta"
     );
 }
+
+// --- a janela de cada sessão (decisão 0055) ----------------------------------
+
+fn ativou(motor: &mut Motor, janela: Option<&str>, ms: u64) {
+    motor.evento_desktop(
+        None,
+        &crate::plataforma::EventoDesktop::JanelaAtiva {
+            janela: janela.map(|j| crate::plataforma::Alca(j.into())),
+            parede_ms: PAREDE + ms,
+        },
+        em(ms),
+    );
+}
+
+fn janela_da(motor: &Motor, sid: &str) -> Option<janelas::ResumoJanela> {
+    motor
+        .resumo()
+        .sessoes
+        .into_iter()
+        .find(|s| s.chave.1 == sid)
+        .and_then(|s| s.janela)
+}
+
+#[test]
+fn o_prompt_casa_a_sessao_com_a_janela_ativa_na_hora_do_hook() {
+    use janelas::Certeza;
+    let mut motor = Motor::novo(ConfigCerebro::default());
+    // Gravado de um socket2: o Renan no foot1, depois no foot2.
+    ativou(&mut motor, Some("f00d01"), 1_000);
+    prompt_em(&mut motor, "sessao-a", "api", 5_000);
+    let a = janela_da(&motor, "sessao-a").unwrap();
+    assert_eq!(
+        (a.endereco.as_deref(), a.certeza),
+        (Some("f00d01"), Certeza::Certa)
+    );
+    ativou(&mut motor, Some("f00d02"), 10_000);
+    prompt_em(&mut motor, "sessao-b", "web", 15_000);
+    let b = janela_da(&motor, "sessao-b").unwrap();
+    assert_eq!(b.endereco.as_deref(), Some("f00d02"));
+    // Trocou para o foot1 e, meio segundo depois, um prompt de B: dúvida,
+    // mas a janela certa de antes fica.
+    ativou(&mut motor, Some("f00d01"), 20_000);
+    prompt_em(&mut motor, "sessao-b", "web", 20_500);
+    let b = janela_da(&motor, "sessao-b").unwrap();
+    assert_eq!(
+        (b.endereco.as_deref(), b.certeza),
+        (Some("f00d02"), Certeza::Certa)
+    );
+    // Uma sessão nova nesse meio segundo: só a dúvida.
+    prompt_em(&mut motor, "sessao-c", "x", 20_600);
+    let c = janela_da(&motor, "sessao-c").unwrap();
+    assert_eq!((c.endereco, c.certeza), (None, Certeza::Duvida));
+    // Numa área de trabalho vazia, nenhuma janela.
+    ativou(&mut motor, None, 30_000);
+    prompt_em(&mut motor, "sessao-d", "y", 35_000);
+    assert_eq!(
+        janela_da(&motor, "sessao-d").unwrap().certeza,
+        Certeza::SemJanela
+    );
+    // A janela do B fechou.
+    motor.evento_desktop(
+        None,
+        &crate::plataforma::EventoDesktop::JanelaFechou(crate::plataforma::Alca("f00d02".into())),
+        em(40_000),
+    );
+    let b = janela_da(&motor, "sessao-b").unwrap();
+    assert_eq!((b.endereco, b.certeza), (None, Certeza::Fechou));
+    // A sessão A acabou: a janela dela some junto.
+    let fim = Evento {
+        e: "SessionEnd".into(),
+        sid: Some("sessao-a".into()),
+        ent: Some("cli".into()),
+        reason: Some("clear".into()),
+        ..Evento::default()
+    };
+    motor.evento(&fim, PAREDE + 50_000, em(50_000));
+    assert!(janela_da(&motor, "sessao-a").is_none());
+    assert!(motor.identidades.de(&(false, "sessao-a".into())).is_none());
+}
+
+#[test]
+fn sem_anel_nao_ha_janela_e_o_hook_traz_os_ids_de_terminal() {
+    use janelas::Certeza;
+    let mut motor = Motor::novo(ConfigCerebro::default());
+    let ev = Evento {
+        e: "SessionStart".into(),
+        sid: Some("sessao-t".into()),
+        ent: Some("cli".into()),
+        ts: Some(PAREDE + 100),
+        term: Some(crate::evento::Terminal {
+            tmux: Some("%4".into()),
+            ..Default::default()
+        }),
+        ..Evento::default()
+    };
+    motor.evento(&ev, PAREDE + 100, em(100));
+    let t = janela_da(&motor, "sessao-t").unwrap();
+    assert_eq!(t.certeza, Certeza::SemAnel, "o pet não viu janela nenhuma");
+    assert_eq!(t.terminal.unwrap().tmux.as_deref(), Some("%4"));
+    // Uma origem que o cérebro não acompanha (claude -p) não ganha janela.
+    let sdk = Evento {
+        ent: Some("sdk-cli".into()),
+        sid: Some("sessao-sdk".into()),
+        ..ev.clone()
+    };
+    motor.evento(&sdk, PAREDE + 200, em(200));
+    assert!(
+        motor
+            .identidades
+            .de(&(false, "sessao-sdk".into()))
+            .is_none()
+    );
+}

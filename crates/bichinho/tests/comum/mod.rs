@@ -6,6 +6,7 @@
 #![allow(dead_code)] // cada arquivo de teste usa uma parte
 
 pub mod canarios;
+pub mod hyprland;
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};

@@ -321,7 +321,12 @@ impl Nucleo {
         mut ov: Option<&mut dyn Punho>,
     ) -> bool {
         let agora = self.agora();
-        self.motor.evento_desktop(janela(&mut ov), evento, agora)
+        let mudou = self.motor.evento_desktop(janela(&mut ov), evento, agora);
+        // Uma janela que fechou tira a janela das sessões dela.
+        if matches!(evento, EventoDesktop::JanelaFechou(_)) {
+            self.comp.publicar_cerebro(&self.motor.resumo());
+        }
+        mudou
     }
 
     /// Um evento do Claude Code vai para o cérebro, no relógio da chegada.

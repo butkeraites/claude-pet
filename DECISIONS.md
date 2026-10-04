@@ -2082,3 +2082,75 @@ para cochilar por 30 min, só com reações pequenas e um selo "zZ".
 **Por quê:** a proteção de tela é o Renan longe do computador, e o pet por
 cima dela só gastaria GPU. A soneca é o "me deixa trabalhar" de um clique, e
 o selo diz por que o pet está quieto sem pedir commit nenhum enquanto dura.
+
+## 0054 — Os ids de terminal no fio v1: o campo `term`, só no começo da sessão e em cada prompt (2026-10-04)
+
+**Problema:** a janela de uma sessão vem do anel de ativações (decisão 0043),
+mas duas sessões no mesmo terminal (dois painéis do tmux, duas abas do
+kitty ou do WezTerm) caem na mesma janela, e nada as separa. O PLANO pede um
+campo novo e opcional do fio v1, com decisão própria, com os ids de
+terminal que o hook vê no próprio ambiente — só ids, nunca títulos.
+**Escolha (T4.8):**
+- **O campo:** `term`, um objeto com até três ids: `tmux` (o
+  `$TMUX_PANE`: `%` e de 1 a 10 dígitos), `kitty` (o `$KITTY_WINDOW_ID`) e
+  `wezterm` (o `$WEZTERM_PANE`), esses dois de 1 a 10 dígitos. Opcional
+  como todo campo do fio v1.
+- **No hook** (`bichinho avisar`, `pet_core::aviso::terminal`): só no
+  `SessionStart` e no `UserPromptSubmit` (é quando a janela é casada), e
+  cada id só sai se passar no validador do pet; um ruim cai sozinho, os bons
+  do mesmo evento saem. Nada mais do ambiente sai (`TERM_PROGRAM`, chaves,
+  tokens; os canários já plantavam segredos nele).
+- **No pet** (`pet_core::evento`): um objeto com os ids conhecidos, todos
+  válidos; um ruim derruba o campo inteiro (só o nome `term` vai para os
+  descartados), uma chave desconhecida é ignorada sem rastro (um hook mais
+  novo não derruba o pet) e um objeto vazio é ausente.
+- **O `avisar.sh`** de reserva não manda o `term`: o campo é opcional, e a
+  reserva fica como estava.
+- **Canários** (`tests/hook.rs`): com `TMUX_PANE`, `KITTY_WINDOW_ID` e
+  `WEZTERM_PANE` válidos, `TERM_PROGRAM` e uma chave da API no ambiente, os
+  ids saem no começo e no prompt, nenhum outro evento os leva, nada com
+  `segredo` sai e o pet aceita o corpo inteiro; ids que não são ids (`%7;
+  rm -rf …`, `SEGREDO-janela`) não saem. Duas versões erradas de propósito
+  reprovaram: o `term` em todo evento e o painel do tmux sem validar.
+- **A troca:** o plugin não muda (o `hooks.json` chama o mesmo `bichinho
+  avisar`); o binário novo chega ao PATH pelo `bin/pet instalar-host` depois
+  do merge, como na decisão 0045. Até lá, o hook instalado não manda o
+  `term`, e o pet funciona sem ele.
+**Por quê:** os ids de terminal são números que o terminal põe no ambiente
+de todo processo filho; não dizem o que o Renan faz, só onde. Mandá-los só
+quando a janela é casada mantém o fio pequeno, e o validador nos dois lados
+mantém a regra de que o que o pet descartaria nem sai do host.
+
+## 0055 — A janela de cada sessão: o anel casado com o `ts` do hook, pegajosa e com dúvida (2026-10-04)
+
+**Problema:** o clique no Zeca leva ao terminal da sessão (decisão 0039). No
+Docker o daemon não vê PIDs do host, e o socket2 e o foreign-toplevel não
+trazem PID (decisão 0043): a janela da sessão tem de vir da hora em que o
+Renan mandou o prompt.
+**Escolha (T4.8):**
+- **O casamento** (`pet_core::motor::janelas::Identidades`, no Motor): no
+  `SessionStart` e no `UserPromptSubmit` de uma sessão que o cérebro
+  acompanha, a hora do evento (o `ts` do hook, se plausível; senão a
+  chegada) procura no anel de ativações (decisão 0050) a janela ativa
+  naquela hora. A janela certa vira a da sessão.
+- **Dúvida:** se a troca para aquela janela foi há menos de 1 s, há dúvida
+  (o prompt pode ter saído da janela de antes); sem anel na hora (o pet
+  subiu depois, a fonte caiu) não se sabe; numa área vazia, nenhuma janela.
+- **Pegajosa:** uma janela certa fica até outra certa trocá-la (um
+  `--resume` em outro terminal) ou ela fechar (`closewindow`). Um prompt com
+  dúvida não apaga a janela certa de antes; só sem nenhuma a dúvida é
+  guardada. Os ids de terminal do hook (decisão 0054) ficam junto.
+- **O fim:** a identidade some com a sessão (o `SessionEnd`, ou a sessão que
+  expirou).
+- **No `/v1/estado.sessoes[].janela`:** o endereço (o do `activewindowv2`),
+  a certeza (`certa`, `duvida`, `sem_anel`, `sem_janela`, `fechou`) e os ids
+  de terminal. O clique (T4.10) usa a janela certa; sem ela, o balão diz o
+  porquê.
+- **Conferido no daemon de verdade** (`tests/janela.rs`), com linhas
+  gravadas de um socket2 e eventos de hook com o `ts`: o prompt casa a
+  janela ativa, a troca meio segundo antes deixa dúvida, passado o segundo o
+  prompt seguinte casa, e o `closewindow` tira a janela.
+**Por quê:** o terminal de uma sessão não muda de janela, e quase todo
+prompt sai do teclado na janela ativa; casar pela hora acerta sem ler
+títulos, e guardar a dúvida em vez de chutar evita mandar o Renan para a
+janela errada.

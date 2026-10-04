@@ -255,6 +255,14 @@ pub struct ResumoSessao {
     /// Hora do último evento (ms desde 1970).
     pub ultimo_evento_ms: u64,
     pub contadores: Contadores,
+    /// A janela do terminal da sessão, como o Motor a casou (decisão 0055);
+    /// o cérebro não sabe de janelas e deixa vazio.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub janela: Option<crate::motor::janelas::ResumoJanela>,
+    /// (teste, sid) inteiros, para o Motor casar a janela; nunca vai para o
+    /// `/v1/estado`.
+    #[serde(skip)]
+    pub chave: (bool, String),
 }
 
 /// O que o cérebro publica no `/v1/estado`.
@@ -1207,6 +1215,11 @@ impl Cerebro {
         reacoes
     }
 
+    /// O cérebro acompanha a sessão (teste, sid).
+    pub fn tem_sessao(&self, chave: &(bool, String)) -> bool {
+        self.sessoes.contains_key(chave)
+    }
+
     /// Quando chamar [`Self::tique`] de novo (relógio monotônico).
     pub fn proximo_prazo(&self) -> Option<u64> {
         self.sessoes
@@ -1241,6 +1254,8 @@ impl Cerebro {
                     acomodando: s.turno.as_ref().is_some_and(|t| t.stop.is_some()),
                     ultimo_evento_ms: s.ultimo_parede,
                     contadores: s.contadores.clone(),
+                    janela: None,
+                    chave: (s.teste, s.sid.clone()),
                 })
                 .collect(),
             ultima_reacao: self.ultima_reacao.clone(),
