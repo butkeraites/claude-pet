@@ -282,7 +282,7 @@ Assim o fade de saída do Hyprland não deixa um quadro fantasma.
 **`plugin/scripts/avisar.sh`** (POSIX sh + jq + curl):
 - lê o JSON do hook pela entrada padrão;
 - monta, com uma lista branca do jq, só metadados;
-- manda com `curl -sS -m 2 -H 'Content-Type: application/json' -H 'X-Pet: 1' --data-binary @- http://127.0.0.1:${PET_PORTA:-27380}/v1/evento`;
+- manda com `curl -q --noproxy '*' -sS -m 2 -H 'Content-Type: application/json' -H 'X-Pet: 1' --data-binary @- http://127.0.0.1:${PET_PORTA:-27380}/v1/evento` (`-q` primeiro: nenhum curlrc; `--noproxy '*'`: nenhum proxy do ambiente), com o jq sem `~/.jq` (decisão 0031);
 - não imprime nada e **sempre sai 0**. Um Stop hook que saísse com 2 impediria o Claude de parar.
 
 **Formato de fio v1** (todos os campos são opcionais, exceto `v` e `e`; strings com tamanho e caracteres validados):
@@ -300,7 +300,7 @@ Assim o fade de saída do Hyprland não deixa um quadro fantasma.
 |---|---|
 | `err` | enum de `StopFailure.error`. O campo `error_type` não existe. |
 | `aid` | `agent_id`, validado como token; só existe dentro de subagentes e serve para atribuir as ferramentas deles ao turno certo |
-| `bgt` / `bgi` | tipos (normalizados para `[a-z_]`) e ids de `background_tasks` |
+| `bgt` / `bgi` | tipos (lista fechada dos rótulos do 2.1.288 normalizados para `[a-z_]`; outro tipo vira `outro`) e ids de `background_tasks` |
 | `dur` | `duration_ms` do PostToolUse |
 | `arq` | sha256 truncado do caminho editado, calculado no host |
 | `ent` | `$CLAUDE_CODE_ENTRYPOINT` |
@@ -440,6 +440,7 @@ As outras sessões aparecem como selos: um contador "+N", uma bandeirinha com a 
 | pensando | Sit Idle + "…" |
 | esperando você | Chirp em rajadas + "!" |
 | pronto | Stand + bandeirinha |
+| T0 (aceno) | Stand → Sit |
 | T1 | Chirp + receita pulo |
 | T2 | Take Off → Fly em arco curto → Landing |
 | T3 | Take Off → Fly/Glide atravessando a tela → Dive → Landing |
@@ -640,25 +641,28 @@ claude-pet/
 ### M3 — Esqueleto andante: hook → reação
 
 **Tarefas:**
-- fio v1 com validação: `/v1/evento`, `/v1/comando`, `/v1/debug/eventos`;
-- plugin (manifests, 13 hooks, `avisar.sh`) e testes canário;
-- cérebro mínimo: sessões, acomodação e dedupe do Stop, T0 aceno contra T1 pulinho;
-- marketplace local pela worktree estável.
+- **T3.1** fio v1 com validação: `/v1/evento` (Host, Content-Type, `X-Pet`, até 8 KiB; 204, 400, 415), `/v1/comando` (`tocar`, `esconder`, `mostrar`), `/v1/debug/eventos` (só debug); o evento chega ao laço principal pelo canal do calloop; o animador toca uma reação uma vez e volta à pose;
+- **T3.2** plugin (manifests, 13 hooks, `avisar.sh`) e testes canário;
+- **T3.3** cérebro mínimo: sessões (só `ent = cli` por padrão), turnos por `prompt_id`, acomodação e dedupe do Stop, T0 aceno contra T1 pulinho, eventos de teste com TTL de 60 s; `/v1/estado.sessoes`, `.ultima_reacao` e `.turnos`;
+- **T3.4** `bin/pet testar`, gate interativo ao vivo com `--plugin-dir`; o marketplace local pela worktree estável entra só depois do merge na `main`;
+- **T3.5** integração sobre o M2 (a `m3-hooks` rebaseada na `m2-zeca`, decisão 0030): um `/v1/comando` para as reações e as aprovações, reações pelos estados da skin com as reservas do catálogo, `nod` nativo no MVP, config relida também no cérebro; `skin-instalar`, `bin/pet testar` e gate interativo de novo com o Zeca.
 
 **Testes canário:**
-- `SEGREDO-n` plantado em todo campo de conteúdo; nada disso pode sair do script;
+- `SEGREDO-n` plantado em todo campo de conteúdo; nada disso pode sair do script (procurado sem caixa);
 - o script sempre sai 0;
 - não imprime nada;
-- o curl é falso.
+- o curl é falso; com o curl de verdade, proxy no ambiente e curlrc não desviam o evento do 127.0.0.1, e um `~/.jq` não muda a lista branca (decisão 0031).
 
-**Verificação:**
-- `claude plugin list` mostra `bichinho@bichinho-local` habilitado.
-- Gate **interativo** num diretório já confiável:
-  1. `tmux new-session -d -s e2e -c <dir> 'claude --dangerously-skip-permissions "responda só: ok"'` → `/v1/estado` mostra a sessão e o aceno T0;
-  2. um segundo prompt editando um arquivo temporário → pulinho T1;
-  3. `/exit`.
-- `claude -p` só serve para conferir que, com o pet parado, não aparece erro de hook.
+**Verificação** (até o merge na `main`, o plugin só entra por sessão, com `--plugin-dir`; decisão 0021):
+- `claude plugin list` e `claude plugin marketplace list` iguais antes e depois do gate: nada instalado globalmente.
+- Gate **interativo** num diretório já confiável, com `CLAUDECODE` e as `CLAUDE_CODE_*` tiradas do ambiente:
+  1. `tmux new-session -d -s e2e -c <dir> 'claude --plugin-dir ~/Documents/claude-pet/plugin --dangerously-skip-permissions "responda só: ok"'` → `/v1/estado` mostra a sessão e o aceno T0;
+  2. um segundo prompt que cria um arquivo temporário com a ferramenta Write → pulinho T1, com `arquivos: 1` no turno (`/v1/estado.turnos`; o `arq` exato, sha256 do caminho, só aparece na pilha de dev, em `/v1/debug/eventos`, e os canários o conferem);
+  3. `/exit` → tchau.
+- `claude -p --plugin-dir …` só serve para conferir que, com o pet parado, não aparece erro de hook.
 - `time (printf '{}' | sh plugin/scripts/avisar.sh Stop)` leva no máximo 2,1 s com o pet parado.
+- Na tela (acesa e desbloqueada), o `commits_total` do `/v1/estado` sobe durante as reações; com a tela apagada ou bloqueada, as reações só são conferidas no `/v1/estado`.
+- Depois do merge: a instalação pela worktree estável (README) e `claude plugin list` mostrando `bichinho@bichinho-local` habilitado.
 
 ### M4 — Arrastar e seguir o monitor ativo
 
@@ -704,7 +708,7 @@ claude-pet/
 - selos;
 - escalada L1–L4 com presença;
 - dedupe de aviso;
-- Stop com `sha`;
+- Stop com `sha` (o M3 já reabre o turno na continuação e só reage se o nível subir, decisão 0032; falta fundir nos níveis T2/T3);
 - DND;
 - modo discreto;
 - cenários dourados com relógio falso;

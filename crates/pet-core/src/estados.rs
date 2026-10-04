@@ -6,10 +6,13 @@
 //!   pose parada com um "…" em cima). As receitas são desenhadas no M6; aqui
 //!   fica o que cada uma precisa;
 //! - **reserva:** usa outro estado no lugar (o primeiro da lista que a skin
-//!   cobrir). As reservas de `nod` e `done_small` são as do animador do M3.
+//!   cobrir, seguindo as reservas das reservas).
 //!
 //! `cargo xtask cobertura` classifica cada estado de uma skin em nativo,
-//! receita, reserva ou faltando.
+//! receita, reserva ou faltando. O animador usa as mesmas reservas para
+//! tocar uma reação que a skin não tem (`animador::tag_da_reacao`), sem
+//! nunca cair na pose parada: assim o que a cobertura mostra é o que o pet
+//! toca (decisão 0030).
 
 /// Um estado semântico.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -170,15 +173,19 @@ pub const CATALOGO: &[Estado] = &[
 ];
 
 /// Estados que um personagem de verdade precisa ter **nativos** no MVP: a
-/// tabela do PLANO.md ("Zeca: arte e skin", item 4). Receita e reserva
+/// tabela do PLANO.md ("Zeca: arte e skin", item 4), com as três reações que
+/// o cérebro do M3 emite (`nod`, `done_small` e `bye`). Receita e reserva
 /// existem para skins de teste e para o que falta até o M6; o personagem
-/// aprovado não depende delas (`cargo xtask cobertura --nativos mvp`).
+/// aprovado não depende delas (`cargo xtask cobertura --nativos mvp`). O
+/// `nod` não pode cair na reserva: o aceno do T0 viraria o `wave`, que no
+/// Zeca é o mesmo pio do pulinho do T1 (decisão 0030).
 pub const NATIVOS_DO_MVP: &[&str] = &[
     "idle",
     "working",
     "thinking",
     "waiting",
     "ready",
+    "nod",
     "done_small",
     "done_medium",
     "done_big",
@@ -236,8 +243,19 @@ pub fn cobrir(chave: &str, nativo: &dyn Fn(&str) -> Vec<String>) -> Cobertura {
     {
         return Cobertura::Receita(r.descricao);
     }
-    // Reservas em profundidade, sem repetir (as listas formam um grafo).
-    let mut fila: Vec<&'static str> = e.reservas.to_vec();
+    match reserva(chave, &|r| !nativo(r).is_empty()) {
+        Some(r) => Cobertura::Reserva(r),
+        None => Cobertura::Faltando,
+    }
+}
+
+/// O primeiro estado de reserva de `chave` que `serve` aceita: as reservas
+/// dele, em ordem, depois as reservas delas, sem repetir (as listas formam um
+/// grafo): `done_big` → `done_medium` → `done_small` → `wave` → `idle`.
+/// `None` para um estado fora do catálogo ou sem reserva que sirva. A
+/// cobertura e o animador andam por aqui.
+pub fn reserva(chave: &str, serve: &dyn Fn(&str) -> bool) -> Option<&'static str> {
+    let mut fila: Vec<&'static str> = estado(chave)?.reservas.to_vec();
     let mut vistos: Vec<&str> = vec![chave];
     while !fila.is_empty() {
         let r = fila.remove(0);
@@ -245,14 +263,14 @@ pub fn cobrir(chave: &str, nativo: &dyn Fn(&str) -> Vec<String>) -> Cobertura {
             continue;
         }
         vistos.push(r);
-        if !nativo(r).is_empty() {
-            return Cobertura::Reserva(r);
+        if serve(r) {
+            return Some(r);
         }
         if let Some(outro) = estado(r) {
             fila.extend(outro.reservas.iter().copied());
         }
     }
-    Cobertura::Faltando
+    None
 }
 
 #[cfg(test)]
@@ -285,9 +303,11 @@ mod testes {
             }
             assert_eq!(CATALOGO.iter().filter(|x| x.chave == e.chave).count(), 1);
         }
-        // As reservas do M3 (animador::RESERVAS na branch m3-hooks).
+        // As reservas das reações do M3 (decisão 0019): o aceno e o pulinho
+        // caem no `wave`; o tchau não tem reserva.
         assert_eq!(estado("nod").unwrap().reservas, &["wave"]);
         assert_eq!(estado("done_small").unwrap().reservas, &["wave"]);
+        assert!(estado("bye").unwrap().reservas.is_empty());
         for e in NATIVOS_DO_MVP {
             assert!(estado(e).is_some(), "MVP cita «{e}», fora do catálogo");
         }
@@ -313,5 +333,39 @@ mod testes {
         assert_eq!(cobrir("inventado", &nada), Cobertura::Faltando);
         let com_wave = skin(&["idle", "wave"]);
         assert_eq!(cobrir("nod", &com_wave), Cobertura::Reserva("wave"));
+    }
+
+    #[test]
+    fn as_reacoes_do_cerebro_sao_estados_nativos_do_mvp() {
+        // O personagem aprovado toca cada reação do cérebro com tags
+        // próprias, nunca com reserva (decisão 0030).
+        for reacao in [
+            crate::cerebro::ACENO,
+            crate::cerebro::PULINHO,
+            crate::cerebro::TCHAU,
+        ] {
+            assert!(estado(reacao).is_some(), "«{reacao}» fora do catálogo");
+            assert!(
+                NATIVOS_DO_MVP.contains(&reacao),
+                "«{reacao}» fora dos nativos do MVP"
+            );
+        }
+    }
+
+    #[test]
+    fn reserva_segue_as_reservas_das_reservas() {
+        let tem = |estados: &'static [&'static str]| move |e: &str| estados.contains(&e);
+        assert_eq!(
+            reserva("done_big", &tem(&["done_small"])),
+            Some("done_small")
+        );
+        assert_eq!(reserva("done_big", &tem(&["wave", "idle"])), Some("wave"));
+        assert_eq!(reserva("nod", &tem(&["idle"])), Some("idle"));
+        assert_eq!(reserva("nod", &tem(&[])), None);
+        assert_eq!(reserva("bye", &tem(&["wave", "idle"])), None, "sem reserva");
+        assert_eq!(reserva("inventado", &tem(&["idle"])), None);
+        // Um estado nunca é reserva de si mesmo, nem num ciclo.
+        assert_eq!(reserva("waiting", &tem(&["waiting"])), None);
+        assert_eq!(reserva("waiting", &tem(&["alert"])), Some("alert"));
     }
 }

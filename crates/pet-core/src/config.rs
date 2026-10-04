@@ -29,6 +29,7 @@ pub enum Origem {
 #[serde(untagged)]
 pub enum Valor {
     Texto(String),
+    Lista(Vec<String>),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -37,11 +38,19 @@ enum Tipo {
     Id,
     /// Uma das opções da lista.
     Opcao(&'static [&'static str]),
+    /// Lista de até [`MAX_ITENS`] identificadores, sem repetição. No arquivo,
+    /// um array TOML; no ambiente, separados por vírgula (vazio = lista
+    /// vazia).
+    ListaDeIds,
 }
+
+/// Maior lista aceita numa chave.
+const MAX_ITENS: usize = 16;
 
 struct Chave {
     caminho: &'static str,
     tipo: Tipo,
+    /// Para listas, os itens separados por vírgula.
     padrao: &'static str,
 }
 
@@ -57,6 +66,14 @@ const CHAVES: &[Chave] = &[
         caminho: "celebracao.modo",
         tipo: Tipo::Opcao(MODOS_CELEBRACAO),
         padrao: "proporcional",
+    },
+    // De onde vêm as sessões que contam (`$CLAUDE_CODE_ENTRYPOINT`): só o
+    // terminal por padrão; `claude -p`, SDK e IDE ficam de fora (decisão
+    // 0020).
+    Chave {
+        caminho: "sessoes.origens",
+        tipo: Tipo::ListaDeIds,
+        padrao: "cli",
     },
 ];
 
@@ -89,6 +106,8 @@ pub enum ModoCelebracao {
 pub struct Config {
     pub skin: String,
     pub celebracao_modo: ModoCelebracao,
+    /// Origens de sessão que o cérebro acompanha (`cli`, `sdk-cli`, …).
+    pub sessoes_origens: Vec<String>,
 }
 
 impl ConfigEfetiva {
@@ -148,6 +167,18 @@ impl ConfigEfetiva {
     pub fn texto(&self, caminho: &str) -> &str {
         match &self.chaves[caminho].valor {
             Valor::Texto(texto) => texto,
+            Valor::Lista(_) => panic!("{caminho} é lista, não texto"),
+        }
+    }
+
+    /// Itens efetivos de uma chave de lista conhecida.
+    ///
+    /// # Panics
+    /// Se a chave não existir ou não for lista (erro de programação).
+    pub fn lista(&self, caminho: &str) -> &[String] {
+        match &self.chaves[caminho].valor {
+            Valor::Lista(itens) => itens,
+            Valor::Texto(_) => panic!("{caminho} é texto, não lista"),
         }
     }
 
@@ -161,6 +192,7 @@ impl ConfigEfetiva {
         Config {
             skin: self.texto("aparencia.skin").to_owned(),
             celebracao_modo: modo,
+            sessoes_origens: self.lista("sessoes.origens").to_vec(),
         }
     }
 }
@@ -184,11 +216,22 @@ fn aplicar_arquivo(
             ));
             continue;
         };
-        let Some(texto) = valor.as_str() else {
-            avisos.push(format!("{caminho} ignorada: esperava texto entre aspas"));
-            continue;
+        let validado = match (chave.tipo, valor) {
+            (Tipo::ListaDeIds, toml::Value::Array(itens)) => {
+                match itens
+                    .iter()
+                    .map(toml::Value::as_str)
+                    .collect::<Option<Vec<_>>>()
+                {
+                    Some(textos) => validar_lista(&textos),
+                    None => Err("esperava uma lista de textos entre aspas".to_owned()),
+                }
+            }
+            (Tipo::ListaDeIds, _) => Err("esperava uma lista, como [\"cli\"]".to_owned()),
+            (_, toml::Value::String(texto)) => validar(chave.tipo, texto),
+            _ => Err("esperava texto entre aspas".to_owned()),
         };
-        match validar(chave.tipo, texto) {
+        match validado {
             Ok(valor) => {
                 chaves.insert(
                     chave.caminho,
@@ -221,15 +264,46 @@ fn coletar_folhas<'a>(
     }
 }
 
+fn eh_id(texto: &str) -> bool {
+    !texto.is_empty()
+        && texto.len() <= 40
+        && texto
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
+}
+
+/// Lista de ids: cada item validado, sem repetição, até [`MAX_ITENS`].
+fn validar_lista(itens: &[&str]) -> Result<Valor, String> {
+    if itens.len() > MAX_ITENS {
+        return Err(format!("lista com mais de {MAX_ITENS} itens"));
+    }
+    let mut lista: Vec<String> = Vec::with_capacity(itens.len());
+    for item in itens {
+        let item = item.trim();
+        if !eh_id(item) {
+            return Err(format!(
+                "«{item}» não é um identificador ([a-z0-9_-], até 40)"
+            ));
+        }
+        if !lista.iter().any(|x| x == item) {
+            lista.push(item.to_owned());
+        }
+    }
+    Ok(Valor::Lista(lista))
+}
+
 fn validar(tipo: Tipo, texto: &str) -> Result<Valor, String> {
     match tipo {
+        Tipo::ListaDeIds => {
+            let itens: Vec<&str> = texto
+                .split(',')
+                .map(str::trim)
+                .filter(|i| !i.is_empty())
+                .collect();
+            validar_lista(&itens)
+        }
         Tipo::Id => {
-            let ok = !texto.is_empty()
-                && texto.len() <= 40
-                && texto.bytes().all(|b| {
-                    b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-'
-                });
-            if ok {
+            if eh_id(texto) {
                 Ok(Valor::Texto(texto.to_owned()))
             } else {
                 Err(format!(
@@ -313,6 +387,48 @@ mod testes {
     fn toml_quebrado_nao_derruba() {
         let c = ConfigEfetiva::carregar(Some("[aparencia\nskin ="), sem_ambiente);
         assert_eq!(c.texto("aparencia.skin"), "zeca");
+        assert_eq!(c.avisos.len(), 1);
+    }
+
+    #[test]
+    fn origens_das_sessoes() {
+        let c = ConfigEfetiva::carregar(None, sem_ambiente);
+        assert_eq!(c.config().sessoes_origens, vec!["cli"]);
+        let arquivo = "[sessoes]\norigens = [\"cli\", \"sdk-cli\", \"cli\"]\n";
+        let c = ConfigEfetiva::carregar(Some(arquivo), sem_ambiente);
+        assert_eq!(c.config().sessoes_origens, vec!["cli", "sdk-cli"]);
+        assert_eq!(c.chaves["sessoes.origens"].origem, Origem::Arquivo);
+        let ambiente =
+            |nome: &str| (nome == "PET_SESSOES_ORIGENS").then(|| " cli , claude-vscode".into());
+        let c = ConfigEfetiva::carregar(Some(arquivo), ambiente);
+        assert_eq!(c.config().sessoes_origens, vec!["cli", "claude-vscode"]);
+        // Vazio é uma escolha válida: nenhuma sessão conta.
+        let c = ConfigEfetiva::carregar(None, |n: &str| {
+            (n == "PET_SESSOES_ORIGENS").then(String::new)
+        });
+        assert!(c.config().sessoes_origens.is_empty());
+        assert!(c.avisos.is_empty(), "{:?}", c.avisos);
+        let json = serde_json::to_value(&c).unwrap();
+        assert_eq!(
+            json["chaves"]["sessoes.origens"]["valor"],
+            serde_json::json!([])
+        );
+    }
+
+    #[test]
+    fn origens_invalidas_viram_aviso() {
+        for arquivo in [
+            "[sessoes]\norigens = \"cli\"\n",
+            "[sessoes]\norigens = [\"CLI\"]\n",
+            "[sessoes]\norigens = [1]\n",
+        ] {
+            let c = ConfigEfetiva::carregar(Some(arquivo), sem_ambiente);
+            assert_eq!(c.config().sessoes_origens, vec!["cli"], "{arquivo}");
+            assert_eq!(c.avisos.len(), 1, "{arquivo}: {:?}", c.avisos);
+        }
+        let ambiente = |nome: &str| (nome == "PET_SESSOES_ORIGENS").then(|| "cli,sdk cli".into());
+        let c = ConfigEfetiva::carregar(None, ambiente);
+        assert_eq!(c.config().sessoes_origens, vec!["cli"]);
         assert_eq!(c.avisos.len(), 1);
     }
 

@@ -7,9 +7,11 @@
 pub mod animador;
 pub mod aprovacao;
 pub mod cena;
+pub mod cerebro;
 pub mod confete;
 pub mod config;
 pub mod estados;
+pub mod evento;
 pub mod geometria;
 pub mod raster;
 pub mod skin;

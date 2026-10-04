@@ -22,7 +22,7 @@ set -uo pipefail
 
 PASTA="${1:?uso: scripts/capturar-pet.sh <pasta>}"
 URL="http://127.0.0.1:${PET_PORTA:-27380}"
-api() { curl -fsS -m 3 -H 'X-Pet: 1' "${URL}$1"; }
+api() { curl -q --noproxy '*' -fsS -m 3 -H 'X-Pet: 1' "${URL}$1"; }
 
 mkdir -p "$PASTA"
 if ! ESTADO="$(api /v1/estado)"; then

@@ -1053,6 +1053,44 @@ mod testes {
     }
 
     #[test]
+    fn as_reacoes_do_cerebro_tocam_tags_proprias_do_zeca() {
+        // O cérebro do M3 emite `nod` (T0), `done_small` (T1) e `bye`; pelos
+        // estados do skin.json do Zeca de verdade (arte/zeca/zeca.toml), cada
+        // uma toca uma tag própria, sem reserva (decisão 0030): o aceno é a
+        // tag composta `nod` (levanta e senta), o pulinho e o tchau são o pio.
+        use pet_core::animador::{Animador, DURACAO_MIN_MS, sequencia, tag_da_reacao};
+        use pet_core::cerebro::{ACENO, PULINHO, TCHAU};
+        let arte = Arte::carregar(&crate::raiz().join("arte/zeca")).unwrap();
+        for variante in [Variante::Simples, Variante::Contorno] {
+            let m = montar(&pack_sintetico(), &arte, variante).unwrap();
+            let f = folha::montar(m.celula, &m.quadros, &m.tags_folha, "t").unwrap();
+            let skin = pet_core::skin::Skin::de_partes(&m.skin_json, &f.json, &f.png).unwrap();
+            let tag =
+                |reacao: &str| tag_da_reacao(&skin, reacao).map(|t| skin.tags[t].nome.clone());
+            assert_eq!(tag(ACENO).as_deref(), Some("nod"), "{variante:?}");
+            assert_eq!(tag(PULINHO).as_deref(), Some("chirp"), "{variante:?}");
+            assert_eq!(tag(TCHAU).as_deref(), Some("chirp"), "{variante:?}");
+            for reacao in [ACENO, PULINHO, TCHAU] {
+                assert!(
+                    !skin.tags_do_estado(reacao).is_empty(),
+                    "«{reacao}» nativo no {variante:?}"
+                );
+            }
+            // O aceno toca a sequência inteira (levantar e sentar) e volta à
+            // pose do repouso.
+            let total: u64 = sequencia(skin.tag("nod").unwrap())
+                .into_iter()
+                .map(|q| u64::from(skin.quadros[q].duracao_ms).max(DURACAO_MIN_MS))
+                .sum();
+            let mut a = Animador::novo(&skin, 0);
+            assert!(a.tocar(&skin, ACENO, 1000));
+            assert_eq!(a.reacao(1000 + total - 1), Some(ACENO));
+            assert_eq!(a.reacao(1000 + total), None);
+            assert_eq!(a.em(1000 + total).0, a.pose());
+        }
+    }
+
+    #[test]
     fn dados_errados_da_arte_sao_erro_e_nao_somem() {
         let base = Arte::carregar(&crate::raiz().join("arte/zeca")).unwrap();
         let pack = pack_sintetico();

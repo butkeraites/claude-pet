@@ -1,0 +1,17 @@
+{
+  "name": "bichinho",
+  "version": "0.1.0",
+  "description": "Hooks do claude-pet: o Zeca, papagaio de pixel art, reage ao Claude Code na tela (Hyprland). Só metadados saem do Claude Code.",
+  "author": {
+    "name": "butkeraites"
+  },
+  "repository": "https://github.com/butkeraites/claude-pet",
+  "license": "MIT",
+  "keywords": [
+    "pet",
+    "hooks",
+    "hyprland",
+    "wayland",
+    "pixel-art"
+  ]
+}

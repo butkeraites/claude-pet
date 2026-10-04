@@ -383,6 +383,165 @@ Ao vivo com a tela apagada passaram:
 - `kill -9` com RestartCount 0 → 1, de volta em 471 ms;
 - "aguardando compositor" sem compositor.
 
+## 0019 — Fio v1: validação campo a campo e entrada dos eventos (2026-10-03)
+
+**Problema:** o M3 congela o formato de fio dos hooks (revisão de produto:
+tarefas em segundo plano, sessões sem terminal, `stop_hook_active`). A
+entrada HTTP é a segunda barreira de privacidade, depois da lista branca do
+`avisar.sh`. Um campo inesperado não pode vazar conteúdo nem deixar o pet
+surdo quando o Claude Code muda um enum.
+**Escolha:**
+- `POST /v1/evento` exige `Host` de loopback na porta pública, `X-Pet: 1` e
+  `Content-Type: application/json` (415), corpo de até 8 KiB (413) com
+  `Content-Length` (411). Só `v = 1` e `e = [A-Za-z]{1,40}` são
+  obrigatórios (400); aceito, 204.
+- Cada campo opcional tem tipo, tamanho e classe de caracteres (tabela em
+  `pet_core::evento`). O que não passa é descartado sozinho e só o nome do
+  campo fica; campos desconhecidos são ignorados; nenhuma mensagem de erro
+  cita o corpo (o erro do serde pode citar).
+- `bgt` e `bgi` andam alinhados, até 16 tarefas; `bg` é a contagem total.
+- O ingress carimba a hora de chegada (relógio do host) e manda o evento ao
+  laço principal pelo canal do calloop (256 vagas; cheio, 503).
+- `/v1/estado.eventos`: aceitos, recusados e idade do último. Em debug,
+  `/v1/debug/eventos` guarda os últimos 200 eventos já validados, com a
+  hora de chegada e os nomes descartados; sem debug nada é guardado. No log
+  vão só o nome do evento e os 8 primeiros caracteres do `sid`.
+- `POST /v1/comando`, subconjunto do M3: `{"cmd":"tocar","arg":"<reação>"}`,
+  `esconder` e `mostrar`, sem persistir; campo a mais é recusado (um pedido
+  como `esconder 30m` não pode virar `esconder` para sempre em silêncio).
+- O animador toca uma reação uma vez, com as durações por quadro (mínimo de
+  34 ms), e o repouso recomeça no fim dela com a pausa inteira. `nod` cai
+  no estado `wave` quando a skin não tem `nod`; `done_small` também tem o
+  `wave` de reserva; `bye` não tem reserva e, sem estado próprio, não anima.
+**Por quê:** a lista branca do `avisar.sh` é a primeira barreira e os
+canários a provam; esta protege contra um script velho, um bug ou outro
+processo local. Descartar campo por campo, em vez de recusar o evento,
+mantém o pet funcionando depois de uma atualização do Claude Code; `v` e
+`e` são o mínimo para rotear.
+
+## 0020 — Cérebro mínimo do M3: sessões, turnos e acomodação do Stop (2026-10-03)
+
+**Problema:** o M3 liga o primeiro elo hook → reação sem pintar o M5 num
+canto. Os hooks são async e chegam fora de ordem; um Stop pode ser seguido
+de mais trabalho (Stop hook de outro plugin); `claude -p`, SDK e IDE criam
+sessões sem terminal; o `bin/pet testar` roda ao lado da sessão real do
+Claude que o chama; e sessões morrem sem `SessionEnd`.
+**Escolha:**
+- Core puro (`pet_core::cerebro`) com relógio injetado: parede (o mesmo do
+  `ts` dos hooks) para ordem e duração, monotônico para os prazos. O `ts` só
+  vale a até 6 h da hora de chegada carimbada no ingress; fora disso vale a
+  chegada.
+- Sessões por `sid`, só das origens em `sessoes.origens` (padrão `["cli"]`;
+  evento sem `ent` não conta). Eventos de teste vivem num mundo à parte
+  (chave `(teste, sid)`) e somem 60 s depois do último evento; sessão real
+  sem eventos some em 12 h; no máximo 64 de cada tipo.
+- Turnos por `prompt_id`. O `UserPromptSubmit` abre o turno (t0); evento de
+  um turno que ninguém abriu (pet reiniciado, prompt atrasado) abre um
+  turno implícito; um id novo encerra o turno aberto: com Stop pendente
+  comemora na hora, sem Stop foi abandonado (Esc) e fecha sem festa.
+- Componentes por turno: ferramentas de trabalho (Edit, Write, MultiEdit,
+  NotebookEdit, Bash, também as que falharam), outras, arquivos únicos
+  (`arq`), soma de `dur`, subagentes, falhas e ferramentas de subagentes.
+  Ferramenta de subagente conta para o turno em que ele nasceu e não muda o
+  estado da sessão. O `SubagentStart` chega com `agente` (o `agent_id` é o
+  do subagente que nasce), mas vale como evento da thread principal.
+- Stop: acomodação de 0,8 s, cancelada só por um evento de trabalho da
+  thread principal (PreToolUse, PostToolUse, PostToolUseFailure,
+  PermissionRequest, SubagentStart, PreCompact, PostCompact) da mesma
+  sessão e do mesmo turno com `ts` posterior ao Stop. Dedupe por
+  `(sid, turno)`, lembrando os últimos 32 turnos fechados de cada sessão.
+- Fecham sem festa: ferramenta interrompida (`intr`), `idle_prompt` com
+  turno aberto e sem Stop, `StopFailure` e `SessionEnd`.
+- T0 (nenhuma ferramenta de trabalho, nenhum subagente, nenhum arquivo
+  editado) → `nod`; o resto → T1, `done_small`. `celebracao.modo`:
+  `desligada` não reage, `discreta` só acena, `sempre_grande` é igual ao
+  proporcional até o M5 trazer níveis maiores.
+- `SessionEnd` sempre larga a sessão com o turno e a acomodação; `bye` só
+  quando não sobra sessão do mesmo tipo (a skin de teste não tem `bye`, e o
+  tchau não anima no M3).
+- `/v1/estado`: `sessoes` (8 caracteres do `sid`, projeto, origem, estado,
+  contadores, hora do último evento), `ultima_reacao` (nome, `sid8`,
+  projeto, hora, nível, teste), `turnos` (os últimos 20, com todos os
+  componentes; `relogio_ms` só para calibrar, nunca pontua) e
+  `cerebro.ignorados`, a contagem do que não contou, por motivo.
+**Por quê:** a ordem dos hooks async é a do relógio do host no início do
+script, não a de chegada; 0,8 s cobre o atraso de um PostToolUse sem
+segurar a festa. O filtro de origem e o isolamento dos testes vêm da
+revisão de produto. O M5 pontua T2/T3, correntes e escalada em cima dos
+mesmos componentes, sem mudar o fio nem o registro.
+
+## 0021 — Gate ao vivo do M3 e plugin só por `--plugin-dir` até o merge (2026-10-03)
+
+**Problema:** o plano verifica o M3 com `claude plugin list` mostrando
+`bichinho@bichinho-local` habilitado, mas instalar o marketplace antes do
+merge faria toda sessão do Claude nesta máquina rodar o plugin de uma
+branch (revisão de produto: acoplamento in-place). E o fio v1 foi escrito a
+partir dos tipos do d.ts do 2.1.288: faltava ver o que o Claude Code manda
+de verdade.
+**Escolha:**
+- Até o merge, o plugin só entra numa sessão por vez:
+  `claude --plugin-dir ~/Documents/claude-pet/plugin`. A instalação
+  (worktree estável destacada na `main`, `claude plugin marketplace add`,
+  `claude plugin install bichinho@bichinho-local`) vem depois do merge.
+  `claude plugin list` e `claude plugin marketplace list` terminaram o M3
+  iguais aos de antes.
+- Gate ao vivo (tela em DPMS; pilha de dev para ter o `/v1/debug/eventos`,
+  produção refeita da branch no fim):
+  - `bin/pet testar rapido` → `nod` e `bin/pet testar pequeno` →
+    `done_small`, na produção;
+  - sessão interativa no tmux em `~/Documents`, com as variáveis
+    `CLAUDECODE` e `CLAUDE_CODE_*` do agente tiradas do ambiente:
+    "responda só: ok" → `nod` (T0); "crie o arquivo …" → o Claude usou um
+    Bash (`mkdir && echo`) → `done_small` (T1); "use a ferramenta Write …"
+    → Read e Write → `done_small`, com o `arq` igual ao sha256 do caminho
+    calculado à parte; `/exit` → `SessionEnd` → `bye`;
+  - pet parado: `claude -p --plugin-dir …` imprimiu só `ok`, stderr vazio,
+    saída 0; o `avisar.sh` levou ~30 ms com a porta recusando e 2,04 s com
+    um servidor que aceita e nunca responde;
+  - pet de pé: um `claude -p` mandou SessionStart, UserPromptSubmit, Stop e
+    SessionEnd com `ent: sdk-cli`, e o cérebro ignorou os quatro.
+- O que o 2.1.288 mandou (só os metadados que o `/v1/debug/eventos`
+  guarda; nenhum campo descartado, nenhum evento recusado):
+  - `CLAUDE_CODE_ENTRYPOINT` chega aos hooks posto pelo próprio Claude
+    Code: `cli` no terminal, `sdk-cli` no `-p`;
+  - `SessionStart` com `source: startup` e sem `prompt_id`;
+  - `UserPromptSubmit` **sem** `source` (o d.ts avisa que o campo ainda
+    está chegando): o turno fica com `src: null`;
+  - `Stop` com `background_tasks: []` e `stop_hook_active: false`;
+  - `PostToolUse` com `duration_ms` (Bash 151 ms, Read 33 ms, Write 84 ms);
+  - `SessionEnd` chega mesmo com o processo saindo, com `reason:
+    prompt_input_exit` (terminal) ou `other` (`-p`) e o `prompt_id` do
+    próprio `/exit`;
+  - do hook ao pet: 25 a 82 ms; a reação sai ~850 ms depois do `ts` do Stop.
+- Não exercitados ao vivo (cobertos pelos canários e pelos testes do
+  cérebro): PreToolUse de AskUserQuestion/ExitPlanMode, PermissionRequest,
+  Notification, SubagentStart, PreCompact, PostCompact, StopFailure e
+  PostToolUseFailure.
+**Por quê:** sessões de outros projetos não podem rodar código de uma
+branch; instalar a partir da `main` estável é o desenho do plano. Ver os
+campos de verdade confirma o fio v1 e mostra que o `source` do
+UserPromptSubmit ainda não vem: o M5 usa esse campo para continuação de
+correntes e terá de tolerar a falta dele.
+
+## 0022 — Revisão do M3: tchau só quando o processo sai e motivos com teto (2026-10-03)
+
+**Problema:** relendo o cérebro antes de publicar a branch:
+- um `/clear` (ou uma retomada) manda `SessionEnd` com `reason: clear`
+  (`resume`) para o `sid` velho, e o processo segue com outro `sid`. Com
+  uma sessão só, o pet daria tchau sem o Renan ter saído, contra o plano
+  ("só o tchau depende do motivo");
+- `cerebro.ignorados` ganhava uma chave por origem diferente: um processo
+  local mandando `ent` sempre novo cresceria o mapa sem limite.
+**Escolha:**
+- `SessionEnd` continua largando a sessão, o turno e a acomodação sempre;
+  o `bye` só vem com a última sessão **e** um motivo de saída do processo
+  (`prompt_input_exit`, `logout`, `other`), nunca com `clear` ou `resume`;
+- no máximo 32 motivos distintos em `ignorados`; os novos depois disso
+  contam em `outros`.
+**Por quê:** o tchau é a despedida de quem fechou o Claude; um `/clear` é
+o mesmo terminal continuando. O teto custa uma linha e fecha o único mapa
+do cérebro que ainda crescia com dado de fora.
+
 ## 0023 — O Zeca é o Parrot 2 no visual "Malandro rosa" (2026-10-03)
 
 **Problema:** a decisão 0001 previa troca de paleta (bico amarelo, peito
@@ -703,3 +862,331 @@ medido do M1 sem depender de uma conta linear.
 precisa valer para a arte da folha vista, poder trocar o personagem sem
 congelar a tela nem reiniciar, e nenhum teste pode terminar com o Zeca
 aprovado no lugar do Renan.
+
+## 0030 — Integração do M3 sobre o M2: um `/v1/comando`, reações pelos estados da skin e o config relido também no cérebro (2026-10-03)
+
+**Problema:** o M3 (decisões 0019–0022) foi feito de madrugada, a partir da
+`m1-overlay` de antes do portão do M1, e o M2 (0023–0029) à tarde, em cima
+do portão fechado. Rebaseada a `m3-hooks` na `m2-zeca`, as duas metades se
+encontram em quatro pontos:
+- os dois escreveram um `POST /v1/comando` no mesmo formato `{"cmd",
+  "arg"}`: o M3 com `tocar`, `esconder` e `mostrar` (204, sem esperar), o M2
+  com `aprovar_skin` e `revogar_skin` (200, uma por vez, esperando o laço
+  escolher o personagem de novo);
+- o animador do M3 tinha a própria tabela de reservas (`nod` e `done_small`
+  → `wave`), repetida no catálogo de estados do M2 (`pet_core::estados`),
+  que a cobertura usa: duas fontes para a mesma regra;
+- o `nod`, o aceno do T0 e a reação mais frequente, não estava entre os
+  estados que o personagem tem de ter nativos: sem ele, o aceno cairia no
+  `wave`, que no Zeca é o mesmo pio do pulinho do T1;
+- o M2 relê o config a cada aprovação (decisão 0029), mas o cérebro ficava
+  com as origens e o modo da partida, e o `/v1/estado.config` passaria a
+  mostrar outra coisa que o `cerebro.origens`.
+
+**Escolha:**
+- **Um `/v1/comando` só**, com as mesmas checagens de `Host`, `X-Pet` e
+  `Content-Type` e o mesmo corpo `{"cmd", "arg"}` sem campo a mais:
+  `tocar`, `esconder` e `mostrar` vão ao laço e respondem 204 na hora;
+  `aprovar_skin` e `revogar_skin` respondem 200 com o resultado depois de o
+  laço escolher o personagem. Só as aprovações passam pelo cadeado: uma
+  reação nunca espera uma aprovação. Um `cmd` desconhecido lista os cinco.
+  O `bin/pet` fala com o `/v1/comando` por uma função só.
+- **Um laço só** recebe pelo mesmo canal (256 vagas) eventos, reações,
+  aprovações e debug; o `/v1/estado` traz o `skin` do M2 (`id`, `origem`,
+  `sha256`, avisos) e o `sessoes`, `ultima_reacao`, `turnos`, `cerebro` e
+  `eventos` do M3. O `Laco::novo` recebe a config da partida, de onde saem
+  a skin configurada e a config do cérebro (com os argumentos dos dois
+  marcos ele passava do limite do clippy; corrigido no próprio commit do
+  T3.3 rebaseado).
+- **Reações pelos estados do `skin.json`:** toca a primeira tag do estado de
+  mesmo nome; senão a do primeiro estado de reserva que a skin tem, pelas
+  reservas do catálogo (`estados::reserva`, a mesma caminhada da
+  cobertura), nunca a pose parada (tocar o repouso não é reação); senão uma
+  tag de mesmo nome. A tabela própria do animador saiu.
+  - No Zeca: `nod` → a tag composta `nod` (levanta e senta, 600 ms);
+    `done_small` → `chirp`; `bye` → `chirp`. O tchau, que na `_teste` não
+    anima, no Zeca pia.
+  - Na `_teste` (debug), como antes: `nod` → `wave`, `done_small` →
+    `done_small`, `bye` não anima.
+- **`nod` entra nos nativos do MVP** (`cargo xtask cobertura --nativos mvp`,
+  que o `skin-instalar` exige): o Zeca passa com 18 de 18; um personagem sem
+  aceno próprio não passa. A tabela do PLANO ("Zeca: arte e skin", item 4)
+  ganha a linha do T0.
+- **O config relido vale para o cérebro:** a cada aprovação ou revogação,
+  `sessoes.origens` e `celebracao.modo` do arquivo novo passam ao cérebro
+  (`Cerebro::reconfigurar`); uma sessão de origem que deixou de contar sai
+  na hora, sem reação (os eventos dela seriam ignorados e ela só sumiria em
+  12 h).
+- **Rebase:** cada conflito foi resolvido mantendo os dois lados (lista na
+  linha do T3.5 no PROGRESS). DECISIONS em ordem numérica (0019–0022 antes
+  de 0023); PROGRESS em ordem cronológica: as linhas do M3, de madrugada,
+  antes do portão do M1 (de manhã) e do M2 (à tarde). Todo commit
+  rebaseado passa `cargo fmt --check`, `clippy -D warnings` e `cargo test`.
+
+Ao vivo, com a produção refeita da `m3-hooks` (verificação pelo
+`/v1/estado`, sem olhar pixels):
+- `bin/pet skin-instalar` com o zip do pack deu as mesmas impressões das
+  prévias do M2 (`zeca` 5b843b03…, `zeca-contorno` a0d5fbb1…), com os três
+  arquivos, o `CREDITS.md`, as folhas de contato e os GIFs idênticos byte a
+  byte; só o `cobertura.md` mudou (18 de 18 exigidos, era 17 de 17);
+- o `zeca` estava aprovado: uma aprovação feita fora desta sessão em
+  2026-10-03 às 23:28 UTC, depois do fim do M2, com a impressão da folha.
+  Ela ficou como estava; com a mesma impressão na imagem nova, a produção
+  mostra o Zeca (`tela: ativa`, D = 8) e as reações tocam nele;
+- `bin/pet testar rapido` → `nod` (T0) e `pequeno` → `done_small` (T1,
+  trabalho 2, 940 ms de ferramenta), isolados como teste; `bin/pet tocar`
+  `nod`, `done_small` e `bye` aparecem em `/v1/estado.reacao`;
+- gate interativo no tmux em `~/Documents`, com `--plugin-dir` e sem as
+  variáveis `CLAUDECODE`/`CLAUDE_*` do agente: "responda só: ok" → `nod`
+  (T0); "crie o arquivo …" → um Bash de 66 ms → `done_small` (T1); `/exit`
+  → `bye`; as sessões de teste expiraram sozinhas;
+- pet parado: `claude -p --plugin-dir …` imprimiu só `ok`, stderr vazio,
+  saída 0; o `avisar.sh` levou 12 ms com a porta recusando; pet de pé: um
+  `claude -p` mandou 4 eventos `sdk-cli`, todos ignorados;
+- `claude plugin list`, `claude plugin marketplace list` e os arquivos de
+  configuração do Claude Code terminaram iguais aos de antes.
+
+**Por quê:** o formato `{"cmd", "arg"}` já era o mesmo dos dois lados, então
+um endpoint só, com uma tabela de comandos, é menos superfície do que dois
+caminhos; aprovações são lentas e raras e não podem segurar uma reação. Uma
+fonte só para as reservas faz o `cobertura.md` dizer o que o pet toca. Com o
+`nod` nativo, T0 e T1 continuam diferentes na tela. E o config relido tem de
+valer para tudo o que o `/v1/estado.config` mostra.
+
+## 0031 — Hooks só para o 127.0.0.1: sem curlrc, proxy nem `~/.jq`, e validadores iguais aos do pet (2026-10-03)
+
+**Problema:** a revisão adversarial da integração (lente de hooks e
+privacidade) achou o caminho que a lista branca não cobre: **para onde** os
+metadados vão.
+- O hook herda o ambiente do Claude Code (perfil do shell, bloco `env` do
+  `settings.json`). Com `http_proxy`/`ALL_PROXY` no ambiente, ou um
+  `~/.curlrc` com `proxy`, o curl do `avisar.sh` entregava cada evento ao
+  proxy, que pode ser outra máquina: ids de sessão e de turno, nomes de
+  ferramenta, hash de arquivo, nome da pasta do projeto, DND. E o pet
+  ficava surdo sem erro nenhum. Os canários não viam: usam um curl falso e
+  limpam o ambiente. Nada disso está ativo nesta máquina hoje (nenhuma
+  variável de proxy nos processos do Claude, nenhum `~/.curlrc`, `env`
+  vazio no `settings.json`).
+- Achado nesta revisão: o jq lê sozinho o `~/.jq` antes do programa, e um
+  `~/.jq` que redefine `test` ou `select` abria a lista branca (conferido no
+  jq 1.8.2).
+- Os validadores do jq não eram os do `pet_core::evento`, como o script
+  dizia: o `$` do jq aceita um "\n" no fim do texto (id, enum, origem e
+  pasta passavam com ele e o pet descartava), e a pasta aceitava todas as
+  marcas Unicode (`\p{M}`), o pet só cinco faixas (uma pasta "1️⃣" saía e
+  era descartada).
+- `bgt` normalizava qualquer texto para `[a-z_]`: um campo de conteúdo que
+  um dia passasse por ali sairia em minúsculas, e os canários só procuravam
+  `SEGREDO` em maiúsculas.
+
+**Escolha:**
+- O curl do `avisar.sh`, do `bin/pet` e dos scripts de host sempre com `-q`
+  (o primeiro argumento: nenhum curlrc) e `--noproxy '*'` (nenhum proxy do
+  ambiente). O jq do `avisar.sh` roda com `HOME=/nonexistent` (sem
+  `~/.jq`).
+- Validadores com `\A…\z`; a pasta aceita letras, dígitos, espaço, `_.-` e
+  só as marcas combinantes que o pet aceita. O que o pet descartaria nem
+  sai do host.
+- `bgt` por lista fechada, os rótulos do 2.1.288 normalizados (`shell`,
+  `subagent`, `workflow`, `monitor`, `mcp_task`, `teammate`, `dream`,
+  `auto_mode_scan`, `memory_import`, `cloud_session`); qualquer outro vira
+  `outro`, nunca o texto dele.
+- Canários (20, eram 16): todo vazamento é procurado sem caixa
+  (`segredo`); novos: o curl de verdade com proxy em todas as variáveis e
+  curlrc desviando (`proxy` e `connect-to`) em `CURL_HOME`,
+  `XDG_CONFIG_HOME` e `HOME` ainda entrega ao daemon; um `~/.jq` que
+  redefine `test`, `select` e `with_entries` não muda nada; ids, enums,
+  origem e pasta com "\n" no fim e a pasta "1️⃣" saem sem nada que o pet
+  descartaria; uma entrada de 8 MiB sai calada com 0. O `bin/pet testar`
+  também passa com proxy e curlrc. Cada canário novo reprovou o script
+  antigo antes da correção.
+
+**Por quê:** a lista branca escolhe o que sai; isto garante que só sai para
+o 127.0.0.1. Com o pet desligado continua custando uma conexão recusada. Um
+tipo de tarefa desconhecido vale para o M5 o mesmo que o texto dele (quem
+decide se é agente é a lista), e a lista não deixa conteúdo passar.
+
+## 0032 — Revisão do cérebro: Stop depois do prompt seguinte, continuação de um Stop segurado e estado só por evento aplicado (2026-10-03)
+
+**Problema:** a revisão adversarial da integração (lente do cérebro)
+reproduziu num daemon de debug duas ordens reais de hooks async que o
+cérebro errava. Para uma delas, a decisão 0020 dizia o contrário.
+- **Stop depois do prompt seguinte.** Um prompt na fila, ou o aviso de uma
+  tarefa em segundo plano entregue quando a sessão para, entra milissegundos
+  depois do Stop, e os dois hooks chegam trocados (do hook ao pet são 25 a
+  82 ms, decisão 0021). O `UserPromptSubmit` do p2 fechava o p1 na hora como
+  `substituido`, sem festa, e o Stop do p1 caía como `stop_repetido`.
+- **Stop segurado por outro plugin** (`stop_hook_active`; o ralph-loop, o
+  hookify e outros do marketplace oficial ligam Stop hooks). A 0020 dizia
+  que a acomodação de 0,8 s cobria esse caso, e não cobre. O PreToolUse só
+  está ligado para AskUserQuestion e ExitPlanMode, então o primeiro evento
+  da continuação é o PostToolUse da ferramenta, segundos depois. O primeiro
+  Stop comemorava em 0,8 s, as ferramentas da continuação caíam como
+  `turno_fechado` e o Stop final (`sha`) como `stop_repetido`. Um T0 que
+  virava T1 nunca pulava, e o registro ficava errado. Nesta máquina nada
+  segura o Stop hoje: dos plugins instalados, só o superpowers tem hooks, e
+  só o SessionStart.
+- Um evento ignorado mudava o estado da sessão: um prompt ou uma ferramenta
+  atrasados deixavam a sessão `pensando` ou `trabalhando` sem turno aberto
+  até o próximo evento, ou por 12 h.
+- `Turno.arquivos` crescia sem teto com `arq` sempre novo. A 0022 dizia que
+  `ignorados` era o último mapa que crescia com dado de fora, e não era.
+- O `receber` vencia os prazos na hora do processamento. Com o laço parado
+  (handshake do Wayland, troca de personagem), uma acomodação podia vencer
+  antes do evento da fila que a cancelaria.
+
+**Escolha:**
+- **Turno trocado.** Um turno novo que começa sem o Stop do aberto não fecha
+  o anterior na hora: o anterior espera 0,8 s (`ACOMODACAO_MS`). Se o Stop
+  dele chega, comemora na hora, porque o turno novo já começou. Eventos
+  atrasados dele contam nele, sem fechar o turno novo. Sem Stop, fecha
+  `substituido` com a hora da troca, como antes. `StopFailure` e ferramenta
+  interrompida fecham o turno do próprio `prompt_id`; antes fechavam o
+  aberto, qualquer que fosse.
+- **Turno comemorado.** O último turno fechado por um Stop guarda os
+  contadores. Um evento de trabalho da thread principal com o mesmo
+  `prompt_id` e `ts` depois do Stop reabre o turno (`continuacoes` + 1). O
+  próximo Stop acomoda de novo e reclassifica, e só reage se o nível subir
+  (T0 → T1: `done_small`). O turno tem um registro só, trocado pelo novo
+  (com `sha`), e `reacao` passa a ser a última reação do turno. Um prompt
+  novo encerra essa chance. É a regra "Stop com sha" do plano, no tamanho
+  do M3; o M5 funde nos níveis T2 e T3.
+- **Estado só por evento aplicado.** Evento ignorado (`turno_fechado`,
+  `prompt_repetido`, `stop_repetido`), atrasado (antes do Stop pendente) ou
+  do turno trocado não mexe no estado da sessão.
+- **Teto de 1024 arquivos lembrados por turno.** Passado o teto, cada `arq`
+  novo só soma, contando por cima. Os contadores somam saturando.
+- **Relógio da chegada.** O ingress carimba também o `Instant` da chegada,
+  e o laço passa ao cérebro a hora em que cada evento chegou. O calloop
+  0.14 despacha o canal antes dos timers vencidos, então um laço parado não
+  vence uma acomodação que um evento da fila cancela.
+- **Testes:** 7 cenários novos na tabela (Stop depois do prompt seguinte,
+  Stop do trocado fora da espera, eventos atrasados do trocado,
+  stop-bloqueado subindo e sem subir de nível, evento atrasado depois da
+  festa), 3 testes de registro e estado, um do teto de arquivos, um do
+  relógio da chegada e um de ponta a ponta no daemon com as duas ordens. A
+  tabela nova reprova o cérebro antigo.
+
+**Por quê:** o turno é o `prompt_id` ("até o próximo prompt", diz o d.ts), e
+o Stop e o prompt seguinte são dois hooks async correndo um contra o outro.
+Esperar 0,8 s pelo Stop do trocado não custa nada: o Esc continua sem festa,
+só 0,8 s depois. Reabrir em vez de ignorar mantém o registro certo para o M5
+e põe o pulinho no fim de verdade; reagir só se o nível subir evita festa
+dupla. Isto corrige a 0020: a acomodação cobre hooks fora de ordem dentro de
+0,8 s, e o Stop segurado é coberto pela reabertura. Corrige também a 0022: o
+teto dos arquivos fecha o último mapa do cérebro que crescia com dado de
+fora.
+
+## 0033 — O `tocar` responde o que o pet fez, e reação nunca espera o cadeado das aprovações (2026-10-03)
+
+**Problema:** a revisão adversarial da integração (lentes do cérebro e do
+processo) achou duas pontas soltas no `/v1/comando` unificado da 0030:
+- O comando respondia de dois jeitos. As aprovações davam 200 com o
+  resultado, depois de o laço trocar o personagem. O `tocar` dava 204
+  sempre, com o nome só validado por `[a-z_]`. Sem personagem aprovado, sem
+  compositor ou com um nome que a skin não sabe tocar, o `bin/pet tocar`
+  saía 0 calado, e só o log do daemon avisava.
+- A 0030 promete que só as aprovações passam pelo cadeado ("uma reação
+  nunca espera uma aprovação"), mas nenhum teste segurava isso. O
+  `receber_comando` do M2 pegava o cadeado no começo para qualquer comando,
+  e voltar a esse formato passaria na suíte inteira.
+
+**Escolha:**
+- O `tocar` vai ao laço e espera a resposta por até 2 s (o mesmo prazo das
+  aprovações e do quadro de debug), sem passar pelo cadeado. Respostas:
+  - 200 com `{"reacao", "tocou", "tag", "motivo"}`: `tocou` diz se a
+    reação apareceu na tela, e `motivo` diz por que não (sem compositor, ou
+    o pet escondido; escondido, não toca);
+  - 409 sem personagem aprovado;
+  - 400 se a skin não tem estado, reserva nem tag com esse nome.
+- `esconder` e `mostrar` continuam 204 na hora.
+- O `bin/pet tocar` mostra a tag que a skin tocou e sai 1, com o motivo,
+  quando a reação não aparece.
+- Um teste prende o cadeado: `tocar`, `esconder` e `mostrar` respondem na
+  hora, e a revogação espera até ele soltar. Com o cadeado posto no `tocar`
+  (mutação), o teste reprova.
+
+**Por quê:** um comando de depuração que sai 0 sem ter feito nada esconde
+justamente o que se queria ver: o personagem sem aprovação, o compositor
+fora. Esperar o laço custa milissegundos. O cadeado continua só onde há
+disco e troca de personagem.
+
+## 0034 — Revisão do gate do M3: `bin/pet testar` pelo registro do turno, plano sem instalação global, aprovação fora do CLAUDE.md e gate refeito com Write (2026-10-03)
+
+**Problema:** a revisão adversarial da integração (lentes do processo e do
+cérebro) achou:
+- o `bin/pet testar` lia o resultado da `ultima_reacao`, que é de quem
+  reagiu por último. Uma sessão real reagindo entre a reação do teste e a
+  leitura seguinte (a cada 100 ms) fazia o teste esperar 5 s e falhar, com
+  a reação feita;
+- a verificação do M3 no PLANO ainda pedia `claude plugin list` com
+  `bichinho@bichinho-local` habilitado e rodava o gate sem `--plugin-dir`,
+  contra a 0021 e o CLAUDE.md: instalar antes do merge faria as sessões de
+  outros projetos rodarem a branch;
+- o CLAUDE.md versionado guardava estado desta máquina: a aprovação do
+  `zeca` de 23:28 UTC "tratada como do Renan" e um "não a revogue". Estado
+  de máquina envelhece num arquivo que vai para a `main`. E a origem, que o
+  relatório da integração deixou como não confirmada, estava confirmada: o
+  Renan respondeu "Aprovo, sem contorno" na sessão que orquestra os marcos
+  às 23:27:37 UTC, e essa sessão rodou `bin/pet skin-aprovar zeca` às
+  23:28:02;
+- o gate refeito na integração (0030) não teve turno com Write ou Edit, e
+  nada foi conferido na tela, embora a 0030 dissesse que as reações "tocam
+  nele";
+- um daemon de debug do M2 (o do T2.6, nativo, na porta 27399, conectado ao
+  Hyprland) ficou rodando desde as 17:46.
+
+**Escolha:**
+- O `bin/pet testar` acha o turno da própria sessão de teste no
+  `/v1/estado.turnos` (por `sid8` e `teste`) e lê a reação dele. O teste
+  novo tem sessões reais reagindo a cada 50 ms; o `bin/pet` antigo
+  reprovou 3 de 3 vezes.
+- A verificação do M3 no PLANO segue a 0021: `--plugin-dir`, com
+  `CLAUDECODE` e as `CLAUDE_CODE_*` fora do ambiente; `claude plugin list` e
+  `claude plugin marketplace list` iguais antes e depois; um turno com Write
+  conferido por `arquivos: 1`. A instalação e o `bichinho@bichinho-local`
+  habilitado ficam para depois do merge (README).
+- O CLAUDE.md perde o parágrafo da máquina e ganha a regra que dura: nunca
+  revogue uma aprovação que você não fez; antes de mexer, leia o `skin` do
+  `/v1/estado` e o `aprovacao.json` em `/state`.
+- O daemon esquecido foi parado pelo PID, sem `pkill -f`.
+
+Ao vivo. A tela ficou apagada e a sessão bloqueada o tempo todo: nada foi
+conferido por pixel, só pelo `/v1/estado` e pelo log.
+- Produção refeita da `m3-hooks` (`bin/pet subir`): tela ativa, `zeca` da
+  imagem com a aprovação do Renan (sha 5b843b03…), D = 8. A aprovação não
+  foi tocada.
+- `bin/pet testar rapido` → `nod` (T0); `pequeno` → `done_small` (T1,
+  trabalho 2, arquivos 1, 940 ms).
+- `bin/pet tocar`: `nod` → tag `nod`, `done_small` → `chirp`, `bye` →
+  `chirp`; `nada_disso` → 400. Com a tela apagada, `tocou` só diz que a
+  reação tocou na camada, e o `commits_total` fica em 1. O pet não sabe se
+  a tela está acesa, porque nunca pergunta ao Hyprland, e sem frame
+  callback não faz commit (decisão 0018).
+- Gate interativo no tmux, em `~/Documents`, com `--plugin-dir`:
+  - "responda só: ok" → `nod` (T0);
+  - "use a ferramenta Write para criar …/tmp/e2e/oi.txt" → um Write de 22
+    ms → `done_small` (T1, trabalho 1, `arquivos: 1`);
+  - `/exit` → `bye`.
+  Foram 19 eventos aceitos e nenhum recusado. A primeira tentativa mandou o
+  texto e o `Enter` no mesmo `tmux send-keys`: o Claude Code tratou como
+  colagem e não enviou (a sessão saiu com `bye` quando o tmux foi
+  derrubado). O texto vai com `-l`, e o `Enter` num `send-keys` à parte.
+- Com o pet parado, `claude -p --plugin-dir …` imprimiu só `ok`, com stderr
+  vazio e saída 0, e o `avisar.sh` levou 14 ms. Com o pet de pé, um
+  `claude -p` mandou 4 eventos, todos ignorados como `origem:sdk-cli`.
+- Log e `/v1/estado` sem nada dos prompts nem caminhos (0 ocorrências).
+  `claude plugin list`, `claude plugin marketplace list`, `settings.json`,
+  `installed_plugins.json` e `known_marketplaces.json` iguais antes e
+  depois.
+
+Fica pendente, porque pede o Renan: no Zeca, o aceno do T0 (`nod`, levanta
+e senta, 600 ms) é um pedaço da rajada do repouso (`stand_look_sit`,
+levanta, respira em pé e senta), que o parado toca sozinho a cada ~18 s.
+Quem olha pode confundir os dois. Mudar o `nod` ou o repouso muda o
+`skin.json`, a impressão digital e a aprovação: é uma folha de contato nova
+e uma reaprovação dele, e depois a conferência na tela.
+
+**Por quê:** o teste tem de achar o próprio resultado, não o do vizinho. O
+plano não pode mandar quebrar uma regra de ouro. Estado de máquina vai para
+o PROGRESS ou o corpo do PR; regra vai para o CLAUDE.md.

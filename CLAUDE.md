@@ -25,8 +25,7 @@ o clique manual (clicar ao lado do pet chega na janela de baixo).
 O daemon acha o Hyprland pelo `hyprland.lock`, conecta ao Wayland (Rust
 puro, SCTK), cria a camada OVERLAY `claude-pet` no monitor focado e desenha
 a skin em blocos D×D de pixels do monitor, com orçamento de commits.
-Repositório privado em `github.com/butkeraites/claude-pet`. Ainda não há
-hooks (M3).
+Repositório privado em `github.com/butkeraites/claude-pet`.
 
 **M2 (Zeca) na branch `m2-zeca`:** o pack *Cute Parrots!* (exclusiveOlive,
 zip em `~/Downloads`, fora do repo) vira o Zeca: Parrot 2 verde no visual
@@ -48,6 +47,31 @@ personagem: a sessão ficou bloqueada. Com a tela acesa e desbloqueada, rode
 `scripts/verificar-ao-vivo.sh --personagem` e `scripts/medir-custo.sh
 --personagem` (aprovam só para o teste e revogam no fim).
 
+**M3 (hooks → reação) na branch `m3-hooks`, rebaseada sobre a `m2-zeca`**
+(publicada, sem PR nem merge; a pilha é `m1-overlay` ← `m2-zeca` ←
+`m3-hooks`): fio v1 validado no `/v1/evento`, plugin `bichinho` (13 hooks
+async → `avisar.sh`), cérebro mínimo (T0 `nod`, T1 `done_small`, `bye`
+quando o Claude sai) e `bin/pet testar`. Na integração (decisão 0030) um
+`/v1/comando` só serve as reações (`tocar`, `esconder`, `mostrar`) e as
+aprovações (`aprovar_skin`, `revogar_skin`); as reações tocam pelos estados
+do `skin.json` com as reservas do catálogo: no Zeca, o aceno é a tag
+composta `nod` (levanta e senta) e o pulinho e o tchau são o pio; na
+`_teste`, o aceno cai no `wave`. O `nod` é nativo obrigatório do MVP, e o
+config relido a cada aprovação vale também para o cérebro. Gate ao vivo
+refeito com o Zeca (decisões 0021 e 0030). O plugin **não** está
+instalado: até o merge na `main`, só por sessão, com `claude --plugin-dir
+~/Documents/claude-pet/plugin`; depois do merge, pela worktree estável
+(README). Sem personagem aprovado a produção reage só no `/v1/estado`
+(`ultima_reacao`, `turnos`). A revisão adversarial da integração (decisões
+0031–0034) prendeu os hooks no 127.0.0.1 (sem curlrc, proxy nem `~/.jq`),
+ensinou o cérebro a esperar o Stop que chega depois do prompt seguinte e a
+reabrir o turno quando outro Stop hook segura o Claude, fez o `tocar` dizer
+o que tocou e refez o gate com um turno de Write. **Pendente:** no Zeca o
+aceno (`nod`: levanta e senta) é um pedaço da rajada do repouso
+(`stand_look_sit`), e dá para confundir os dois; mudar pede o Renan (muda o
+`skin.json`, a impressão e a aprovação). As reações com o Zeca ainda não
+foram vistas na tela: a sessão estava bloqueada nos dois gates.
+
 ## Comandos
 
 O `~/.cargo/bin` **não está no PATH** do Renan; o `bin/pet` acrescenta.
@@ -57,6 +81,9 @@ Fora dele, use `~/.cargo/bin/cargo`.
 |---|---|
 | `bin/pet verificar` | portão antes de **todo** commit: fmt, clippy, testes, compose, plugin |
 | `bin/pet subir` / `parar` / `logs` / `estado` | compose e estado do pet |
+| `bin/pet testar rapido` / `pequeno` | eventos sintéticos pelo `avisar.sh` de verdade (`PET_TESTE=1`) → `nod` / `done_small` |
+| `bin/pet tocar <reação>` / `esconder` / `mostrar` | `/v1/comando` (não persiste); o `tocar` diz a tag que a skin tocou e se apareceu na tela |
+| `claude --plugin-dir ~/Documents/claude-pet/plugin` | o plugin numa sessão só (até o merge, nunca instalar) |
 | `~/.cargo/bin/cargo test` | testes do workspace (os quadros dourados regeneram com `PET_ATUALIZAR_OURO=1`) |
 | `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build` | modo desenvolvimento (sem restart, debug, skin `_teste`) |
 | `bin/pet foto` | foto do pet (grim no monitor inteiro); em debug, só os pixels opacos do pet sobre fundo neutro |
@@ -80,13 +107,27 @@ Fora dele, use `~/.cargo/bin/cargo`.
   nunca redimensionada, sem subsurfaces; o Zeca anda dentro do buffer.
   Cada pixel de arte vira um bloco D×D inteiro de pixels do monitor.
 - Eventos do Claude Code chegam por `POST 127.0.0.1:27380/v1/evento`
-  vindos do plugin `bichinho` (hooks async → `plugin/scripts/avisar.sh`).
+  vindos do plugin `bichinho` (hooks async → `plugin/scripts/avisar.sh`),
+  são validados campo a campo (`pet_core::evento`, decisão 0019) e vão
+  pelo canal do calloop para o cérebro (`pet_core::cerebro`, decisões
+  0020 e 0032), que mora no laço principal, conta os prazos da chegada de
+  cada evento e funciona mesmo sem compositor.
+- Comandos chegam por `POST /v1/comando`, sempre `{"cmd", "arg"}`: as
+  reações (`tocar`, 200 com a tag e se apareceu na tela; `esconder` e
+  `mostrar`, 204) e as aprovações (`aprovar_skin`, `revogar_skin`; 200
+  depois de o laço trocar o personagem), com as mesmas checagens de `Host`,
+  `X-Pet` e `Content-Type` (decisões 0030 e 0033). Só as aprovações passam
+  pelo cadeado: uma reação nunca espera uma aprovação. Uma reação toca a tag do estado de mesmo nome no
+  `skin.json`, ou a reserva do catálogo (`pet_core::estados`), nunca o
+  repouso.
 
 ## Regras de ouro
 
 - **Hooks:** sempre `async`, só metadados (lista branca do jq), sempre
   `exit 0`. Conteúdo (prompt, código, resposta, título de janela) nunca sai
-  do host nem vai para log.
+  do host nem vai para log. Os metadados só vão ao 127.0.0.1: todo curl que
+  fala com o pet leva `-q --noproxy '*'` (nenhum curlrc, nenhum proxy) e o
+  jq do `avisar.sh` roda sem `~/.jq` (decisão 0031).
 - **Hyprland:** o daemon **nunca** abre o `.socket.sock` e nunca chama
   `hyprctl dispatch`/`keyword`. Só lê eventos do `.socket2.sock`.
   `hyprctl` só aparece em scripts de teste do host.
@@ -100,7 +141,11 @@ Fora dele, use `~/.cargo/bin/cargo`.
 - **Personagem só com aprovação:** o Zeca aparece só com a impressão
   digital aprovada pelo Renan (`bin/pet skin-aprovar`, decisões 0026 e 0029).
   Nunca aprove por ele: aprovação de teste se revoga no fim (os scripts ao
-  vivo fazem isso sozinhos, até numa falha).
+  vivo fazem isso sozinhos, até numa falha). **Nunca revogue uma aprovação
+  que você não fez:** antes de mexer, leia `skin` no `/v1/estado` e o
+  `/state/skins/<id>/aprovacao.json` (`docker exec claude-pet-pet-1 cat …`);
+  a que já estava lá é do Renan. Para testar reações, `bin/pet testar` e
+  `bin/pet tocar`, que nunca mexem em aprovação.
 - **Orçamento de commits Wayland:** média ≤ 2/s parado, 0 dormindo,
   rajadas ≤ 30 fps (decisão 0005).
 - **Registro por tarefa:** cada tarefa ganha uma linha no `PROGRESS.md` e um
@@ -113,6 +158,10 @@ Fora dele, use `~/.cargo/bin/cargo`.
   drene sempre, numa thread só para isso.
 - `idle_prompt` se repete a cada ~60 s; nunca trate como aviso novo.
 - O Stop não chega quando o usuário aperta Esc no meio da resposta.
+- Hooks async chegam fora de ordem: o Stop pode chegar depois do prompt
+  seguinte, e um Stop hook de outro plugin manda a continuação segundos
+  depois da festa, com o mesmo `prompt_id`. O cérebro espera 0,8 s pelo
+  Stop do turno trocado e reabre o turno comemorado (decisão 0032).
 - `hyprctl output create headless` não aceita nome: descubra o nome novo
   por diff em `hyprctl -j monitors`.
 - Arquivo de dev do compose **nunca** se chama `compose.override.yml`
@@ -146,10 +195,26 @@ Fora dele, use `~/.cargo/bin/cargo`.
 - `pkill -f`/`pgrep -f` com um padrão que aparece na própria linha de
   comando acha o shell que está rodando: para parar um daemon de teste,
   guarde o PID.
+- Plugin: **nunca** `claude plugin marketplace add` / `install` antes do
+  merge na `main` (sessões de outros projetos rodariam a branch). Para
+  testar ao vivo, `claude --plugin-dir ~/Documents/claude-pet/plugin`.
+- Hook async não aparece em lugar nenhum: para ver o que chegou, pilha de
+  dev e `curl -H 'X-Pet: 1' 127.0.0.1:27380/v1/debug/eventos` (só
+  metadados validados).
+- `claude` aninhado (tmux, testes) a partir de uma sessão do Claude: tire
+  `CLAUDECODE` e as `CLAUDE_*` do ambiente antes, como no gate do M3. No
+  tmux, mande o texto com `tmux send-keys -l` e o `Enter` num `send-keys`
+  separado: juntos, o Claude Code trata como colagem e não envia.
+  O próprio Claude Code põe `CLAUDE_CODE_ENTRYPOINT` (`cli` no terminal,
+  `sdk-cli` no `-p`), e o cérebro só conta `cli` (`sessoes.origens`).
+- No 2.1.288 o `UserPromptSubmit` vem **sem** `source`, e o `SessionEnd`
+  vem com o `prompt_id` do `/exit`.
+- `bin/pet testar` precisa do pet de pé; as sessões de teste somem em 60 s
+  e nunca se misturam com as reais.
 - O `shellcheck` não está instalado no host (o `bin/pet verificar` pula).
   Rodado pela imagem oficial, que depois foi removida:
   `docker run --rm --network none -v "$PWD:/mnt:ro" -w /mnt
-  koalaman/shellcheck:stable -x bin/pet scripts/*.sh`.
+  koalaman/shellcheck:stable -x bin/pet scripts/*.sh plugin/scripts/avisar.sh`.
 
 ## Convenções
 

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "bichinho-local",
+  "description": "Marketplace local do claude-pet: só o plugin bichinho.",
+  "owner": {
+    "name": "butkeraites"
+  },
+  "plugins": [
+    {
+      "name": "bichinho",
+      "source": "./plugin",
+      "description": "Hooks do claude-pet: o Zeca reage ao Claude Code na tela. Só metadados saem do Claude Code."
+    }
+  ]
+}

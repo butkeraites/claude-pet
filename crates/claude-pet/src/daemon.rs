@@ -34,8 +34,7 @@ pub fn rodar() -> ExitCode {
     for aviso in &config.avisos {
         aviso!("config: {aviso}");
     }
-    let configurada = config.texto("aparencia.skin").to_owned();
-    let comp = Arc::new(Compartilhado::novo(config, ambiente.debug));
+    let comp = Arc::new(Compartilhado::novo(config.clone(), ambiente.debug));
     comp.bater();
     let (canal, comandos) = channel::sync_channel(comando::CAPACIDADE);
 
@@ -80,8 +79,8 @@ pub fn rodar() -> ExitCode {
         base.clone(),
         curto,
         ambiente.onde(),
-        configurada,
         Some(ambiente.arquivo_config()),
+        &config,
     );
     if let Err(e) = laco.instalar_sinais() {
         erro!("não consegui tratar SIGTERM/SIGINT: {e}");
@@ -93,6 +92,7 @@ pub fn rodar() -> ExitCode {
     }
     laco.armar_batimento();
     laco.armar_descoberta(Duration::ZERO);
+    laco.iniciar_cerebro();
 
     info!(
         "claude-pet {} escutando em {} (porta pública {}){}",

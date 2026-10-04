@@ -18,5 +18,8 @@ wayland-client.workspace = true
 wayland-protocols.workspace = true
 rustix.workspace = true
 
+[dev-dependencies]
+sha2.workspace = true
+
 [lints]
 workspace = true
