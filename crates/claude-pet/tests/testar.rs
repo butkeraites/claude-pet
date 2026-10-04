@@ -40,6 +40,45 @@ fn rapido_acena_e_pequeno_pula() {
 }
 
 #[test]
+fn proxy_e_curlrc_nao_desviam_o_cli() {
+    // O `bin/pet` e o `avisar.sh` só falam com o pet do 127.0.0.1, mesmo com
+    // proxy no ambiente e um curlrc desviando tudo (decisão 0031).
+    let d = Daemon::subir(false);
+    let pasta = d.pasta.join("config-curl");
+    std::fs::create_dir_all(&pasta).unwrap();
+    for nome in [".curlrc", "curlrc"] {
+        std::fs::write(
+            pasta.join(nome),
+            "proxy = \"http://127.0.0.1:9\"\nconnect-to = \"::127.0.0.1:9\"\n",
+        )
+        .unwrap();
+    }
+    let mut cmd = Command::new(comum::raiz().join("bin/pet"));
+    cmd.args(["testar", "rapido"])
+        .env("PET_PORTA", d.porta.to_string())
+        .env("CURL_HOME", &pasta)
+        .env("XDG_CONFIG_HOME", &pasta);
+    for variavel in [
+        "http_proxy",
+        "HTTP_PROXY",
+        "https_proxy",
+        "HTTPS_PROXY",
+        "all_proxy",
+        "ALL_PROXY",
+    ] {
+        cmd.env(variavel, "http://127.0.0.1:9");
+    }
+    let saida = cmd.output().expect("rodar bin/pet");
+    let texto = String::from_utf8_lossy(&saida.stdout);
+    assert!(
+        saida.status.success(),
+        "{texto}{}",
+        String::from_utf8_lossy(&saida.stderr)
+    );
+    assert!(texto.contains("✓ rapido → nod"), "{texto}");
+}
+
+#[test]
 fn cenario_desconhecido_e_pet_desligado() {
     let d = Daemon::subir(false);
     let (ok, _, erro) = testar(&d, "gigante");

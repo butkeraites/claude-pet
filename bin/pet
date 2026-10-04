@@ -59,8 +59,10 @@ uso: bin/pet <comando>
 TEXTO
 }
 
+# O pet só existe no 127.0.0.1: `-q` (primeiro) ignora todo curlrc e
+# `--noproxy '*'` ignora os proxies do ambiente (decisão 0031).
 api() {
-  curl -fsS -m 3 -H 'X-Pet: 1' "${URL}$1"
+  curl -q --noproxy '*' -fsS -m 3 -H 'X-Pet: 1' "${URL}$1"
 }
 
 # POST /v1/comando, o mesmo para as reações e as aprovações (decisão 0030);
@@ -69,7 +71,7 @@ RESPOSTA=""
 STATUS=""
 comando_pet() {
   local saida
-  saida="$(curl -sS -m 10 -w '\n%{http_code}' -X POST -H 'X-Pet: 1' \
+  saida="$(curl -q --noproxy '*' -sS -m 10 -w '\n%{http_code}' -X POST -H 'X-Pet: 1' \
     -H 'Content-Type: application/json' --data-binary "$1" "${URL}/v1/comando")" || return 1
   STATUS="${saida##*$'\n'}"
   RESPOSTA="${saida%$'\n'*}"

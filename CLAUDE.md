@@ -121,7 +121,9 @@ Fora dele, use `~/.cargo/bin/cargo`.
 
 - **Hooks:** sempre `async`, só metadados (lista branca do jq), sempre
   `exit 0`. Conteúdo (prompt, código, resposta, título de janela) nunca sai
-  do host nem vai para log.
+  do host nem vai para log. Os metadados só vão ao 127.0.0.1: todo curl que
+  fala com o pet leva `-q --noproxy '*'` (nenhum curlrc, nenhum proxy) e o
+  jq do `avisar.sh` roda sem `~/.jq` (decisão 0031).
 - **Hyprland:** o daemon **nunca** abre o `.socket.sock` e nunca chama
   `hyprctl dispatch`/`keyword`. Só lê eventos do `.socket2.sock`.
   `hyprctl` só aparece em scripts de teste do host.

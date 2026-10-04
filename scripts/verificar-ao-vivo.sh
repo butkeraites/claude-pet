@@ -81,9 +81,9 @@ passou() { LINHAS+=("✓ $1"); printf '✓ %s\n' "$1"; }
 falhou() { LINHAS+=("✗ $1"); printf '✗ %s\n' "$1" >&2; FALHAS=$((FALHAS + 1)); }
 manual() { LINHAS+=("• $1"); printf '• %s\n' "$1"; }
 
-api() { curl -fsS -m 3 -H 'X-Pet: 1' "${URL}$1"; }
+api() { curl -q --noproxy '*' -fsS -m 3 -H 'X-Pet: 1' "${URL}$1"; }
 post() {
-  curl -fsS -m 3 -X POST -H 'X-Pet: 1' -H 'Content-Type: application/json' \
+  curl -q --noproxy '*' -fsS -m 3 -X POST -H 'X-Pet: 1' -H 'Content-Type: application/json' \
     --data "${2:-}" "${URL}$1" >/dev/null
 }
 campo() { api /v1/estado 2>/dev/null | jq -r "$1" 2>/dev/null; }
@@ -163,7 +163,7 @@ elif aprovada_no_volume "$CONF"; then
   ESPERADO_PROD=ativa
 fi
 if esperar_campo 20 .tela ativa && esperar_campo 10 .visivel true &&
-  curl -fsS -m 3 "${URL}/saude" >/dev/null; then
+  curl -q --noproxy '*' -fsS -m 3 "${URL}/saude" >/dev/null; then
   passou "saúde: /saude 200, tela ativa, pet visível ($(campo '.skin.id'), origem $(campo '.skin.origem'))"
 else
   falhou "saúde: tela=$(campo .tela) visivel=$(campo .visivel)"

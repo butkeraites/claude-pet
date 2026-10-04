@@ -282,7 +282,7 @@ Assim o fade de saída do Hyprland não deixa um quadro fantasma.
 **`plugin/scripts/avisar.sh`** (POSIX sh + jq + curl):
 - lê o JSON do hook pela entrada padrão;
 - monta, com uma lista branca do jq, só metadados;
-- manda com `curl -sS -m 2 -H 'Content-Type: application/json' -H 'X-Pet: 1' --data-binary @- http://127.0.0.1:${PET_PORTA:-27380}/v1/evento`;
+- manda com `curl -q --noproxy '*' -sS -m 2 -H 'Content-Type: application/json' -H 'X-Pet: 1' --data-binary @- http://127.0.0.1:${PET_PORTA:-27380}/v1/evento` (`-q` primeiro: nenhum curlrc; `--noproxy '*'`: nenhum proxy do ambiente), com o jq sem `~/.jq` (decisão 0031);
 - não imprime nada e **sempre sai 0**. Um Stop hook que saísse com 2 impediria o Claude de parar.
 
 **Formato de fio v1** (todos os campos são opcionais, exceto `v` e `e`; strings com tamanho e caracteres validados):
@@ -300,7 +300,7 @@ Assim o fade de saída do Hyprland não deixa um quadro fantasma.
 |---|---|
 | `err` | enum de `StopFailure.error`. O campo `error_type` não existe. |
 | `aid` | `agent_id`, validado como token; só existe dentro de subagentes e serve para atribuir as ferramentas deles ao turno certo |
-| `bgt` / `bgi` | tipos (normalizados para `[a-z_]`) e ids de `background_tasks` |
+| `bgt` / `bgi` | tipos (lista fechada dos rótulos do 2.1.288 normalizados para `[a-z_]`; outro tipo vira `outro`) e ids de `background_tasks` |
 | `dur` | `duration_ms` do PostToolUse |
 | `arq` | sha256 truncado do caminho editado, calculado no host |
 | `ent` | `$CLAUDE_CODE_ENTRYPOINT` |

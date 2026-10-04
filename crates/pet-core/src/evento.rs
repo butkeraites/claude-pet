@@ -26,7 +26,7 @@
 //! | `nt`, `err`, `src`, `reason` | `notification_type`, `error` do StopFailure, `source`, `reason` | `[a-z_]{1,40}` |
 //! | `intr`, `sha` | `is_interrupt`, `stop_hook_active` | bool |
 //! | `bg` | tamanho de `background_tasks` | inteiro até 10 000 |
-//! | `bgt`, `bgi` | tipos (normalizados) e ids de `background_tasks` | listas alinhadas de até 16 |
+//! | `bgt`, `bgi` | tipos (lista fechada no `avisar.sh`, senão `outro`) e ids de `background_tasks` | listas alinhadas de até 16 |
 //! | `dur` | `duration_ms` | inteiro até 24 h |
 //! | `arq` | sha256 do caminho editado, calculado no host | 12 hexadecimais minúsculos |
 //! | `proj` | último componente de `cwd` | até 64 letras, dígitos, espaço, `_.-` |

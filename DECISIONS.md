@@ -952,3 +952,56 @@ caminhos; aprovações são lentas e raras e não podem segurar uma reação. Um
 fonte só para as reservas faz o `cobertura.md` dizer o que o pet toca. Com o
 `nod` nativo, T0 e T1 continuam diferentes na tela. E o config relido tem de
 valer para tudo o que o `/v1/estado.config` mostra.
+
+## 0031 — Hooks só para o 127.0.0.1: sem curlrc, proxy nem `~/.jq`, e validadores iguais aos do pet (2026-10-03)
+
+**Problema:** a revisão adversarial da integração (lente de hooks e
+privacidade) achou o caminho que a lista branca não cobre: **para onde** os
+metadados vão.
+- O hook herda o ambiente do Claude Code (perfil do shell, bloco `env` do
+  `settings.json`). Com `http_proxy`/`ALL_PROXY` no ambiente, ou um
+  `~/.curlrc` com `proxy`, o curl do `avisar.sh` entregava cada evento ao
+  proxy, que pode ser outra máquina: ids de sessão e de turno, nomes de
+  ferramenta, hash de arquivo, nome da pasta do projeto, DND. E o pet
+  ficava surdo sem erro nenhum. Os canários não viam: usam um curl falso e
+  limpam o ambiente. Nada disso está ativo nesta máquina hoje (nenhuma
+  variável de proxy nos processos do Claude, nenhum `~/.curlrc`, `env`
+  vazio no `settings.json`).
+- Achado nesta revisão: o jq lê sozinho o `~/.jq` antes do programa, e um
+  `~/.jq` que redefine `test` ou `select` abria a lista branca (conferido no
+  jq 1.8.2).
+- Os validadores do jq não eram os do `pet_core::evento`, como o script
+  dizia: o `$` do jq aceita um "\n" no fim do texto (id, enum, origem e
+  pasta passavam com ele e o pet descartava), e a pasta aceitava todas as
+  marcas Unicode (`\p{M}`), o pet só cinco faixas (uma pasta "1️⃣" saía e
+  era descartada).
+- `bgt` normalizava qualquer texto para `[a-z_]`: um campo de conteúdo que
+  um dia passasse por ali sairia em minúsculas, e os canários só procuravam
+  `SEGREDO` em maiúsculas.
+
+**Escolha:**
+- O curl do `avisar.sh`, do `bin/pet` e dos scripts de host sempre com `-q`
+  (o primeiro argumento: nenhum curlrc) e `--noproxy '*'` (nenhum proxy do
+  ambiente). O jq do `avisar.sh` roda com `HOME=/nonexistent` (sem
+  `~/.jq`).
+- Validadores com `\A…\z`; a pasta aceita letras, dígitos, espaço, `_.-` e
+  só as marcas combinantes que o pet aceita. O que o pet descartaria nem
+  sai do host.
+- `bgt` por lista fechada, os rótulos do 2.1.288 normalizados (`shell`,
+  `subagent`, `workflow`, `monitor`, `mcp_task`, `teammate`, `dream`,
+  `auto_mode_scan`, `memory_import`, `cloud_session`); qualquer outro vira
+  `outro`, nunca o texto dele.
+- Canários (20, eram 16): todo vazamento é procurado sem caixa
+  (`segredo`); novos: o curl de verdade com proxy em todas as variáveis e
+  curlrc desviando (`proxy` e `connect-to`) em `CURL_HOME`,
+  `XDG_CONFIG_HOME` e `HOME` ainda entrega ao daemon; um `~/.jq` que
+  redefine `test`, `select` e `with_entries` não muda nada; ids, enums,
+  origem e pasta com "\n" no fim e a pasta "1️⃣" saem sem nada que o pet
+  descartaria; uma entrada de 8 MiB sai calada com 0. O `bin/pet testar`
+  também passa com proxy e curlrc. Cada canário novo reprovou o script
+  antigo antes da correção.
+
+**Por quê:** a lista branca escolhe o que sai; isto garante que só sai para
+o 127.0.0.1. Com o pet desligado continua custando uma conexão recusada. Um
+tipo de tarefa desconhecido vale para o M5 o mesmo que o texto dele (quem
+decide se é agente é a lista), e a lista não deixa conteúdo passar.

@@ -6,7 +6,10 @@
 //! texto de erro, mensagem, títulos, última resposta, transcript, pastas
 //! acima do projeto, campos que ainda nem existem) carrega um `SEGREDO-…`.
 //! Um `curl` falso na frente do PATH guarda o corpo e os argumentos. Nada com
-//! `SEGREDO` pode sair, o script sai sempre 0 e não imprime nada.
+//! `segredo`, em maiúsculas ou minúsculas, pode sair, o script sai sempre 0
+//! e não imprime nada. Com o curl de verdade, nem proxy nem `~/.curlrc`
+//! desviam o evento do 127.0.0.1, e um `~/.jq` não muda a lista branca
+//! (decisão 0031).
 
 mod comum;
 
@@ -171,6 +174,15 @@ impl Rodada {
             .unwrap_or_else(|| panic!("{caso}: o curl não foi chamado"));
         serde_json::from_str(corpo).unwrap_or_else(|e| panic!("{caso}: corpo não é JSON ({e})"))
     }
+}
+
+/// Nada de `segredo`, em caixa nenhuma: um campo de conteúdo que passasse por
+/// uma normalização (`ascii_downcase`) também tem de ser pego.
+fn sem_segredo(onde: &str, texto: &str) {
+    assert!(
+        !texto.to_lowercase().contains("segredo"),
+        "{onde}: vazou: {texto}"
+    );
 }
 
 fn sha12(texto: &str) -> String {
@@ -357,7 +369,9 @@ fn casos() -> Vec<Caso> {
                        {"id": "task-2", "type": "auto-mode scan", "status": "pending",
                         "description": "SEGREDO-varredura"},
                        {"id": "task-3", "type": "shell", "status": "running",
-                        "command": "npm run SEGREDO-dev", "description": "SEGREDO-servidor-dev"}],
+                        "command": "npm run SEGREDO-dev", "description": "SEGREDO-servidor-dev"},
+                       {"id": "task-4", "type": "SEGREDO Tarefa", "status": "running",
+                        "description": "SEGREDO-tipo-novo"}],
                    "session_crons": [{"id": "c1", "schedule": "0 9 * * 1-5", "recurring": true,
                                       "prompt": "SEGREDO-cron"}]}),
         ),
@@ -390,15 +404,9 @@ fn nenhum_segredo_sai_em_evento_nenhum() {
         let r = banca.rodar(caso.evento, caso.entrada.to_string().as_bytes(), |_| {});
         r.calada(nome);
         let bruto = r.corpo.clone().unwrap_or_default();
-        assert!(
-            !bruto.contains("SEGREDO"),
-            "{nome}: vazou no corpo: {bruto}"
-        );
+        sem_segredo(&format!("{nome}, corpo"), &bruto);
         let args = r.args.clone().unwrap_or_default();
-        assert!(
-            !args.contains("SEGREDO"),
-            "{nome}: vazou nos argumentos: {args}"
-        );
+        sem_segredo(&format!("{nome}, argumentos do curl"), &args);
         let corpo = r.corpo_json(nome);
         assert_eq!(corpo["v"], 1, "{nome}");
         assert_eq!(corpo["e"], caso.evento, "{nome}");
@@ -446,9 +454,14 @@ fn campos_de_cada_evento() {
     };
     let stop = rodar("Stop");
     assert_eq!(stop["sha"], true);
-    assert_eq!(stop["bg"], 3);
-    assert_eq!(stop["bgt"], json!(["mcp_task", "auto_mode_scan", "shell"]));
-    assert_eq!(stop["bgi"], json!(["task-1", "task-2", "task-3"]));
+    assert_eq!(stop["bg"], 4);
+    // Os rótulos do Claude Code normalizados, por lista fechada: um tipo
+    // que ela não conhece vira `outro`, nunca o texto dele.
+    assert_eq!(
+        stop["bgt"],
+        json!(["mcp_task", "auto_mode_scan", "shell", "outro"])
+    );
+    assert_eq!(stop["bgi"], json!(["task-1", "task-2", "task-3", "task-4"]));
 
     let bash = rodar("PostToolUse Bash");
     assert_eq!(bash["tool"], "Bash");
@@ -546,7 +559,7 @@ fn nao_perturbe_do_omarchy() {
         });
         r.calada("dnd");
         assert_eq!(r.corpo_json("dnd")["dnd"], esperado, "{conteudo:?}");
-        assert!(!r.corpo.unwrap().contains("SEGREDO"));
+        sem_segredo("dnd", &r.corpo.unwrap());
     }
     // Sem XDG_STATE_HOME vale ~/.local/state.
     let padrao = banca
@@ -704,9 +717,14 @@ fn porta_e_cabecalhos_do_curl() {
         });
         r.calada("porta");
         let args: Vec<String> = r.args.unwrap().lines().map(str::to_owned).collect();
+        // `-q` primeiro (nenhum curlrc) e `--noproxy '*'` (nenhum proxy do
+        // ambiente): o evento só vai ao 127.0.0.1 (decisão 0031).
         assert_eq!(
             args,
             vec![
+                "-q",
+                "--noproxy",
+                "*",
                 "-sS",
                 "-m",
                 "2",
@@ -841,8 +859,191 @@ fn pelo_curl_de_verdade_ate_o_daemon() {
         ("/v1/estado", daemon.get_json("/v1/estado").to_string()),
         ("log do daemon", daemon.log()),
     ] {
-        assert!(!texto.contains("SEGREDO"), "{onde} vazou: {texto}");
+        sem_segredo(onde, &texto);
     }
+}
+
+/// Um `.curlrc` que manda tudo para outro lugar (proxy e `connect-to`).
+fn curlrc_desviando(pasta: &Path) {
+    let desvio = "proxy = \"http://127.0.0.1:9\"\nconnect-to = \"::127.0.0.1:9\"\n";
+    std::fs::create_dir_all(pasta).unwrap();
+    for nome in [".curlrc", "curlrc"] {
+        std::fs::write(pasta.join(nome), desvio).unwrap();
+    }
+}
+
+#[test]
+fn proxy_e_curlrc_nunca_desviam_o_evento() {
+    // Os hooks herdam o ambiente do Claude Code: um proxy nas variáveis ou
+    // um `~/.curlrc` levariam os metadados para outra máquina, e o pet
+    // ficaria surdo sem erro nenhum. O curl de verdade, com proxy em todas
+    // as variáveis e curlrc desviando em todo lugar onde o curl procura,
+    // ainda entrega no daemon do 127.0.0.1 (decisão 0031).
+    let banca = Banca::nova();
+    let daemon = comum::Daemon::subir(true);
+    let porta = daemon.porta.to_string();
+    let config = banca.pasta.join("config-curl");
+    curlrc_desviando(&config);
+    curlrc_desviando(&banca.pasta.join("home"));
+    let desvio = "http://127.0.0.1:9";
+    let entrada = com("Stop", json!({})).to_string();
+    let r = banca.rodar("Stop", entrada.as_bytes(), |c| {
+        c.env("PATH", "/usr/bin:/bin")
+            .env("PET_PORTA", &porta)
+            .env("CURL_HOME", &config)
+            .env("XDG_CONFIG_HOME", &config);
+        for variavel in [
+            "http_proxy",
+            "HTTP_PROXY",
+            "https_proxy",
+            "HTTPS_PROXY",
+            "all_proxy",
+            "ALL_PROXY",
+        ] {
+            c.env(variavel, desvio);
+        }
+    });
+    r.calada("proxy e curlrc");
+    assert!(r.corpo.is_none(), "o curl falso não pode ter rodado");
+    let estado = daemon.esperar_estado("o evento chegou ao pet", |e| e["eventos"]["aceitos"] == 1);
+    assert_eq!(estado["eventos"]["recusados"], 0);
+}
+
+#[test]
+fn um_jq_do_usuario_nao_muda_a_lista_branca() {
+    // O jq lê o `~/.jq` sozinho, antes do programa: um que redefine `test`,
+    // `select` e `with_entries` deixaria passar qualquer texto nos campos
+    // lidos. O avisar.sh roda o jq sem esse arquivo (decisão 0031).
+    let banca = Banca::nova();
+    std::fs::write(
+        banca.pasta.join("home/.jq"),
+        "def test($re): true;\ndef select(f): .;\ndef with_entries(f): .;\n",
+    )
+    .unwrap();
+    let entrada = json!({
+        "session_id": "tem espaço SEGREDO-1",
+        "prompt_id": "SEGREDO 2",
+        "cwd": "/home/x/SEGREDO pasta\u{0007}",
+        "tool_name": "Bash; SEGREDO-3",
+        "notification_type": "Permission Prompt SEGREDO-4",
+        "source": "SEGREDO user"
+    });
+    for evento in ["Notification", "PostToolUse", "UserPromptSubmit"] {
+        let r = banca.rodar(evento, entrada.to_string().as_bytes(), |_| {});
+        r.calada(evento);
+        let bruto = r.corpo.clone().unwrap_or_default();
+        sem_segredo(evento, &bruto);
+        let lido = pet_core::evento::ler(bruto.as_bytes())
+            .unwrap_or_else(|e| panic!("{evento}: o daemon recusaria: {e}"));
+        assert!(lido.descartados.is_empty(), "{evento}: {bruto}");
+    }
+}
+
+#[test]
+fn validadores_iguais_aos_do_daemon() {
+    // Todo campo que o avisar.sh manda, o `pet_core::evento` aceita: o que um
+    // descartaria, o outro nem manda. O `$` do jq aceita um "\n" no fim do
+    // texto (o `\z` não), e as marcas Unicode da pasta são as mesmas dos
+    // dois lados (decisão 0031).
+    let banca = Banca::nova();
+    let casos = [
+        (
+            "Stop",
+            json!({"session_id": "s1\n", "prompt_id": "p1\n", "cwd": "/home/x/proj\n",
+                   "background_tasks": [{"id": "t1\n", "type": "shell"},
+                                        {"id": "t2", "type": "shell\n"}]}),
+            Some("cli\n"),
+            vec!["sid", "turno", "proj", "ent"],
+        ),
+        (
+            "PostToolUse",
+            json!({"session_id": "s1", "tool_name": "Edit\n", "agent_id": "a1\n",
+                   "tool_input": {"file_path": "/tmp/x"}, "cwd": "/home/x/1\u{fe0f}\u{20e3}"}),
+            None,
+            vec!["tool", "aid", "arq", "proj"],
+        ),
+        (
+            "Notification",
+            json!({"session_id": "s1", "notification_type": "idle_prompt\n"}),
+            None,
+            vec!["nt"],
+        ),
+        (
+            "StopFailure",
+            json!({"session_id": "s1", "error": "rate_limit\n"}),
+            None,
+            vec!["err"],
+        ),
+        (
+            "SessionEnd",
+            json!({"session_id": "s1", "reason": "clear\n"}),
+            None,
+            vec!["reason"],
+        ),
+        (
+            "UserPromptSubmit",
+            json!({"session_id": "s1", "source": "user\n", "prompt": "SEGREDO"}),
+            None,
+            vec!["src"],
+        ),
+    ];
+    for (evento, entrada, ent, ausentes) in casos {
+        let r = banca.rodar(evento, entrada.to_string().as_bytes(), |c| {
+            if let Some(ent) = ent {
+                c.env("CLAUDE_CODE_ENTRYPOINT", ent);
+            }
+        });
+        r.calada(evento);
+        let bruto = r.corpo.clone().unwrap_or_default();
+        let lido = pet_core::evento::ler(bruto.as_bytes())
+            .unwrap_or_else(|e| panic!("{evento}: o daemon recusaria: {e}"));
+        assert!(
+            lido.descartados.is_empty(),
+            "{evento}: o daemon descartaria {:?} de {bruto}",
+            lido.descartados
+        );
+        let corpo = r.corpo_json(evento);
+        for campo in ausentes {
+            assert!(corpo.get(campo).is_none(), "{evento}: {campo} em {corpo}");
+        }
+        if evento == "Stop" {
+            assert_eq!(corpo["bg"], 2);
+            assert_eq!(corpo["bgi"], json!(["t2"]), "{corpo}");
+            assert_eq!(corpo["bgt"], json!(["outro"]), "{corpo}");
+        }
+        if evento == "PostToolUse" {
+            assert_eq!(corpo["agente"], true, "{corpo}");
+        }
+    }
+    // Pastas com acento (composto ou decomposto) e de outras escritas passam
+    // dos dois lados.
+    for pasta in ["ação", "acao\u{0301}", "日本", "Meu Projeto 2"] {
+        let entrada = json!({"session_id": "s1", "cwd": format!("/home/x/{pasta}")});
+        let r = banca.rodar("SessionStart", entrada.to_string().as_bytes(), |_| {});
+        r.calada(pasta);
+        let corpo = r.corpo_json(pasta);
+        assert_eq!(corpo["proj"], pasta, "{corpo}");
+        let lido = pet_core::evento::ler(r.corpo.unwrap().as_bytes()).unwrap();
+        assert!(
+            lido.descartados.is_empty(),
+            "{pasta}: {:?}",
+            lido.descartados
+        );
+    }
+}
+
+#[test]
+fn entrada_enorme_sai_0_calada() {
+    // Um prompt de 8 MiB (colado de um arquivo, por exemplo): o script lê,
+    // manda só os metadados e sai 0, calado.
+    let banca = Banca::nova();
+    let prompt = "SEGREDO-enorme ".repeat(8 * 1024 * 1024 / 15);
+    let entrada = com("UserPromptSubmit", json!({"prompt": prompt})).to_string();
+    let r = banca.rodar("UserPromptSubmit", entrada.as_bytes(), |_| {});
+    r.calada("entrada enorme");
+    sem_segredo("entrada enorme", &r.corpo.clone().unwrap_or_default());
+    assert_eq!(r.corpo_json("entrada enorme")["sid"], SID);
+    assert!(r.duracao < Duration::from_secs(10), "levou {:?}", r.duracao);
 }
 
 #[test]

@@ -57,9 +57,9 @@ FASE_ESTRESSE="${PET_FASE_ESTRESSE_S:-15}"
 RODADAS="${PET_RODADAS:-3}"
 XTASK="$RAIZ/target/debug/xtask"
 
-api() { curl -fsS -m 3 -H 'X-Pet: 1' "${URL}$1"; }
+api() { curl -q --noproxy '*' -fsS -m 3 -H 'X-Pet: 1' "${URL}$1"; }
 post() {
-  curl -fsS -m 3 -X POST -H 'X-Pet: 1' -H 'Content-Type: application/json' \
+  curl -q --noproxy '*' -fsS -m 3 -X POST -H 'X-Pet: 1' -H 'Content-Type: application/json' \
     --data "${2:-}" "${URL}$1" >/dev/null
 }
 campo() { api /v1/estado 2>/dev/null | jq -r "$1" 2>/dev/null; }
