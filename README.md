@@ -47,6 +47,19 @@ bin/pet estado
 O container sobe no boot, espera o Hyprland e se reconecta sozinho depois
 de logout, suspensão ou troca de monitor.
 
+Para mudar alguma coisa, copie `config/exemplo.toml` para
+`config/bichinho.toml` (fora do git). Por exemplo, o Zeca menor:
+
+```toml
+[aparencia]
+tamanho = "pequeno"   # pequeno (~10% da altura do monitor), normal (~12%) ou grande (~16%)
+```
+
+O tamanho muda só a escala do desenho, nunca a skin: não pede outra
+aprovação. Vale quando o pet reinicia (`bin/pet parar && bin/pet subir`; um
+`bin/pet subir` sozinho não recria o container quando só o config muda) ou na
+próxima aprovação, que relê o config.
+
 ### Arte
 
 O Zeca é feito a partir do pack *Cute Parrots!* da

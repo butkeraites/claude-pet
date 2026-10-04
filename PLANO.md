@@ -205,7 +205,7 @@ volumes: {estado: {}}
 - Cada superfície ganha um **SlotPool novo**, que nunca é reaproveitado entre monitores. Um slot reaproveitado é limpo antes de usar.
 - Cada pixel de arte vira um bloco **D×D** de pixels do monitor, com D inteiro calculado por monitor:
   - o alvo é o corpo do Zeca ocupar cerca de 12% da altura lógica do monitor (entre 80 e 160 px);
-  - dá para sobrescrever no config.
+  - dá para mudar no config: `aparencia.tamanho` = `pequeno` (~10%), `normal` (~12%) ou `grande` (~16%), com os limites acompanhando, D sempre inteiro e sem mexer na skin (TP.2, decisão 0042).
 - Toda posição é um pixel inteiro do monitor, e os deslocamentos andam em múltiplos de D.
 
 **Dano e ritmo:**

@@ -7,6 +7,12 @@
 [aparencia]
 # Personagem: nome da pasta em skins/ ou skins-locais/.
 skin = "zeca"
+# Tamanho do pet na tela: pequeno (~10% da altura do monitor), normal (~12%)
+# ou grande (~16%). Muda só o D (pixels do monitor por pixel de arte, sempre
+# inteiro), não a skin: não pede outra aprovação. Relido a cada aprovação; no
+# mais, vale quando o pet reinicia (bin/pet parar && bin/pet subir). Ou
+# PET_APARENCIA_TAMANHO=pequeno.
+tamanho = "normal"
 
 [celebracao]
 # proporcional | sempre_grande | discreta | desligada

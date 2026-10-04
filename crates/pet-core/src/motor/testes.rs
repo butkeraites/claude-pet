@@ -491,6 +491,43 @@ fn encerrar_esconde_e_espera_a_confirmacao() {
 }
 
 #[test]
+fn tamanho_pequeno_e_grande_mudam_o_d_sem_mudar_a_skin() {
+    let (mut motor, mut janela) = ligado();
+    assert_eq!(motor.painel(Some(&janela), 10).d, Some(5), "normal");
+    janela.em_voo = true;
+    motor.definir_tamanho(Tamanho::Pequeno, Some(&mut janela), 20);
+    let fim: Vec<&str> = janela
+        .pedidos
+        .iter()
+        .rev()
+        .take(2)
+        .map(String::as_str)
+        .collect();
+    assert_eq!(fim, vec!["quadro 2", "esquecer"], "redesenha tudo, já");
+    let painel = motor.painel(Some(&janela), 30);
+    assert_eq!(painel.d, Some(4), "_teste no eDP-1: 3,75 → 4");
+    // Célula de 48 × 4 com o corpo (38 × 4) e os pés (45 × 4) a 16 lógicos
+    // (24 pixels) das bordas, recortada na direita: (1744, 996, 176, 192).
+    assert_eq!(painel.sprite_disp, Some(Ret::novo(1744, 996, 176, 192)));
+    motor.definir_tamanho(Tamanho::Grande, Some(&mut janela), 40);
+    assert_eq!(motor.painel(Some(&janela), 50).d, Some(6));
+    assert_eq!(motor.skin().map(|s| s.id.as_str()), Some("_teste"));
+    // O mesmo tamanho não mexe na tela; sem janela, vale no próximo palco.
+    let antes = janela.pedidos.len();
+    motor.definir_tamanho(Tamanho::Grande, Some(&mut janela), 60);
+    assert_eq!(janela.pedidos.len(), antes);
+    let mut novo = Motor::novo(ConfigCerebro::default());
+    novo.definir_skin(Some(skin_teste()));
+    novo.definir_tamanho(Tamanho::Pequeno, None, 0);
+    let mut outra = Falsa::default();
+    novo.conectou(0);
+    novo.aplicar_visibilidade(&mut outra, 0);
+    outra.pronta = Some(edp());
+    novo.evento_overlay(&mut outra, EventoOverlay::Pronta(edp()), 0);
+    assert_eq!(novo.painel(Some(&outra), 10).d, Some(4));
+}
+
+#[test]
 fn regiao_que_muda_sem_pixels_novos_conta_como_commit() {
     let (mut motor, mut janela) = ligado();
     // A janela esqueceu a região (como depois de uma troca de escala): o

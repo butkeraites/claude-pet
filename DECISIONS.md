@@ -1471,3 +1471,51 @@ Fica para depois: a porta e o token por usuário no loopback (T9.3; o
 sistemas, e a lista branca passa a ter uma fonte com os validadores do pet.
 Prender o volume ao nome antigo não copia nem arrisca a aprovação, e vale
 para todo jeito de subir o compose (produção, dev e scripts).
+
+## 0042 — O tamanho do Zeca é config (`aparencia.tamanho`), sem mexer na skin (2026-10-03)
+
+**Problema:** o Renan quer o Zeca menor na tela, ~10% da altura lógica do
+monitor (hoje o corpo dá 12,7% no eDP-1). O tamanho vinha de uma fração fixa
+(12%, entre 80 e 160 pixels lógicos) dividida pelo `corpo_px` da skin; mudar
+a skin mudaria a impressão digital e pediria outra aprovação.
+**Escolha (TP.2):**
+- **`aparencia.tamanho`** = `pequeno` | `normal` | `grande` no config
+  (`PET_APARENCIA_TAMANHO` no ambiente; padrão `normal`, o de antes), ~10%,
+  ~12% e ~16% da altura lógica do monitor. O alvo do `normal` (12%, entre 80 e
+  160 lógicos) é multiplicado por `fração ÷ 12%`, limites inclusive: os três
+  continuam diferentes até no 4K, onde o `normal` bate no teto. O D continua
+  inteiro e por monitor, e as posições em pixels inteiros. Com o Zeca (corpo
+  de 19): D = 6, 8 e 10 no eDP-1 (o corpo dá 9,5%, 12,7% e 15,8%) e 11, 13 e
+  17 no 4K. O `normal` dá exatamente o D de antes.
+- **A skin não muda:** o tamanho entra no palco (`Motor`), não no
+  `skin.json`; a impressão digital e a aprovação ficam como estão.
+- Relido a cada aprovação (decisão 0029): com a janela pronta, o palco é
+  refeito e o quadro novo redesenha a tela toda. No mais, vale quando o pet
+  reinicia (`bin/pet parar && bin/pet subir`; o `bin/pet subir` sozinho não
+  recria o container quando só o config muda).
+- O `config/bichinho.toml` local do Renan (fora do git) pede `tamanho =
+  "pequeno"`.
+
+Ao vivo, com a tela apagada e a sessão bloqueada (só `/v1/estado`, log e o
+`/state`; a conferência na tela fica pendente): produção refeita desta
+branch, `tela: ativa`, D = 6 (era 8), `aparencia.tamanho` = `pequeno` vindo
+do arquivo, célula em (1698, 984), região de toque de 76×76 lógicos (era
+102×102), o `zeca` da imagem com a aprovação do Renan (sha 5b843b03…, o
+`aprovacao.json` idêntico ao de antes). E o fim da branch, também ao vivo:
+- `bin/pet testar rapido` → `nod` e `pequeno` → `done_small`, pelo hook
+  nativo (`~/.local/bin/bichinho`);
+- `claude --plugin-dir` com o plugin 0.2.0: só ele dispara, sem o 0.1.0
+  instalado em dobro (medido com um invólucro que registra cada chamada do
+  `bichinho`, só o nome do evento, num daemon de rascunho);
+- gate interativo no tmux em `~/Documents`, sem `CLAUDECODE` e as
+  `CLAUDE_*` do agente: "responda só: ok" → `nod` (T0); um Write → um turno
+  de trabalho 1 e `arquivos: 1` → `done_small` (T1); `/exit` → `bye`. Sete
+  chamadas do hook nativo, 15 eventos aceitos, nenhum recusado; nada dos
+  prompts nem do caminho no log nem no `/v1/estado`;
+- pet parado: o hook sai 0 em 1 ms; `claude -p --plugin-dir …` imprime só
+  `ok`, com stderr vazio e saída 0 (quatro chamadas do hook nativo);
+- o plugin instalado, o marketplace e a worktree estável ficaram como
+  estavam (mesmo sha256 do `avisar.sh` e do `hooks.json` no cache).
+**Por quê:** o tamanho é gosto de quem usa, não arte: fica no config, onde
+trocar não pede aprovação. Multiplicar o alvo inteiro (limites junto) mantém
+os três tamanhos distintos em qualquer monitor sem mexer no `normal`.

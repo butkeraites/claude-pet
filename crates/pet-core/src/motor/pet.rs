@@ -9,7 +9,7 @@ use std::rc::Rc;
 
 use crate::animador::Animador;
 use crate::cena::Elemento;
-use crate::geometria::{self, Ret};
+use crate::geometria::{self, Ret, Tamanho};
 use crate::skin::Skin;
 
 /// Onde e em que escala o pet é desenhado numa superfície.
@@ -51,9 +51,16 @@ impl Pet {
         &self.skin
     }
 
-    /// D e posição padrão para uma superfície de tamanho lógico `logico`.
-    pub fn palco(&self, logico: (u32, u32), escala: f64, tela: (i32, i32)) -> Palco {
-        let d = geometria::calcular_d(logico.1, escala, self.skin.corpo_px);
+    /// D e posição padrão para uma superfície de tamanho lógico `logico`, no
+    /// tamanho pedido (`aparencia.tamanho`).
+    pub fn palco(
+        &self,
+        logico: (u32, u32),
+        escala: f64,
+        tela: (i32, i32),
+        tamanho: Tamanho,
+    ) -> Palco {
+        let d = geometria::calcular_d_com(logico.1, escala, self.skin.corpo_px, tamanho);
         let (x, y) = geometria::posicao_padrao(tela, escala, d, &self.skin.ancoras);
         Palco {
             tela,
@@ -122,7 +129,7 @@ mod testes {
     #[test]
     fn palco_no_notebook() {
         let pet = pet();
-        let palco = pet.palco((1280, 800), 1.5, (1920, 1200));
+        let palco = pet.palco((1280, 800), 1.5, (1920, 1200), Tamanho::Normal);
         assert_eq!(palco.d, 5);
         // Corpo (toque 10..38) termina a 24 px da direita; pés a 24 px do chão.
         assert_eq!(palco.x + 38 * 5, 1896);
@@ -132,7 +139,7 @@ mod testes {
     #[test]
     fn sprite_disp_e_regiao_de_toque() {
         let pet = pet();
-        let palco = pet.palco((1280, 800), 1.5, (1920, 1200));
+        let palco = pet.palco((1280, 800), 1.5, (1920, 1200), Tamanho::Normal);
         // Célula 240x240 em (1706, 951): passa 26 px da borda direita.
         assert_eq!(
             pet.sprite_disp(&palco),
@@ -149,7 +156,7 @@ mod testes {
     #[test]
     fn cena_parada_e_um_sprite_com_proxima_troca() {
         let pet = pet();
-        let palco = pet.palco((1280, 800), 1.5, (1920, 1200));
+        let palco = pet.palco((1280, 800), 1.5, (1920, 1200), Tamanho::Normal);
         let (cena, proxima) = pet.cena(&palco, 0);
         assert_eq!(cena.len(), 1);
         assert!(proxima.unwrap() > 0);
@@ -162,7 +169,7 @@ mod testes {
     #[test]
     fn reacao_troca_o_quadro_e_volta() {
         let mut pet = pet();
-        let palco = pet.palco((1280, 800), 1.5, (1920, 1200));
+        let palco = pet.palco((1280, 800), 1.5, (1920, 1200), Tamanho::Normal);
         assert!(pet.tocar("done_small", 1000));
         assert_eq!(pet.reacao(1000), Some("done_small"));
         let (cena, proxima) = pet.cena(&palco, 1000);

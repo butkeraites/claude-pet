@@ -13,6 +13,8 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
+use crate::geometria::Tamanho;
+
 /// De onde veio o valor efetivo de uma chave.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -62,6 +64,12 @@ const CHAVES: &[Chave] = &[
         tipo: Tipo::Id,
         padrao: "zeca",
     },
+    // O tamanho do pet na tela (decisão 0042): muda só o D, nunca a skin.
+    Chave {
+        caminho: "aparencia.tamanho",
+        tipo: Tipo::Opcao(Tamanho::NOMES),
+        padrao: "normal",
+    },
     Chave {
         caminho: "celebracao.modo",
         tipo: Tipo::Opcao(MODOS_CELEBRACAO),
@@ -105,6 +113,8 @@ pub enum ModoCelebracao {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
     pub skin: String,
+    /// O tamanho do pet na tela.
+    pub tamanho: Tamanho,
     pub celebracao_modo: ModoCelebracao,
     /// Origens de sessão que o cérebro acompanha (`cli`, `sdk-cli`, …).
     pub sessoes_origens: Vec<String>,
@@ -191,6 +201,7 @@ impl ConfigEfetiva {
         };
         Config {
             skin: self.texto("aparencia.skin").to_owned(),
+            tamanho: Tamanho::de_texto(self.texto("aparencia.tamanho")).unwrap_or_default(),
             celebracao_modo: modo,
             sessoes_origens: self.lista("sessoes.origens").to_vec(),
         }
@@ -430,6 +441,29 @@ mod testes {
         let c = ConfigEfetiva::carregar(None, ambiente);
         assert_eq!(c.config().sessoes_origens, vec!["cli"]);
         assert_eq!(c.avisos.len(), 1);
+    }
+
+    #[test]
+    fn tamanho_do_pet() {
+        let c = ConfigEfetiva::carregar(None, sem_ambiente);
+        assert_eq!(c.config().tamanho, Tamanho::Normal);
+        assert_eq!(c.chaves["aparencia.tamanho"].origem, Origem::Padrao);
+        let arquivo = "[aparencia]\ntamanho = \"pequeno\"\n";
+        let c = ConfigEfetiva::carregar(Some(arquivo), sem_ambiente);
+        assert_eq!(c.config().tamanho, Tamanho::Pequeno);
+        assert_eq!(c.chaves["aparencia.tamanho"].origem, Origem::Arquivo);
+        assert_eq!(c.config().skin, "zeca", "a skin não muda");
+        let ambiente = |nome: &str| (nome == "PET_APARENCIA_TAMANHO").then(|| "grande".into());
+        assert_eq!(
+            ConfigEfetiva::carregar(Some(arquivo), ambiente)
+                .config()
+                .tamanho,
+            Tamanho::Grande
+        );
+        let ruim = "[aparencia]\ntamanho = \"gigante\"\n";
+        let c = ConfigEfetiva::carregar(Some(ruim), sem_ambiente);
+        assert_eq!(c.config().tamanho, Tamanho::Normal);
+        assert_eq!(c.avisos.len(), 1, "{:?}", c.avisos);
     }
 
     #[test]

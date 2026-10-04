@@ -32,7 +32,7 @@ use crate::cena::{self, Elemento};
 use crate::cerebro::{Agora, Cerebro, ConfigCerebro, Reacao, Resumo};
 use crate::confete::{Chuva, Grade};
 use crate::evento::Evento;
-use crate::geometria::Ret;
+use crate::geometria::{Ret, Tamanho};
 use crate::plataforma::{
     Desenho, EventoOverlay, Fase, Monitor, Overlay, Passo, passo_de_visibilidade,
 };
@@ -125,6 +125,8 @@ pub struct Motor {
     commits: Commits,
     /// A próxima troca de quadro da animação.
     proximo_quadro: Option<u64>,
+    /// O tamanho do pet na tela (`aparencia.tamanho`, decisão 0042).
+    tamanho: Tamanho,
 }
 
 impl Motor {
@@ -138,6 +140,7 @@ impl Motor {
             estresse: None,
             commits: Commits::default(),
             proximo_quadro: None,
+            tamanho: Tamanho::Normal,
         }
     }
 
@@ -178,6 +181,31 @@ impl Motor {
     /// Troca o personagem sem janela aberta (vale na próxima sessão).
     pub fn definir_skin(&mut self, skin: Option<Rc<Skin>>) {
         self.skin = skin;
+    }
+
+    pub fn tamanho(&self) -> Tamanho {
+        self.tamanho
+    }
+
+    /// Troca o tamanho do pet (o config relido, decisão 0042). Com a janela
+    /// pronta, o palco é refeito e o quadro novo redesenha a tela toda; sem,
+    /// vale no próximo palco. A skin não muda.
+    pub fn definir_tamanho(
+        &mut self,
+        tamanho: Tamanho,
+        ov: Option<&mut dyn Overlay>,
+        agora_ms: u64,
+    ) {
+        if tamanho == self.tamanho {
+            return;
+        }
+        self.tamanho = tamanho;
+        if let Some(ov) = ov
+            && self.palco.is_some()
+        {
+            ov.esquecer_cena();
+            self.refazer_palco(ov, agora_ms);
+        }
     }
 
     /// O pet deve estar na tela (pedido do `/v1/comando`).
@@ -287,11 +315,17 @@ impl Motor {
         let Some(pet) = &self.pet else {
             return;
         };
-        let palco = pet.palco(monitor.logico, monitor.escala, monitor.buffer());
+        let palco = pet.palco(
+            monitor.logico,
+            monitor.escala,
+            monitor.buffer(),
+            self.tamanho,
+        );
         info!(
-            "pet «{}» com D={} e célula em ({}, {}) pixels do monitor",
+            "pet «{}» com D={} (tamanho {}) e célula em ({}, {}) pixels do monitor",
             pet.skin().id,
             palco.d,
+            self.tamanho.nome(),
             palco.x,
             palco.y
         );

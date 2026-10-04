@@ -21,7 +21,7 @@ Campos do `skin.json`:
 | `celula` | tamanho da célula em pixels de arte (`[48, 48]` no Zeca) |
 | `pe` | onde os pés pisam (x no meio dos pés, y na linha do chão) |
 | `toque` | área clicável (o corpo), `[x, y, w, h]` |
-| `corpo_px` | altura da figura parada: D = 12% da altura do monitor ÷ `corpo_px` (no Zeca, 19: sentado com o chapéu) |
+| `corpo_px` | altura da figura parada: D = a fração da altura do monitor ÷ `corpo_px` (no Zeca, 19: sentado com o chapéu). A fração vem do config, não da skin: `aparencia.tamanho` = `pequeno` (~10%), `normal` (~12%) ou `grande` (~16%), e trocar não pede outra aprovação (decisão 0042) |
 | `escala_padrao` | escala inteira para prévias (×3 numa célula de 48) |
 | `estados` | estado semântico → tags (`idle`: a primeira tag dá a pose fixa e as rajadas do repouso vão pelas tags, em ordem; uma tag pode repetir) |
 | `chao` | tags com os pés no chão (o lint confere a linha dos pés) |

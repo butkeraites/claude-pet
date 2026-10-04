@@ -65,9 +65,11 @@ impl Nucleo {
         config: &ConfigEfetiva,
         inicio: Instant,
     ) -> Nucleo {
+        let mut motor = Motor::novo(ConfigCerebro::de(&config.config()));
+        motor.definir_tamanho(config.config().tamanho, None, 0);
         let mut nucleo = Nucleo {
             comp,
-            motor: Motor::novo(ConfigCerebro::de(&config.config())),
+            motor,
             na_tela: None,
             onde,
             configurada: config.texto("aparencia.skin").to_owned(),
@@ -102,7 +104,7 @@ impl Nucleo {
     /// partida): uma aprovação depois de trocar `aparencia.skin` já vale, e
     /// o cérebro passa a usar `sessoes.origens` e `celebracao.modo` do
     /// arquivo novo, como o `/v1/estado.config` mostra (decisão 0030).
-    fn reler_config(&mut self, ov: Option<&mut dyn Overlay>) {
+    fn reler_config(&mut self, mut ov: Option<&mut dyn Overlay>) {
         let Some(pasta) = &self.pasta_config else {
             return;
         };
@@ -116,7 +118,17 @@ impl Nucleo {
             self.configurada = skin;
         }
         let cerebro = ConfigCerebro::de(&config.config());
+        let tamanho = config.config().tamanho;
         self.comp.definir_config(config);
+        if tamanho != self.motor.tamanho() {
+            info!(
+                "config: aparencia.tamanho mudou de «{}» para «{}»",
+                self.motor.tamanho().nome(),
+                tamanho.nome()
+            );
+            let agora = self.agora_ms();
+            self.motor.definir_tamanho(tamanho, janela(&mut ov), agora);
+        }
         if &cerebro != self.motor.config_do_cerebro() {
             info!(
                 "config: o cérebro passa a acompanhar as origens {} (celebração {:?})",
@@ -124,7 +136,7 @@ impl Nucleo {
                 cerebro.modo
             );
             self.motor.reconfigurar_cerebro(cerebro);
-            self.depois_do_cerebro(Vec::new(), ov);
+            self.depois_do_cerebro(Vec::new(), janela(&mut ov));
         }
     }
 

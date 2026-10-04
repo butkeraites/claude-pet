@@ -60,7 +60,8 @@ impl Ret {
     }
 }
 
-/// Fração da altura lógica do monitor que o corpo do pet ocupa.
+/// Fração da altura lógica do monitor que o corpo do pet ocupa no tamanho
+/// `normal`.
 pub const FRACAO_CORPO: f64 = 0.12;
 /// Limites do corpo, em pixels lógicos.
 pub const CORPO_MIN: f64 = 80.0;
@@ -68,12 +69,68 @@ pub const CORPO_MAX: f64 = 160.0;
 /// Margem padrão até a borda do monitor, em pixels lógicos.
 pub const MARGEM_LOGICA: i32 = 16;
 
-/// D: pixels do monitor por pixel de arte, inteiro e por monitor.
+/// O tamanho do pet na tela (`aparencia.tamanho`, decisão 0042): a fração da
+/// altura lógica do monitor que o corpo ocupa. Muda só o D, nunca a skin:
+/// não pede outra aprovação.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Tamanho {
+    /// ~10% da altura (D = 6 no eDP-1 com o Zeca).
+    Pequeno,
+    /// ~12% (D = 8 no eDP-1 com o Zeca: o corpo dá 12,7%).
+    #[default]
+    Normal,
+    /// ~16% (D = 10 no eDP-1 com o Zeca).
+    Grande,
+}
+
+impl Tamanho {
+    /// As opções, como no config.
+    pub const NOMES: &'static [&'static str] = &["pequeno", "normal", "grande"];
+
+    pub fn de_texto(texto: &str) -> Option<Tamanho> {
+        match texto {
+            "pequeno" => Some(Tamanho::Pequeno),
+            "normal" => Some(Tamanho::Normal),
+            "grande" => Some(Tamanho::Grande),
+            _ => None,
+        }
+    }
+
+    pub fn nome(self) -> &'static str {
+        match self {
+            Tamanho::Pequeno => "pequeno",
+            Tamanho::Normal => "normal",
+            Tamanho::Grande => "grande",
+        }
+    }
+
+    /// A fração da altura lógica do monitor que o corpo ocupa.
+    pub fn fracao(self) -> f64 {
+        match self {
+            Tamanho::Pequeno => 0.10,
+            Tamanho::Normal => FRACAO_CORPO,
+            Tamanho::Grande => 0.16,
+        }
+    }
+}
+
+/// D: pixels do monitor por pixel de arte, inteiro e por monitor, no tamanho
+/// `normal`.
 ///
 /// O alvo é o corpo ocupar ~12% da altura lógica do monitor, entre 80 e 160
 /// pixels lógicos; `corpo_px` é a altura do corpo na arte.
 pub fn calcular_d(altura_logica: u32, escala: f64, corpo_px: u32) -> i32 {
-    let alvo = (altura_logica as f64 * FRACAO_CORPO).clamp(CORPO_MIN, CORPO_MAX);
+    calcular_d_com(altura_logica, escala, corpo_px, Tamanho::Normal)
+}
+
+/// D no tamanho pedido: o alvo do `normal` (12% da altura, entre 80 e 160
+/// pixels lógicos) vezes `fração ÷ 12%`. Os limites crescem e encolhem junto,
+/// então os três tamanhos continuam diferentes até no 4K, onde o `normal`
+/// bate no teto. O D continua inteiro, por monitor.
+pub fn calcular_d_com(altura_logica: u32, escala: f64, corpo_px: u32, tamanho: Tamanho) -> i32 {
+    let fator = tamanho.fracao() / FRACAO_CORPO;
+    let alvo = (altura_logica as f64 * FRACAO_CORPO).clamp(CORPO_MIN, CORPO_MAX) * fator;
     let d = (alvo * escala / corpo_px.max(1) as f64).round();
     (d as i32).max(1)
 }
@@ -195,6 +252,41 @@ mod testes {
         assert_eq!(calcular_d(400, 1.0, 40), 2);
         // Nunca menos que 1.
         assert_eq!(calcular_d(800, 1.0, 1000), 1);
+    }
+
+    #[test]
+    fn tamanhos_no_notebook_e_no_4k() {
+        use Tamanho::*;
+        // O Zeca (corpo de 19 pixels de arte) no eDP-1 (800 lógicos a 1,5):
+        // 6, 8 e 10; o corpo dá 9,5%, 12,7% e 15,8% da altura.
+        let zeca = |altura, t| calcular_d_com(altura, 1.5, 19, t);
+        assert_eq!(
+            [zeca(800, Pequeno), zeca(800, Normal), zeca(800, Grande)],
+            [6, 8, 10]
+        );
+        for (t, fracao) in [(Pequeno, 0.095), (Normal, 0.127), (Grande, 0.158)] {
+            let corpo_logico = zeca(800, t) as f64 * 19.0 / 1.5;
+            assert!((corpo_logico / 800.0 - fracao).abs() < 0.001, "{t:?}");
+        }
+        // No 4K o normal bate no teto (160 lógicos); os outros continuam
+        // diferentes porque o teto anda junto.
+        assert_eq!(
+            [zeca(1440, Pequeno), zeca(1440, Normal), zeca(1440, Grande)],
+            [11, 13, 17]
+        );
+        // O normal é exatamente o de antes (decisão 0025: D = 8 e 13).
+        assert_eq!(calcular_d(800, 1.5, 19), 8);
+        assert_eq!(calcular_d(1440, 1.5, 19), 13);
+        assert_eq!(
+            calcular_d_com(800, 1.0, 1000, Pequeno),
+            1,
+            "nunca menos que 1"
+        );
+        assert_eq!(Tamanho::de_texto("grande"), Some(Grande));
+        assert_eq!(Tamanho::de_texto("gigante"), None);
+        for nome in Tamanho::NOMES {
+            assert_eq!(Tamanho::de_texto(nome).map(Tamanho::nome), Some(*nome));
+        }
     }
 
     #[test]

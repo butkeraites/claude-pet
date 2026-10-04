@@ -34,21 +34,25 @@ aprovação. A pilha de dev (`PET_DEBUG=1`) mostra a skin xadrez `_teste`, ou o
 personagem aprovado com `PET_DEBUG_PERSONAGEM=1`. Formato, arte e aprovação
 em `docs/SKINS.md`.
 
-**Rumo (2026-10-03, decisões 0035–0039):** lançamento open source para Linux,
-macOS e Windows, com o app **bichinho** (o personagem continua Zeca). O PLANO
-ganhou o M8 (multiplataforma) e o M9 (publicação). Antes do M4 entram, na
-branch `m3b-portabilidade`, a costura de plataforma (T8.0), o hook nativo com
-o nome novo (T8.1) e o tamanho do Zeca no config (TP.2). No M4, o clique no
-Zeca leva ao terminal da sessão pelo foreign-toplevel, nunca pelo socket de
-comandos. A pesquisa está em `docs/pesquisa/09-multiplataforma.md`.
+**Rumo (2026-10-03, decisões 0035–0042):** lançamento open source para
+Linux, macOS e Windows, com o app **bichinho** (o personagem continua Zeca).
+O PLANO ganhou o M8 (multiplataforma) e o M9 (publicação). Antes do M4,
+na branch `m3b-portabilidade`: a costura de plataforma (T8.0: o Motor e os
+traits no `pet-core`, o Wayland em `pet-wayland`), o hook nativo `bichinho
+avisar` em exec form com o nome novo (T8.1; o plugin instalado continua no
+`avisar.sh` até a troca do README) e o tamanho do Zeca no config (TP.2,
+`aparencia.tamanho`). No M4, o clique no Zeca leva ao terminal da sessão pelo
+foreign-toplevel, nunca pelo socket de comandos. A pesquisa está em
+`docs/pesquisa/09-multiplataforma.md`.
 
-**Pendentes desde o M2 e o M3** (pedem a tela acesa e desbloqueada, ou o
-Renan): a conferência na tela da arte revista e das reações com o Zeca, a
-medição de custo com o personagem (`scripts/verificar-ao-vivo.sh
---personagem` e `scripts/medir-custo.sh --personagem`, que aprovam só para o
-teste e revogam no fim), e o aceno (`nod`, levanta e senta), que é um pedaço
-da rajada do repouso (`stand_look_sit`) e dá para confundir: mudar pede uma
-folha de contato nova e a reaprovação do Renan.
+**Pendentes** (pedem a tela acesa e desbloqueada, ou o Renan): a
+conferência na tela da arte revista, das reações com o Zeca e do tamanho
+pequeno, a medição de custo com o personagem e a regressão do T8.0
+(`scripts/verificar-ao-vivo.sh --personagem` e `scripts/medir-custo.sh
+--personagem`, que aprovam só para o teste e revogam no fim), e o aceno
+(`nod`, levanta e senta), que é um pedaço da rajada do repouso
+(`stand_look_sit`) e dá para confundir: mudar pede uma folha de contato nova
+e a reaprovação do Renan.
 
 ## Comandos
 
