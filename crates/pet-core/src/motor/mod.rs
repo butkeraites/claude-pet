@@ -25,6 +25,7 @@
 pub mod arraste;
 mod desktop;
 mod pet;
+pub mod posicoes;
 mod ritmo;
 
 use std::rc::Rc;
@@ -46,6 +47,7 @@ use crate::skin::Skin;
 pub use arraste::{Arraste, Gesto};
 pub use desktop::{EstadoDesktop, PainelDesktop};
 pub use pet::{Palco, Pet};
+pub use posicoes::{Fracao, Posicoes};
 pub use ritmo::{Commits, Estresse, JANELA_COMMITS_MS};
 
 /// Confetes do teste de estresse, sempre com a mesma semente: medições
@@ -149,6 +151,12 @@ pub struct Motor {
     desktop: EstadoDesktop,
     /// Arrastar e clicar (decisão 0048).
     arraste: Arraste,
+    /// Onde o Renan deixou o pet em cada monitor (decisão 0049).
+    posicoes: Posicoes,
+    /// As posições mudaram desde a última gravação.
+    posicoes_novas: bool,
+    /// A chave do monitor do palco de agora.
+    chave_do_monitor: Option<String>,
 }
 
 impl Motor {
@@ -165,6 +173,47 @@ impl Motor {
             tamanho: Tamanho::Normal,
             desktop: EstadoDesktop::default(),
             arraste: Arraste::default(),
+            posicoes: Posicoes::default(),
+            posicoes_novas: false,
+            chave_do_monitor: None,
+        }
+    }
+
+    // --- posições salvas (decisão 0049) --------------------------------------
+
+    /// As posições lidas de `/state` na partida.
+    pub fn definir_posicoes(&mut self, posicoes: Posicoes) {
+        self.posicoes = posicoes;
+        self.posicoes_novas = false;
+    }
+
+    pub fn posicoes(&self) -> &Posicoes {
+        &self.posicoes
+    }
+
+    /// O arquivo das posições, se elas mudaram desde a última vez (quem
+    /// grava é o núcleo do daemon).
+    pub fn posicoes_para_gravar(&mut self) -> Option<String> {
+        if !self.posicoes_novas {
+            return None;
+        }
+        self.posicoes_novas = false;
+        Some(self.posicoes.json())
+    }
+
+    /// Guarda onde o pet está agora, no monitor do palco.
+    fn guardar_posicao(&mut self) {
+        let (Some(palco), Some(pet), Some(chave)) = (
+            self.palco,
+            self.pet.as_ref(),
+            self.chave_do_monitor.as_deref(),
+        ) else {
+            return;
+        };
+        let fracao = Fracao::da_celula(palco.x, palco.y, palco.d, &pet.skin().ancoras, palco.tela);
+        if self.posicoes.de(chave) != Some(fracao) {
+            self.posicoes.guardar(chave, fracao);
+            self.posicoes_novas = true;
         }
     }
 
@@ -344,12 +393,22 @@ impl Motor {
         }
     }
 
-    /// Palco do pet num monitor pronto, com o log de onde ele ficou.
+    /// Palco do pet num monitor pronto, na posição salva daquele monitor ou
+    /// no canto inferior direito da área útil, com o log de onde ele ficou.
     fn montar_palco(&mut self, monitor: &Monitor) {
         let Some(pet) = &self.pet else {
             return;
         };
-        let palco = pet.palco(monitor, self.tamanho);
+        let mut palco = pet.palco(monitor, self.tamanho);
+        self.chave_do_monitor = posicoes::chave(monitor);
+        if let Some(fracao) = self
+            .chave_do_monitor
+            .as_deref()
+            .and_then(|c| self.posicoes.de(c))
+        {
+            let (x, y) = fracao.celula(palco.d, &pet.skin().ancoras, palco.tela);
+            (palco.x, palco.y) = pet.prender(&palco, x, y);
+        }
         info!(
             "pet «{}» com D={} (tamanho {}) e célula em ({}, {}) pixels do monitor",
             pet.skin().id,
@@ -487,13 +546,15 @@ impl Motor {
     }
 
     /// O arraste acabou (soltou ou o fail-safe): o cursor volta, o pet larga
-    /// o laço, pousa e a área de toque volta ao corpo.
+    /// o laço, pousa, a área de toque volta ao corpo e a posição fica
+    /// guardada para aquele monitor (decisão 0049).
     fn pousar(&mut self, ov: &mut dyn Overlay, agora_ms: u64) {
         ov.cursor(Cursor::Pegar);
         if let Some(pet) = self.pet.as_mut() {
             pet.largar(agora_ms);
             pet.tocar(SOLTO, agora_ms);
         }
+        self.guardar_posicao();
         self.desenhar(ov, agora_ms, false);
     }
 

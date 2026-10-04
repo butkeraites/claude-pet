@@ -10,7 +10,7 @@
 //! Funciona com ou sem janela: sem compositor, as reações só ficam no
 //! `/v1/estado`.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
@@ -18,7 +18,7 @@ use std::time::Instant;
 use pet_core::cerebro::{Agora, ConfigCerebro, Reacao};
 use pet_core::config::ConfigEfetiva;
 use pet_core::evento;
-use pet_core::motor::{Motor, Tocou};
+use pet_core::motor::{Motor, Posicoes, Tocou};
 use pet_core::plataforma::{EventoDesktop, EventoOverlay, Overlay, Punho};
 
 use crate::comando::{Comando, Recebido};
@@ -29,6 +29,42 @@ use crate::personagem::{self, Escolha, NaTela, Onde, mesma_tela};
 /// Quantas vezes por lote o núcleo esvazia os eventos da janela (um evento
 /// pode gerar outro; uma janela com defeito não prende o laço).
 const VOLTAS_DE_EVENTOS: usize = 8;
+/// As posições do pet por monitor, em `/state` (decisão 0049).
+pub const ARQUIVO_POSICOES: &str = "posicoes.json";
+
+/// Lê as posições salvas; sem arquivo, ou com um que não serve, o pet
+/// começa no canto padrão de cada monitor.
+fn ler_posicoes(estado: &Path) -> Posicoes {
+    let caminho = estado.join(ARQUIVO_POSICOES);
+    match std::fs::read_to_string(&caminho) {
+        Ok(texto) => match Posicoes::ler(&texto) {
+            Ok(posicoes) => {
+                info!("posições salvas: {} monitor(es)", posicoes.quantas());
+                posicoes
+            }
+            Err(motivo) => {
+                aviso!(
+                    "posições salvas ignoradas ({}): {motivo}",
+                    caminho.display()
+                );
+                Posicoes::default()
+            }
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Posicoes::default(),
+        Err(e) => {
+            aviso!("não consegui ler {}: {e}", caminho.display());
+            Posicoes::default()
+        }
+    }
+}
+
+/// Grava as posições de uma vez (arquivo temporário e `rename`).
+fn gravar_posicoes(estado: &Path, json: &str) -> std::io::Result<()> {
+    std::fs::create_dir_all(estado)?;
+    let temporario = estado.join(format!("{ARQUIVO_POSICOES}.tmp"));
+    std::fs::write(&temporario, json)?;
+    std::fs::rename(&temporario, estado.join(ARQUIVO_POSICOES))
+}
 
 /// Reempresta a conexão por um trecho. O `as_deref_mut` não serve: ele não
 /// encurta o tempo de vida do `dyn Punho` dentro do `Option`.
@@ -76,6 +112,7 @@ impl Nucleo {
     ) -> Nucleo {
         let mut motor = Motor::novo(ConfigCerebro::de(&config.config()));
         motor.definir_tamanho(config.config().tamanho, None, 0);
+        motor.definir_posicoes(ler_posicoes(&onde.estado));
         let mut nucleo = Nucleo {
             comp,
             motor,
@@ -358,6 +395,18 @@ impl Nucleo {
         if let Some(ov) = punho(&mut ov) {
             self.motor.vencer(ov, agora);
         }
+        self.guardar_posicoes();
+    }
+
+    /// Grava as posições do pet em `/state` se elas mudaram (um arraste
+    /// terminou).
+    fn guardar_posicoes(&mut self) {
+        if let Some(json) = self.motor.posicoes_para_gravar() {
+            match gravar_posicoes(&self.onde.estado, &json) {
+                Ok(()) => depurar!("posição do pet guardada"),
+                Err(e) => aviso!("não consegui guardar a posição do pet: {e}"),
+            }
+        }
     }
 
     /// Os eventos da janela e do desktop da conexão, em ordem, até acabarem.
@@ -383,6 +432,7 @@ impl Nucleo {
                 mudou |= self.evento_desktop(evento, Some(&mut *ov));
             }
         }
+        self.guardar_posicoes();
         mudou
     }
 
@@ -508,6 +558,53 @@ mod testes {
         assert!(nucleo.evento_desktop(&EventoDesktop::Ligado(true), Some(&mut janela)));
         nucleo.publicar(Some(&janela));
         assert_eq!(nucleo.comp.estado_json()["desktop"]["eventos"], "ligado");
+    }
+
+    #[test]
+    fn a_posicao_arrastada_fica_em_state_e_volta_noutro_nucleo() {
+        use pet_core::plataforma::{Botao, EventoPonteiro};
+        let a = Ambiente::novo("nucleo-posicao");
+        let config = a.raiz.join("config");
+        fs::create_dir_all(&config).unwrap();
+        let (mut nucleo, mut janela) = ligado(&a, &config);
+        let corpo = janela.toque.expect("toque no corpo");
+        let (x, y) = (corpo.x + corpo.w / 2, corpo.y + corpo.h / 2);
+        let antes = nucleo.motor.painel(Some(&janela), 0).sprite_disp.unwrap();
+        for evento in [
+            EventoPonteiro::Apertou {
+                botao: Botao::Esquerdo,
+                x,
+                y,
+            },
+            EventoPonteiro::Moveu {
+                x: x - 400,
+                y: y - 300,
+            },
+            EventoPonteiro::Soltou {
+                botao: Botao::Esquerdo,
+                x: x - 400,
+                y: y - 300,
+            },
+        ] {
+            janela.mostrou();
+            janela.eventos.push(EventoOverlay::Ponteiro(evento));
+            nucleo.eventos_da_janela(Some(&mut janela));
+        }
+        let depois = nucleo.motor.painel(Some(&janela), 0).sprite_disp.unwrap();
+        assert_ne!((depois.x, depois.y), (antes.x, antes.y), "arrastou");
+        let arquivo = a.estado.join(ARQUIVO_POSICOES);
+        let gravado = fs::read_to_string(&arquivo).expect("posições gravadas");
+        assert!(gravado.contains("\"chave\": \"nome:eDP-1\""), "{gravado}");
+        // Outro núcleo (o pet reiniciou) com o mesmo /state: o pet volta para
+        // onde foi deixado, não para o canto.
+        let (mut nucleo2, janela2) = ligado(&a, &config);
+        let de_novo = nucleo2.motor.painel(Some(&janela2), 0).sprite_disp.unwrap();
+        assert_eq!((de_novo.x, de_novo.y), (depois.x, depois.y));
+        // Um arquivo quebrado não derruba nada: o canto padrão.
+        fs::write(&arquivo, "quebrado").unwrap();
+        let (mut nucleo3, janela3) = ligado(&a, &config);
+        let padrao = nucleo3.motor.painel(Some(&janela3), 0).sprite_disp.unwrap();
+        assert_eq!((padrao.x, padrao.y), (antes.x, antes.y));
     }
 
     #[test]

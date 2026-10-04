@@ -1881,3 +1881,32 @@ gerenciador de janelas faz; crescer a área de toque só durante o arraste
 mantém o resto da tela clicável o tempo todo; andar em múltiplos de D mantém
 o bicho nítido e com movimento de pixel art; e o fail-safe impede que uma
 pegada perdida deixe a tela inteira presa ao pet.
+
+## 0049 — Posições salvas por monitor, como fração do palco e pela descrição do monitor (2026-10-04)
+
+**Problema:** o Renan arrasta o Zeca para onde quiser, em cada monitor, e o
+lugar tem de sobreviver ao restart do pet (PLANO, verificação do M4). Numa
+dock o conector muda (`DP-3` vira `DP-5`), a escala e o tamanho
+(`aparencia.tamanho`) podem mudar, e a skin também.
+**Escolha (T4.3):**
+- **O que se guarda:** o ponto dos pés (a âncora `pe` da skin) como fração
+  do palco (pixels do dispositivo do monitor), de 0 a 1 nos dois eixos. Ao
+  voltar, a célula é posta com os pés na fração e o corpo é preso de novo na
+  área útil: outra escala, outro D ou outra skin caem no mesmo lugar
+  relativo.
+- **A chave:** a descrição do monitor (fabricante, modelo e série), sem o
+  conector que o Hyprland põe no fim da descrição do `wl_output`
+  (`… (eDP-1)`); sem descrição, o nome do conector (`nome:eDP-1`). No
+  máximo 32 monitores; o usado há mais tempo sai.
+- **Quando:** guardada ao soltar um arraste (e no fail-safe); aplicada sempre
+  que o palco é montado (a camada ficou pronta, mudou de escala ou de
+  tamanho, trocou de skin). Sem posição salva, o canto inferior direito da
+  área útil, como antes.
+- **Onde:** `/state/posicoes.json` (o volume do pet, o mesmo da aprovação),
+  gravado de uma vez (arquivo temporário e `rename`) pelo núcleo do daemon
+  depois do lote que mudou a posição. Um arquivo que não se lê vira um
+  aviso no log e o canto padrão; uma entrada ruim cai sozinha. O Motor só
+  guarda e entrega o JSON: continua sem I/O.
+**Por quê:** a fração dos pés é o que o olho percebe como "o mesmo lugar" em
+monitores de tamanhos diferentes, e a descrição é o que identifica o
+monitor físico. Gravar só ao soltar não custa nada parado.
