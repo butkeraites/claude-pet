@@ -147,7 +147,9 @@ instalado continua no `avisar.sh` da cópia dele, que fala com o mesmo pet:
 nada fica surdo no meio da troca.
 
 No M4 o plugin não muda (continua 0.2.0): o `bin/pet subir` e o
-`bin/pet instalar-host` bastam. O binário novo do hook passa a mandar os ids
+`bin/pet instalar-host` bastam, rodados no clone (nunca na worktree
+estável, que não tem o seu `config/bichinho.toml`: o Zeca voltaria ao
+tamanho normal; decisão 0064). O binário novo do hook passa a mandar os ids
 de terminal (`term`, decisão 0054); o antigo continua funcionando com o pet
 novo, sem eles.
 
