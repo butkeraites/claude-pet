@@ -2275,3 +2275,60 @@ focar, o balão diz o porquê e mostra a lista.
 ele ainda não viu, e o cérebro já sabe o estado. Esperar a confirmação do
 desktop evita marcar como visto um foco que não aconteceu, e a memória da
 volta evita que uma sessão sem janela prenda o clique nela.
+
+## 0058 — A verificação ao vivo do M4, a produção na branch e a regra opcional só proposta (2026-10-04)
+
+**Problema:** o M4 termina com a verificação na tela de verdade e a
+produção refeita da branch (PLANO, M4). Parte dela pede a tela desbloqueada
+ou o Renan com o mouse; o e2e de monitores mexe no Hyprland dele (cria e
+remove um monitor); e a regra opcional do Hyprland só pode ser proposta,
+nunca aplicada sem ele.
+**Escolha (T4.11):**
+- **`scripts/verificar-m4.sh`**, contra a produção que está de pé: o
+  desktop no `/v1/estado` (o socket2 ligado, os dois protocolos do clique,
+  janelas com endereço, o anel e as janelas das sessões só com endereços em
+  hexadecimal), a janela ativa e o monitor em foco iguais aos do Hyprland
+  (`hyprctl -j`, só leitura) e, com a sessão desbloqueada e a tela acesa, o
+  clique de ponta a ponta: dois `foot` com um título-canário
+  (`SEGREDO-M4-…`), uma sessão de teste casada com cada um pelo `ts` do
+  prompt, A pedindo permissão e B pronta; o primeiro `bin/pet clique` tem de
+  levar ao foot de A e o segundo ao de B (o `hyprctl -j activewindow`), e o
+  terceiro mostra a lista; o título nunca aparece no log, no `/v1/estado`
+  nem no `/v1/debug/eventos`. Os `foot` fecham num `trap`. Com a sessão
+  bloqueada ou a tela apagada, sai NÃO VERIFICADO sem abrir janela; com
+  avisos de sessões reais pendentes também (o clique iria a eles primeiro).
+  `--manual` guia o Renan: arrastar numa área cheia e numa vazia, a posição
+  depois de um restart, a proteção de tela e o clique com o mouse.
+- **`scripts/e2e-monitor.sh --autorizo`**: cria um output headless, foca
+  nele, confere o pet lá (a camada viva e o `/v1/estado.monitor`), volta,
+  confere, remove e confere de novo, com um `trap` que remove o output e
+  devolve o foco. É o único script que muda o Hyprland (`hyprctl output` e
+  `dispatch focusmonitor`): escrito, nunca rodado sem o consentimento do
+  Renan, a cada vez.
+- **A regra opcional** (`order = 1` para ficar abaixo dos popups do
+  Omarchy, `no_anim` para tirar o fade de ~180 ms de cada troca de
+  monitor): proposta no README, a aplicar só pela skill `omarchy` e com o
+  consentimento do Renan. Não foi aplicada; sem ela tudo funciona.
+- **A linha da lista de sessões:** o nome do projeto encolhe (até 6
+  caracteres) para o estado e o tempo caberem nos 36 do balão; ao vivo, a
+  linha de uma sessão de teste saiu "m4-vivo (teste): esperando você (0 …".
+- **Conferido ao vivo**, com a sessão bloqueada e a tela apagada, na
+  produção refeita da branch (`bin/pet subir` do commit da T4.10): tela
+  ativa, o Zeca aprovado pelo Renan intacto (sha256 5b843b03…), D=6 (o
+  tamanho pequeno no eDP-1), o socket2 ligado, os dois protocolos ligados
+  com a janela aberta mapeada, a semente no anel e nenhum título no log. O
+  `scripts/verificar-m4.sh` passou no desktop e na janela ativa e deu o
+  clique nos dois `foot` como NÃO VERIFICADO, sem abrir janela. Uma sessão
+  de teste casou com a janela ativa (certa, pela semente), e o
+  `bin/pet clique` focou a janela dela (já ativa: confirmado na hora) pelo
+  `activate` do foreign-toplevel de verdade, sem erro de protocolo nem
+  reconexão; o aviso saiu, o segundo clique mostrou a lista e o direito
+  ligou e desligou a soneca.
+- **Pendente** (pede a tela desbloqueada ou o Renan): o clique nos dois
+  `foot`, o `--manual`, o e2e de monitores e a regra opcional.
+- **A troca depois do merge:** o plugin não muda (0.2.0); na worktree
+  estável, `bin/pet subir` e `bin/pet instalar-host` (o hook novo manda o
+  `term`; o antigo continua funcionando com o pet novo, sem ele).
+**Por quê:** o que dá para provar sem a tela fica provado no daemon de
+verdade e na produção; o que pede a tela fica escrito para rodar com o
+Renan, sem mexer no Hyprland dele nem focar janelas enquanto ele não está.

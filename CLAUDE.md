@@ -45,9 +45,19 @@ avisar` em exec form com o nome novo (T8.1; o plugin instalado continua no
 foreign-toplevel, nunca pelo socket de comandos. A pesquisa está em
 `docs/pesquisa/09-multiplataforma.md`.
 
+**Na branch `m4-arrastar-seguir` (T4.1–T4.11, decisões 0047–0058):** o M4
+— arrastar com posições salvas por monitor, seguir o monitor ativo pelo
+socket2 com o poof, a fonte monogram e o balão mínimo, a proteção de tela e
+a soneca, os ids de terminal no fio v1 (`term`) com a janela de cada sessão
+casada pelo anel de ativações, o foco pelo foreign-toplevel com o mapeamento
+do Hyprland e os avisos com o clique em ciclo. A produção roda a branch; a
+conferência na tela (`scripts/verificar-m4.sh` e `--manual`) e o
+`scripts/e2e-monitor.sh --autorizo` ficaram pendentes (sessão bloqueada; o
+e2e pede o consentimento do Renan a cada vez).
+
 **Pendentes** (pedem a tela acesa e desbloqueada, ou o Renan): a
-conferência na tela da arte revista, das reações com o Zeca e do tamanho
-pequeno, a medição de custo com o personagem e a regressão do T8.0
+conferência na tela do M4 (acima), a da arte revista, das reações com o
+Zeca e do tamanho pequeno, a medição de custo com o personagem e a regressão do T8.0
 (`scripts/verificar-ao-vivo.sh --personagem` e `scripts/medir-custo.sh
 --personagem`, que aprovam só para o teste e revogam no fim), e o aceno
 (`nod`, levanta e senta), que é um pedaço da rajada do repouso
@@ -74,6 +84,9 @@ Fora dele, use `~/.cargo/bin/cargo`.
 | `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build` | modo desenvolvimento (sem restart, debug, skin `_teste`) |
 | `bin/pet foto` | foto do pet (grim no monitor inteiro); em debug, só os pixels opacos do pet sobre fundo neutro |
 | `scripts/verificar-ao-vivo.sh` | verificação do M1 na tela de verdade; termina com a produção de pé |
+| `scripts/verificar-m4.sh [--manual]` | verificação do M4 contra a produção: o desktop no `/v1/estado`, a janela ativa igual à do Hyprland (`hyprctl -j`, só leitura) e, desbloqueado, dois `foot` com título-canário e sessões de teste para o clique levar a cada um; `--manual` guia o Renan no arraste, no restart, na proteção de tela e no clique com o mouse |
+| `scripts/e2e-monitor.sh --autorizo` | o pet segue um monitor headless criado e removido no Hyprland: **só com o consentimento do Renan, a cada vez** |
+| `cargo xtask globais [interface …]` | lista os globais do Wayland e confere os que o clique pede (só lê o registro) |
 | `scripts/medir-custo.sh` | CPU do Hyprland, GPU e commits/s: escondido × parado, com e sem carga de repintura, e estresse |
 | `cargo xtask skin-teste` / `nitidez` / `fantasma` / `carga` | gera a skin xadrez; compara captura e quadro esperado; acha pixel velho e fantasma; repintura invisível para medir custo |
 | `bin/pet skin-instalar <zip\|pasta>` | o pack vira o Zeca em `skins-locais/` (com e sem contorno, `--estrito`), com lint, cobertura (`--nativos mvp`) e prévias em `tmp/previa-zeca-m2/` |
@@ -96,10 +109,12 @@ Fora dele, use `~/.cargo/bin/cargo`.
     `plataforma::falsa::JanelaFalsa` (feature `teste` fora do core).
     **Nunca** depende de crates Wayland ou de sistema, em nenhum alvo — os
     testes ficam rápidos e o `bin/pet verificar` confere;
-  - `crates/pet-wayland`: a camada OVERLAY (a `Sessao` é o `Overlay` do
-    Wayland), os buffers e a descoberta; o que é só do Hyprland
-    (`hyprland.lock`, o monitor FALLBACK, o socket de eventos no M4) fica no
-    adaptador `hyprland`;
+  - `crates/pet-wayland`: a camada OVERLAY (a `Sessao` é o `Overlay` e o
+    `Desktop` do Wayland, na mesma conexão e no mesmo `wl_seat`), os
+    buffers, a descoberta e o foreign-toplevel genérico (`toplevel`); o que é
+    só do Hyprland (`hyprland.lock`, o monitor FALLBACK, o leitor do socket
+    de eventos em `hyprland::eventos`, o mapeamento dos toplevels para os
+    endereços em `hyprland::mapeamento`) fica no adaptador `hyprland`;
   - `crates/pet-windows` e `crates/pet-macos`: esboços vazios que compilam
     (`cargo clippy --target` no `bin/pet verificar`, com os alvos do
     rustup instalados);
@@ -107,7 +122,12 @@ Fora dele, use `~/.cargo/bin/cargo`.
     uid 1000, rootfs somente leitura). O `nucleo` junta o Motor com as
     aprovações em disco e o `/v1/estado`; o `laco` é o do Linux (calloop
     com o Wayland); o `sem_janela` roda onde ainda não há janela (Windows e
-    macOS). Threads: principal (o laço), ingress HTTP, vigia.
+    macOS). Threads: principal (o laço), ingress HTTP, vigia e o leitor do
+    socket2 (só lê, traduz na hora e manda pela caixa do desktop).
+  - No Motor (M4): `arraste` (a máquina do ponteiro), `posicoes`, `viagem`
+    e `poof` (seguir o monitor), `balao` (o balão, o selo zZ e o coração),
+    `janelas` (o anel de ativações e a janela de cada sessão) e o clique em
+    ciclo sobre os avisos que o cérebro guarda (`Cerebro::pendencias`).
 - Uma camada OVERLAY do tamanho do monitor focado, criada com output NULL,
   nunca redimensionada, sem subsurfaces; o Zeca anda dentro do buffer.
   Cada pixel de arte vira um bloco D×D inteiro de pixels do monitor.
@@ -255,6 +275,19 @@ Fora dele, use `~/.cargo/bin/cargo`.
   vem com o `prompt_id` do `/exit`.
 - `bin/pet testar` precisa do pet de pé; as sessões de teste somem em 60 s
   e nunca se misturam com as reais.
+- **Clique e sessão bloqueada:** bloqueado, o Hyprland recusa o `activate`
+  do foreign-toplevel sem dizer nada; o clique espera 1,5 s o socket2 contar
+  a troca (`/v1/estado.focando`) e só então marca o aviso como visto, ou diz
+  no balão que não focou. Uma janela que já está ativa conta na hora.
+- `bin/pet clique` com avisos de sessões reais pendentes foca terminais de
+  verdade: não rode com o Renan trabalhando (o `verificar-m4.sh` usa sessões
+  de teste e recusa com avisos reais, que vêm antes no ciclo).
+- `WAYLAND_DEBUG=1` (ou `client`) no ambiente do daemon desliga o
+  foreign-toplevel: o wayland-client imprimiria os títulos das janelas no
+  stderr. O clique cai no balão.
+- O socket2 só conta trocas: logo depois de o pet subir,
+  `desktop.monitor_em_foco` fica nulo até a primeira troca de monitor, e o
+  anel começa com a semente do foreign-toplevel (a janela ativa na conexão).
 - O `shellcheck` não está instalado no host (o `bin/pet verificar` pula).
   Rodado pela imagem oficial, que depois foi removida:
   `docker run --rm --network none -v "$PWD:/mnt:ro" -w /mnt

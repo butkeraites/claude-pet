@@ -18,8 +18,10 @@ use crate::geometria::Ret;
 pub const MAX_LINHAS: usize = 6;
 /// Caracteres por linha (cortada com "…").
 pub const MAX_CARACTERES: usize = 36;
-/// Caracteres do nome do projeto numa linha da lista.
+/// Caracteres do nome do projeto numa linha da lista: até tanto, e menos
+/// (até o mínimo) para o estado e o tempo caberem na linha.
 pub const MAX_PROJETO: usize = 16;
+pub const MIN_PROJETO: usize = 6;
 /// Quanto o balão fica: uma base e um tanto por linha, com teto.
 pub const BASE_MS: u64 = 5_000;
 pub const POR_LINHA_MS: u64 = 1_000;
@@ -272,7 +274,8 @@ pub fn duracao(ms: u64) -> String {
     }
 }
 
-/// Uma linha da lista de sessões: "projeto: estado (tempo)".
+/// Uma linha da lista de sessões: "projeto: estado (tempo)". O nome do
+/// projeto encolhe para o tempo caber na linha (o corte do balão é no fim).
 pub fn linha_da_sessao(
     proj: Option<&str>,
     estado: &str,
@@ -280,11 +283,17 @@ pub fn linha_da_sessao(
     agora_parede_ms: u64,
     teste: bool,
 ) -> String {
-    let nome = fonte::cortar(proj.unwrap_or("sem pasta"), MAX_PROJETO);
     let marca = if teste { " (teste)" } else { "" };
-    format!(
-        "{nome}{marca}: {estado} ({})",
+    let resto = format!(
+        "{marca}: {estado} ({})",
         duracao(agora_parede_ms.saturating_sub(desde_ms))
+    );
+    let cabe = MAX_CARACTERES
+        .saturating_sub(resto.chars().count())
+        .clamp(MIN_PROJETO, MAX_PROJETO);
+    format!(
+        "{}{resto}",
+        fonte::cortar(proj.unwrap_or("sem pasta"), cabe)
     )
 }
 
@@ -449,8 +458,18 @@ mod testes {
         );
         assert_eq!(
             linha_da_sessao(Some("agenda-presidencial-2026"), "parado", 0, 5_000, true),
-            "agenda-presiden… (teste): parado (5 s)"
+            "agenda-presid… (teste): parado (5 s)"
         );
+        // O nome encolhe para o tempo caber nos 36 caracteres.
+        let longa = linha_da_sessao(
+            Some("agenda-presidencial-2026"),
+            "esperando você",
+            0,
+            720_000,
+            false,
+        );
+        assert_eq!(longa, "agenda-pre…: esperando você (12 min)");
+        assert_eq!(longa.chars().count(), MAX_CARACTERES);
         assert_eq!(
             linha_da_sessao(None, "erro", 0, 0, false),
             "sem pasta: erro (0 s)"
