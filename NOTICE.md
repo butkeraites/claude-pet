@@ -28,3 +28,14 @@ O código deste repositório é MIT (`LICENSE`). Abaixo, o que vem de fora.
   de bitmaps do pacote; `cargo xtask fonte` o assa em
   `crates/pet-core/src/fonte/glifos.rs`, que vai dentro do binário (decisão
   0052). Obrigado, datagoblin!
+
+## Protocolos
+
+- `crates/pet-wayland/protocolos/hyprland-toplevel-mapping-v1.xml` — o
+  protocolo `hyprland_toplevel_mapping_v1`, do hyprland-protocols
+  (https://github.com/hyprwm/hyprland-protocols, commit 9830bfb5 de
+  2025-04-01): Copyright © 2025 WhySoBad, **BSD-3-Clause** (o aviso de
+  copyright e a licença estão no próprio XML, que vai sem mudança nenhuma).
+  O código de cliente sai dele pelo `wayland-scanner` (decisão 0056) e vai
+  dentro do binário: quem distribuir o binário leva junto este aviso e o
+  texto da licença que está no XML.

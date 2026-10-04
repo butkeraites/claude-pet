@@ -17,16 +17,20 @@
 //! A mesma sessão é o [`Desktop`] do Wayland (decisão 0043): a janela e a
 //! ligação com o desktop usam a mesma conexão e o mesmo `wl_seat`, e nascem e
 //! morrem juntas a cada reconexão. Juntas, são o [`Punho`] que o laço entrega
-//! ao núcleo.
+//! ao núcleo. Focar uma janela é o `zwlr_foreign_toplevel_handle_v1.activate`
+//! do handle que o `hyprland_toplevel_mapping_manager_v1` ligou ao endereço
+//! dela (decisões 0039 e 0056; [`crate::toplevel`]).
 
+use std::ffi::OsStr;
 use std::os::unix::net::UnixStream;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use pet_core::cena::Elemento;
 use pet_core::geometria::{self, Ret};
 use pet_core::plataforma::{
-    Alca, Botao, CapDesktop, CapOverlay, Cursor, Desenho, Desktop, ErroFoco, EventoOverlay,
-    EventoPonteiro, Fase, InfoOverlay, Monitor, Overlay, Punho, UltimoQuadro,
+    Alca, Botao, CapDesktop, CapOverlay, Cursor, Desenho, Desktop, ErroFoco, EventoDesktop,
+    EventoOverlay, EventoPonteiro, Fase, InfoDesktop, InfoOverlay, Monitor, Overlay, Punho,
+    UltimoQuadro,
 };
 use pet_core::skin::Skin;
 
@@ -37,8 +41,15 @@ use smithay_client_toolkit::reexports::client::globals::{GlobalList, registry_qu
 use smithay_client_toolkit::reexports::client::protocol::{
     wl_output, wl_pointer, wl_seat, wl_surface,
 };
+use smithay_client_toolkit::reexports::client::backend::ObjectId;
 use smithay_client_toolkit::reexports::client::{
-    Connection, Dispatch, EventQueue, QueueHandle, delegate_noop,
+    Connection, Dispatch, EventQueue, Proxy, QueueHandle, delegate_noop, event_created_child,
+};
+use smithay_client_toolkit::reexports::protocols_wlr::foreign_toplevel::v1::client::zwlr_foreign_toplevel_handle_v1::{
+    self, ZwlrForeignToplevelHandleV1,
+};
+use smithay_client_toolkit::reexports::protocols_wlr::foreign_toplevel::v1::client::zwlr_foreign_toplevel_manager_v1::{
+    self, ZwlrForeignToplevelManagerV1,
 };
 use smithay_client_toolkit::reexports::protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
 use smithay_client_toolkit::reexports::protocols::wp::fractional_scale::v1::client::wp_fractional_scale_v1::{
@@ -61,9 +72,36 @@ use smithay_client_toolkit::shell::wlr_layer::{
 use smithay_client_toolkit::shm::{Shm, ShmHandler};
 use smithay_client_toolkit::{delegate_registry, registry_handlers};
 
+use crate::hyprland::mapeamento::{
+    self,
+    protocolo::hyprland_toplevel_mapping_manager_v1::{self, HyprlandToplevelMappingManagerV1},
+    protocolo::hyprland_toplevel_window_mapping_handle_v1::{
+        self, HyprlandToplevelWindowMappingHandleV1,
+    },
+};
 use crate::saida;
 use crate::sincronia;
 use crate::superficie::{self, OrigemEscala, Prazo, Superficie};
+use crate::toplevel::{self, Janelas};
+
+/// Os dois protocolos que focam janelas (decisão 0056).
+const FOREIGN_TOPLEVEL: &str = "zwlr_foreign_toplevel_manager_v1";
+const MAPEAMENTO: &str = "hyprland_toplevel_mapping_manager_v1";
+
+/// O `WAYLAND_DEBUG` ligado para clientes: o backend do wayland-client
+/// imprime toda mensagem no stderr, com os argumentos — os títulos das
+/// janelas do foreign-toplevel iriam para o log. Com ele, o foreign-toplevel
+/// fica desligado (a regra de ouro dos títulos).
+fn wayland_debug(valor: Option<&OsStr>) -> bool {
+    matches!(valor, Some(v) if v == "1" || v == "client")
+}
+
+/// Hora de parede em ms desde 1970 (o relógio do `ts` dos hooks).
+fn agora_parede_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
+}
 
 /// Globais sem os quais não há camada para desenhar.
 const OBRIGATORIOS: &[&str] = &[
@@ -178,6 +216,15 @@ pub struct Sessao {
     /// O serial do último `enter` do ponteiro na camada: o cursor-shape só
     /// aceita trocar o cursor com ele.
     serial_enter: Option<u32>,
+    /// O foreign-toplevel e o mapeamento do Hyprland (decisão 0056), se o
+    /// compositor oferece.
+    toplevels: Option<ZwlrForeignToplevelManagerV1>,
+    mapeador: Option<HyprlandToplevelMappingManagerV1>,
+    /// As janelas que o compositor anunciou (sem título nem app id).
+    janelas: Janelas<ObjectId, ZwlrForeignToplevelHandleV1>,
+    /// O que o desktop desta conexão conta ao Motor (a semente da janela
+    /// ativa).
+    eventos_desktop: Vec<EventoDesktop>,
 }
 
 /// Resultado do handshake: a conexão, a fila e o estado que ela despacha.
@@ -223,6 +270,42 @@ pub fn conectar(fluxo: UnixStream, inicio: Instant) -> Result<Conexao, String> {
         .ok();
     let assentos = SeatState::new(&globais, &qh);
     let cursores = CursorShapeManager::bind(&globais, &qh).ok();
+    // Focar janelas (decisão 0056): o foreign-toplevel genérico e o
+    // mapeamento do Hyprland para os endereços das janelas.
+    let depurando = wayland_debug(std::env::var_os("WAYLAND_DEBUG").as_deref());
+    let toplevels = if depurando {
+        None
+    } else {
+        globais
+            .bind::<ZwlrForeignToplevelManagerV1, _, _>(&qh, 1..=3, ())
+            .ok()
+    };
+    let mapeador = globais
+        .bind::<HyprlandToplevelMappingManagerV1, _, _>(&qh, 1..=1, ())
+        .ok();
+    match (&toplevels, &mapeador) {
+        (Some(t), Some(m)) => info!(
+            "focar janelas: {FOREIGN_TOPLEVEL} v{} e {MAPEAMENTO} v{} ligados",
+            t.version(),
+            m.version()
+        ),
+        _ if depurando => aviso!(
+            "WAYLAND_DEBUG ligado: o {FOREIGN_TOPLEVEL} fica desligado (o wayland-client \
+             imprimiria os títulos das janelas no log) e o clique no pet cai no balão"
+        ),
+        _ => aviso!(
+            "o compositor não oferece {}: o clique no pet não foca janelas (cai no balão)",
+            [
+                (FOREIGN_TOPLEVEL, toplevels.is_none()),
+                (MAPEAMENTO, mapeador.is_none())
+            ]
+            .iter()
+            .filter(|(_, falta)| *falta)
+            .map(|(nome, _)| *nome)
+            .collect::<Vec<_>>()
+            .join(" nem ")
+        ),
+    }
     let sessao = Sessao {
         registro: RegistryState::new(&globais),
         saidas: OutputState::new(&globais, &qh),
@@ -242,6 +325,10 @@ pub fn conectar(fluxo: UnixStream, inicio: Instant) -> Result<Conexao, String> {
         cursores,
         forma_do_cursor: None,
         serial_enter: None,
+        toplevels,
+        mapeador,
+        janelas: Janelas::default(),
+        eventos_desktop: Vec::new(),
     };
     Ok(Conexao {
         conexao,
@@ -557,15 +644,153 @@ impl Overlay for Sessao {
     }
 }
 
-/// O desktop do Wayland nesta conexão. Focar janelas pelo foreign-toplevel
-/// chega na T4.9 (decisão 0039); por enquanto, nenhuma capacidade.
+/// O desktop do Wayland nesta conexão (decisões 0043 e 0056): foca uma
+/// janela pelo endereço com o `activate` do foreign-toplevel, no `wl_seat`
+/// desta conexão. O monitor em foco e as trocas de janela vêm do socket2 (o
+/// leitor do adaptador do Hyprland), não daqui.
 impl Desktop for Sessao {
     fn capacidades(&self) -> CapDesktop {
-        CapDesktop::default()
+        let mapeia = self.toplevels.is_some() && self.mapeador.is_some();
+        CapDesktop {
+            segue_foco: false,
+            janela_ativa: mapeia,
+            foca_janela: mapeia && self.assentos.seats().next().is_some(),
+            nao_perturbe: false,
+        }
     }
 
-    fn focar(&mut self, _: &Alca) -> Result<(), ErroFoco> {
-        Err(ErroFoco::NaoSuportado)
+    fn focar(&mut self, alvo: &Alca) -> Result<(), ErroFoco> {
+        if self.toplevels.is_none() || self.mapeador.is_none() {
+            return Err(ErroFoco::NaoSuportado);
+        }
+        let Some(assento) = self.assentos.seats().next() else {
+            return Err(ErroFoco::NaoSuportado);
+        };
+        let Some(handle) = self.janelas.achar(&alvo.0) else {
+            return Err(ErroFoco::JanelaSumiu);
+        };
+        handle.activate(&assento);
+        if let Err(e) = self.conexao.flush() {
+            aviso!("focar a janela {}: {e}", alvo.0);
+        }
+        info!("focando a janela {} (foreign-toplevel)", alvo.0);
+        Ok(())
+    }
+
+    fn eventos(&mut self) -> Vec<EventoDesktop> {
+        std::mem::take(&mut self.eventos_desktop)
+    }
+
+    fn info(&self) -> InfoDesktop {
+        let mut protocolos = Vec::new();
+        if let Some(t) = &self.toplevels {
+            protocolos.push(format!("{FOREIGN_TOPLEVEL} v{}", t.version()));
+        }
+        if let Some(m) = &self.mapeador {
+            protocolos.push(format!("{MAPEAMENTO} v{}", m.version()));
+        }
+        InfoDesktop {
+            protocolos,
+            janelas: self.janelas.com_endereco(),
+        }
+    }
+}
+
+/// As janelas que o compositor anuncia: cada uma é mapeada para o endereço
+/// dela no Hyprland assim que chega.
+impl Dispatch<ZwlrForeignToplevelManagerV1, ()> for Sessao {
+    fn event(
+        sessao: &mut Self,
+        _: &ZwlrForeignToplevelManagerV1,
+        evento: zwlr_foreign_toplevel_manager_v1::Event,
+        _: &(),
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        match evento {
+            zwlr_foreign_toplevel_manager_v1::Event::Toplevel { toplevel } => {
+                if let Some(mapeador) = &sessao.mapeador {
+                    mapeador.get_window_for_toplevel_wlr(&toplevel, qh, toplevel.id());
+                }
+                sessao.janelas.nova(toplevel.id(), toplevel);
+            }
+            zwlr_foreign_toplevel_manager_v1::Event::Finished => {
+                aviso!("o compositor parou o {FOREIGN_TOPLEVEL}: o clique não foca janelas");
+                sessao.toplevels = None;
+            }
+            _ => {}
+        }
+    }
+
+    event_created_child!(Sessao, ZwlrForeignToplevelManagerV1, [
+        zwlr_foreign_toplevel_manager_v1::EVT_TOPLEVEL_OPCODE => (ZwlrForeignToplevelHandleV1, ())
+    ]);
+}
+
+/// Uma janela: só o "ativa" e o "fechou" interessam. O título e o app id
+/// chegam e são jogados fora aqui, sem ser guardados.
+impl Dispatch<ZwlrForeignToplevelHandleV1, ()> for Sessao {
+    fn event(
+        sessao: &mut Self,
+        handle: &ZwlrForeignToplevelHandleV1,
+        evento: zwlr_foreign_toplevel_handle_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match evento {
+            zwlr_foreign_toplevel_handle_v1::Event::State { state } => {
+                let ativa = toplevel::tem_ativa(&state);
+                if let Some(evento) = sessao
+                    .janelas
+                    .estado(&handle.id(), ativa, agora_parede_ms())
+                {
+                    sessao.eventos_desktop.push(evento);
+                }
+            }
+            zwlr_foreign_toplevel_handle_v1::Event::Closed => {
+                sessao.janelas.fechou(&handle.id());
+                handle.destroy();
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<HyprlandToplevelMappingManagerV1, ()> for Sessao {
+    fn event(
+        _: &mut Self,
+        _: &HyprlandToplevelMappingManagerV1,
+        evento: hyprland_toplevel_mapping_manager_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match evento {}
+    }
+}
+
+/// O endereço de uma janela (o `dono` é o handle do foreign-toplevel).
+impl Dispatch<HyprlandToplevelWindowMappingHandleV1, ObjectId> for Sessao {
+    fn event(
+        sessao: &mut Self,
+        mapeado: &HyprlandToplevelWindowMappingHandleV1,
+        evento: hyprland_toplevel_window_mapping_handle_v1::Event,
+        dono: &ObjectId,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let hyprland_toplevel_window_mapping_handle_v1::Event::WindowAddress {
+            address_hi,
+            address,
+        } = evento
+        {
+            let endereco = mapeamento::endereco(address_hi, address);
+            if let Some(evento) = sessao.janelas.endereco(dono, endereco, agora_parede_ms()) {
+                sessao.eventos_desktop.push(evento);
+            }
+        }
+        mapeado.destroy();
     }
 }
 
@@ -982,6 +1207,15 @@ mod testes {
                 EventoOverlay::Ponteiro(EventoPonteiro::Moveu { x: 61, y: 2 }),
             ]
         );
+    }
+
+    #[test]
+    fn wayland_debug_de_cliente_desliga_o_foreign_toplevel() {
+        assert!(wayland_debug(Some(OsStr::new("1"))));
+        assert!(wayland_debug(Some(OsStr::new("client"))));
+        assert!(!wayland_debug(Some(OsStr::new("server"))));
+        assert!(!wayland_debug(Some(OsStr::new("0"))));
+        assert!(!wayland_debug(None));
     }
 
     #[test]

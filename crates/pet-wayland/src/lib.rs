@@ -9,10 +9,12 @@
 //!   buffers, os monitores e a ida e volta com prazo;
 //! - [`conexao`]: o que serve a qualquer compositor (socket por caminho
 //!   longo, backoff de reconexão);
+//! - [`toplevel`]: o foreign-toplevel genérico (as janelas que o compositor
+//!   anuncia, para focar a de uma sessão; decisão 0056);
 //! - [`hyprland`]: o adaptador do Hyprland (achar a instância pelo
-//!   `hyprland.lock`, o monitor FALLBACK e, no M4, o socket de eventos e o
-//!   foco por foreign-toplevel). O socket de comandos nunca é aberto
-//!   (decisão 0006).
+//!   `hyprland.lock`, o monitor FALLBACK, o leitor do socket de eventos e o
+//!   mapeamento dos toplevels para os endereços das janelas). O socket de
+//!   comandos nunca é aberto (decisão 0006).
 //!
 //! Nada daqui sabe o que o pet faz: quem decide é o
 //! [`pet_core::motor::Motor`], pelo laço do daemon.
@@ -29,6 +31,7 @@ pub mod sessao;
 pub mod shm;
 pub mod sincronia;
 pub mod superficie;
+pub mod toplevel;
 
 pub use sessao::{Conexao, Sessao, conectar};
 

@@ -10,8 +10,10 @@
 //! **Buracos.** Quando a fonte das trocas cai (o socket2 do Hyprland), o que
 //! aconteceu até ela voltar é desconhecido: o anel marca um buraco, e uma
 //! hora dentro dele não acha janela. A semente (a janela que o
-//! foreign-toplevel diz estar ativa) só entra com o anel vazio ou num
-//! buraco: ela diz que a janela estava ativa, não desde quando.
+//! foreign-toplevel diz estar ativa) só entra com o anel vazio, num buraco
+//! ou depois de outra semente — enquanto a fonte das trocas não contou nada
+//! desde o buraco. A primeira semente diz que a janela estava ativa, não
+//! desde quando; as seguintes são trocas que o foreign-toplevel viu.
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -101,12 +103,18 @@ impl Anel {
         true
     }
 
-    /// A janela que já estava ativa (o foreign-toplevel, na conexão nova):
-    /// só entra com o anel vazio ou num buraco.
+    /// A janela ativa pelo foreign-toplevel: só entra com o anel vazio, num
+    /// buraco ou depois de outra semente (a fonte das trocas não contou nada
+    /// desde então).
     pub fn semente(&mut self, janela: Alca, parede_ms: u64) -> bool {
         match self.trocas.back() {
             None => {}
             Some(t) if t.tipo == Tipo::Buraco => {}
+            Some(t) if t.tipo == Tipo::Semente => {
+                if t.janela.as_ref() == Some(&janela) {
+                    return false;
+                }
+            }
             Some(_) => return false,
         }
         let parede_ms = parede_ms.max(self.trocas.back().map_or(0, |t| t.parede_ms));
@@ -153,11 +161,11 @@ impl Anel {
         match (&troca.tipo, &troca.janela) {
             (Tipo::Buraco, _) => Achado::Desconhecida,
             (_, None) => Achado::Nenhuma,
-            (Tipo::Semente, Some(janela)) => Achado::Janela(janela.clone()),
-            (Tipo::Troca, Some(janela)) => {
+            (_, Some(janela)) => {
                 // A primeira troca do anel (ou a primeira depois de um
-                // buraco) não diz o que havia antes: a dúvida só vale para
-                // uma troca de verdade entre duas janelas conhecidas.
+                // buraco, e a primeira semente) não diz o que havia antes: a
+                // dúvida só vale para uma troca entre duas janelas
+                // conhecidas.
                 let houve_antes = indice > 0 && self.trocas[indice - 1].tipo != Tipo::Buraco;
                 if houve_antes && ts.saturating_sub(troca.parede_ms) < DUVIDA_MS {
                     Achado::Duvida
@@ -324,9 +332,16 @@ mod testes {
         );
         assert_eq!(anel.em(T0 - 1), Achado::Desconhecida, "antes da semente");
         assert!(
-            !anel.semente(a("foot2"), T0 + 5),
-            "com trocas, a semente não entra"
+            !anel.semente(a("foot1"), T0 + 5),
+            "a mesma janela não repete"
         );
+        // Sem o socket2, o foreign-toplevel conta as trocas: com dúvida perto.
+        assert!(anel.semente(a("foot2"), T0 + 5_000));
+        assert_eq!(anel.em(T0 + 5_500), Achado::Duvida);
+        assert_eq!(anel.em(T0 + 6_000), Achado::Janela(a("foot2")));
+        // A fonte das trocas contou uma: a semente não entra mais.
+        assert!(anel.ativou(Some(a("foot3")), T0 + 10_000));
+        assert!(!anel.semente(a("foot4"), T0 + 11_000));
     }
 
     #[test]

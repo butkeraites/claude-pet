@@ -13,6 +13,7 @@ mod fantasma;
 mod folha;
 mod fonte;
 mod fonte_mini;
+mod globais;
 mod importar;
 mod lint;
 mod nitidez;
@@ -48,6 +49,10 @@ const COMANDOS: &[(&str, &str)] = &[
     (
         "fonte",
         "assa a fonte monogram dos balões no pet-core (M4); --conferir só confere",
+    ),
+    (
+        "globais",
+        "lista os globais do compositor e confere os que o clique pede (M4)",
     ),
 ];
 
@@ -151,6 +156,14 @@ fn main() -> ExitCode {
             Err(e) => {
                 eprintln!("cobertura: {e}");
                 eprintln!("uso: cargo xtask cobertura <pasta> [--saida <arquivo.md>]");
+                ExitCode::from(2)
+            }
+        },
+        Some("globais") => match globais::executar(&args[1..]) {
+            Ok(true) => ExitCode::SUCCESS,
+            Ok(false) => ExitCode::FAILURE,
+            Err(e) => {
+                eprintln!("globais: {e}");
                 ExitCode::from(2)
             }
         },

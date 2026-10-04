@@ -31,6 +31,10 @@ png = "0.18.1"
 smithay-client-toolkit = { version = "0.21.1", default-features = false, features = ["calloop"] }
 wayland-client = "0.31.15"
 wayland-protocols = { version = "0.32.13", features = ["client", "staging"] }
+# Gera o código de cliente do `hyprland_toplevel_mapping_manager_v1` a partir
+# do XML vendorado em `crates/pet-wayland/protocolos/` (decisão 0056); as
+# tabelas das interfaces são escritas à mão, sem `unsafe`.
+wayland-scanner = "0.31.11"
 rustix = { version = "1.1.4", features = ["process", "event"] }
 sha2 = "0.11.0"
 

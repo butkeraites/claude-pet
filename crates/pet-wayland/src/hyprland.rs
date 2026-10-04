@@ -36,6 +36,7 @@ use std::time::Duration;
 use crate::conexao::conectar_unix;
 
 pub mod eventos;
+pub mod mapeamento;
 
 /// Nome do output que o Hyprland cria quando não sobra nenhum monitor de
 /// verdade: nunca é casa do pet.

@@ -2154,3 +2154,56 @@ Renan mandou o prompt.
 prompt sai do teclado na janela ativa; casar pela hora acerta sem ler
 títulos, e guardar a dúvida em vez de chutar evita mandar o Renan para a
 janela errada.
+
+## 0056 — Focar a janela pelo foreign-toplevel e o mapeamento do Hyprland, na conexão e no `wl_seat` da sessão (2026-10-04)
+
+**Problema:** o clique no Zeca foca o terminal de uma sessão sem o socket
+de comandos do Hyprland (decisões 0006 e 0039): pelo
+`zwlr_foreign_toplevel_handle_v1.activate(seat)` do handle certo. O handle
+vem do foreign-toplevel; o endereço da janela (o do `activewindowv2`, que o
+anel guarda) só vem do `hyprland_toplevel_mapping_manager_v1`, que não tem
+crate em Rust. E o `generate_interfaces!` do `wayland-scanner` gera a ponte
+para a libwayland em C, com `unsafe` — proibido fora dos esboços.
+**Escolha (T4.9):**
+- **Conferido nesta máquina** (`cargo xtask globais`, que só lê o registro
+  do Wayland): o Hyprland 0.56.2 anuncia `zwlr_foreign_toplevel_manager_v1`
+  v3 e `hyprland_toplevel_mapping_manager_v1` v1. E o código do Hyprland
+  confere o resto: o `activate` faz `activate(true)` (passa por cima das
+  regras de foco, muda para a área de trabalho da janela e leva o ponteiro);
+  o endereço do mapeamento é o ponteiro da janela, o mesmo
+  `std::format("{:x}", …)` dos eventos do socket2.
+- **O protocolo:** o XML do hyprland-protocols (BSD-3-Clause) vendorado sem
+  mudança em `crates/pet-wayland/protocolos/`; o código de cliente pelo
+  `wayland_scanner::generate_client_code!` (dependência direta do
+  `pet-wayland`, já no `Cargo.lock`); as tabelas das duas interfaces
+  escritas à mão (`c_ptr: None`: o pet usa só o backend em Rust puro), sem
+  `unsafe`, com um teste que as confere contra o XML (pedidos, eventos,
+  argumentos e destrutores).
+- **O foreign-toplevel genérico** (`pet_wayland::toplevel`, serve aos outros
+  wlroots no T8.7): as janelas anunciadas, cada uma com o endereço e se está
+  ativa — nunca o título nem o app id, que chegam e são jogados fora. Cada
+  toplevel novo é mapeado na hora (`get_window_for_toplevel_wlr`), e o
+  handle do mapeamento é destruído depois da resposta. Com o
+  `WAYLAND_DEBUG` de cliente ligado, o wayland-client imprime toda mensagem
+  no stderr, títulos inclusive: aí o foreign-toplevel nem é ligado (aviso no
+  log) e o clique cai no balão.
+- **O desktop da sessão:** a `Sessao` liga os dois protocolos na própria
+  conexão (opcionais: sem algum, o aviso no log e o clique cai no balão);
+  `Desktop::focar(endereço)` acha o handle e faz `activate` no `wl_seat` da
+  mesma conexão (`JanelaSumiu` se o endereço não está mais lá,
+  `NaoSuportado` sem os protocolos ou sem seat). O `/v1/estado.desktop`
+  mostra os protocolos ligados e quantas janelas têm endereço.
+- **A semente:** a janela ativa pelo foreign-toplevel (com endereço) vira
+  `JanelaInicial`; o anel a usa com ele vazio, num buraco ou depois de outra
+  semente, até o socket2 contar uma troca (a primeira semente não tem
+  dúvida; as seguintes são trocas que o foreign-toplevel viu).
+- **Conferido ao vivo** com a sessão bloqueada e a tela apagada, num daemon
+  nativo de rascunho (porta 27399, `/state` de rascunho, skin `_teste`,
+  parado com SIGTERM em seguida): os dois protocolos ligados, a única janela
+  aberta mapeada com o endereço que o `hyprctl -j clients` (só leitura, no
+  host) dá para o `foot`, a semente no anel e o socket2 ligado. Focar de
+  verdade fica pendente: bloqueado, o Hyprland recusa o foco a janelas.
+**Por quê:** o foreign-toplevel é uma ação de alto nível sobre uma janela,
+sem executar nada no host; o mapeamento é o que liga o handle ao endereço
+que o anel conhece. Escrever as tabelas à mão é o preço de não ter `unsafe`,
+e o teste contra o XML garante que elas são as do protocolo.
