@@ -529,7 +529,7 @@ mod testes {
     fn arte_com(nome: &str, arquivo: &str, de: &str, para: &str) -> Result<Arte, String> {
         let origem = crate::raiz().join("arte/zeca");
         let pasta =
-            std::env::temp_dir().join(format!("claude-pet-arte-{}-{nome}", std::process::id()));
+            std::env::temp_dir().join(format!("bichinho-arte-{}-{nome}", std::process::id()));
         let _ = fs::remove_dir_all(&pasta);
         fs::create_dir_all(pasta.join("acessorios")).unwrap();
         for entrada in fs::read_dir(&origem)

@@ -1,6 +1,7 @@
 //! `bin/pet testar` de ponta a ponta: o CLI manda os eventos sintéticos
-//! pelo `avisar.sh` de verdade (curl de verdade) para um daemon numa porta
-//! própria, e o cérebro escolhe a reação.
+//! pelo hook de verdade (o `bichinho avisar` que o cargo acabou de compilar,
+//! por `PET_BICHINHO`; sem binário, o `avisar.sh` de reserva) para um daemon
+//! numa porta própria, e o cérebro escolhe a reação.
 
 mod comum;
 
@@ -8,10 +9,14 @@ use std::process::Command;
 
 use comum::Daemon;
 
+/// O hook nativo que o cargo acabou de compilar.
+const HOOK: &str = env!("CARGO_BIN_EXE_bichinho");
+
 fn testar(d: &Daemon, cenario: &str) -> (bool, String, String) {
     let saida = Command::new(comum::raiz().join("bin/pet"))
         .args(["testar", cenario])
         .env("PET_PORTA", d.porta.to_string())
+        .env("PET_BICHINHO", HOOK)
         .output()
         .expect("rodar bin/pet");
     (
@@ -27,6 +32,10 @@ fn rapido_acena_e_pequeno_pula() {
     let (ok, saida, erro) = testar(&d, "rapido");
     assert!(ok, "rapido falhou: {saida}{erro}");
     assert!(saida.contains("✓ rapido → nod"), "{saida}");
+    assert!(
+        saida.contains(&format!("pelo hook nativo: {HOOK} avisar")),
+        "{saida}"
+    );
     let (ok, saida, erro) = testar(&d, "pequeno");
     assert!(ok, "pequeno falhou: {saida}{erro}");
     assert!(saida.contains("✓ pequeno → done_small"), "{saida}");
@@ -97,6 +106,7 @@ fn proxy_e_curlrc_nao_desviam_o_cli() {
     let mut cmd = Command::new(comum::raiz().join("bin/pet"));
     cmd.args(["testar", "rapido"])
         .env("PET_PORTA", d.porta.to_string())
+        .env("PET_BICHINHO", HOOK)
         .env("CURL_HOME", &pasta)
         .env("XDG_CONFIG_HOME", &pasta);
     for variavel in [
@@ -117,6 +127,25 @@ fn proxy_e_curlrc_nao_desviam_o_cli() {
         String::from_utf8_lossy(&saida.stderr)
     );
     assert!(texto.contains("✓ rapido → nod"), "{texto}");
+}
+
+#[test]
+fn sem_o_binario_vai_pelo_avisar_sh_de_reserva() {
+    // Até a troca (decisão 0041): sem o `bichinho` no PATH, o `bin/pet
+    // testar` avisa e vai pelo `avisar.sh`, que continua funcionando.
+    let d = Daemon::subir(false);
+    let saida = Command::new(comum::raiz().join("bin/pet"))
+        .args(["testar", "pequeno"])
+        .env_remove("PET_BICHINHO")
+        .env("PATH", "/usr/bin:/bin")
+        .env("PET_PORTA", d.porta.to_string())
+        .output()
+        .expect("rodar bin/pet");
+    let texto = String::from_utf8_lossy(&saida.stdout);
+    let erro = String::from_utf8_lossy(&saida.stderr);
+    assert!(saida.status.success(), "{texto}{erro}");
+    assert!(texto.contains("✓ pequeno → done_small"), "{texto}");
+    assert!(erro.contains("indo pelo avisar.sh de reserva"), "{erro}");
 }
 
 #[test]

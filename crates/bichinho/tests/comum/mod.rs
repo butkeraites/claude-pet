@@ -5,6 +5,8 @@
 
 #![allow(dead_code)] // cada arquivo de teste usa uma parte
 
+pub mod canarios;
+
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -60,7 +62,7 @@ impl Daemon {
                 .expect("porta livre")
                 .port();
             let log = std::fs::File::create(pasta.join("daemon.log")).expect("log");
-            let mut cmd = Command::new(env!("CARGO_BIN_EXE_claude-pet"));
+            let mut cmd = Command::new(env!("CARGO_BIN_EXE_bichinho"));
             cmd.arg("rodar")
                 .env_clear()
                 .env("HOME", &pasta)

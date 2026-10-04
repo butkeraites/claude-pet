@@ -50,7 +50,7 @@ use crate::shm::Lona;
 
 /// Namespace da camada (decisão 0012); é por ele que o `hyprctl layers` e
 /// uma eventual regra do Hyprland acham o pet.
-pub const NAMESPACE: &str = "claude-pet";
+pub const NAMESPACE: &str = "bichinho";
 /// Sem `preferred_scale` depois disto: escala pelo modo do monitor.
 pub const PRAZO_ESCALA: Duration = Duration::from_millis(200);
 /// Sem `enter` depois disto: primeiro monitor utilizável.

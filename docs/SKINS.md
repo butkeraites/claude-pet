@@ -193,7 +193,7 @@ A skin `_teste` só aparece com `PET_DEBUG=1`.
   e avisa "mudou depois da aprovação"; aprovar sem prévias novas é recusado.
 - `bin/pet skin-revogar [id]` apaga a aprovação e a cópia: o pet some.
 - A aprovação é por id. Para usar `zeca-contorno`: ponha `aparencia.skin =
-  "zeca-contorno"` em `config/claude-pet.toml` e rode `bin/pet skin-aprovar
+  "zeca-contorno"` em `config/bichinho.toml` e rode `bin/pet skin-aprovar
   zeca-contorno` — o pet relê o config a cada aprovação, sem reiniciar.
 - Para conferir o personagem com as rotas de debug (nitidez, foto
   mascarada): `scripts/verificar-ao-vivo.sh --personagem` (aprova só para o

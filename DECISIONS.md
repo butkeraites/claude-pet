@@ -1386,3 +1386,88 @@ custo no Hyprland iguais ao M1).
 **Por quê:** a costura é pequena agora e cara depois do M4–M6. Com o Motor
 puro, o que o pet faz é testado sem compositor, e o porte para outro sistema
 é escrever um `Overlay`, um `Desktop` e um laço, sem tocar no resto.
+
+## 0041 — Hook nativo (`bichinho avisar`) em exec form e o nome bichinho, com o volume da aprovação preso ao nome antigo (2026-10-03)
+
+**Problema:** o hook era o `avisar.sh` (sh + jq + curl): no Windows, sem Git
+Bash ele nem roda e, sem jq, só sai o evento mínimo; a lista branca vivia
+num programa jq, duplicando os validadores do `pet_core::evento`. O nome
+`claude-pet` ia para o binário, a camada e o compose (decisão 0036 trocou
+para `bichinho`), e o volume com a aprovação do Zeca leva o nome do projeto
+do compose: trocar o projeto criaria um volume vazio, sem a aprovação. E o
+plugin instalado (0.1.0, decisão 0021) continua chamando o `avisar.sh` até a
+troca depois do merge.
+**Escolha (T8.1):**
+- **`bichinho avisar <Evento>`**: lê o JSON do hook na entrada padrão (até
+  64 MiB), monta o corpo pela lista branca de `pet_core::aviso` — a mesma do
+  `avisar.sh`, campo a campo, com os validadores do fio v1, então o que o pet
+  descartaria nem sai —, faz o hash do caminho editado (12 hexadecimais do
+  sha256), lê o "não perturbe" do Omarchy (só o booleano), valida o
+  `CLAUDE_CODE_ENTRYPOINT`, respeita `PET_TESTE=1` e manda por TCP direto ao
+  127.0.0.1 (conexão em 300 ms, envio e resposta em 2 s): nenhum proxy,
+  curlrc, jq ou shell. Espera a resposta do pet para o evento não se perder
+  no fim do processo. Nunca imprime (um pânico sai 0, calado), sempre sai 0 e
+  nunca passa de 4 s, nem com a entrada padrão aberta. Diferenças do
+  `avisar.sh`, todas a favor do pet: a pasta passa pelo validador do pet; uma
+  contagem `bg` acima de 10 000 não sai; uma porta 0 ou acima de 65 535 vira
+  a padrão.
+- **`hooks.json` em exec form**, igual nos três sistemas: `{"type":
+  "command", "async": true, "command": "bichinho", "args": ["avisar",
+  "<Evento>"]}` (`claude plugin validate --strict` aceita); plugin 0.2.0.
+- **O binário no host:** o exec form acha o `bichinho` pelo PATH do Claude
+  Code. `bin/pet instalar-host` copia o binário estático (musl, static-pie)
+  da imagem para `~/.local/bin/bichinho` (troca de uma vez, confere que roda
+  no host, avisa se a pasta não está no PATH ou se outro `bichinho` vem
+  antes). Requisito documentado: `~/.local/bin` no PATH que o Claude Code vê
+  (no Omarchy, está). Sem o binário, os hooks não chegam ao pet e o `claude
+  -p` continua calado (conferido com um plugin de sondagem cujo comando não
+  existe).
+- **Reserva até a troca:** o `avisar.sh` fica no plugin, com os canários
+  dele; o plugin 0.1.0 instalado continua chamando a cópia dele (no cache do
+  Claude Code), que fala com o mesmo pet: a troca nunca deixa o pet surdo. O
+  `bin/pet testar` vai pelo `bichinho` do PATH (ou `PET_BICHINHO`) e, sem
+  ele, pelo `avisar.sh`, avisando. A troca depois do merge, na ordem (está no
+  README): clone e worktree estável na `main`, `bin/pet subir`, `bin/pet
+  instalar-host`, `claude plugin marketplace update bichinho-local`,
+  `claude plugin update bichinho@bichinho-local` e `/reload-plugins`.
+- **Canários portados** para o binário (`tests/hook.rs`, 18 testes, com os
+  casos do `avisar.sh` num módulo comum): o binário de verdade, o ambiente
+  limpo e um pet falso no 127.0.0.1 que guarda o pedido inteiro (linha,
+  cabeçalhos e corpo) — nenhum segredo em evento nenhum, campos por evento,
+  `PET_TESTE`, "não perturbe", entrada que não é JSON, tipos errados, nome de
+  evento inválido, cabeçalhos, proxy e curlrc ignorados, origem, validadores
+  iguais aos do pet, entrada de 8 MiB, pet desligado (menos de 0,5 s), pet
+  travado (menos de 2,6 s), entrada que nunca fecha (sai no prazo) e o pet de
+  verdade sem nada recusado nem descartado. Seis versões erradas de propósito
+  reprovaram: a lista branca aberta (o prompt no `src`: 5 testes), o caminho
+  editado em claro (2), imprimir no stderr (14), sair 1 (14), sem o prazo
+  total (1) e a pasta inteira no `proj` (7).
+- **O nome bichinho** (decisão 0036): crate e binário, namespace da camada,
+  projeto, serviço e imagem do compose (`bichinho:local`), `/opt/bichinho` e
+  `/etc/bichinho` no container, `config/bichinho.toml` (o `claude-pet.toml`
+  ainda vale sozinho, com aviso no log), a pasta dos symlinks curtos, a carga
+  de medição (`bichinho-carga`) e as mensagens. Ficam `claude-pet`: o
+  repositório, a worktree estável e as strings de autoria gravadas na arte
+  gerada (mudariam a impressão digital aprovada).
+- **O volume:** preso ao nome `claude-pet_estado` no compose, sem copiar a
+  aprovação; o compose avisa que ele foi criado para o projeto antigo, e é de
+  propósito. `bin/pet subir`, `dev` e `reconstruir` aposentam o container do
+  projeto antigo (ele seguraria a porta 27380); o volume nunca é tocado.
+
+Ao vivo (tela apagada e sessão bloqueada; só `/v1/estado` e log): `bin/pet
+subir` aposentou o `claude-pet-pet-1` e subiu o `bichinho-bichinho-1`
+(healthy) com o mesmo volume: `tela: ativa`, `zeca` da imagem com a aprovação
+do Renan (sha 5b843b03…), o `aprovacao.json` idêntico ao de antes, D = 8.
+`bin/pet instalar-host` pôs o binário em `~/.local/bin/bichinho`;
+`bin/pet testar rapido` → `nod` e `pequeno` → `done_small`, pelo hook nativo.
+O `avisar.sh` do plugin instalado (mesmo sha256 antes e depois) entregou um
+evento de teste ao daemon novo. Shellcheck limpo pela imagem oficial,
+removida depois.
+
+Fica para depois: a porta e o token por usuário no loopback (T9.3; o
+`avisar.sh` instalado não mandaria o token) e a CLI de usuário no binário
+(`estado`, `tocar`, `doutor`), que por enquanto é o `bin/pet`.
+**Por quê:** um binário só, sem shell nem jq, é o mesmo hook nos três
+sistemas, e a lista branca passa a ter uma fonte com os validadores do pet.
+Prender o volume ao nome antigo não copia nem arrisca a aprovação, e vale
+para todo jeito de subir o compose (produção, dev e scripts).

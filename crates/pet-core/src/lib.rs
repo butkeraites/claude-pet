@@ -1,4 +1,4 @@
-//! Núcleo puro do claude-pet.
+//! Núcleo puro do bichinho.
 //!
 //! Tudo aqui é determinístico e testável sem compositor: configuração,
 //! cérebro (eventos do Claude Code → reações), pontuação, animador, skin,
@@ -11,6 +11,7 @@ pub mod registro;
 
 pub mod animador;
 pub mod aprovacao;
+pub mod aviso;
 pub mod cena;
 pub mod cerebro;
 pub mod confete;

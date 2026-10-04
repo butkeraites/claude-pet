@@ -1,6 +1,6 @@
 [package]
 name = "pet-core"
-description = "Núcleo puro do claude-pet: configuração, cérebro, animação e raster. Nunca depende de Wayland."
+description = "Núcleo puro do bichinho: configuração, cérebro, animação e raster. Nunca depende de Wayland."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

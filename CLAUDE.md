@@ -2,13 +2,17 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-# claude-pet — contexto para o Claude Code
+# bichinho — contexto para o Claude Code
 
 O **Zeca** é um papagaio de pixel art que mora na tela do Renan (Omarchy,
 Hyprland 0.56, Wayland) e reage ao Claude Code rodando no terminal:
 comemora quando o Claude termina, chama quando o Claude precisa dele, dorme
 quando ninguém mexe. Fica sempre por cima de tudo, pode ser arrastado e
 segue o monitor ativo. Roda em Docker. **Sem som** (decisão 0002).
+
+O app se chama **bichinho** (binário, crate, camada, compose; decisão 0036);
+o repositório de desenvolvimento continua `claude-pet`
+(`~/Documents/claude-pet`).
 
 O plano completo, com marcos M0–M9 e como verificar cada um, está em
 `PLANO.md`. As decisões, com o porquê, estão em `DECISIONS.md`.
@@ -56,9 +60,10 @@ Fora dele, use `~/.cargo/bin/cargo`.
 | `bin/pet verificar` | portão antes de **todo** commit: fmt, clippy, testes, compose, plugin |
 | `rustup target add x86_64-pc-windows-msvc aarch64-apple-darwin` | com os alvos instalados, o `verificar` também passa o clippy do núcleo, dos esboços e do daemon para Windows e macOS (sem linkar, sem SDK) |
 | `bin/pet subir` / `parar` / `logs` / `estado` | compose e estado do pet |
-| `bin/pet testar rapido` / `pequeno` | eventos sintéticos pelo `avisar.sh` de verdade (`PET_TESTE=1`) → `nod` / `done_small` |
+| `bin/pet testar rapido` / `pequeno` | eventos sintéticos pelo hook de verdade (`bichinho avisar` do PATH ou `PET_BICHINHO`; sem ele, o `avisar.sh` de reserva, com aviso), com `PET_TESTE=1` → `nod` / `done_small` |
+| `bin/pet instalar-host` | copia o binário estático da imagem para `~/.local/bin/bichinho` (o hook do plugin 0.2.0 o acha pelo PATH) |
 | `bin/pet tocar <reação>` / `esconder` / `mostrar` | `/v1/comando` (não persiste); o `tocar` diz a tag que a skin tocou e se apareceu na tela |
-| `claude --plugin-dir ~/Documents/claude-pet/plugin` | o plugin numa sessão só (até o merge, nunca instalar) |
+| `claude --plugin-dir ~/Documents/claude-pet/plugin` | o plugin da branch numa sessão só (nunca instalar antes do merge) |
 | `~/.cargo/bin/cargo test` | testes do workspace (os quadros dourados regeneram com `PET_ATUALIZAR_OURO=1`) |
 | `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build` | modo desenvolvimento (sem restart, debug, skin `_teste`) |
 | `bin/pet foto` | foto do pet (grim no monitor inteiro); em debug, só os pixels opacos do pet sobre fundo neutro |
@@ -88,7 +93,7 @@ Fora dele, use `~/.cargo/bin/cargo`.
   - `crates/pet-windows` e `crates/pet-macos`: esboços vazios que compilam
     (`cargo clippy --target` no `bin/pet verificar`, com os alvos do
     rustup instalados);
-  - `crates/claude-pet`: o daemon (binário estático no container `alpine`,
+  - `crates/bichinho`: o daemon e o hook (binário estático no container `alpine`,
     uid 1000, rootfs somente leitura). O `nucleo` junta o Motor com as
     aprovações em disco e o `/v1/estado`; o `laco` é o do Linux (calloop
     com o Wayland); o `sem_janela` roda onde ainda não há janela (Windows e
@@ -97,7 +102,8 @@ Fora dele, use `~/.cargo/bin/cargo`.
   nunca redimensionada, sem subsurfaces; o Zeca anda dentro do buffer.
   Cada pixel de arte vira um bloco D×D inteiro de pixels do monitor.
 - Eventos do Claude Code chegam por `POST 127.0.0.1:27380/v1/evento`
-  vindos do plugin `bichinho` (hooks async → `plugin/scripts/avisar.sh`),
+  vindos do plugin `bichinho` (hooks async em exec form → `bichinho avisar
+  <Evento>`, com a lista branca do `pet_core::aviso`; decisão 0041),
   são validados campo a campo (`pet_core::evento`, decisão 0019) e vão
   pela `Caixa` (um `mpsc` limitado que acorda o laço; no Linux, por um
   `Ping` do calloop) para o cérebro (`pet_core::cerebro`, decisões 0020 e
@@ -115,11 +121,14 @@ Fora dele, use `~/.cargo/bin/cargo`.
 
 ## Regras de ouro
 
-- **Hooks:** sempre `async`, só metadados (lista branca do jq), sempre
-  `exit 0`. Conteúdo (prompt, código, resposta, título de janela) nunca sai
-  do host nem vai para log. Os metadados só vão ao 127.0.0.1: todo curl que
-  fala com o pet leva `-q --noproxy '*'` (nenhum curlrc, nenhum proxy) e o
-  jq do `avisar.sh` roda sem `~/.jq` (decisão 0031).
+- **Hooks:** sempre `async`, só metadados, nunca imprimem, sempre `exit 0`.
+  O hook é o `bichinho avisar <Evento>` em exec form (decisão 0041): a lista
+  branca do `pet_core::aviso`, com os validadores do fio v1, e TCP direto ao
+  127.0.0.1 (nenhum proxy, nenhum curlrc). Conteúdo (prompt, código,
+  resposta, título de janela) nunca sai do host nem vai para log. O
+  `avisar.sh` fica de reserva até a troca: todo curl que fala com o pet leva
+  `-q --noproxy '*'` e o jq dele roda sem `~/.jq` (decisão 0031). Os
+  canários dos dois (`tests/hook.rs`, `tests/avisar.rs`) não podem cair.
 - **Hyprland:** o daemon **nunca** abre o `.socket.sock` e nunca chama
   `hyprctl dispatch`/`keyword` (nem em `pet-wayland`). Só lê eventos do
   `.socket2.sock`. `hyprctl` só aparece em scripts de teste do host.
@@ -143,7 +152,7 @@ Fora dele, use `~/.cargo/bin/cargo`.
   Nunca aprove por ele: aprovação de teste se revoga no fim (os scripts ao
   vivo fazem isso sozinhos, até numa falha). **Nunca revogue uma aprovação
   que você não fez:** antes de mexer, leia `skin` no `/v1/estado` e o
-  `/state/skins/<id>/aprovacao.json` (`docker exec claude-pet-pet-1 cat …`);
+  `/state/skins/<id>/aprovacao.json` (`docker compose exec -T bichinho cat …`);
   a que já estava lá é do Renan. Para testar reações, `bin/pet testar` e
   `bin/pet tocar`, que nunca mexem em aprovação.
 - **Orçamento de commits Wayland:** média ≤ 2/s parado, 0 dormindo,
@@ -195,9 +204,20 @@ Fora dele, use `~/.cargo/bin/cargo`.
 - `pkill -f`/`pgrep -f` com um padrão que aparece na própria linha de
   comando acha o shell que está rodando: para parar um daemon de teste,
   guarde o PID.
-- Plugin: **nunca** `claude plugin marketplace add` / `install` antes do
-  merge na `main` (sessões de outros projetos rodariam a branch). Para
-  testar ao vivo, `claude --plugin-dir ~/Documents/claude-pet/plugin`.
+- Plugin: **nunca** `claude plugin marketplace add` / `install` / `update`
+  nem mexer na worktree estável (`~/.local/share/claude-pet/estavel`) antes
+  do merge na `main` (sessões de outros projetos rodariam a branch). Para
+  testar ao vivo, `claude --plugin-dir ~/Documents/claude-pet/plugin`. A
+  troca depois do merge está no README (a ordem importa: `bin/pet
+  instalar-host` antes de `claude plugin update`).
+- O hook em exec form acha o `bichinho` pelo PATH do Claude Code: sem ele,
+  os eventos não chegam e o `claude -p` fica calado (conferido). Confira com
+  `command -v bichinho` e `bin/pet testar`.
+- O compose avisa que o volume `claude-pet_estado` "foi criado para o
+  projeto claude-pet": é de propósito, o nome está preso a ele para a
+  aprovação do Zeca sobreviver ao nome novo (decisão 0041). Nunca apague
+  esse volume. O `bin/pet subir` (e `dev`, `reconstruir`) aposenta o
+  container do projeto antigo, que seguraria a porta 27380.
 - Hook async não aparece em lugar nenhum: para ver o que chegou, pilha de
   dev e `curl -H 'X-Pet: 1' 127.0.0.1:27380/v1/debug/eventos` (só
   metadados validados).
@@ -230,5 +250,5 @@ Fora dele, use `~/.cargo/bin/cargo`.
   (decisão 0037). Linha nova do PROGRESS nasce com "—" no commit.
 - DECISIONS só cresce (decisões novas no fim, em ordem numérica); a única
   reescrita permitida foi a da decisão 0035.
-- Nunca commitar `.env`, `config/claude-pet.toml`, `skins-locais/*`,
+- Nunca commitar `.env`, `config/bichinho.toml` (ou o `claude-pet.toml` de antes), `skins-locais/*`,
   `tmp/`, `target/`.

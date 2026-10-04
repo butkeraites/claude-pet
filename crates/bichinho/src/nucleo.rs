@@ -47,20 +47,21 @@ pub struct Nucleo {
     onde: Onde,
     /// A skin configurada (`aparencia.skin`).
     configurada: String,
-    /// `claude-pet.toml`, relido a cada aprovação: trocar `aparencia.skin`
-    /// (o `zeca-contorno`, por exemplo) vale sem reiniciar o container.
-    arquivo_config: Option<PathBuf>,
+    /// A pasta do `bichinho.toml`, relido a cada aprovação: trocar
+    /// `aparencia.skin` (o `zeca-contorno`, por exemplo) vale sem reiniciar o
+    /// container.
+    pasta_config: Option<PathBuf>,
     /// Origem do relógio monotônico do laço (os prazos em ms).
     inicio: Instant,
 }
 
 impl Nucleo {
     /// `config` é a da partida: dela saem a skin configurada e a config do
-    /// cérebro; `arquivo_config` é de onde ela é relida a cada aprovação.
+    /// cérebro; `pasta_config` é de onde ela é relida a cada aprovação.
     pub fn novo(
         comp: Arc<Compartilhado>,
         onde: Onde,
-        arquivo_config: Option<PathBuf>,
+        pasta_config: Option<PathBuf>,
         config: &ConfigEfetiva,
         inicio: Instant,
     ) -> Nucleo {
@@ -70,7 +71,7 @@ impl Nucleo {
             na_tela: None,
             onde,
             configurada: config.texto("aparencia.skin").to_owned(),
-            arquivo_config,
+            pasta_config,
             inicio,
         };
         nucleo.escolher_personagem(None);
@@ -97,15 +98,15 @@ impl Nucleo {
         }
     }
 
-    /// Relê o `claude-pet.toml` (o mesmo caminho e as mesmas variáveis da
+    /// Relê o `bichinho.toml` (a mesma pasta e as mesmas variáveis da
     /// partida): uma aprovação depois de trocar `aparencia.skin` já vale, e
     /// o cérebro passa a usar `sessoes.origens` e `celebracao.modo` do
     /// arquivo novo, como o `/v1/estado.config` mostra (decisão 0030).
     fn reler_config(&mut self, ov: Option<&mut dyn Overlay>) {
-        let Some(arquivo) = &self.arquivo_config else {
+        let Some(pasta) = &self.pasta_config else {
             return;
         };
-        let config = crate::daemon::carregar_config(arquivo);
+        let config = crate::daemon::carregar_config(&crate::ambiente::arquivo_config_em(pasta));
         let skin = config.texto("aparencia.skin").to_owned();
         if skin != self.configurada {
             info!(

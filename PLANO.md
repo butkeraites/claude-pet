@@ -1,4 +1,4 @@
-# Plano: claude-pet — o Zeca, papagaio pixel art que comemora quando o Claude Code termina
+# Plano: bichinho — o Zeca, papagaio pixel art que comemora quando o Claude Code termina
 
 > Plano aprovado em 2026-10-02. Mudanças de rumo entram em DECISIONS.md; este arquivo só ganha correções e IDs de tarefa.
 >
@@ -83,21 +83,21 @@ O Renan quer um bichinho de pixel art que more na tela e reaja ao Claude Code ro
 | Festa | Calculada pelo **trabalho real**: ferramentas de trabalho, arquivos editados, subagentes e tempo de ferramenta. Não usa tempo de relógio. | Com Opus em esforço máximo, uma resposta simples leva 20–90 s. Medir por relógio daria festa em toda resposta. |
 | Atenção | Escalada só visual, com teto, e que sabe se você está presente: olhando o terminal do Claude, fica no nível 1. | Não há som. Movimento que começa chama atenção; movimento constante cansa. |
 | Arte | O pack comprado fica em `skins-locais/` (gitignored) e entra só na imagem local, que nunca vai a registry. Chapéu e gravata são arte nossa, commitada. | A licença permite editar e proíbe redistribuir. |
-| Nomes | - repo, binário, compose e namespace da camada: `claude-pet`;<br>- plugin e marketplace: `bichinho` (nomes de plugin que começam com `claude-` são reservados);<br>- personagem/skin: `zeca`;<br>- CLI: `bin/pet`;<br>- variáveis de ambiente: `PET_*`. | Trocar o personagem não exige renomear o código. |
+| Nomes | - app, binário, crate, compose (projeto, serviço, imagem) e namespace da camada: `bichinho` (decisão 0036; até o T8.1, `claude-pet`); o repositório de desenvolvimento continua `claude-pet`;<br>- plugin e marketplace: `bichinho` e `bichinho-local` (nomes de plugin que começam com `claude-` são reservados);<br>- personagem/skin: `zeca`;<br>- CLI de desenvolvimento: `bin/pet`;<br>- variáveis de ambiente: `PET_*`; cabeçalho `X-Pet: 1`. | Trocar o personagem não exige renomear o código; um nome próprio evita colisão e marca alheia. |
 | Fuso | Bind de `/etc/localtime`, nunca `TZ`. | O host está em America/New_York e os outros projetos usam São Paulo; não dá para assumir nenhum dos dois. |
 
 ## Arquitetura
 
 ```
-HOST (Hyprland, uid 1000)                                  CONTAINER claude-pet (alpine 3.24.2, uid 1000, rootfs ro)
+HOST (Hyprland, uid 1000)                                  CONTAINER bichinho (alpine 3.24.2, uid 1000, rootfs ro)
 claude (foot) + plugin bichinho                            PID1 docker-init (init: true)
-  hook async: sh avisar.sh <Evento>                         └ claude-pet rodar (um processo)
-    jq (lista branca) -> curl -m 2 POST ----------------->     main (calloop): cérebro, animador, cena, sessão Wayland, timers, estado
+  hook async: bichinho avisar <Evento>                      └ bichinho rodar (um processo)
+    lista branca (pet_core::aviso) -> POST -------------->     main (calloop): Motor (cérebro, animador, cena), sessão Wayland, prazos, estado
       127.0.0.1:27380/v1/evento                                thread ingress: HTTP 0.0.0.0:27380
 /run/user (bind ro, rslave) ------------------------------>    thread hypr: leitor do .socket2.sock (só eventos)
   1000/wayland-1          <- 1 camada OVERLAY                  thread watchdog: batimento > 60 s -> abort() -> Docker reinicia
   1000/hypr/<HIS>/.socket2.sock
-/etc/localtime (ro), ./config -> /etc/claude-pet (ro), volume estado -> /state
+/etc/localtime (ro), ./config -> /etc/bichinho (ro), volume claude-pet_estado -> /state
 ```
 
 **Falhas esperadas, tratadas dentro do processo:**
@@ -127,6 +127,8 @@ claude (foot) + plugin bichinho                            PID1 docker-init (ini
 - o `.dockerignore` **não** pode excluir `skins-locais/`.
 
 **`docker-compose.yml` (pontos essenciais):**
+
+Desde o T8.1 (decisões 0036 e 0041) o projeto, o serviço e a imagem se chamam `bichinho`, e o volume do estado fica preso ao nome antigo (`claude-pet_estado`), com a aprovação do Zeca. O esboço original:
 
 ```yaml
 name: claude-pet
@@ -163,7 +165,7 @@ volumes: {estado: {}}
 **Desenvolvimento:**
 - `docker-compose.dev.yml` traz `restart: "no"`, `PET_LOG=debug` e `PET_DEBUG=1`, e monta `skins/` e `assets/` somente-leitura.
   - Ele **não** pode se chamar `compose.override.yml`, porque esse nome é mesclado automaticamente.
-- Ciclo nativo, o mais rápido: `docker compose stop pet` e depois `cargo run -p claude-pet -- rodar`, com `PET_HOST_RUNTIME=/run/user` e caminhos locais.
+- Ciclo nativo, o mais rápido: `docker compose stop bichinho` e depois `cargo run -p bichinho -- rodar`, com `PET_HOST_RUNTIME=/run/user` e caminhos locais.
 
 ## Descoberta e ciclo de vida
 
@@ -189,7 +191,7 @@ volumes: {estado: {}}
 ## Superfície, renderização e nitidez
 
 **Superfície:**
-- camada OVERLAY, namespace `claude-pet`, ancorada nas 4 bordas;
+- camada OVERLAY, namespace `bichinho` (até o T8.1, `claude-pet`), ancorada nas 4 bordas;
 - `exclusive_zone -1` e teclado NONE, então nunca rouba o foco.
 
 **Primeiro mapeamento** (com output NULL, a escala só chega quando a camada é mapeada):
@@ -282,6 +284,8 @@ Assim o fade de saída do Hyprland não deixa um quadro fantasma.
 "Stop": [{"hooks": [{"type": "command", "async": true,
   "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" Stop || true"}]}]
 ```
+
+**O hook.** Desde o T8.1 (decisão 0041) é o próprio binário, `bichinho avisar <Evento>`, em exec form (`"command": "bichinho", "args": ["avisar", "<Evento>"]`): a mesma lista branca em Rust (`pet_core::aviso`, com os validadores do fio v1), TCP direto ao 127.0.0.1, calado, sempre 0, com prazo. O `avisar.sh` abaixo fica de reserva até a troca do plugin instalado.
 
 **`plugin/scripts/avisar.sh`** (POSIX sh + jq + curl):
 - lê o JSON do hook pela entrada padrão;
@@ -479,6 +483,7 @@ claude-pet/
   Cargo.toml Cargo.lock rust-toolchain.toml(channel "stable" + clippy + rustfmt) rustfmt.toml .editorconfig
   crates/pet-core/src/{config,event,brain,score,attention,animator,recipes,skin,aseprite,raster,scene,particles,text,geometry,scenario}.rs
   crates/claude-pet/src/{main,daemon,discovery,hypr,ingress,store,watchdog}.rs  crates/claude-pet/src/wl/{surface,fractional,input,shm,idle}.rs
+  # desde o T8.0/T8.1: crates/{pet-core (com motor e plataforma), pet-wayland, pet-windows, pet-macos, bichinho}
   xtask/   # skin-importar | zeca | lint-skin | cobertura | contato | skin-teste | fonte | nitidez
   arte/zeca/{paleta.toml,ancoras.json,acessorios/}   assets/{fonte/monogram/,frases.toml}
   skins/_teste/   skins-locais/.gitkeep   cenarios/*.jsonl + *.esperado.jsonl   config/exemplo.toml
@@ -512,7 +517,7 @@ claude-pet/
 - Um commit por tarefa; uma branch e um PR por marco, revisado por você; merge com **merge commit** (`gh pr merge --merge`), nunca squash, para os hashes citados no PROGRESS continuarem valendo (decisão 0037); tag `v0.N.0`.
 - O corpo do PR termina com a linha do Claude Code.
 
-**Nunca commitar:** `.env`, `config/claude-pet.toml`, `skins-locais/*`, `tmp/`, `target/`.
+**Nunca commitar:** `.env`, `config/bichinho.toml` (e o `config/claude-pet.toml` de antes), `skins-locais/*`, `tmp/`, `target/`.
 
 **CLAUDE.md:**
 - Estado do projeto e comandos. O `~/.cargo/bin` fica fora do PATH, mas `bin/pet` acrescenta.
@@ -563,7 +568,7 @@ claude-pet/
 - `claude plugin validate` (`--strict`) no repo e em `plugin/`;
 - shellcheck, se estiver instalado.
 
-**Config `config/claude-pet.toml`** (gitignored; modelo em `exemplo.toml`; relido a quente):
+**Config `config/bichinho.toml`** (gitignored; modelo em `exemplo.toml`; relido a quente; o nome de antes, `claude-pet.toml`, ainda vale sozinho):
 - Precedência: comandos persistidos em `/state`, depois `PET_*`, depois o arquivo, depois os padrões.
 - `/v1/estado.config` mostra o valor de cada chave e de onde veio.
 
@@ -615,7 +620,7 @@ A beta pública mínima é T8.0–T8.5 mais T9.0–T9.4.
 - **T1.6** `scripts/verificar-ao-vivo.sh`, `cargo xtask nitidez`, medições de custo registradas em DECISIONS.
 
 **Verificação** (`scripts/verificar-ao-vivo.sh`):
-1. **Posição:** `hyprctl -j layers` mostra `claude-pet` no nível 3 do monitor focado, com o retângulo lógico do monitor.
+1. **Posição:** `hyprctl -j layers` mostra `bichinho` (até o T8.1, `claude-pet`) no nível 3 do monitor focado, com o retângulo lógico do monitor.
 2. **Nitidez:**
    - `grim -o <monitor>` captura o monitor inteiro, com transformação identidade;
    - recorte em pixels do monitor por `sprite_disp`;
@@ -708,7 +713,7 @@ Atualizado em 2026-10-03 (decisões 0038 e 0039). O M4 nasce em cima da costura 
 - **tamanho:** `aparencia.tamanho` (`pequeno`, `normal`, `grande`) chega antes, no TP.2; no M4 o arraste, as posições salvas e o balão usam o D que o tamanho escolhido dá em cada monitor.
 - Propor a regra opcional do Hyprland **pela skill omarchy e com seu consentimento**:
   ```lua
-  hl.layer_rule({ name = "claude-pet", match = { namespace = "^claude-pet$" }, order = 1, no_anim = true })
+  hl.layer_rule({ name = "bichinho", match = { namespace = "^bichinho$" }, order = 1, no_anim = true })
   ```
   - `order = 1` deixa o Zeca abaixo dos popups do Omarchy (polkit, menus, toasts);
   - `no_anim` tira o fade de ~180 ms em cada troca de monitor.

@@ -228,10 +228,8 @@ pub mod testes {
 
     impl Ambiente {
         pub fn novo(nome: &str) -> Ambiente {
-            let raiz = std::env::temp_dir().join(format!(
-                "claude-pet-aprovacao-{}-{nome}",
-                std::process::id()
-            ));
+            let raiz = std::env::temp_dir()
+                .join(format!("bichinho-aprovacao-{}-{nome}", std::process::id()));
             let _ = fs::remove_dir_all(&raiz);
             let skins = raiz.join("skins");
             let estado = raiz.join("estado");

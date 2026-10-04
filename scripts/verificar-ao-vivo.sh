@@ -4,7 +4,7 @@
 #
 # Sobe a pilha de desenvolvimento (PET_DEBUG=1, skin xadrez _teste) e confere:
 #   1. saúde: /saude 200, tela ativa, pet visível;
-#   2. camada: `hyprctl -j layers` mostra claude-pet no nível 3 do monitor
+#   2. camada: `hyprctl -j layers` mostra bichinho no nível 3 do monitor
 #      focado, com o retângulo lógico do monitor;
 #   3. esconder e mostrar seguidos: o pet volta (a corrida da revisão);
 #   4. nitidez: `grim -o` do monitor inteiro + /v1/debug/quadro +
@@ -15,7 +15,7 @@
 #   6. orçamentos: imagem < 40 MB, RSS < 64 MiB, CPU parado < 1%, commits:
 #      com a tela acesa ≤ 2/s numa janela de 20 s; com ela apagada, 0;
 #   7. clique: região de input só no corpo (o clique de verdade é manual);
-#   8. `docker compose restart pet` volta em até ~3 s, no mesmo lugar;
+#   8. `docker compose restart bichinho` volta em até ~3 s, no mesmo lugar;
 #   9. troca para a produção (SIGTERM no daemon de dev) sem fantasma, e
 #      `kill -9` pelo host faz o RestartCount subir (a produção é a que tem
 #      restart: unless-stopped; `docker kill` cancelaria a política);
@@ -106,7 +106,7 @@ CONF=""
 APROVOU_PARA_TESTE=0
 skin_configurada() { campo '.config.chaves["aparencia.skin"].valor'; }
 aprovada_no_volume() {
-  docker compose exec -T pet test -f "/state/skins/$1/aprovacao.json" >/dev/null 2>&1
+  docker compose exec -T bichinho test -f "/state/skins/$1/aprovacao.json" >/dev/null 2>&1
 }
 
 RESTAURADO=0
@@ -114,7 +114,7 @@ restaurar() {
   [ "$RESTAURADO" = 1 ] && return 0
   RESTAURADO=1
   rm -rf "$PRIVADO"
-  docker rm -f claude-pet-sem-compositor >/dev/null 2>&1 || true
+  docker rm -f bichinho-sem-compositor >/dev/null 2>&1 || true
   if [ "$APROVOU_PARA_TESTE" = 1 ]; then
     ESPERADO_PROD=sem_personagem
   fi
@@ -190,13 +190,13 @@ read -r MX MY MW MH < <(jq -r '
   | "\(.x) \(.y) \(($m[0] / .scale) | round) \(($m[1] / .scale) | round)"' <<<"$FOCADO")
 camadas_vivas() {
   hyprctl -j layers | jq -c --arg m "$NOME" \
-    '[.[$m].levels["3"][]? | select(.namespace == "claude-pet" and .pid > 0)]'
+    '[.[$m].levels["3"][]? | select(.namespace == "bichinho" and .pid > 0)]'
 }
 CAMADAS="$(camadas_vivas)"
 QUANTAS="$(jq length <<<"$CAMADAS")"
 GEOM="$(jq -r '.[0] | "\(.x) \(.y) \(.w) \(.h)"' <<<"$CAMADAS")"
 if [ "$QUANTAS" = 1 ] && [ "$GEOM" = "$MX $MY $MW $MH" ] && [ "$(campo .monitor)" = "$NOME" ]; then
-  passou "camada: claude-pet no nível 3 de $NOME, ${MW}x${MH} lógicos em ($MX,$MY)"
+  passou "camada: bichinho no nível 3 de $NOME, ${MW}x${MH} lógicos em ($MX,$MY)"
 else
   falhou "camada: $QUANTAS camada(s) viva(s) em $NOME, geometria «$GEOM» (esperado «$MX $MY $MW $MH»), estado.monitor=$(campo .monitor)"
 fi
@@ -320,8 +320,8 @@ elif [ "$PERSONAGEM" = 1 ]; then
 fi
 
 # --- 6. orçamentos do container ---------------------------------------------------
-CONTAINER="$("${DEV[@]}" ps -q pet)"
-TAMANHO="$(docker image inspect claude-pet:local --format '{{.Size}}')"
+CONTAINER="$("${DEV[@]}" ps -q bichinho)"
+TAMANHO="$(docker image inspect bichinho:local --format '{{.Size}}')"
 if [ "$TAMANHO" -lt 40000000 ]; then
   passou "imagem: $((TAMANHO / 1000)) kB (< 40 MB)"
 else
@@ -386,7 +386,7 @@ manual "clique: clicar AO LADO do pet tem que chegar na janela de baixo; em cima
 # --- 8. reinício -------------------------------------------------------------
 ANTES="$(campo_json .sprite_disp)"
 T0="$(agora_ms)"
-"${DEV[@]}" restart pet >/dev/null 2>&1
+"${DEV[@]}" restart bichinho >/dev/null 2>&1
 if esperar_campo 15 .visivel true; then
   DT=$(($(agora_ms) - T0))
   DEPOIS="$(campo_json .sprite_disp)"
@@ -444,9 +444,9 @@ fi
 if ! esperar_campo 20 .tela "$ESPERADO_PROD"; then
   falhou "produção não ficou $ESPERADO_PROD (tela=$(campo .tela))"
 else
-  ID="$("${PROD[@]}" ps -q pet)"
+  ID="$("${PROD[@]}" ps -q bichinho)"
   ANTES="$(docker inspect -f '{{.RestartCount}}' "$ID")"
-  PID="$(pgrep -u "$(id -u)" -f '^/usr/local/bin/claude-pet rodar$' | head -n1)"
+  PID="$(pgrep -u "$(id -u)" -f '^/usr/local/bin/bichinho rodar$' | head -n1)"
   if [ -z "$PID" ]; then
     falhou "crash: não achei o processo do daemon pelo host"
   else
@@ -470,12 +470,12 @@ else
 fi
 
 # --- 10. sem compositor ----------------------------------------------------------
-docker rm -f claude-pet-sem-compositor >/dev/null 2>&1 || true
-"${PROD[@]}" run -d --no-deps --name claude-pet-sem-compositor \
-  -e PET_HOST_RUNTIME=/tmp/nada pet >/dev/null 2>&1
+docker rm -f bichinho-sem-compositor >/dev/null 2>&1 || true
+"${PROD[@]}" run -d --no-deps --name bichinho-sem-compositor \
+  -e PET_HOST_RUNTIME=/tmp/nada bichinho >/dev/null 2>&1
 sleep 4
-LOG="$(docker logs claude-pet-sem-compositor 2>&1)"
-docker rm -f claude-pet-sem-compositor >/dev/null 2>&1 || true
+LOG="$(docker logs bichinho-sem-compositor 2>&1)"
+docker rm -f bichinho-sem-compositor >/dev/null 2>&1 || true
 if grep -q 'aguardando compositor' <<<"$LOG"; then
   passou "sem compositor: $(grep -m1 'aguardando compositor' <<<"$LOG")"
 else

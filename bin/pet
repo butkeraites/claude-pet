@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# bin/pet — atalhos do claude-pet. `bin/pet ajuda` lista os comandos.
+# bin/pet — atalhos de desenvolvimento do bichinho. `bin/pet ajuda` lista os
+# comandos.
 #
 # Funciona de qualquer pasta (resolve a raiz do repo pelo próprio caminho)
 # e acrescenta ~/.cargo/bin ao PATH, que fica fora do PATH do Renan.
@@ -28,13 +29,19 @@ ajuda() {
   cat <<'TEXTO'
 uso: bin/pet <comando>
 
-  subir           sobe o pet (docker compose up -d --build)
+  subir           sobe o pet (docker compose up -d --build); na primeira vez
+                  depois do nome novo, aposenta o container claude-pet antigo
+                  (o volume com a aprovação fica)
   parar           para o pet
   logs            acompanha os logs
   estado          mostra /v1/estado (o que o pet está vendo e pensando)
-  testar CENÁRIO  manda eventos sintéticos pelo plugin/scripts/avisar.sh de
-                  verdade (PET_TESTE=1: isolados das sessões reais e
-                  esquecidos em 60 s) e mostra a reação: rapido → nod,
+  instalar-host   copia o binário estático da imagem para ~/.local/bin/bichinho
+                  (o hook do plugin chama `bichinho avisar`; PET_BIN_HOST muda
+                  a pasta)
+  testar CENÁRIO  manda eventos sintéticos pelo hook de verdade (o `bichinho
+                  avisar` do PATH, ou PET_BICHINHO; sem ele, o avisar.sh de
+                  reserva), com PET_TESTE=1 (isolados das sessões reais e
+                  esquecidos em 60 s), e mostra a reação: rapido → nod,
                   pequeno → done_small
   tocar REAÇÃO    toca uma reação (nod, done_small, wave, alert, …) e diz a
                   tag que a skin tocou e se ela apareceu na tela
@@ -115,10 +122,22 @@ tocar_reacao() {
   fi
 }
 
-# Um cenário sintético PELO avisar.sh de verdade, como o Claude Code chamaria:
-# o JSON do hook na entrada padrão, CLAUDE_CODE_ENTRYPOINT=cli (uma sessão
-# de terminal) e PET_TESTE=1 (o pet isola o evento das sessões reais e o
-# esquece em 60 s). Depois espera a acomodação do Stop e mostra a reação.
+# O hook que o plugin chama (decisão 0041): o `bichinho` do PATH, como o
+# Claude Code acha no exec form, ou PET_BICHINHO; vazio se não houver.
+binario_do_hook() {
+  if [ -n "${PET_BICHINHO:-}" ]; then
+    printf '%s' "$PET_BICHINHO"
+  else
+    command -v bichinho 2>/dev/null || true
+  fi
+}
+
+# Um cenário sintético PELO hook de verdade, como o Claude Code chamaria: o
+# JSON do hook na entrada padrão, CLAUDE_CODE_ENTRYPOINT=cli (uma sessão de
+# terminal) e PET_TESTE=1 (o pet isola o evento das sessões reais e o esquece
+# em 60 s). O hook é o `bichinho avisar` (o do PATH ou PET_BICHINHO); sem ele,
+# o avisar.sh de reserva, com aviso. Depois espera a acomodação do Stop e
+# mostra a reação.
 testar() {
   local cenario="${1:-}" esperado
   case "$cenario" in
@@ -133,15 +152,25 @@ testar() {
     echo "o pet não respondeu em ${URL} — está de pé? (bin/pet subir)" >&2
     return 1
   fi
-  local sid id_turno
+  local sid id_turno nativo
   sid="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')-pet-testar"
   id_turno="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+  nativo="$(binario_do_hook)"
+  if [ -n "$nativo" ]; then
+    echo "pelo hook nativo: $nativo avisar"
+  else
+    echo "aviso: o bichinho não está no PATH (bin/pet instalar-host); indo pelo avisar.sh de reserva" >&2
+  fi
   hook() {
     jq -nc --arg e "$1" --arg sid "$sid" --arg turno "$id_turno" --argjson extra "$2" \
       '{session_id: $sid, prompt_id: $turno, cwd: "/tmp/pet-testar",
         transcript_path: "/dev/null", hook_event_name: $e} + $extra' |
-      PET_TESTE=1 PET_PORTA="$PORTA" CLAUDE_CODE_ENTRYPOINT=cli \
-        sh "$RAIZ/plugin/scripts/avisar.sh" "$1"
+      if [ -n "$nativo" ]; then
+        PET_TESTE=1 PET_PORTA="$PORTA" CLAUDE_CODE_ENTRYPOINT=cli "$nativo" avisar "$1"
+      else
+        PET_TESTE=1 PET_PORTA="$PORTA" CLAUDE_CODE_ENTRYPOINT=cli \
+          sh "$RAIZ/plugin/scripts/avisar.sh" "$1"
+      fi
   }
   hook SessionStart '{"source": "startup"}'
   hook UserPromptSubmit '{"prompt": "teste do bin/pet", "source": "user"}'
@@ -211,7 +240,7 @@ outros_sistemas() {
       *windows*) crate=pet-windows ;;
       *) crate=pet-macos ;;
     esac
-    cargo clippy --quiet --target "$alvo" -p pet-core -p "$crate" -p claude-pet -- -D warnings || return 1
+    cargo clippy --quiet --target "$alvo" -p pet-core -p "$crate" -p bichinho -- -D warnings || return 1
   done
   if [ "${#faltam[@]}" -gt 0 ]; then
     echo "  (sem os alvos ${faltam[*]}: rustup target add ${faltam[*]})"
@@ -427,7 +456,7 @@ skin_aprovar() {
   pedida="$(skin_pedida || true)"
   if [ -n "$pedida" ] && [ "$pedida" != "$id" ]; then
     echo "atenção: o pet está configurado para «$pedida»; para usar «$id», ponha" \
-      "aparencia.skin = \"$id\" em config/claude-pet.toml (o pet relê o config a cada" \
+      "aparencia.skin = \"$id\" em config/bichinho.toml (o pet relê o config a cada" \
       "aprovação) e rode bin/pet skin-aprovar $id de novo" >&2
   fi
 }
@@ -456,6 +485,61 @@ skin_revogar() {
     echo "«$id» não estava aprovada"
   fi
   jq -r '.personagem | if .id then "personagem: \(.id) (\(.origem))" else "personagem: nenhum (o pet fica escondido)" end' <<<"$RESPOSTA"
+}
+
+# O nome antigo (decisões 0036 e 0041): o projeto do compose era claude-pet,
+# com o serviço pet. O container dele segura a porta 27380 e impediria o
+# novo de subir: sai (parado e removido), junto com a rede. O volume
+# claude-pet_estado, com a aprovação do Zeca, fica: o compose novo usa o
+# mesmo, pelo nome.
+aposentar_nome_antigo() {
+  local antigos
+  antigos="$(docker ps -aq --filter label=com.docker.compose.project=claude-pet 2>/dev/null || true)"
+  [ -z "$antigos" ] && return 0
+  echo "▸ aposentando o container do nome antigo (claude-pet); o volume claude-pet_estado fica"
+  # shellcheck disable=SC2086 # um id por palavra
+  docker rm -f $antigos >/dev/null
+  docker network rm claude-pet_default >/dev/null 2>&1 || true
+}
+
+# instalar-host: o hook do plugin chama `bichinho avisar` (exec form, decisão
+# 0041), então o binário tem de estar no PATH que o Claude Code vê. Copia o
+# binário estático (musl) da imagem local para ~/.local/bin/bichinho
+# (PET_BIN_HOST muda a pasta), trocando de uma vez, e confere que ele roda no
+# host.
+instalar_host() {
+  local destino="${PET_BIN_HOST:-$HOME/.local/bin}" id pasta achado
+  if ! docker image inspect bichinho:local >/dev/null 2>&1; then
+    echo "falta a imagem bichinho:local: rode bin/pet subir antes" >&2
+    return 1
+  fi
+  mkdir -p "$destino"
+  pasta="$(mktemp -d "$destino/.bichinho-XXXXXX")"
+  id="$(docker create bichinho:local)"
+  if ! docker cp "$id:/usr/local/bin/bichinho" "$pasta/bichinho" >/dev/null; then
+    docker rm -f "$id" >/dev/null
+    rm -rf "$pasta"
+    echo "não consegui copiar o binário da imagem" >&2
+    return 1
+  fi
+  docker rm -f "$id" >/dev/null
+  chmod 0755 "$pasta/bichinho"
+  if ! "$pasta/bichinho" versao >/dev/null; then
+    rm -rf "$pasta"
+    echo "o binário da imagem não roda neste host" >&2
+    return 1
+  fi
+  mv -f "$pasta/bichinho" "$destino/bichinho"
+  rmdir "$pasta"
+  echo "instalado: $destino/bichinho ($("$destino/bichinho" versao))"
+  achado="$(command -v bichinho 2>/dev/null || true)"
+  case ":$PATH:" in
+    *":$destino:"*) ;;
+    *) echo "atenção: $destino não está no PATH deste shell; o Claude Code precisa achar o bichinho no PATH dele" >&2 ;;
+  esac
+  if [ -n "$achado" ] && [ "$(readlink -f "$achado")" != "$(readlink -f "$destino/bichinho")" ]; then
+    echo "atenção: o PATH acha outro bichinho antes: $achado" >&2
+  fi
 }
 
 verificar() {
@@ -503,9 +587,12 @@ comando="${1:-ajuda}"
 [ "$#" -gt 0 ] && shift
 
 case "$comando" in
-  subir) docker compose up -d --build "$@" ;;
+  subir)
+    aposentar_nome_antigo
+    docker compose up -d --build "$@"
+    ;;
   parar) docker compose stop "$@" ;;
-  logs) docker compose logs -f --tail=100 pet ;;
+  logs) docker compose logs -f --tail=100 bichinho ;;
   estado)
     if ! api /v1/estado | jq .; then
       echo "o pet não respondeu em ${URL} — está de pé? (bin/pet subir)" >&2
@@ -526,8 +613,15 @@ case "$comando" in
   skin-instalar) skin_instalar "$@" ;;
   skin-aprovar) skin_aprovar "$@" ;;
   skin-revogar) skin_revogar "$@" ;;
-  reconstruir) docker compose build --pull pet && docker compose up -d pet ;;
-  dev) docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build ;;
+  reconstruir)
+    aposentar_nome_antigo
+    docker compose build --pull bichinho && docker compose up -d bichinho
+    ;;
+  dev)
+    aposentar_nome_antigo
+    docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+    ;;
+  instalar-host) instalar_host ;;
   verificar) verificar ;;
   ajuda | -h | --help) ajuda ;;
   *)

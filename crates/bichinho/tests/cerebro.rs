@@ -206,7 +206,7 @@ fn config_relida_na_aprovacao_vale_para_o_cerebro() {
     let pasta = d.pasta.join("config");
     std::fs::create_dir_all(&pasta).unwrap();
     std::fs::write(
-        pasta.join("claude-pet.toml"),
+        pasta.join("bichinho.toml"),
         "[sessoes]\norigens = [\"cli\", \"sdk-cli\"]\n",
     )
     .unwrap();

@@ -34,7 +34,15 @@ pub fn rodar() -> ExitCode {
         aviso!("XDG_RUNTIME_DIR privado: {e}");
     }
 
-    let config = carregar_config(&ambiente.arquivo_config());
+    let arquivo = ambiente.arquivo_config();
+    if arquivo.ends_with(crate::ambiente::ARQUIVO_CONFIG_ANTIGO) {
+        aviso!(
+            "config: lendo o nome antigo {}; renomeie para {} (decisão 0041)",
+            arquivo.display(),
+            crate::ambiente::ARQUIVO_CONFIG
+        );
+    }
+    let config = carregar_config(&arquivo);
     for aviso in &config.avisos {
         aviso!("config: {aviso}");
     }
@@ -101,7 +109,7 @@ pub fn iniciar_entrada(
         .map_err(|e| format!("não consegui iniciar a entrada HTTP: {e}"))
 }
 
-/// `claude-pet saude`: pergunta ao próprio daemon se o laço principal está
+/// `bichinho saude`: pergunta ao próprio daemon se o laço principal está
 /// vivo. Sai 0 se sim, 1 se não.
 pub fn saude() -> ExitCode {
     let escuta = match Ambiente::ler(|nome| std::env::var(nome).ok()) {

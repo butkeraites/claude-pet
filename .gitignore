@@ -3,6 +3,7 @@
 
 # Configuração e segredos locais
 .env
+/config/bichinho.toml
 /config/claude-pet.toml
 
 # Arte que não pode ser redistribuída (decisão 0011)

@@ -81,7 +81,7 @@ CARGA_PID=""
 CONF=""
 APROVOU_PARA_TESTE=0
 aprovada_no_volume() {
-  docker compose exec -T pet test -f "/state/skins/$1/aprovacao.json" >/dev/null 2>&1
+  docker compose exec -T bichinho test -f "/state/skins/$1/aprovacao.json" >/dev/null 2>&1
 }
 restaurar() {
   [ -n "$CARGA_PID" ] && kill "$CARGA_PID" 2>/dev/null
@@ -170,7 +170,7 @@ carga_iniciar() { # <segundos>
   CARGA_PID=$!
   sleep 2
   hyprctl -j layers | jq -e --arg m "$MONITOR" \
-    '[.[$m].levels[]?[] | select(.namespace == "claude-pet-carga" and .pid > 0)] | length == 1' \
+    '[.[$m].levels[]?[] | select(.namespace == "bichinho-carga" and .pid > 0)] | length == 1' \
     >/dev/null || parar "a camada de carga não apareceu em $MONITOR: $(cat "$CARGA_LOG")"
 }
 carga_fim() {

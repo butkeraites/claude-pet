@@ -44,13 +44,13 @@ pub fn rodar(
     let mut nucleo = Nucleo::novo(
         Arc::clone(&comp),
         ambiente.onde(),
-        Some(ambiente.arquivo_config()),
+        Some(ambiente.pasta_config.clone()),
         &config,
         Instant::now(),
     );
     nucleo.iniciar_cerebro();
     info!(
-        "claude-pet {} escutando em {} (porta pública {}), sem janela",
+        "bichinho {} escutando em {} (porta pública {}), sem janela",
         pet_core::VERSAO,
         ambiente.escuta,
         ambiente.porta_publica

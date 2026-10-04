@@ -100,7 +100,7 @@ pub fn rodar(
     let nucleo = Nucleo::novo(
         Arc::clone(&comp),
         ambiente.onde(),
-        Some(ambiente.arquivo_config()),
+        Some(ambiente.pasta_config.clone()),
         &config,
         Instant::now(),
     );
@@ -119,7 +119,7 @@ pub fn rodar(
     laco.assentar();
 
     info!(
-        "claude-pet {} escutando em {} (porta pública {}){}",
+        "bichinho {} escutando em {} (porta pública {}){}",
         pet_core::VERSAO,
         ambiente.escuta,
         ambiente.porta_publica,

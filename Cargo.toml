@@ -5,7 +5,7 @@ members = [
     "crates/pet-wayland",
     "crates/pet-windows",
     "crates/pet-macos",
-    "crates/claude-pet",
+    "crates/bichinho",
     "xtask",
 ]
 

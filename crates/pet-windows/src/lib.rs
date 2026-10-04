@@ -13,6 +13,11 @@
 //! - o laço `MsgWaitForMultipleObjectsEx`, com a
 //!   [`pet_core::plataforma::Caixa`] acordando o laço por `PostMessageW`.
 //!
+//! O hook dos plugins (`bichinho avisar`) já compila para este sistema: só
+//! usa a `std` (decisão 0041); rodar de verdade pede uma máquina ou o CI
+//! (T8.2). Até a janela chegar, o daemon roda o laço sem janela (o cérebro e
+//! o `/v1/estado`).
+//!
 //! O `unsafe` do Win32 fica só neste crate, com `// SAFETY:` em cada bloco
 //! (o workspace o proíbe no resto). Hoje nem isso: o crate não tem `unsafe`.
 

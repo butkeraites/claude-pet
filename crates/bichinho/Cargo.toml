@@ -1,6 +1,6 @@
 [package]
-name = "claude-pet"
-description = "Daemon do claude-pet: entrada HTTP dos hooks, o laço de cada sistema e o Motor."
+name = "bichinho"
+description = "O bichinho: o daemon (entrada HTTP, o laço de cada sistema e o Motor) e o hook nativo dos plugins (`bichinho avisar`)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

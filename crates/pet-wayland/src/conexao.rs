@@ -2,7 +2,7 @@
 //!
 //! - **Caminho longo:** caminhos com 108 bytes ou mais não cabem no
 //!   `sun_path` do AF_UNIX; esses passam por um symlink curto numa pasta só
-//!   nossa (`claude-pet/`, 0700) dentro do `XDG_RUNTIME_DIR` privado do
+//!   nossa (`bichinho/`, 0700) dentro do `XDG_RUNTIME_DIR` privado do
 //!   container. Nada fora dela é apagado, e dentro dela só symlinks: rodando
 //!   fora do container, o `XDG_RUNTIME_DIR` é o do usuário, onde mora o
 //!   socket do compositor.
@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 /// Limite do `sun_path` do AF_UNIX, contando o NUL final.
 pub const LIMITE_SUN_PATH: usize = 108;
 /// Pasta dos symlinks curtos, dentro de `curto`.
-pub const PASTA_LINKS: &str = "claude-pet";
+pub const PASTA_LINKS: &str = "bichinho";
 
 /// Primeiro atraso depois de uma falha na mesma instância.
 pub const ATRASO_MIN: Duration = Duration::from_secs(1);
@@ -30,7 +30,7 @@ pub const ATRASO_MAX: Duration = Duration::from_secs(30);
 pub const VIDA_PARA_ZERAR: Duration = Duration::from_secs(60);
 
 /// `connect()` num socket Unix; se o caminho for longo demais para o
-/// `sun_path`, passa por um symlink `curto/claude-pet/pet-<apelido>`.
+/// `sun_path`, passa por um symlink `curto/bichinho/pet-<apelido>`.
 pub fn conectar_unix(caminho: &Path, curto: &Path, apelido: &str) -> io::Result<UnixStream> {
     if caminho.as_os_str().len() < LIMITE_SUN_PATH {
         return UnixStream::connect(caminho);

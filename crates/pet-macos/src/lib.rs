@@ -13,6 +13,11 @@
 //! - o laço `NSApplication.run`, com a [`pet_core::plataforma::Caixa`]
 //!   acordando o laço pela fila principal.
 //!
+//! O hook dos plugins (`bichinho avisar`) já compila para este sistema: só
+//! usa a `std` (decisão 0041); rodar de verdade pede uma máquina ou o CI
+//! (T8.2). Até a janela chegar, o daemon roda o laço sem janela (o cérebro e
+//! o `/v1/estado`).
+//!
 //! O `unsafe` do AppKit fica só neste crate, com `// SAFETY:` em cada bloco
 //! (o workspace o proíbe no resto). Hoje nem isso: o crate não tem `unsafe`.
 

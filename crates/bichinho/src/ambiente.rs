@@ -3,10 +3,27 @@
 //! Docker (`cargo run`); o Dockerfile define os valores do container.
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Porta padrão da entrada de eventos (decisão 0008).
 pub const PORTA_PADRAO: u16 = 27380;
+/// O arquivo de config, dentro de `PET_CONFIG` (decisão 0041).
+pub const ARQUIVO_CONFIG: &str = "bichinho.toml";
+/// O nome de antes do T8.1, ainda lido se o novo não existe.
+pub const ARQUIVO_CONFIG_ANTIGO: &str = "claude-pet.toml";
+
+/// O config dentro de `pasta`: `bichinho.toml`; se ele não existe e o
+/// `claude-pet.toml` de antes do T8.1 existe, esse. Resolvido a cada leitura
+/// (a cada aprovação o config é relido, decisão 0029).
+pub fn arquivo_config_em(pasta: &Path) -> PathBuf {
+    let novo = pasta.join(ARQUIVO_CONFIG);
+    let antigo = pasta.join(ARQUIVO_CONFIG_ANTIGO);
+    if !novo.exists() && antigo.exists() {
+        antigo
+    } else {
+        novo
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Ambiente {
@@ -15,7 +32,7 @@ pub struct Ambiente {
     /// Porta que os hooks enxergam no host (`PET_PORTA_PUBLICA`); vale para
     /// conferir o cabeçalho Host.
     pub porta_publica: u16,
-    /// Pasta com `claude-pet.toml` (`PET_CONFIG`).
+    /// Pasta com o `bichinho.toml` (`PET_CONFIG`).
     pub pasta_config: PathBuf,
     /// Pasta do estado persistente (`PET_ESTADO`).
     pub pasta_estado: PathBuf,
@@ -51,7 +68,7 @@ impl Ambiente {
         let home = var("HOME").unwrap_or_else(|| "/tmp".to_owned());
         let pasta_estado = var("PET_ESTADO")
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(home).join(".local/state/claude-pet"));
+            .unwrap_or_else(|| PathBuf::from(home).join(".local/state/bichinho"));
         Ok(Ambiente {
             escuta,
             porta_publica,
@@ -84,7 +101,7 @@ impl Ambiente {
     }
 
     pub fn arquivo_config(&self) -> PathBuf {
-        self.pasta_config.join("claude-pet.toml")
+        arquivo_config_em(&self.pasta_config)
     }
 }
 
@@ -97,7 +114,7 @@ mod testes {
         let a = Ambiente::ler(|_| None).unwrap();
         assert_eq!(a.escuta, "127.0.0.1:27380".parse().unwrap());
         assert_eq!(a.porta_publica, 27380);
-        assert_eq!(a.arquivo_config(), PathBuf::from("config/claude-pet.toml"));
+        assert_eq!(a.arquivo_config(), PathBuf::from("config/bichinho.toml"));
         assert_eq!(
             a.skins,
             vec![PathBuf::from("skins"), PathBuf::from("skins-locais")]
@@ -111,18 +128,35 @@ mod testes {
             "PET_ESCUTA" => Some("0.0.0.0:27380".into()),
             "PET_PORTA_PUBLICA" => Some("28000".into()),
             "PET_DEBUG" => Some("1".into()),
-            "PET_SKINS" => Some("/opt/claude-pet/skins:/opt/claude-pet/skins-locais".into()),
+            "PET_SKINS" => Some("/opt/bichinho/skins:/opt/bichinho/skins-locais".into()),
             _ => None,
         })
         .unwrap();
         assert_eq!(a.skins.len(), 2);
-        assert_eq!(a.skins[1], PathBuf::from("/opt/claude-pet/skins-locais"));
+        assert_eq!(a.skins[1], PathBuf::from("/opt/bichinho/skins-locais"));
         assert_eq!(a.escuta.port(), 27380);
         assert_eq!(a.porta_publica, 28000);
         assert!(a.debug);
         assert!(!a.debug_personagem);
         let p = Ambiente::ler(|n| (n == "PET_DEBUG_PERSONAGEM").then(|| "1".into())).unwrap();
         assert!(p.debug_personagem);
+    }
+
+    #[test]
+    fn config_novo_vence_o_antigo_que_ainda_vale_sozinho() {
+        let pasta = std::env::temp_dir().join(format!("bichinho-ambiente-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&pasta);
+        std::fs::create_dir_all(&pasta).unwrap();
+        assert_eq!(arquivo_config_em(&pasta), pasta.join("bichinho.toml"));
+        std::fs::write(pasta.join("claude-pet.toml"), "").unwrap();
+        assert_eq!(
+            arquivo_config_em(&pasta),
+            pasta.join("claude-pet.toml"),
+            "só o antigo: vale o antigo"
+        );
+        std::fs::write(pasta.join("bichinho.toml"), "").unwrap();
+        assert_eq!(arquivo_config_em(&pasta), pasta.join("bichinho.toml"));
+        std::fs::remove_dir_all(&pasta).unwrap();
     }
 
     #[test]

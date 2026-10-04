@@ -1,6 +1,6 @@
 //! Configuração com precedência visível.
 //!
-//! Ordem (a última vence): padrões do código < arquivo `claude-pet.toml` <
+//! Ordem (a última vence): padrões do código < arquivo `bichinho.toml` <
 //! variáveis `PET_<SECAO>_<CHAVE>` < comandos dados em tempo de execução
 //! (gravados em `/state`, a partir do M3). Cada chave efetiva guarda de onde
 //! veio; o `/v1/estado` mostra isso para o Renan saber por que o pet está

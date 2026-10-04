@@ -5,7 +5,7 @@
 # O nome NÃO é compose.override.yml de propósito: esse nome é mesclado
 # automaticamente e levaria debug e bind da árvore de trabalho para produção.
 services:
-  pet:
+  bichinho:
     restart: "no"
     environment:
       PET_LOG: debug
@@ -16,11 +16,11 @@ services:
     volumes:
       - type: bind
         source: ./skins
-        target: /opt/claude-pet/skins
+        target: /opt/bichinho/skins
         read_only: true
         bind: {create_host_path: false}
       - type: bind
         source: ./assets
-        target: /opt/claude-pet/assets
+        target: /opt/bichinho/assets
         read_only: true
         bind: {create_host_path: false}
