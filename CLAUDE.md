@@ -150,7 +150,9 @@ Fora dele, use `~/.cargo/bin/cargo`.
 - **Nome do personagem:** é o Zeca, um papagaio malandro com visual próprio.
   Nunca o chame nem o descreva como personagem de terceiros, e nunca cite
   nome, estúdio ou família de um, em código, docs, balões, commits ou PRs. O
-  `bin/pet verificar` reprova se aparecer (decisão 0035).
+  `bin/pet verificar` reprova se aparecer nos arquivos ou nas mensagens dos
+  commits da branch (decisões 0035 e 0043); o corpo do PR se confere antes do
+  `gh pr create` com o mesmo padrão (`NOMES_DE_TERCEIROS` no `bin/pet`).
 - **Personagem só com aprovação:** o Zeca aparece só com a impressão
   digital aprovada pelo Renan (`bin/pet skin-aprovar`, decisões 0026 e 0029).
   Nunca aprove por ele: aprovação de teste se revoga no fim (os scripts ao

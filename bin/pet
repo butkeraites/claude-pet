@@ -302,15 +302,22 @@ daemon_sem_socket_de_comandos() {
   fi
 }
 
-# Decisão 0035: nenhum texto do projeto cita o personagem de terceiros nem o
-# estúdio dele. Procura sem caixa nos arquivos rastreados e nos novos (os
-# ignorados ficam de fora); os colchetes fazem o padrão não casar consigo
-# mesmo.
+# Decisões 0035 e 0043: nenhum texto do projeto cita o personagem de
+# terceiros nem o estúdio dele. Procura sem caixa nos arquivos rastreados e
+# nos novos (os ignorados ficam de fora) e nas mensagens dos commits da
+# branch que ainda não estão na main; os colchetes fazem o padrão não casar
+# consigo mesmo. O corpo do PR se confere antes do `gh pr create`.
+NOMES_DE_TERCEIROS='cari[o]ca|dis[n]ey'
 sem_nomes_de_terceiros() {
-  local achados
-  achados="$(git grep --untracked -n -i -E 'cari[o]ca|dis[n]ey' -- . 2>/dev/null || true)"
-  if [ -n "$achados" ]; then
-    printf 'texto citando personagem de terceiros (decisão 0035):\n%s\n' "$achados" >&2
+  local achados mensagens=""
+  achados="$(git grep --untracked -n -i -E "$NOMES_DE_TERCEIROS" -- . 2>/dev/null || true)"
+  if git rev-parse --verify --quiet main >/dev/null; then
+    mensagens="$(git log --format='%h %B' main..HEAD 2>/dev/null |
+      grep -i -E "$NOMES_DE_TERCEIROS" || true)"
+  fi
+  if [ -n "$achados" ] || [ -n "$mensagens" ]; then
+    printf 'texto citando personagem de terceiros (decisão 0035):\n%s\n' \
+      "$achados${mensagens:+$'\n'commits da branch:$'\n'$mensagens}" >&2
     return 1
   fi
 }

@@ -1519,3 +1519,56 @@ do arquivo, célula em (1698, 984), região de toque de 76×76 lógicos (era
 **Por quê:** o tamanho é gosto de quem usa, não arte: fica no config, onde
 trocar não pede aprovação. Multiplicar o alvo inteiro (limites junto) mantém
 os três tamanhos distintos em qualquer monitor sem mexer no `normal`.
+
+## 0043 — Revisão do plano do M4: ids de terminal em vez da cadeia de PIDs, aviso visto só com clique, os contratos do M4 na costura e a guarda de nomes nas mensagens (2026-10-04)
+
+**Problema:** as três revisões da branch `m3b-portabilidade` acharam no plano
+(TP.1):
+- a decisão 0039 e o M4 diziam que a cadeia de PIDs que o hook manda
+  (`CLAUDE_PID` e pais) desempataria o anel de ativações. No Docker o daemon
+  roda em outro espaço de PIDs e não lê o `/proc` do host; o socket2, o
+  foreign-toplevel e o `hyprland_toplevel_mapping` não trazem PID. Ligar um
+  PID a uma janela pediria o `hyprctl clients`, que é o socket de comandos
+  (decisão 0006) e só aparece em scripts de teste do host;
+- o M4 dizia que o aviso de uma sessão some "quando a janela dela é focada",
+  contra as regras do cérebro: o pronto some com ~10 s de foco, e o
+  "esperando você" só sai com um evento da sessão ou um clique;
+- a decisão 0040 punha o foco no adaptador `hyprland`, que não tem conexão
+  Wayland. O `activate(seat)` do foreign-toplevel precisa da conexão e do
+  `wl_seat`, que moram na `Sessao`;
+- o PLANO ainda descrevia o hook antigo em alguns trechos: o `avisar.sh` como
+  o hook, o curl de 2 s, a receita `novo-evento-hook` e o `testar`. Também
+  citava o serviço `pet` do compose;
+- a guarda de nomes (decisão 0035) olhava só os arquivos.
+
+**Escolha:**
+- **As dicas do hook** vão num campo novo e opcional do fio v1, com decisão
+  própria no M4. São os ids de terminal do ambiente do hook (`TMUX_PANE`,
+  `KITTY_WINDOW_ID`, `WEZTERM_PANE`), que só separam sessões dentro de um
+  mesmo terminal. A identidade da janela é o anel de ativações casado com o
+  `ts`; quando há dúvida, o clique cai no balão com a lista.
+  - Se um dia a cadeia de PIDs for necessária, só uma decisão nova pode
+    deixar o **hook** ler o `hyprctl -j clients`, jogando fora os títulos na
+    memória. O daemon nunca. A regra do CLAUDE.md muda junto com essa
+    decisão.
+  - Corrige a 0039 nesse ponto.
+- **O clique** que foca a janela de uma sessão marca o aviso dela como
+  visto. O foco sem clique segue as regras de sempre.
+- **A costura no M4** ganha:
+  - o `EventoDesktop` e o `Motor::evento_desktop`;
+  - o `Overlay::cursor`;
+  - um punho por conexão no `Nucleo`, com a janela e o desktop juntos.
+
+  O `Desktop` do Wayland usa a conexão e o `wl_seat` da `Sessao`, recriados a
+  cada reconexão. O foreign-toplevel genérico fica no `pet-wayland`, e o
+  mapeamento do Hyprland com o socket2 é a extensão do Hyprland. Corrige a
+  0040 nesse ponto.
+- **O PLANO** descreve o hook nativo, com o `avisar.sh` de reserva, o serviço
+  `bichinho` e a receita nova do `novo-evento-hook`.
+- **A guarda de nomes:** o `bin/pet verificar` procura os nomes também nas
+  mensagens dos commits da branch (`main..HEAD`). O corpo do PR se confere
+  antes do `gh pr create` (CLAUDE.md). A nota de memória do Claude sobre o
+  projeto, fora do repositório, foi reescrita sem o nome.
+
+**Por quê:** o plano não pode prometer o que as regras de ouro proíbem nem
+contradizer o cérebro. E o M4 precisa encontrar a costura pronta para o foco.

@@ -79,7 +79,7 @@ O Renan quer um bichinho de pixel art que more na tela e reaja ao Claude Code ro
 | Seguir o monitor | Só eventos do `.socket2.sock`, com debounce de 300 ms. | O `.socket.sock` executa comandos no host e congela o Hyprland se um cliente travar. O daemon nunca o abre. |
 | Docker | `alpine:3.24.2`, `restart: unless-stopped`, bind de `/run/user` (read_only, `rslave`, `create_host_path: false`). WAYLAND_DISPLAY e a assinatura do Hyprland são descobertos em tempo de execução. | Sobe no boot (docker.service + linger) e sobrevive a logout/login, crash, suspensão e hotplug sem unit de systemd. Não sofre a corrida de boot nem fica preso a sockets velhos. |
 | Entrada de eventos | HTTP em `127.0.0.1:27380`, só loopback. `POST /v1/evento` responde 204. | O curl sempre existe. Checar Host, Content-Type e `X-Pet: 1` barra requisições vindas do navegador. |
-| Hooks | Plugin `bichinho`, no próprio repo, com 13 hooks `async` de comando que chamam `avisar.sh` (jq + `curl -m 2`, sempre exit 0). | Async não atrasa o Claude. Um hook do tipo http mostraria erro no transcript sempre que o pet estivesse desligado. Só **metadados** saem do host. |
+| Hooks | Plugin `bichinho`, no próprio repo, com 13 hooks `async` em exec form que chamam o próprio binário, `bichinho avisar <Evento>`: a lista branca do `pet_core::aviso`, TCP direto ao 127.0.0.1 com prazo curto, sempre exit 0 (decisão 0041). Até a troca do plugin instalado, o `avisar.sh` (jq + `curl -m 2`) fica de reserva. | Async não atrasa o Claude. Um hook do tipo http mostraria erro no transcript sempre que o pet estivesse desligado. Só **metadados** saem do host. |
 | Festa | Calculada pelo **trabalho real**: ferramentas de trabalho, arquivos editados, subagentes e tempo de ferramenta. Não usa tempo de relógio. | Com Opus em esforço máximo, uma resposta simples leva 20–90 s. Medir por relógio daria festa em toda resposta. |
 | Atenção | Escalada só visual, com teto, e que sabe se você está presente: olhando o terminal do Claude, fica no nível 1. | Não há som. Movimento que começa chama atenção; movimento constante cansa. |
 | Arte | O pack comprado fica em `skins-locais/` (gitignored) e entra só na imagem local, que nunca vai a registry. Chapéu e gravata são arte nossa, commitada. | A licença permite editar e proíbe redistribuir. |
@@ -186,7 +186,7 @@ volumes: {estado: {}}
 | Monitor muda de posição no layout | Mudança de posição/tamanho do xdg_output → re-home depois de 200 ms. |
 | Só sobrou o output FALLBACK, ou um output 0x0 | Esconde e espera `focusedmonv2`/`monitoraddedv2`. |
 | Na partida, nenhum foco conhecido | Usa o primeiro `wl_output` que não seja FALLBACK e tenha tamanho maior que zero. |
-| Pet desligado enquanto o Claude roda | O hook async falha calado: o curl expira em 2 s e o script sai com 0. |
+| Pet desligado enquanto o Claude roda | O hook async falha calado e sai com 0: a conexão é recusada na hora (com um pet travado, desiste em 2 s). |
 
 ## Superfície, renderização e nitidez
 
@@ -539,7 +539,7 @@ claude-pet/
 | Skill | Receita |
 |---|---|
 | `nova-animacao` | catálogo → skin → gatilho no cérebro → cenário → `tocar` + `foto` |
-| `novo-evento-hook` | lista branca do `avisar.sh` → canário → `hooks.json` → tabela do cérebro → `/reload-plugins` |
+| `novo-evento-hook` | lista branca do `pet_core::aviso` (e do `avisar.sh`, enquanto a reserva existir) → canários em `tests/hook.rs` (e `tests/avisar.rs`) → `hooks.json` em exec form → tabela do cérebro → teste ao vivo só numa sessão (`--plugin-dir`) → `/reload-plugins` depois do merge |
 | `conferir-na-tela` | ciclo dev, `foto`, `nitidez`, consulta de camadas |
 
 ## CLI `bin/pet` (bash + curl + jq)
@@ -550,7 +550,7 @@ claude-pet/
 | `doutor` | saúde do container, conexões Wayland/hypr, `bichinho@bichinho-local` habilitado em `claude plugin list --json`, idade do último evento por sessão, DND, skin aprovada |
 | `soneca [30m]`, `acordar`, `esconder [30m]`, `mostrar`, `posicao-padrao`, `recarregar` | controles, persistidos |
 | `tocar <reação>` | toca uma reação direto |
-| `testar <cenário>` | eventos sintéticos **pelo `avisar.sh` real**, com `teste:true` e TTL de 60 s; nunca se misturam com sessões reais |
+| `testar <cenário>` | eventos sintéticos **pelo hook de verdade** (o `bichinho avisar` do PATH ou de `PET_BICHINHO`; sem ele, o `avisar.sh` de reserva), com `teste:true` e TTL de 60 s; nunca se misturam com sessões reais |
 | `simular <cenário>` | roda o cenário no core com relógio falso; o daemon só exibe as intenções |
 | `eventos --salvar <arquivo>` | grava um cenário com ids pseudonimizados |
 | `foto` | captura com grim para o Claude ler |
@@ -561,10 +561,14 @@ claude-pet/
 
 **`verificar` roda:**
 - `cargo fmt --check`;
+- `pet-core` sem crate de Wayland, de laço de eventos ou de sistema;
+- o socket de comandos do Hyprland e o `hyprctl` fora do código de produção de todos os crates;
+- nenhum nome de personagem de terceiros nos arquivos nem nas mensagens de commit da branch (decisões 0035 e 0043);
 - `cargo clippy --all-targets -- -D warnings`;
 - `cargo test`;
+- `cargo clippy --target` para Windows e macOS, com os alvos do rustup instalados;
 - `lint-skin` em todas as skins;
-- `docker compose config -q`;
+- `docker compose config -q` (produção e dev);
 - `claude plugin validate` (`--strict`) no repo e em `plugin/`;
 - shellcheck, se estiver instalado.
 
@@ -633,12 +637,12 @@ A beta pública mínima é T8.0–T8.5 mais T9.0–T9.4.
    - orçamento: parado com no máximo +1% de CPU do Hyprland e média de até 2 commits/s.
 4. **Limites do container:** RSS abaixo de 64 MiB (96 no 4K) e CPU parado abaixo de 1%.
 5. **Clique:** clicar ao lado do bicho chega na janela de baixo.
-6. **Reinício:** `docker compose restart pet` volta em até 3 s, no mesmo lugar.
+6. **Reinício:** `docker compose restart bichinho` volta em até 3 s, no mesmo lugar.
 7. **Crash:** `kill -9` do processo pelo host faz o RestartCount subir. `docker kill` **não** serve, porque cancela a política de restart.
-8. **Sem compositor:** `docker compose run --rm --no-deps -e PET_HOST_RUNTIME=/tmp/nada pet` registra "aguardando compositor".
+8. **Sem compositor:** `docker compose run --rm --no-deps -e PET_HOST_RUNTIME=/tmp/nada bichinho` registra "aguardando compositor".
 
 **Se falhar:**
-- Nitidez, clique ou reconexão falhando são bugs a corrigir em `wl/`.
+- Nitidez, clique ou reconexão falhando são bugs a corrigir no backend Wayland (`crates/pet-wayland`, desde o T8.0).
 - Custo acima do orçamento → plano B de duas superfícies (repouso pequeno + palco temporário).
 - O GTK fica só como saída de emergência com prazo, se o encanamento Wayland não convergir.
 
@@ -686,7 +690,7 @@ A beta pública mínima é T8.0–T8.5 mais T9.0–T9.4.
   2. um segundo prompt que cria um arquivo temporário com a ferramenta Write → pulinho T1, com `arquivos: 1` no turno (`/v1/estado.turnos`; o `arq` exato, sha256 do caminho, só aparece na pilha de dev, em `/v1/debug/eventos`, e os canários o conferem);
   3. `/exit` → tchau.
 - `claude -p --plugin-dir …` só serve para conferir que, com o pet parado, não aparece erro de hook.
-- `time (printf '{}' | sh plugin/scripts/avisar.sh Stop)` leva no máximo 2,1 s com o pet parado.
+- `time (printf '{}' | sh plugin/scripts/avisar.sh Stop)` leva no máximo 2,1 s com o pet parado (desde o T8.1, o hook é o `bichinho avisar`: conexão recusada na hora, menos de 0,5 s nos canários).
 - Na tela (acesa e desbloqueada), o `commits_total` do `/v1/estado` sobe durante as reações; com a tela apagada ou bloqueada, as reações só são conferidas no `/v1/estado`.
 - Depois do merge: a instalação pela worktree estável (README) e `claude plugin list` mostrando `bichinho@bichinho-local` habilitado.
 
@@ -705,12 +709,13 @@ Atualizado em 2026-10-03 (decisões 0038 e 0039). O M4 nasce em cima da costura 
 - esconder durante a proteção de tela;
 - botão direito para soneca;
 - **clicar no Zeca leva à janela do terminal da sessão do Claude que terminou ou que precisa de você** (decisão 0039):
-  - **identidade de janela por sessão:** o leitor do socket2 guarda um anel com as últimas ativações (`activewindowv2`: endereço da janela e a hora em que o evento chegou, nunca o título). O `ts` do `UserPromptSubmit` (e do `SessionStart`) de cada sessão escolhe no anel a janela que estava ativa quando o Renan mandou o prompt: é o terminal daquela sessão. O hook manda também dicas da cadeia de processos (`CLAUDE_PID` e pais, e ids de terminal como `TMUX_PANE` e `KITTY_WINDOW_ID`; só números e ids, nunca títulos), num campo novo e opcional do fio v1, validado no `pet_core::evento` e com decisão própria; a cadeia desempata quando o anel tem dúvida (dois terminais trocados em menos de 1 s, tmux);
+  - **identidade de janela por sessão:** o leitor do socket2 guarda um anel com as últimas ativações (`activewindowv2`: endereço da janela e a hora em que o evento chegou, nunca o título). O `ts` do `UserPromptSubmit` (e do `SessionStart`) de cada sessão escolhe no anel a janela que estava ativa quando o Renan mandou o prompt: é o terminal daquela sessão. O hook pode mandar também, num campo novo e opcional do fio v1 (validado no `pet_core::evento` e com decisão própria), os ids de terminal que ele vê no próprio ambiente (`TMUX_PANE`, `KITTY_WINDOW_ID`, `WEZTERM_PANE`; só ids, nunca títulos). Eles só separam sessões dentro de um mesmo terminal (painéis do tmux, abas): no Docker o daemon roda em outro espaço de PIDs, e nem o socket2 nem o foreign-toplevel trazem PID, então uma cadeia de PIDs não leva a uma janela sem o `hyprctl clients`, que é o socket de comandos (decisão 0043). Quando o anel tem dúvida (dois terminais trocados em menos de 1 s), o clique cai no balão com a lista;
   - **focar sem o socket de comandos:** `zwlr_foreign_toplevel_manager_v1` + `hyprland_toplevel_mapping_manager_v1` (que liga cada handle de toplevel ao endereço de janela do Hyprland, o mesmo do `activewindowv2`) e `zwlr_foreign_toplevel_handle_v1.activate(seat)`. O daemon continua sem abrir o `.socket.sock` e sem chamar `hyprctl` (decisão 0006). Conferir na 0.56.2 que os dois protocolos aparecem no registro; se faltar algum, o clique cai no balão;
-  - **pendências em ciclo:** com vários avisos (precisa de você, erro, pronto), o primeiro clique vai ao mais urgente, pela prioridade do cérebro (esperando você > erro > pronto), e cada clique seguinte vai ao próximo; o aviso de uma sessão some quando a janela dela é focada;
+  - **pendências em ciclo:** com vários avisos (precisa de você, erro, pronto), o primeiro clique vai ao mais urgente, pela prioridade do cérebro (esperando você > erro > pronto), e cada clique seguinte vai ao próximo. O clique que foca a janela de uma sessão marca o aviso dela como visto; o foco sem clique segue as regras de sempre (o pronto some depois de ~10 s com o terminal da sessão em foco; o "esperando você" só sai com um evento da própria sessão ou um clique);
   - **clique sem pendência:** um balão com a lista das sessões abertas (nome da pasta do projeto, estado — pensando, trabalhando, esperando você, pronto, parado — e há quanto tempo), que some sozinho. Pede o **balão mínimo e a fonte de pixel** (monogram, CC0), puxados do M6; o M6 só acrescenta pop, datilografia e as frases;
   - **sem como focar** (a janela fechou, a sessão não tem identidade, o compositor não oferece os protocolos): o balão diz isso e mostra a lista;
 - **tamanho:** `aparencia.tamanho` (`pequeno`, `normal`, `grande`) chega antes, no TP.2; no M4 o arraste, as posições salvas e o balão usam o D que o tamanho escolhido dá em cada monitor.
+- **o que a costura ganha no M4** (decisão 0043): o `EventoDesktop` e o `Motor::evento_desktop` (monitor em foco, anel de ativações, "não perturbe"); o `Overlay::cursor` (pegar e agarrar no arraste); um punho por conexão (janela e desktop juntos) no `Nucleo`, no lugar do `Option<&mut dyn Overlay>`. O `Desktop` do Wayland usa a mesma conexão e o mesmo `wl_seat` da `Sessao`, recriados a cada reconexão: o `zwlr_foreign_toplevel_manager_v1` (genérico, serve ao Sway, ao labwc e aos outros wlroots) fica no `pet-wayland`, e o `hyprland_toplevel_mapping_manager_v1` com o socket2 é a extensão do Hyprland.
 - Propor a regra opcional do Hyprland **pela skill omarchy e com seu consentimento**:
   ```lua
   hl.layer_rule({ name = "bichinho", match = { namespace = "^bichinho$" }, order = 1, no_anim = true })
