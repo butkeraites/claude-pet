@@ -2555,3 +2555,44 @@ sei, em vez de virar uma certeza velha.
 errar para o lado de deixar o aviso custa um clique, e errar para o outro
 apaga o que ele não viu. A volta do ciclo é para cliques seguidos, não para
 a tarde inteira.
+
+## 0063 — Revisão do arraste: a pegada perdida solta o pet e o cursor volta quando o aperto desiste (2026-10-04)
+
+**Problema:** as revisões do M4 acharam duas falhas na máquina do ponteiro
+(T4.2, decisão 0048).
+- **Uma pegada perdida deixava um arraste fantasma.** Um `leave` no meio do
+  arraste era ignorado, e o `enter` e o `motion` seguintes rearmavam o
+  fail-safe e moviam o pet. Sem a pegada implícita (numa área de trabalho
+  vazia, sem nenhuma superfície com o teclado; pesquisa do Hyprland, seção
+  3), cruzar para o outro monitor perde o soltar: quando o ponteiro voltava,
+  o pet grudava nele sem botão nenhum, o laço do voo seguia fazendo commits,
+  a área de toque do palco inteiro capturava o monitor, e o próximo aperto
+  era engolido. Com o mouse andando, o fail-safe nunca vencia — justo o que
+  a decisão 0048 dizia evitar. O pouso entre monitores também não acontecia.
+- **O cursor ficava "agarrando".** Um aperto que acabava sem gesto (o direito
+  que andou e soltou, o fail-safe antes de arrastar) não devolvia o cursor
+  de "pegar".
+
+**Escolha (revisão do T4.2):**
+- **O `leave` no meio do arraste é a pegada perdida**: com a pegada
+  implícita o Hyprland só manda o `leave` depois de soltar, então um
+  `leave` com o arraste de pé quer dizer que o soltar vai para outro lugar.
+  O arraste acaba ali (`Gesto::Cancelou`): o pet pousa onde está, a área de
+  toque volta ao corpo, a posição fica guardada e o foco é conferido (o
+  ponteiro está no outro monitor: o pet vai atrás dele pelo seguir o foco,
+  na posição salva de lá). O pet nunca anda sem um aperto novo.
+- **`Gesto::Desistiu`**: o aperto que acaba sem clique nem arraste devolve o
+  cursor de "pegar".
+- **O cursor depois do `leave`**: a `Sessao` esquece o serial do `enter` no
+  `leave`; um pedido de cursor fora da camada não vai ao compositor (o
+  próximo `enter` põe o "pegar" de novo).
+- **Testes:** na máquina, o `leave` arrastando cancela e o ponteiro que volta
+  sem botão não arrasta; o direito que andou e o fail-safe do direito
+  desistem. No Motor em relógio falso: arrastar, `leave`, `enter` e andar
+  200 pixels deixam o pet onde pousou, sem o voo, com o toque no corpo e
+  nada armado; o cursor volta a "pegar" nos dois casos. As duas mudanças
+  conferidas por mutação.
+
+**Por quê:** o pet só pode andar com o botão apertado em cima dele; um
+"não sei onde o botão subiu" vira um pouso no lugar, e o seguir o foco leva
+o pet ao monitor certo.

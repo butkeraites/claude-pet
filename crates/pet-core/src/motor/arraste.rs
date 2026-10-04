@@ -9,10 +9,13 @@
 //! 0004); quem prende o corpo dentro da área útil é o Motor.
 //!
 //! **Fail-safe:** [`SEM_PONTEIRO_MS`] sem evento do ponteiro com o botão
-//! apertado (o compositor perdeu o ponteiro, numa área de trabalho vazia, ou
-//! o botão foi solto em outro monitor sem a pegada implícita) solta o pet
-//! onde ele está. O Motor também cancela ao esconder, quando a janela fecha e
-//! antes de uma viagem.
+//! apertado (o compositor perdeu o ponteiro) solta o pet onde ele está. Um
+//! `leave` no meio do arraste também solta (decisão 0063): com a pegada
+//! implícita o Hyprland só manda o `leave` depois de soltar, então um `leave`
+//! com o arraste de pé quer dizer que não há pegada (numa área de trabalho
+//! vazia, sem nenhuma superfície com o teclado): o soltar vai para outro
+//! lugar, e o pet nunca anda sem um aperto novo. O Motor também cancela ao
+//! esconder, quando a janela fecha e antes de uma viagem.
 
 use crate::plataforma::{Botao, EventoPonteiro};
 
@@ -46,8 +49,12 @@ pub enum Gesto {
     },
     /// Apertou e soltou sem arrastar.
     Clique(Botao),
-    /// O arraste acabou sem soltar (o fail-safe): o pet pousa onde está.
+    /// O arraste acabou sem soltar (o fail-safe, ou a pegada perdida): o
+    /// pet pousa onde está.
     Cancelou,
+    /// O aperto acabou sem clique nem arraste (o direito andou e soltou, o
+    /// fail-safe antes de arrastar): o cursor volta a "pegar".
+    Desistiu,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,11 +125,12 @@ impl Arraste {
             EventoPonteiro::Saiu => {
                 // A pegada implícita só manda o `leave` depois de soltar: um
                 // `leave` com o botão apertado (sem arrastar ainda) desiste do
-                // clique. Arrastando, quem decide é o soltar ou o fail-safe.
-                if matches!(self.estado, Estado::Apertado { .. }) {
-                    self.estado = Estado::Livre;
+                // clique; arrastando, é a pegada perdida, e o pet pousa onde
+                // está (o soltar vai para outro lugar).
+                match std::mem::replace(&mut self.estado, Estado::Livre) {
+                    Estado::Arrastando { .. } => Gesto::Cancelou,
+                    _ => Gesto::Nada,
                 }
-                Gesto::Nada
             }
             EventoPonteiro::Apertou { botao, x, y } => {
                 self.ultimo = (x, y);
@@ -183,7 +191,7 @@ impl Arraste {
                     } if apertado == botao => {
                         self.estado = Estado::Livre;
                         if andou {
-                            Gesto::Nada
+                            Gesto::Desistiu
                         } else {
                             Gesto::Clique(botao)
                         }
@@ -253,7 +261,7 @@ impl Arraste {
             }
             _ => {
                 self.estado = Estado::Livre;
-                Gesto::Nada
+                Gesto::Desistiu
             }
         }
     }
@@ -490,7 +498,7 @@ mod testes {
             LIMIAR,
             6,
         );
-        assert_eq!(g, Gesto::Nada, "andou: não clica");
+        assert_eq!(g, Gesto::Desistiu, "andou: não clica, o cursor volta");
     }
 
     #[test]
@@ -518,7 +526,6 @@ mod testes {
             Gesto::Nada
         );
         assert!(!a.segurando(), "saiu antes de arrastar: desiste");
-        // Arrastando, sair não solta (a pegada implícita manda o leave depois).
         a.ponteiro(
             apertou(Botao::Esquerdo, 1800, 1050),
             100,
@@ -528,18 +535,36 @@ mod testes {
             6,
         );
         a.ponteiro(moveu(1700, 1050), 110, CELULA, false, LIMIAR, 6);
-        a.ponteiro(EventoPonteiro::Saiu, 120, CELULA, false, LIMIAR, 6);
-        assert!(a.arrastando());
         // Outro aperto durante o arraste não muda nada.
         let g = a.ponteiro(
             apertou(Botao::Direito, 1700, 1050),
-            130,
+            115,
             CELULA,
             true,
             LIMIAR,
             6,
         );
         assert_eq!(g, Gesto::Nada);
+        assert!(a.arrastando());
+        // Arrastando, um `leave` é a pegada perdida (com ela, o leave só vem
+        // depois de soltar): pousa onde está.
+        assert_eq!(
+            a.ponteiro(EventoPonteiro::Saiu, 120, CELULA, false, LIMIAR, 6),
+            Gesto::Cancelou
+        );
+        assert!(!a.segurando() && a.prazo().is_none());
+        // O ponteiro volta sem botão nenhum: o pet não anda atrás dele.
+        let volta = [
+            EventoPonteiro::Entrou { x: 1600, y: 1050 },
+            moveu(1400, 1050),
+        ];
+        for evento in volta {
+            assert_eq!(
+                a.ponteiro(evento, 130, CELULA, false, LIMIAR, 6),
+                Gesto::Nada
+            );
+        }
+        assert!(!a.arrastando() && a.alvo(6).is_none());
     }
 
     #[test]
@@ -559,7 +584,7 @@ mod testes {
         assert_eq!(a.vencer(5_100), Gesto::Nada, "cada movimento adia");
         assert_eq!(a.vencer(9_000), Gesto::Cancelou);
         assert!(!a.segurando());
-        // Botão direito esquecido apertado: só larga.
+        // Botão direito esquecido apertado: só larga (e o cursor volta).
         a.ponteiro(
             apertou(Botao::Direito, 1800, 1050),
             10_000,
@@ -568,7 +593,7 @@ mod testes {
             LIMIAR,
             6,
         );
-        assert_eq!(a.vencer(15_000), Gesto::Nada);
+        assert_eq!(a.vencer(15_000), Gesto::Desistiu);
         assert!(!a.segurando());
     }
 

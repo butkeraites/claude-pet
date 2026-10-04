@@ -1987,3 +1987,85 @@ fn cliques_seguidos_esperam_cada_um_a_sua_confirmacao() {
     assert!(pendentes(&motor).is_empty(), "{:?}", pendentes(&motor));
     assert_eq!(motor.painel(Some(&janela), 8_400).focando, None);
 }
+
+// --- a pegada perdida e o cursor (decisão 0063) ------------------------------
+
+#[test]
+fn a_pegada_perdida_solta_o_pet_e_ele_nao_anda_sem_aperto() {
+    // Numa área de trabalho vazia (sem superfície com o teclado), o Hyprland
+    // não segura o ponteiro: o `leave` vem no meio do arraste, e o soltar vai
+    // para o outro monitor.
+    use crate::plataforma::EventoPonteiro;
+    let (mut motor, mut janela) = ligado();
+    janela.mostrou();
+    let corpo = janela.toque.unwrap();
+    let (x, y) = meio_do_corpo(&janela);
+    ponteiro(&mut motor, &mut janela, apertou(x, y), 0);
+    ponteiro(&mut motor, &mut janela, moveu(x - 60, y), 10);
+    assert!(motor.arrastando());
+    let arrastado = motor.painel(Some(&janela), 10).sprite_disp.unwrap();
+    janela.mostrou();
+    ponteiro(&mut motor, &mut janela, EventoPonteiro::Saiu, 20);
+    assert!(!motor.arrastando());
+    let p = motor.painel(Some(&janela), 20);
+    assert_eq!(
+        p.reacao.as_deref(),
+        Some(SOLTO),
+        "pousou, sem o laço do voo"
+    );
+    let toque = janela.toque.unwrap();
+    assert_eq!(
+        (toque.w, toque.h),
+        (corpo.w, corpo.h),
+        "toque de novo no corpo"
+    );
+    // O ponteiro volta sem botão nenhum: o pet fica onde pousou.
+    janela.mostrou();
+    ponteiro(
+        &mut motor,
+        &mut janela,
+        EventoPonteiro::Entrou { x: x - 300, y },
+        30,
+    );
+    ponteiro(&mut motor, &mut janela, moveu(x - 500, y - 100), 40);
+    assert_eq!(motor.painel(Some(&janela), 40).sprite_disp, Some(arrastado));
+    assert!(
+        !motor.arraste.segurando() && motor.arraste.prazo().is_none(),
+        "sem arraste nem fail-safe armado"
+    );
+}
+
+#[test]
+fn o_cursor_volta_a_pegar_quando_o_aperto_desiste() {
+    use crate::plataforma::{Botao, Cursor, EventoPonteiro};
+    let (mut motor, mut janela) = ligado();
+    janela.mostrou();
+    let (x, y) = meio_do_corpo(&janela);
+    let direito = |apertou: bool, x: i32| {
+        if apertou {
+            EventoPonteiro::Apertou {
+                botao: Botao::Direito,
+                x,
+                y,
+            }
+        } else {
+            EventoPonteiro::Soltou {
+                botao: Botao::Direito,
+                x,
+                y,
+            }
+        }
+    };
+    // O direito anda e solta: nem clique nem arraste, e o cursor volta.
+    ponteiro(&mut motor, &mut janela, direito(true, x), 0);
+    assert_eq!(janela.cursor, Some(Cursor::Agarrar));
+    ponteiro(&mut motor, &mut janela, moveu(x + 40, y), 10);
+    ponteiro(&mut motor, &mut janela, direito(false, x + 40), 20);
+    assert_eq!(janela.cursor, Some(Cursor::Pegar));
+    assert_eq!(motor.soneca(30), None, "não foi clique");
+    // O direito esquecido apertado: o fail-safe larga e o cursor volta.
+    ponteiro(&mut motor, &mut janela, direito(true, x), 100);
+    assert_eq!(janela.cursor, Some(Cursor::Agarrar));
+    motor.vencer(&mut janela, 100 + arraste::SEM_PONTEIRO_MS);
+    assert_eq!(janela.cursor, Some(Cursor::Pegar));
+}

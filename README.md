@@ -179,7 +179,8 @@ tchau. Sem personagem aprovado, as reações ficam só em `bin/pet estado`
 
 - **Arrastar:** segure o Zeca e leve-o para onde quiser (4 pixels ou um
   quarto de segundo segurando já é arraste). Solto noutro monitor, ele fica
-  lá. A posição fica guardada por monitor (pela descrição dele, que não muda
+  lá (numa área de trabalho vazia o Hyprland pode largar o arraste na borda;
+  aí ele pousa ali e segue o foco para o outro monitor). A posição fica guardada por monitor (pela descrição dele, que não muda
   quando o dock troca o nome da porta) e volta depois de reiniciar.
 - **Seguir o monitor ativo:** quando o foco muda de monitor, ele some com
   um "poof" e reaparece no outro, na posição guardada daquele monitor.

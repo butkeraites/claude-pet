@@ -938,6 +938,7 @@ impl Motor {
                 }
             }
             Gesto::Cancelou => self.pousar(punho.janela(), agora_ms),
+            Gesto::Desistiu => punho.janela().cursor(Cursor::Pegar),
             Gesto::Clique(botao) => {
                 punho.janela().cursor(Cursor::Pegar);
                 self.clicar(punho, botao, agora_ms);

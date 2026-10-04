@@ -1191,7 +1191,12 @@ impl PointerHandler for Sessao {
                     }
                     EventoPonteiro::Entrou { x, y }
                 }
-                PointerEventKind::Leave { .. } => EventoPonteiro::Saiu,
+                PointerEventKind::Leave { .. } => {
+                    // Fora da camada, o cursor não é mais do pet: nenhum
+                    // `set_shape` até o próximo `enter` (decisão 0063).
+                    self.serial_enter = None;
+                    EventoPonteiro::Saiu
+                }
                 PointerEventKind::Motion { .. } => EventoPonteiro::Moveu { x, y },
                 PointerEventKind::Press { button, .. } => EventoPonteiro::Apertou {
                     botao: botao(*button),
