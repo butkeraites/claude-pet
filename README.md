@@ -69,8 +69,9 @@ async que chamam `plugin/scripts/avisar.sh`. Ele manda **só metadados**
 para `127.0.0.1:27380` — nome do evento, ids opacos, nome da ferramenta,
 contagens e durações, um hash do caminho do arquivo editado e o nome da
 pasta do projeto —, nunca o texto dos prompts, código, respostas ou
-caminhos. Não imprime nada, sempre sai 0 e não atrasa o Claude: com o pet
-desligado, desiste na hora. Precisa de `jq` e `curl` no host.
+caminhos. E só para lá: o curl ignora proxy e `~/.curlrc`. Não imprime
+nada, sempre sai 0 e não atrasa o Claude: com o pet desligado, desiste na
+hora. Precisa de `jq` e `curl` no host.
 
 **Instalação, depois do merge na `main`.** O marketplace aponta para uma
 worktree estável, destacada na `main`, para uma branch em andamento nunca
@@ -81,6 +82,7 @@ git -C ~/Documents/claude-pet worktree add --detach ~/.local/share/claude-pet/es
 claude plugin validate ~/.local/share/claude-pet/estavel --strict
 claude plugin marketplace add ~/.local/share/claude-pet/estavel
 claude plugin install bichinho@bichinho-local
+claude plugin list                    # bichinho@bichinho-local habilitado
 ```
 
 Depois de cada merge, atualize a worktree
@@ -96,14 +98,15 @@ claude --plugin-dir ~/Documents/claude-pet/plugin
 
 Para conferir sem o Claude: `bin/pet testar rapido` (aceno) e
 `bin/pet testar pequeno` (pulinho) mandam eventos sintéticos pelo mesmo
-`avisar.sh`. Só sessões de terminal contam (`sessoes.origens = ["cli"]` em
+`avisar.sh`, e `bin/pet tocar nod` toca uma reação e diz se ela apareceu na
+tela. Só sessões de terminal contam (`sessoes.origens = ["cli"]` em
 `config/exemplo.toml`): `claude -p`, SDK e IDE ficam de fora.
 
 Com o Zeca aprovado, uma resposta sem trabalho (sem editar arquivo, rodar
 comando nem chamar subagente) ganha o aceno, ele levantando e sentando; uma
 resposta com trabalho ganha o pulinho, um pio; e fechar o Claude, um pio de
 tchau. Sem personagem aprovado, as reações ficam só em `bin/pet estado`
-(`ultima_reacao`).
+(`ultima_reacao` e `turnos`).
 
 ## Desenvolvimento
 

@@ -648,19 +648,21 @@ claude-pet/
 - **T3.5** integração sobre o M2 (a `m3-hooks` rebaseada na `m2-zeca`, decisão 0030): um `/v1/comando` para as reações e as aprovações, reações pelos estados da skin com as reservas do catálogo, `nod` nativo no MVP, config relida também no cérebro; `skin-instalar`, `bin/pet testar` e gate interativo de novo com o Zeca.
 
 **Testes canário:**
-- `SEGREDO-n` plantado em todo campo de conteúdo; nada disso pode sair do script;
+- `SEGREDO-n` plantado em todo campo de conteúdo; nada disso pode sair do script (procurado sem caixa);
 - o script sempre sai 0;
 - não imprime nada;
-- o curl é falso.
+- o curl é falso; com o curl de verdade, proxy no ambiente e curlrc não desviam o evento do 127.0.0.1, e um `~/.jq` não muda a lista branca (decisão 0031).
 
-**Verificação:**
-- `claude plugin list` mostra `bichinho@bichinho-local` habilitado.
-- Gate **interativo** num diretório já confiável:
-  1. `tmux new-session -d -s e2e -c <dir> 'claude --dangerously-skip-permissions "responda só: ok"'` → `/v1/estado` mostra a sessão e o aceno T0;
-  2. um segundo prompt editando um arquivo temporário → pulinho T1;
-  3. `/exit`.
-- `claude -p` só serve para conferir que, com o pet parado, não aparece erro de hook.
+**Verificação** (até o merge na `main`, o plugin só entra por sessão, com `--plugin-dir`; decisão 0021):
+- `claude plugin list` e `claude plugin marketplace list` iguais antes e depois do gate: nada instalado globalmente.
+- Gate **interativo** num diretório já confiável, com `CLAUDECODE` e as `CLAUDE_CODE_*` tiradas do ambiente:
+  1. `tmux new-session -d -s e2e -c <dir> 'claude --plugin-dir ~/Documents/claude-pet/plugin --dangerously-skip-permissions "responda só: ok"'` → `/v1/estado` mostra a sessão e o aceno T0;
+  2. um segundo prompt que cria um arquivo temporário com a ferramenta Write → pulinho T1, com `arquivos: 1` no turno (`/v1/estado.turnos`; o `arq` exato, sha256 do caminho, só aparece na pilha de dev, em `/v1/debug/eventos`, e os canários o conferem);
+  3. `/exit` → tchau.
+- `claude -p --plugin-dir …` só serve para conferir que, com o pet parado, não aparece erro de hook.
 - `time (printf '{}' | sh plugin/scripts/avisar.sh Stop)` leva no máximo 2,1 s com o pet parado.
+- Na tela (acesa e desbloqueada), o `commits_total` do `/v1/estado` sobe durante as reações; com a tela apagada ou bloqueada, as reações só são conferidas no `/v1/estado`.
+- Depois do merge: a instalação pela worktree estável (README) e `claude plugin list` mostrando `bichinho@bichinho-local` habilitado.
 
 ### M4 — Arrastar e seguir o monitor ativo
 

@@ -1110,3 +1110,83 @@ processo) achou duas pontas soltas no `/v1/comando` unificado da 0030:
 justamente o que se queria ver: o personagem sem aprovação, o compositor
 fora. Esperar o laço custa milissegundos. O cadeado continua só onde há
 disco e troca de personagem.
+
+## 0034 — Revisão do gate do M3: `bin/pet testar` pelo registro do turno, plano sem instalação global, aprovação fora do CLAUDE.md e gate refeito com Write (2026-10-03)
+
+**Problema:** a revisão adversarial da integração (lentes do processo e do
+cérebro) achou:
+- o `bin/pet testar` lia o resultado da `ultima_reacao`, que é de quem
+  reagiu por último. Uma sessão real reagindo entre a reação do teste e a
+  leitura seguinte (a cada 100 ms) fazia o teste esperar 5 s e falhar, com
+  a reação feita;
+- a verificação do M3 no PLANO ainda pedia `claude plugin list` com
+  `bichinho@bichinho-local` habilitado e rodava o gate sem `--plugin-dir`,
+  contra a 0021 e o CLAUDE.md: instalar antes do merge faria as sessões de
+  outros projetos rodarem a branch;
+- o CLAUDE.md versionado guardava estado desta máquina: a aprovação do
+  `zeca` de 23:28 UTC "tratada como do Renan" e um "não a revogue". Estado
+  de máquina envelhece num arquivo que vai para a `main`. E a origem, que o
+  relatório da integração deixou como não confirmada, estava confirmada: o
+  Renan respondeu "Aprovo, sem contorno" na sessão que orquestra os marcos
+  às 23:27:37 UTC, e essa sessão rodou `bin/pet skin-aprovar zeca` às
+  23:28:02;
+- o gate refeito na integração (0030) não teve turno com Write ou Edit, e
+  nada foi conferido na tela, embora a 0030 dissesse que as reações "tocam
+  nele";
+- um daemon de debug do M2 (o do T2.6, nativo, na porta 27399, conectado ao
+  Hyprland) ficou rodando desde as 17:46.
+
+**Escolha:**
+- O `bin/pet testar` acha o turno da própria sessão de teste no
+  `/v1/estado.turnos` (por `sid8` e `teste`) e lê a reação dele. O teste
+  novo tem sessões reais reagindo a cada 50 ms; o `bin/pet` antigo
+  reprovou 3 de 3 vezes.
+- A verificação do M3 no PLANO segue a 0021: `--plugin-dir`, com
+  `CLAUDECODE` e as `CLAUDE_CODE_*` fora do ambiente; `claude plugin list` e
+  `claude plugin marketplace list` iguais antes e depois; um turno com Write
+  conferido por `arquivos: 1`. A instalação e o `bichinho@bichinho-local`
+  habilitado ficam para depois do merge (README).
+- O CLAUDE.md perde o parágrafo da máquina e ganha a regra que dura: nunca
+  revogue uma aprovação que você não fez; antes de mexer, leia o `skin` do
+  `/v1/estado` e o `aprovacao.json` em `/state`.
+- O daemon esquecido foi parado pelo PID, sem `pkill -f`.
+
+Ao vivo. A tela ficou apagada e a sessão bloqueada o tempo todo: nada foi
+conferido por pixel, só pelo `/v1/estado` e pelo log.
+- Produção refeita da `m3-hooks` (`bin/pet subir`): tela ativa, `zeca` da
+  imagem com a aprovação do Renan (sha 5b843b03…), D = 8. A aprovação não
+  foi tocada.
+- `bin/pet testar rapido` → `nod` (T0); `pequeno` → `done_small` (T1,
+  trabalho 2, arquivos 1, 940 ms).
+- `bin/pet tocar`: `nod` → tag `nod`, `done_small` → `chirp`, `bye` →
+  `chirp`; `nada_disso` → 400. Com a tela apagada, `tocou` só diz que a
+  reação tocou na camada, e o `commits_total` fica em 1. O pet não sabe se
+  a tela está acesa, porque nunca pergunta ao Hyprland, e sem frame
+  callback não faz commit (decisão 0018).
+- Gate interativo no tmux, em `~/Documents`, com `--plugin-dir`:
+  - "responda só: ok" → `nod` (T0);
+  - "use a ferramenta Write para criar …/tmp/e2e/oi.txt" → um Write de 22
+    ms → `done_small` (T1, trabalho 1, `arquivos: 1`);
+  - `/exit` → `bye`.
+  Foram 19 eventos aceitos e nenhum recusado. A primeira tentativa mandou o
+  texto e o `Enter` no mesmo `tmux send-keys`: o Claude Code tratou como
+  colagem e não enviou (a sessão saiu com `bye` quando o tmux foi
+  derrubado). O texto vai com `-l`, e o `Enter` num `send-keys` à parte.
+- Com o pet parado, `claude -p --plugin-dir …` imprimiu só `ok`, com stderr
+  vazio e saída 0, e o `avisar.sh` levou 14 ms. Com o pet de pé, um
+  `claude -p` mandou 4 eventos, todos ignorados como `origem:sdk-cli`.
+- Log e `/v1/estado` sem nada dos prompts nem caminhos (0 ocorrências).
+  `claude plugin list`, `claude plugin marketplace list`, `settings.json`,
+  `installed_plugins.json` e `known_marketplaces.json` iguais antes e
+  depois.
+
+Fica pendente, porque pede o Renan: no Zeca, o aceno do T0 (`nod`, levanta
+e senta, 600 ms) é um pedaço da rajada do repouso (`stand_look_sit`,
+levanta, respira em pé e senta), que o parado toca sozinho a cada ~18 s.
+Quem olha pode confundir os dois. Mudar o `nod` ou o repouso muda o
+`skin.json`, a impressão digital e a aprovação: é uma folha de contato nova
+e uma reaprovação dele, e depois a conferência na tela.
+
+**Por quê:** o teste tem de achar o próprio resultado, não o do vizinho. O
+plano não pode mandar quebrar uma regra de ouro. Estado de máquina vai para
+o PROGRESS ou o corpo do PR; regra vai para o CLAUDE.md.

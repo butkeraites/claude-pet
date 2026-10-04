@@ -62,13 +62,15 @@ refeito com o Zeca (decisões 0021 e 0030). O plugin **não** está
 instalado: até o merge na `main`, só por sessão, com `claude --plugin-dir
 ~/Documents/claude-pet/plugin`; depois do merge, pela worktree estável
 (README). Sem personagem aprovado a produção reage só no `/v1/estado`
-(`ultima_reacao`, `turnos`).
-
-**Nesta máquina** a produção roda da `m3-hooks`, com o Zeca instalado em
-`skins-locais/` e **aprovado**: a aprovação do `zeca` (sha 5b843b03…, de
-2026-10-03 às 23:28 UTC) foi feita fora das sessões de integração e é
-tratada como do Renan. Não a revogue; teste com `bin/pet testar`, que
-nunca mexe nela.
+(`ultima_reacao`, `turnos`). A revisão adversarial da integração (decisões
+0031–0034) prendeu os hooks no 127.0.0.1 (sem curlrc, proxy nem `~/.jq`),
+ensinou o cérebro a esperar o Stop que chega depois do prompt seguinte e a
+reabrir o turno quando outro Stop hook segura o Claude, fez o `tocar` dizer
+o que tocou e refez o gate com um turno de Write. **Pendente:** no Zeca o
+aceno (`nod`: levanta e senta) é um pedaço da rajada do repouso
+(`stand_look_sit`), e dá para confundir os dois; mudar pede o Renan (muda o
+`skin.json`, a impressão e a aprovação). As reações com o Zeca ainda não
+foram vistas na tela: a sessão estava bloqueada nos dois gates.
 
 ## Comandos
 
@@ -139,7 +141,11 @@ Fora dele, use `~/.cargo/bin/cargo`.
 - **Personagem só com aprovação:** o Zeca aparece só com a impressão
   digital aprovada pelo Renan (`bin/pet skin-aprovar`, decisões 0026 e 0029).
   Nunca aprove por ele: aprovação de teste se revoga no fim (os scripts ao
-  vivo fazem isso sozinhos, até numa falha).
+  vivo fazem isso sozinhos, até numa falha). **Nunca revogue uma aprovação
+  que você não fez:** antes de mexer, leia `skin` no `/v1/estado` e o
+  `/state/skins/<id>/aprovacao.json` (`docker exec claude-pet-pet-1 cat …`);
+  a que já estava lá é do Renan. Para testar reações, `bin/pet testar` e
+  `bin/pet tocar`, que nunca mexem em aprovação.
 - **Orçamento de commits Wayland:** média ≤ 2/s parado, 0 dormindo,
   rajadas ≤ 30 fps (decisão 0005).
 - **Registro por tarefa:** cada tarefa ganha uma linha no `PROGRESS.md` e um
@@ -196,7 +202,9 @@ Fora dele, use `~/.cargo/bin/cargo`.
   dev e `curl -H 'X-Pet: 1' 127.0.0.1:27380/v1/debug/eventos` (só
   metadados validados).
 - `claude` aninhado (tmux, testes) a partir de uma sessão do Claude: tire
-  `CLAUDECODE` e as `CLAUDE_CODE_*` do ambiente antes, como no gate do M3.
+  `CLAUDECODE` e as `CLAUDE_*` do ambiente antes, como no gate do M3. No
+  tmux, mande o texto com `tmux send-keys -l` e o `Enter` num `send-keys`
+  separado: juntos, o Claude Code trata como colagem e não envia.
   O próprio Claude Code põe `CLAUDE_CODE_ENTRYPOINT` (`cli` no terminal,
   `sdk-cli` no `-p`), e o cérebro só conta `cli` (`sessoes.origens`).
 - No 2.1.288 o `UserPromptSubmit` vem **sem** `source`, e o `SessionEnd`

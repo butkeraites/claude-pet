@@ -40,6 +40,47 @@ fn rapido_acena_e_pequeno_pula() {
 }
 
 #[test]
+fn testar_acha_a_propria_reacao_com_sessoes_reais_reagindo() {
+    // A `ultima_reacao` é de quem reagiu por último: com sessões reais
+    // reagindo a cada 50 ms, o `bin/pet testar` ainda acha a reação dele,
+    // pelo registro do próprio turno (decisão 0034).
+    let d = Daemon::subir(false);
+    let porta = d.porta;
+    let parar = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let fundo = {
+        let parar = std::sync::Arc::clone(&parar);
+        std::thread::spawn(move || {
+            let mut i = 0u32;
+            while !parar.load(std::sync::atomic::Ordering::Relaxed) {
+                for e in ["UserPromptSubmit", "Stop"] {
+                    let corpo = format!(
+                        r#"{{"v":1,"e":"{e}","sid":"{i:08x}-real","turno":"p{i}","ent":"cli"}}"#
+                    );
+                    let pedido = format!(
+                        "POST /v1/evento HTTP/1.1\r\nHost: 127.0.0.1:{porta}\r\nX-Pet: 1\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{corpo}",
+                        corpo.len()
+                    );
+                    assert_eq!(comum::bruto(porta, &pedido).0, 204);
+                }
+                i += 1;
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            i
+        })
+    };
+    let (ok, saida, erro) = testar(&d, "pequeno");
+    parar.store(true, std::sync::atomic::Ordering::Relaxed);
+    let reais = fundo.join().unwrap();
+    assert!(ok, "pequeno falhou: {saida}{erro}");
+    assert!(saida.contains("✓ pequeno → done_small"), "{saida}");
+    assert!(reais >= 10, "só {reais} sessões reais");
+    let estado = d.esperar_estado("as reais reagiram", |e| {
+        e["ultima_reacao"]["teste"] == false
+    });
+    assert_eq!(estado["ultima_reacao"]["nome"], "nod");
+}
+
+#[test]
 fn proxy_e_curlrc_nao_desviam_o_cli() {
     // O `bin/pet` e o `avisar.sh` só falam com o pet do 127.0.0.1, mesmo com
     // proxy no ambiente e um curlrc desviando tudo (decisão 0031).

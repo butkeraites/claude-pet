@@ -133,12 +133,11 @@ testar() {
     echo "o pet não respondeu em ${URL} — está de pé? (bin/pet subir)" >&2
     return 1
   fi
-  local sid turno inicio
+  local sid id_turno
   sid="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')-pet-testar"
-  turno="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
-  inicio="$(date +%s%3N)"
+  id_turno="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
   hook() {
-    jq -nc --arg e "$1" --arg sid "$sid" --arg turno "$turno" --argjson extra "$2" \
+    jq -nc --arg e "$1" --arg sid "$sid" --arg turno "$id_turno" --argjson extra "$2" \
       '{session_id: $sid, prompt_id: $turno, cwd: "/tmp/pet-testar",
         transcript_path: "/dev/null", hook_event_name: $e} + $extra' |
       PET_TESTE=1 PET_PORTA="$PORTA" CLAUDE_CODE_ENTRYPOINT=cli \
@@ -154,28 +153,27 @@ testar() {
   fi
   hook Stop '{"stop_hook_active": false, "background_tasks": []}'
 
-  # A reação desta sessão (sid8 e teste) depois do início; a acomodação do
-  # Stop é de 0,8 s.
-  local filtro estado reacao=""
-  # shellcheck disable=SC2016 # programa do jq: $sid8 e $inicio são dele
-  filtro='.ultima_reacao | select(. != null and .teste == true
-    and .sid8 == $sid8 and .ts >= ($inicio | tonumber))'
+  # O turno desta sessão de teste (sid8) no /v1/estado.turnos, com a reação
+  # dele. A ultima_reacao não serve: é de quem reagiu por último, e uma
+  # sessão real pode reagir no meio (decisão 0034). A acomodação do Stop é
+  # de 0,8 s.
+  local filtro estado turno=""
+  # shellcheck disable=SC2016 # programa do jq: $sid8 é dele
+  filtro='[.turnos[] | select(.teste == true and .sid8 == $sid8
+    and .reacao != null)][0] // empty'
   for _ in $(seq 1 50); do
     estado="$(api /v1/estado || true)"
-    reacao="$(jq -c --arg sid8 "${sid:0:8}" --arg inicio "$inicio" "$filtro" \
-      <<<"$estado" 2>/dev/null || true)"
-    [ -n "$reacao" ] && break
+    turno="$(jq -c --arg sid8 "${sid:0:8}" "$filtro" <<<"$estado" 2>/dev/null || true)"
+    [ -n "$turno" ] && break
     sleep 0.1
   done
-  if [ -z "$reacao" ]; then
+  if [ -z "$turno" ]; then
     echo "✗ ${cenario}: nenhuma reação em 5 s (bin/pet logs; os eventos chegaram?)" >&2
     return 1
   fi
-  jq . <<<"$reacao"
-  jq -c --arg sid8 "${sid:0:8}" '[.turnos[] | select(.sid8 == $sid8)][0]
-    | {nivel, trabalho, outras, arquivos, subagentes, dur_ms}' <<<"$estado"
+  jq -c '{reacao, nivel, trabalho, outras, arquivos, subagentes, dur_ms, sid8}' <<<"$turno"
   local nome
-  nome="$(jq -r .nome <<<"$reacao")"
+  nome="$(jq -r .reacao <<<"$turno")"
   if [ "$nome" = "$esperado" ]; then
     echo "✓ ${cenario} → ${nome}"
   else
