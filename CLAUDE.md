@@ -285,9 +285,12 @@ Fora dele, use `~/.cargo/bin/cargo`.
 - `WAYLAND_DEBUG=1` (ou `client`) no ambiente do daemon desliga o
   foreign-toplevel: o wayland-client imprimiria os títulos das janelas no
   stderr. O clique cai no balão.
-- O socket2 só conta trocas: logo depois de o pet subir,
-  `desktop.monitor_em_foco` fica nulo até a primeira troca de monitor, e o
-  anel começa com a semente do foreign-toplevel (a janela ativa na conexão).
+- O socket2 só conta trocas: logo depois de o pet subir, quem diz o
+  `desktop.monitor_em_foco` é a camada (output NULL: ela cai no monitor em
+  foco; decisão 0059), e o anel começa com a semente do foreign-toplevel (a
+  janela ativa na conexão). Sem conexão Wayland o socket2 continua lido: todo
+  prazo que o Motor anuncia tem de vencer também no
+  `Motor::vencer_sem_conexao`, senão o laço gira a 100% de CPU.
 - O `shellcheck` não está instalado no host (o `bin/pet verificar` pula).
   Rodado pela imagem oficial, que depois foi removida:
   `docker run --rm --network none -v "$PWD:/mnt:ro" -w /mnt

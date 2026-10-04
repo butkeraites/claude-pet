@@ -13,6 +13,14 @@
 //! camada, a camada nova com output NULL (o compositor a põe no monitor em
 //! foco), o palco na posição salva daquele monitor (ou no ponto onde o pet
 //! foi solto, se veio de um arraste para fora) e o poof de chegada.
+//!
+//! **O alvo velho** (decisão 0059). O socket2 só conta trocas: um foco que
+//! se perdeu (a fonte caiu e voltou, o Hyprland reiniciou com outro monitor
+//! em foco, o HDMI saiu) deixaria o alvo apontando para um monitor onde a
+//! camada nunca cai, e o pet viajaria a cada 1,5 s sem fim. Uma camada com
+//! output NULL nasce no monitor em foco na hora em que foi criada: se nenhum
+//! foco novo chegou desde então, o monitor onde ela caiu **é** o monitor em
+//! foco, e ele vira o alvo ([`Seguir::pousou`]).
 
 use std::collections::VecDeque;
 
@@ -76,13 +84,18 @@ pub enum Decisao {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Seguir {
-    /// O último monitor em foco que o desktop contou.
+    /// O último monitor em foco que o desktop contou (ou o que a camada
+    /// revelou, [`Seguir::pousou`]).
     pub alvo: Option<String>,
     /// Quando conferir se é hora de ir (o debounce, ou o intervalo).
     prazo: Option<u64>,
     /// O início das viagens recentes.
     viagens: VecDeque<u64>,
     pub viagem: Option<Viagem>,
+    /// Quantos focos o desktop contou até agora.
+    focos: u64,
+    /// Os focos contados quando a camada de agora foi pedida.
+    focos_na_criacao: Option<u64>,
 }
 
 impl Seguir {
@@ -91,6 +104,45 @@ impl Seguir {
     pub fn foco(&mut self, nome: String, agora_ms: u64) {
         self.alvo = Some(nome);
         self.prazo = Some(agora_ms + DEBOUNCE_MS);
+        self.focos += 1;
+    }
+
+    /// Uma camada nova foi pedida (output NULL: ela cai no monitor em foco
+    /// de agora).
+    pub fn criou_camada(&mut self) {
+        self.focos_na_criacao = Some(self.focos);
+    }
+
+    /// A camada caiu em `monitor`. Sem foco novo desde que ela foi pedida,
+    /// esse é o monitor em foco (o compositor a pôs lá): ele vira o alvo, no
+    /// lugar de um alvo velho que mandaria o pet viajar sem fim. Devolve o
+    /// monitor em foco que a camada revelou, se revelou.
+    pub fn pousou(&mut self, monitor: &str) -> Option<String> {
+        if self.focos_na_criacao != Some(self.focos) {
+            // Um foco chegou depois: ele vale (o pet vai atrás dele).
+            return None;
+        }
+        if self.alvo.as_deref() != Some(monitor) {
+            self.alvo = Some(monitor.to_owned());
+        }
+        Some(monitor.to_owned())
+    }
+
+    /// A fonte do foco caiu: o que ela contou pode ter mudado no meio, e o
+    /// pet não viaja atrás de um foco que não se sabe mais.
+    pub fn sem_foco(&mut self) {
+        self.alvo = None;
+        self.prazo = None;
+    }
+
+    /// Uma conexão nova ou o fim dela: nenhuma viagem, nenhum alvo, nenhum
+    /// prazo (a conta das viagens recentes fica, para a próxima ser rápida
+    /// se for o caso).
+    pub fn esquecer(&mut self) {
+        self.alvo = None;
+        self.prazo = None;
+        self.viagem = None;
+        self.focos_na_criacao = None;
     }
 
     /// Confere de novo em `quando` (depois de soltar o pet, do fim de uma
@@ -250,6 +302,47 @@ mod testes {
             s.comecar(31_000, None, false),
             "sem pet desenhado, sem poof"
         );
+    }
+
+    #[test]
+    fn a_camada_que_caiu_sem_foco_novo_corrige_o_alvo_velho() {
+        // O alvo ficou velho (o HDMI saiu, ou o Hyprland reiniciou com outro
+        // monitor em foco): a camada nova cai no eDP-1 e nenhum foco chegou
+        // depois de ela ser pedida. O eDP-1 é o monitor em foco.
+        let mut s = Seguir::default();
+        s.foco("HDMI-A-1".into(), 0);
+        s.criou_camada();
+        assert_eq!(s.pousou("eDP-1"), Some("eDP-1".into()));
+        assert_eq!(s.alvo.as_deref(), Some("eDP-1"));
+        s.conferir_em(500);
+        assert_eq!(s.decidir(500, Some("eDP-1"), true), Decisao::Nada);
+        // Um foco que chega depois de a camada ser pedida vale: o pet vai.
+        s.criou_camada();
+        s.foco("HDMI-A-1".into(), 1_000);
+        assert_eq!(s.pousou("eDP-1"), None, "o foco novo manda");
+        assert_eq!(s.alvo.as_deref(), Some("HDMI-A-1"));
+        assert_eq!(s.decidir(1_300, Some("eDP-1"), true), Decisao::Viajar);
+        // Sem camada pedida, a camada não revela nada.
+        let mut nova = Seguir::default();
+        assert_eq!(nova.pousou("eDP-1"), None);
+    }
+
+    #[test]
+    fn sem_a_fonte_do_foco_ou_sem_conexao_nada_fica_armado() {
+        let mut s = Seguir::default();
+        s.foco("HDMI-A-1".into(), 0);
+        s.sem_foco();
+        assert_eq!((s.alvo.clone(), s.prazo()), (None, None));
+        s.conferir_em(10);
+        assert_eq!(s.prazo(), None, "sem alvo, conferir não arma");
+        s.foco("HDMI-A-1".into(), 20);
+        s.comecar(400, None, true);
+        s.esquecer();
+        assert_eq!((s.alvo.clone(), s.prazo(), s.fase()), (None, None, None));
+        // O prazo vencido sem janela (livre = falso) sai na decisão.
+        s.foco("HDMI-A-1".into(), 1_000);
+        assert_eq!(s.decidir(1_300, None, false), Decisao::Nada);
+        assert_eq!(s.prazo(), None);
     }
 
     #[test]

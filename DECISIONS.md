@@ -2332,3 +2332,56 @@ nunca aplicada sem ele.
 **Por quê:** o que dá para provar sem a tela fica provado no daemon de
 verdade e na produção; o que pede a tela fica escrito para rodar com o
 Renan, sem mexer no Hyprland dele nem focar janelas enquanto ele não está.
+
+## 0059 — Revisão do seguir o foco: os prazos do Motor sem conexão e o alvo velho (2026-10-04)
+
+**Problema:** as revisões do M4 acharam dois defeitos no seguir o monitor
+ativo (T4.5).
+- **O laço girava a 100% de CPU sem a conexão Wayland.** O M4 pôs no
+  `Motor::proximo_prazo` prazos que só o `Motor::vencer(punho)` tirava: o
+  debounce do foco, o fim do balão e o da soneca. Sem conexão (o compositor
+  caiu, ou a conexão está no backoff) o `Nucleo::vencer` pulava o Motor, e o
+  laço rearmava o mesmo prazo vencido sem fim. O leitor do socket2 vive
+  desde a descoberta e sobrevive ao backoff (decisão 0050): bastava o mouse
+  cruzar para o outro monitor. Conferido no daemon de verdade com o
+  Hyprland de mentira: 200 tiques de CPU em 2 s (um núcleo inteiro).
+- **O alvo velho fazia o pet viajar sem fim.** O `Seguir.alvo` nunca era
+  corrigido. A camada com output NULL nasce no monitor em foco; se o alvo
+  apontava para outro monitor (um `focusedmonv2` perdido enquanto o socket2
+  reconectava, o Hyprland reiniciado com o eDP-1 em foco depois de uma
+  sessão que terminou no HDMI, o HDMI intermitente), cada chegada decidia
+  viajar de novo: a camada era destruída e recriada a cada 1,5 s, sem poof
+  depois da terceira, até o Renan trocar de monitor. Com um monitor só,
+  nunca.
+
+**Escolha (revisão do T4.5):**
+- **`Motor::vencer_sem_conexao`**: o `Nucleo::vencer` sem conexão vence os
+  mesmos prazos sem desenhar (o arraste, o de conferir o foco, o balão, a
+  soneca, o coração, o foco à espera de confirmação e o quadro). O
+  `desconectou` tira o que só existe na janela (o balão, a viagem e o
+  prazo de seguir); a soneca fica e acaba no prazo dela.
+- **A camada revela o monitor em foco** (`Seguir::pousou`): o `Seguir` conta
+  os focos que o desktop mandou e guarda a conta quando uma camada é pedida
+  (`Motor::criar_janela`, o único lugar que pede). Quando ela fica pronta
+  sem foco novo desde então, o monitor onde ela caiu é o monitor em foco:
+  ele vira o alvo (o log diz quando corrigiu um velho) e o
+  `/v1/estado.desktop.monitor_em_foco` (que antes ficava nulo até a
+  primeira troca). Um foco que chegou depois de a camada ser pedida vale:
+  o pet vai atrás dele.
+- **A conexão nova esquece o alvo** (`Seguir::esquecer` no `conectou`): a
+  camada nova nasce no monitor em foco. A fonte do foco que cai não apaga o
+  alvo: o último foco contado é o melhor palpite (um `focusedmonv2` que
+  chegou logo antes da queda ainda leva o pet), e a camada corrige se ele
+  estiver velho. As revisões pediam apagar; não apagar não deixa laço, e
+  apagar perderia uma viagem certa.
+- **Testes:** no daemon de verdade, o socket2 com `focusedmonv2` e o Wayland
+  no backoff gastam 0 tique em 2 s (eram 200; `tests/socket2.rs`); no Motor
+  em relógio falso, nenhum prazo vencido fica armado sem conexão (o balão,
+  a soneca e o foco do monitor, vencidos um a um como o laço faz), o alvo
+  velho não viaja de novo em 30 s, e o foco que chega depois da camada
+  pedida ainda leva o pet; no `Seguir`, o alvo corrigido e o esquecido.
+
+**Por quê:** todo prazo que o Motor anuncia tem de ter quem o vença em
+qualquer estado da conexão, senão o laço gira; e o compositor, que pôs a
+camada no monitor em foco, sabe mais que um foco antigo que pode ter se
+perdido.

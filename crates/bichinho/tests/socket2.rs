@@ -119,3 +119,29 @@ fn a_protecao_de_tela_do_omarchy_chega_como_booleano() {
     sem_segredo("log", &d.log());
     assert!(d.log().contains("proteção de tela abriu"), "{}", d.log());
 }
+
+/// Sem a conexão Wayland (o compositor de mentira desliga na hora e o laço
+/// fica no backoff) o socket2 continua lido: um `focusedmonv2` arma o prazo
+/// de seguir o monitor, que tem de vencer mesmo sem a janela. Antes da
+/// revisão do M4 o prazo vencido ficava armado e o laço girava a 100% de
+/// CPU até a conexão voltar (decisão 0059).
+#[test]
+fn sem_a_conexao_wayland_o_foco_de_monitor_nao_gira_o_laco() {
+    let h = HyprlandFalso::novo("cpu", "focusedmonv2>>HDMI-A-1,3\n");
+    let d = Daemon::subir_com(false, &[("PET_HOST_RUNTIME", h.runtime().as_str())]);
+    esperar(&d, "o monitor em foco", |e| {
+        e["desktop"]["monitor_em_foco"] == "HDMI-A-1"
+    });
+    // Passado o debounce de 300 ms, o prazo já venceu sem janela.
+    thread::sleep(Duration::from_millis(600));
+    let antes = d.cpu_tiques();
+    thread::sleep(Duration::from_secs(2));
+    let gasto = d.cpu_tiques() - antes;
+    // Girando, seriam ~200 tiques (2 s de um núcleo a 100 por segundo).
+    assert!(
+        gasto < 40,
+        "o laço girou sem a conexão: {gasto} tiques de CPU em 2 s\nlog:\n{}",
+        d.log()
+    );
+    assert!(h.comandos_intocado(), "alguém conectou no .socket.sock");
+}

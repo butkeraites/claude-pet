@@ -271,7 +271,20 @@ fn janela_fechada_perde_o_palco_e_recriar_so_se_o_pet_deve_aparecer() {
 #[test]
 fn painel_sem_janela_e_vazio_e_desconectar_zera() {
     let (mut motor, janela) = ligado();
-    assert_eq!(motor.painel(None, 10), Painel::default());
+    let sem = motor.painel(None, 10);
+    assert_eq!(
+        Painel {
+            desktop: Painel::default().desktop,
+            ..sem.clone()
+        },
+        Painel::default(),
+        "vazio, fora o desktop"
+    );
+    assert_eq!(
+        sem.desktop.monitor_em_foco.as_deref(),
+        Some("eDP-1"),
+        "o desktop fica: a camada contou o monitor em foco (decisão 0059)"
+    );
     assert_eq!(motor.painel(Some(&janela), 10).commits_total, 1);
     motor.desconectou();
     assert!(!motor.quer_mostrar());
@@ -1581,5 +1594,123 @@ fn o_pronto_sai_com_10_s_do_terminal_em_foco_e_o_esperando_fica() {
     assert_eq!(
         pendentes(&motor),
         vec![("sessao-b".to_owned(), TipoAviso::Pronto)]
+    );
+}
+
+// --- prazos sem conexão e o alvo velho (decisão 0059) ------------------------
+
+/// Vence os prazos do Motor até `ate` sem conexão, como o laço do daemon
+/// faz: cada prazo vencido tem de sair (ou ir para depois); um que ficasse
+/// armado faria o laço acordar de novo na hora, sem fim.
+fn vencer_sem_conexao_ate(motor: &mut Motor, ate: u64) {
+    for _ in 0..1_000 {
+        let Some(prazo) = motor.proximo_prazo().filter(|&p| p <= ate) else {
+            return;
+        };
+        if motor.prazo_do_cerebro().is_some_and(|p| p <= prazo) {
+            motor.tique(em(prazo));
+        }
+        motor.vencer_sem_conexao(prazo);
+        assert!(
+            motor.proximo_prazo().is_none_or(|p| p > prazo),
+            "o prazo {prazo} ficou armado sem conexão"
+        );
+    }
+    panic!("mil prazos sem conexão até {ate}: o laço giraria");
+}
+
+#[test]
+fn sem_conexao_nenhum_prazo_vencido_fica_armado() {
+    use crate::plataforma::EventoDesktop;
+    let (mut motor, mut janela) = ligado();
+    janela.mostrou();
+    motor.mostrar_balao(Some(&mut janela), vec!["oi".into()], 100);
+    janela.mostrou();
+    clique_direito(&mut motor, &mut janela, 200);
+    assert!(motor.soneca(300).is_some());
+    // O compositor cai; o socket2 continua contando o foco.
+    motor.desconectou();
+    assert!(motor.balao(300).is_none(), "o balão era da janela");
+    motor.evento_desktop(
+        None,
+        &EventoDesktop::MonitorEmFoco("HDMI-A-1".into()),
+        em(1_000),
+    );
+    assert_eq!(motor.proximo_prazo(), Some(1_000 + viagem::DEBOUNCE_MS));
+    vencer_sem_conexao_ate(&mut motor, 1_000 + SONECA_MS);
+    assert_eq!(motor.soneca(1_000 + SONECA_MS), None, "a soneca acabou");
+    assert_eq!(motor.proximo_prazo(), None);
+    // Com a conexão de volta, a camada nova nasce no monitor em foco.
+    let mut nova = Falsa::default();
+    motor.conectou(SONECA_MS + 2_000);
+    motor.aplicar_visibilidade(&mut nova, SONECA_MS + 2_000);
+    assert_eq!(nova.pedidos, vec!["criar"]);
+}
+
+#[test]
+fn alvo_velho_nao_faz_o_pet_viajar_sem_fim() {
+    // O foco contado é o HDMI, mas a camada nova cai no eDP-1 (o HDMI saiu,
+    // ou o Hyprland reiniciou com o eDP-1 em foco) e nenhum foco novo chega:
+    // o eDP-1 é o monitor em foco, e o pet fica nele.
+    let (mut motor, mut janela) = ligado();
+    assert_eq!(
+        motor
+            .painel(Some(&janela), 0)
+            .desktop
+            .monitor_em_foco
+            .as_deref(),
+        Some("eDP-1"),
+        "a primeira camada já diz o monitor em foco"
+    );
+    janela.mostrou();
+    foco(&mut motor, &mut janela, "HDMI-A-1", 0);
+    motor.vencer(&mut janela, 300);
+    janela.mostrou();
+    motor.vencer(&mut janela, 540);
+    saiu(&mut motor, &mut janela, 600);
+    assert_eq!(janela.pedidos.last().unwrap(), "criar");
+    // O compositor pôs a camada nova no eDP-1 (a janela de mentira continua
+    // pronta nele).
+    motor.evento_overlay(&mut janela, EventoOverlay::Pronta, 700);
+    let pedidos = janela.pedidos.len();
+    for t in [700 + 240, 2_500, 4_000, 10_000, 30_000] {
+        janela.mostrou();
+        motor.vencer(&mut janela, t);
+    }
+    let novos = &janela.pedidos[pedidos..];
+    assert!(
+        !novos
+            .iter()
+            .any(|p| p == "criar" || p.starts_with("apagar") || p == "destruir"),
+        "viajou de novo: {novos:?}"
+    );
+    let p = motor.painel(Some(&janela), 30_000);
+    assert_eq!(p.viagem, None);
+    assert_eq!(p.desktop.monitor_em_foco.as_deref(), Some("eDP-1"));
+}
+
+#[test]
+fn foco_que_chega_depois_da_camada_pedida_ainda_leva_o_pet() {
+    // A camada nova cai no HDMI (o foco quando ela foi pedida), mas o Renan
+    // volta ao eDP-1 antes de ela ficar pronta: o foco novo vale.
+    let (mut motor, mut janela) = ligado();
+    janela.mostrou();
+    foco(&mut motor, &mut janela, "HDMI-A-1", 0);
+    motor.vencer(&mut janela, 300);
+    janela.mostrou();
+    motor.vencer(&mut janela, 540);
+    saiu(&mut motor, &mut janela, 600);
+    foco(&mut motor, &mut janela, "eDP-1", 650);
+    janela.pronta = Some(hdmi());
+    motor.evento_overlay(&mut janela, EventoOverlay::Pronta, 700);
+    janela.mostrou();
+    motor.vencer(&mut janela, 940);
+    assert_eq!(motor.painel(Some(&janela), 940).viagem, None, "o intervalo");
+    janela.mostrou();
+    motor.vencer(&mut janela, 300 + viagem::INTERVALO_MS);
+    assert_eq!(
+        motor.painel(Some(&janela), 1_800).viagem,
+        Some("poof"),
+        "volta ao eDP-1"
     );
 }

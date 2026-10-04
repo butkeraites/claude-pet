@@ -132,6 +132,26 @@ impl Daemon {
         ))
     }
 
+    /// O PID do daemon.
+    pub fn pid(&self) -> u32 {
+        self.filho.id()
+    }
+
+    /// CPU que o daemon gastou até agora (usuário e sistema), em tiques do
+    /// relógio do kernel (`/proc/<pid>/stat`, campos 14 e 15). O `stat` se
+    /// lê mesmo com o processo sem core dump (dono root, modo 0444).
+    pub fn cpu_tiques(&self) -> u64 {
+        let stat = std::fs::read_to_string(format!("/proc/{}/stat", self.pid()))
+            .expect("/proc/<pid>/stat do daemon");
+        // O nome do processo vem entre parênteses e pode ter espaço: os
+        // campos contam depois do último `)`.
+        let depois = &stat[stat.rfind(')').expect("stat sem nome") + 2..];
+        let campos: Vec<&str> = depois.split(' ').collect();
+        // Depois do `)`, o estado é o campo 3: utime (14) e stime (15) são
+        // os índices 11 e 12.
+        campos[11].parse::<u64>().unwrap() + campos[12].parse::<u64>().unwrap()
+    }
+
     /// O que o daemon escreveu no stderr até agora.
     pub fn log(&self) -> String {
         std::fs::read_to_string(self.pasta.join("daemon.log")).unwrap_or_default()

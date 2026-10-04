@@ -496,29 +496,66 @@ impl Motor {
     }
 
     /// Uma janela nova (o compositor conectou): o pet recomeça a animação
-    /// agora, sem palco até a janela ficar pronta.
+    /// agora, sem palco até a janela ficar pronta. A camada nova nasce no
+    /// monitor em foco: o alvo de antes não vale mais (decisão 0059).
     pub fn conectou(&mut self, agora_ms: u64) {
         self.pet = self.skin.clone().map(|skin| Pet::novo(skin, agora_ms));
         self.palco = None;
         self.arraste.cancelar();
-        self.seguir.terminar();
+        self.seguir.esquecer();
         self.estresse = None;
         self.commits = Commits::default();
         self.proximo_quadro = None;
     }
 
     /// A janela acabou com a sessão (o compositor caiu). Um foco pedido pelo
-    /// clique morre com ela (o handle era dela).
+    /// clique morre com ela (o handle era dela), e nada que só existe na
+    /// janela (o balão, o coração, a viagem e o prazo de seguir o foco) fica
+    /// com prazo armado: sem janela, ninguém o venceria (decisão 0059). A
+    /// soneca fica, e acaba no prazo dela ([`Self::vencer_sem_conexao`]).
     pub fn desconectou(&mut self) {
         self.pet = None;
         self.palco = None;
         self.focando = None;
         self.coracao_ate = None;
+        self.balao = None;
         self.arraste.cancelar();
-        self.seguir.terminar();
+        self.seguir.esquecer();
         self.estresse = None;
         self.commits = Commits::default();
         self.proximo_quadro = None;
+    }
+
+    /// Pede a janela nova (no Wayland, uma camada com output NULL: ela cai
+    /// no monitor em foco) e larga o palco até ela ficar pronta.
+    fn criar_janela(&mut self, ov: &mut dyn Overlay) {
+        ov.criar();
+        self.palco = None;
+        self.seguir.criou_camada();
+    }
+
+    /// A janela ficou pronta em `monitor`. Sem foco novo desde que ela foi
+    /// pedida, esse é o monitor em foco: ele corrige um alvo velho, que
+    /// mandaria o pet viajar sem fim, e o `/v1/estado` passa a saber o
+    /// monitor em foco antes da primeira troca (decisão 0059). `true` se a
+    /// janela está no monitor em foco (nada a conferir).
+    fn pousou(&mut self, monitor: &Monitor) -> bool {
+        let Some(nome) = monitor.nome.as_deref() else {
+            return false;
+        };
+        let antes = self.seguir.alvo.clone();
+        let Some(em_foco) = self.seguir.pousou(nome) else {
+            return false;
+        };
+        if antes.as_deref().is_some_and(|a| a != em_foco) {
+            info!(
+                "seguir: o foco contado era {}, mas a camada nova caiu em {em_foco} sem foco novo \
+                 depois: o pet fica em {em_foco}",
+                antes.as_deref().unwrap_or("?")
+            );
+        }
+        self.desktop.monitor_em_foco = Some(em_foco);
+        true
     }
 
     /// Leva a janela à visibilidade pedida. Numa viagem para outro monitor,
@@ -538,10 +575,7 @@ impl Motor {
     fn aplicar_passo(&mut self, ov: &mut dyn Overlay, passo: Passo, agora_ms: u64) {
         match passo {
             Passo::Nada => {}
-            Passo::Criar => {
-                ov.criar();
-                self.palco = None;
-            }
+            Passo::Criar => self.criar_janela(ov),
             Passo::Cancelar => {
                 ov.cancelar_saida();
                 // Como esconder, mostrar é uma ordem e não animação: o pet
@@ -658,9 +692,13 @@ impl Motor {
                         self.chegar(ov, &monitor, agora_ms);
                     } else {
                         self.montar_palco(&monitor);
+                        let no_foco = self.pousou(&monitor);
                         self.desenhar(ov, agora_ms, false);
-                        // A janela pode ter nascido longe do monitor em foco.
-                        self.seguir.conferir_em(agora_ms);
+                        // Um foco que chegou depois de a janela ser pedida
+                        // pode estar noutro monitor.
+                        if !no_foco {
+                            self.seguir.conferir_em(agora_ms);
+                        }
                     }
                 }
             }
@@ -677,8 +715,7 @@ impl Motor {
             }
             EventoOverlay::Recriar => {
                 if self.quer_mostrar() && ov.fase() == Fase::Ausente {
-                    ov.criar();
-                    self.palco = None;
+                    self.criar_janela(ov);
                 }
             }
             EventoOverlay::Ponteiro(ponteiro) => self.ponteiro(punho, ponteiro, agora_ms),
@@ -687,8 +724,7 @@ impl Motor {
             EventoOverlay::Saiu => {
                 if self.seguir.fase() == Some(FaseViagem::Saindo) {
                     if self.quer_mostrar() && ov.fase() == Fase::Ausente {
-                        ov.criar();
-                        self.palco = None;
+                        self.criar_janela(ov);
                         self.seguir.mudar_fase(FaseViagem::Chegando);
                     } else {
                         self.seguir.terminar();
@@ -728,8 +764,7 @@ impl Motor {
         self.aplicar_passo(ov, passo, agora_ms);
         if ov.fase() == Fase::Ausente {
             if self.quer_mostrar() {
-                ov.criar();
-                self.palco = None;
+                self.criar_janela(ov);
                 self.seguir.mudar_fase(FaseViagem::Chegando);
             } else {
                 self.seguir.terminar();
@@ -738,9 +773,12 @@ impl Motor {
     }
 
     /// A janela nova ficou pronta: o palco na posição salva daquele monitor
-    /// (ou no ponto onde o pet foi solto) e o poof de chegada.
+    /// (ou no ponto onde o pet foi solto) e o poof de chegada. Se ela caiu
+    /// noutro monitor que não o alvo e nenhum foco novo chegou, o alvo era
+    /// velho: o pet fica onde caiu ([`Self::pousou`]).
     fn chegar(&mut self, ov: &mut dyn Overlay, monitor: &Monitor, agora_ms: u64) {
         self.montar_palco(monitor);
+        self.pousou(monitor);
         let viagem = self.seguir.viagem;
         if let Some(pouso) = viagem.and_then(|v| v.pouso)
             && let Some(origem) = monitor.origem
@@ -1386,6 +1424,35 @@ impl Motor {
             );
         }
         self.vencer_animacao(punho.janela(), agora_ms);
+    }
+
+    /// Os mesmos prazos de [`Self::vencer`], sem conexão (o compositor caiu
+    /// ou a conexão está no backoff, com o socket2 ainda contando o foco):
+    /// nada a desenhar, mas nenhum prazo vencido pode ficar armado, senão o
+    /// laço acorda de novo na hora, sem fim, a 100% de CPU (decisão 0059).
+    pub fn vencer_sem_conexao(&mut self, agora_ms: u64) {
+        if self.arraste.vencer(agora_ms) != Gesto::Nada {
+            self.arraste.cancelar();
+        }
+        // Sem janela, não há para onde viajar: o prazo de conferir o foco
+        // sai, e a camada nova (com output NULL) nasce no monitor em foco.
+        self.seguir.decidir(agora_ms, None, false);
+        if self.balao.as_ref().is_some_and(|b| agora_ms >= b.ate_ms) {
+            self.balao = None;
+        }
+        if self.soneca_ate.is_some_and(|ate| agora_ms >= ate) {
+            self.soneca_ate = None;
+            info!("soneca acabou");
+        }
+        if self.coracao_ate.is_some_and(|ate| agora_ms >= ate) {
+            self.coracao_ate = None;
+        }
+        if self.focando.as_ref().is_some_and(|f| agora_ms >= f.ate_ms) {
+            self.focando = None;
+        }
+        if self.proximo_quadro.is_some_and(|p| p <= agora_ms) {
+            self.proximo_quadro = None;
+        }
     }
 
     /// O próximo prazo do Motor (cérebro, animação, arraste ou viagem).

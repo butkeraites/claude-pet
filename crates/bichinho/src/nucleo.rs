@@ -411,7 +411,9 @@ impl Nucleo {
     }
 
     /// Venceu um prazo: os da janela, o do cérebro e o da animação, nessa
-    /// ordem. Quem chama esvazia a caixa antes (decisão 0032).
+    /// ordem. Quem chama esvazia a caixa antes (decisão 0032). Sem conexão,
+    /// os prazos do Motor vencem do mesmo jeito, sem desenhar: um prazo
+    /// vencido que ficasse armado faria o laço girar (decisão 0059).
     pub fn vencer(&mut self, mut ov: Option<&mut dyn Punho>) {
         let agora = self.agora_ms();
         self.motor.acertar_relogio(self.agora());
@@ -423,8 +425,9 @@ impl Nucleo {
             let reacoes = self.motor.tique(self.agora());
             self.depois_do_cerebro(reacoes, punho(&mut ov));
         }
-        if let Some(ov) = punho(&mut ov) {
-            self.motor.vencer(ov, agora);
+        match punho(&mut ov) {
+            Some(ov) => self.motor.vencer(ov, agora),
+            None => self.motor.vencer_sem_conexao(agora),
         }
         self.publicar_avisos();
         self.guardar_posicoes();
