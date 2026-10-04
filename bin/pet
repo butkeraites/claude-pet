@@ -182,15 +182,39 @@ testar() {
   fi
 }
 
-# O core é puro (CLAUDE.md): nenhuma dependência normal, direta ou
-# transitiva, pode ser crate de Wayland ou do laço de eventos.
+# O core é puro (CLAUDE.md, decisão 0040): nenhuma dependência normal,
+# direta ou transitiva, pode ser crate de Wayland, do laço de eventos ou de
+# um sistema operacional.
 core_sem_wayland() {
   local proibidas
   proibidas="$(cargo tree -p pet-core -e normal --prefix none --quiet |
-    grep -iE '^(wayland|smithay|calloop)' || true)"
+    grep -iE '^(wayland|smithay|calloop|rustix|signal-hook|nix |libc |windows|objc2|x11rb|zbus)' || true)"
   if [ -n "$proibidas" ]; then
     printf 'pet-core depende de:\n%s\n' "$proibidas" >&2
     return 1
+  fi
+}
+
+# O núcleo, os esboços e o daemon compilam para o Windows e o macOS
+# (decisão 0040): `cargo clippy --target …`, que não linka e não pede SDK.
+# Só roda com os alvos instalados (`rustup target add x86_64-pc-windows-msvc
+# aarch64-apple-darwin`); sem eles, avisa e pula.
+outros_sistemas() {
+  local instalados alvo crate faltam=()
+  instalados="$(rustup target list --installed 2>/dev/null || true)"
+  for alvo in x86_64-pc-windows-msvc aarch64-apple-darwin; do
+    if ! grep -qx "$alvo" <<<"$instalados"; then
+      faltam+=("$alvo")
+      continue
+    fi
+    case "$alvo" in
+      *windows*) crate=pet-windows ;;
+      *) crate=pet-macos ;;
+    esac
+    cargo clippy --quiet --target "$alvo" -p pet-core -p "$crate" -p claude-pet -- -D warnings || return 1
+  done
+  if [ "${#faltam[@]}" -gt 0 ]; then
+    echo "  (sem os alvos ${faltam[*]}: rustup target add ${faltam[*]})"
   fi
 }
 
@@ -234,12 +258,13 @@ foto() {
 
 # Regra de ouro checável no código (decisão 0006): o daemon nunca abre o
 # socket de comandos do Hyprland nem chama hyprctl. Olha só o código de
-# produção (o que vem antes de `#[cfg(test)]`), fora de comentários; os
-# testes podem criar um `.socket.sock` falso para provar que ninguém conecta.
+# produção de todos os crates (o que vem antes de `#[cfg(test)]`), fora de
+# comentários; os testes podem criar um `.socket.sock` falso para provar que
+# ninguém conecta.
 daemon_sem_socket_de_comandos() {
   local achados
   # shellcheck disable=SC2016 # é o programa do awk: o $0 é do awk, não do shell
-  achados="$(find crates/claude-pet/src -name '*.rs' -print0 |
+  achados="$(find crates/*/src -name '*.rs' -print0 |
     xargs -0 awk '/^#\[cfg\(test\)\]/ {nextfile} {print FILENAME ":" FNR ":" $0}' |
     grep -E '\.socket\.sock|hyprctl' | grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true)"
   if [ -n "$achados" ]; then
@@ -450,6 +475,7 @@ verificar() {
   passo "nomes de terceiros" sem_nomes_de_terceiros
   passo "cargo clippy" cargo clippy --all-targets --quiet -- -D warnings
   passo "cargo test" cargo test --quiet
+  passo "Windows e macOS (cargo clippy --target)" outros_sistemas
   passo "lint-skin" lint_skins
   passo "compose" docker compose config -q
   passo "compose dev" docker compose -f docker-compose.yml -f docker-compose.dev.yml config -q

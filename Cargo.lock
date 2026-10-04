@@ -101,15 +101,14 @@ name = "claude-pet"
 version = "0.1.0"
 dependencies = [
  "pet-core",
- "png",
- "rustix",
+ "pet-macos",
+ "pet-wayland",
+ "pet-windows",
  "serde",
  "serde_json",
  "sha2",
  "signal-hook",
  "smithay-client-toolkit",
- "wayland-client",
- "wayland-protocols",
 ]
 
 [[package]]
@@ -366,6 +365,31 @@ dependencies = [
  "serde_json",
  "sha2",
  "toml",
+]
+
+[[package]]
+name = "pet-macos"
+version = "0.1.0"
+dependencies = [
+ "pet-core",
+]
+
+[[package]]
+name = "pet-wayland"
+version = "0.1.0"
+dependencies = [
+ "pet-core",
+ "rustix",
+ "smithay-client-toolkit",
+ "wayland-client",
+ "wayland-protocols",
+]
+
+[[package]]
+name = "pet-windows"
+version = "0.1.0"
+dependencies = [
+ "pet-core",
 ]
 
 [[package]]

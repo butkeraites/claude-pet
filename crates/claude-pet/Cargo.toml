@@ -1,6 +1,6 @@
 [package]
 name = "claude-pet"
-description = "Daemon do claude-pet: Wayland, eventos do Hyprland, entrada HTTP dos hooks."
+description = "Daemon do claude-pet: entrada HTTP dos hooks, o laço de cada sistema e o Motor."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,12 +11,19 @@ publish = false
 pet-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-signal-hook.workspace = true
-png.workspace = true
+
+# O backend de cada sistema (decisão 0040). No Linux, o Wayland (layer-shell)
+# com o laço do calloop; no Windows e no macOS, por enquanto só um esboço.
+[target.'cfg(target_os = "linux")'.dependencies]
+pet-wayland.workspace = true
 smithay-client-toolkit.workspace = true
-wayland-client.workspace = true
-wayland-protocols.workspace = true
-rustix.workspace = true
+signal-hook.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+pet-windows.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+pet-macos.workspace = true
 
 [dev-dependencies]
 sha2.workspace = true

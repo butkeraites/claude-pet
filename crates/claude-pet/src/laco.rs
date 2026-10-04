@@ -1,63 +1,148 @@
-//! Laço principal do daemon (calloop).
+//! O laço do Linux (calloop) e a sessão Wayland (decisões 0007 e 0040).
 //!
-//! Tudo que mexe no Wayland roda nesta thread: descoberta, sessão, timers.
-//! Fontes do laço:
+//! Tudo que mexe no Wayland roda nesta thread: descoberta, sessão, prazos.
+//! O que o pet decide mora no [`Nucleo`] (e no Motor do `pet-core`); este
+//! laço só traz as fontes:
 //!
 //! - **batimento** de 5 s, incondicional: alimenta o vigia e o `/saude`
 //!   mesmo com a tela apagada (DPMS) ou em sono profundo, quando não há
 //!   frame callback nem animação (revisão de viabilidade);
-//! - **descoberta** a cada 2 s, só enquanto espera o compositor;
+//! - **descoberta** a cada 2 s, só enquanto espera o compositor (o
+//!   adaptador do Hyprland, [`pet_wayland::hyprland`]);
 //! - a **conexão Wayland** ([`WaylandSource`]) enquanto há sessão;
 //! - o **pipe de sinais** (SIGTERM/SIGINT) para encerrar sem atraso;
-//! - o **canal de comandos** das outras threads: eventos dos hooks,
-//!   `/v1/comando` e rotas de debug;
-//! - o **prazo do cérebro** (acomodação do Stop, espera pelo Stop de um
-//!   turno trocado, sessões que expiram), um timer só, rearmado depois de
-//!   cada evento.
-//!
-//! O cérebro ([`Cerebro`]) mora aqui, no laço, e funciona com ou sem
-//! compositor: sem tela, as reações só ficam no `/v1/estado`.
+//! - a **caixa** ([`Caixa`]) das outras threads: eventos dos hooks,
+//!   `/v1/comando` e rotas de debug, acordando o laço por um `Ping`;
+//! - um **prazo** só, o mais próximo entre os do Motor (cérebro e animação)
+//!   e os da janela, rearmado depois de cada lote.
 //!
 //! Erro na conexão Wayland (EOF, erro de protocolo) sai do `dispatch` do
 //! calloop: aí a sessão é derrubada inteira e o laço volta a esperar.
 
 use std::io::Read;
+use std::net::TcpListener;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::rc::Rc;
-use std::sync::Arc;
+use std::process::ExitCode;
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
+use pet_core::config::ConfigEfetiva;
+use pet_core::plataforma::{Caixa, Despertador, Overlay};
+use pet_wayland::conexao::{self, Reconexao};
+use pet_wayland::hyprland::{self, Espera};
+use pet_wayland::sessao::Sessao;
 use signal_hook::consts::{SIGINT, SIGTERM};
-use smithay_client_toolkit::reexports::calloop::channel::{self, Channel};
 use smithay_client_toolkit::reexports::calloop::generic::Generic;
+use smithay_client_toolkit::reexports::calloop::ping::{self, Ping, PingSource};
 use smithay_client_toolkit::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay_client_toolkit::reexports::calloop::{
-    Interest, LoopHandle, Mode, PostAction, RegistrationToken,
+    EventLoop, Interest, LoopHandle, Mode, PostAction, RegistrationToken,
 };
 use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
 
-use pet_core::animador;
-use pet_core::aprovacao::Origem;
-use pet_core::cerebro::{Agora, Cerebro, ConfigCerebro, Reacao};
-use pet_core::config::ConfigEfetiva;
-use pet_core::evento;
-use pet_core::skin::Skin;
-
-use crate::comando::{Comando, Recebido, Tocou};
-use crate::descoberta::{self, Espera, Reconexao};
-use crate::estado::{Compartilhado, InfoSkin, Painel, Tela};
-use crate::ingress::agora_desde_1970_ms;
-use crate::personagem::{self, Escolha, Onde};
-use crate::wl;
+use crate::ambiente::Ambiente;
+use crate::comando::{self, Comando};
+use crate::estado::Compartilhado;
+use crate::nucleo::Nucleo;
+use crate::{daemon, vigia};
 
 /// Batimento do laço principal (o vigia aborta com 60 s sem batimento).
 pub const BATIMENTO: Duration = Duration::from_secs(5);
 /// Intervalo da descoberta enquanto espera o compositor.
 pub const INTERVALO_DESCOBERTA: Duration = Duration::from_secs(2);
+/// Quantos comandos o laço tira da caixa de uma vez (o resto vem no próximo
+/// toque do `Ping`).
+const LOTE_DA_CAIXA: usize = 4 * comando::CAPACIDADE;
+
+/// O `Ping` do calloop acorda o laço quando chega algo na caixa.
+struct Acordar(Ping);
+
+impl Despertador for Acordar {
+    fn despertar(&self) {
+        self.0.ping();
+    }
+}
+
+/// O daemon no Linux: liga a entrada HTTP à caixa deste laço e roda até um
+/// SIGTERM.
+pub fn rodar(
+    ambiente: Ambiente,
+    config: ConfigEfetiva,
+    comp: Arc<Compartilhado>,
+    ouvinte: TcpListener,
+) -> ExitCode {
+    let (sino, fonte_do_sino) = match ping::make_ping() {
+        Ok(par) => par,
+        Err(e) => {
+            erro!("não consegui criar o despertador do laço: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let (caixa, recebe) = Caixa::nova(comando::CAPACIDADE, Arc::new(Acordar(sino)));
+    if let Err(e) = daemon::iniciar_entrada(&ambiente, &comp, ouvinte, caixa) {
+        erro!("{e}");
+        return ExitCode::FAILURE;
+    }
+    vigia::iniciar(Arc::clone(&comp));
+
+    let mut eventos: EventLoop<'static, Laco> = match EventLoop::try_new() {
+        Ok(eventos) => eventos,
+        Err(e) => {
+            erro!("não consegui criar o laço de eventos: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let base = conexao::base_do_usuario(&ambiente.runtime_host);
+    let curto = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    let nucleo = Nucleo::novo(
+        Arc::clone(&comp),
+        ambiente.onde(),
+        Some(ambiente.arquivo_config()),
+        &config,
+        Instant::now(),
+    );
+    let mut laco = Laco::novo(nucleo, eventos.handle(), base.clone(), curto, recebe);
+    if let Err(e) = laco.instalar_sinais() {
+        erro!("não consegui tratar SIGTERM/SIGINT: {e}");
+        return ExitCode::FAILURE;
+    }
+    if let Err(e) = laco.instalar_caixa(fonte_do_sino) {
+        erro!("não consegui ligar a caixa de comandos: {e}");
+        return ExitCode::FAILURE;
+    }
+    laco.armar_batimento();
+    laco.armar_descoberta(Duration::ZERO);
+    laco.nucleo.iniciar_cerebro();
+    laco.assentar();
+
+    info!(
+        "claude-pet {} escutando em {} (porta pública {}){}",
+        pet_core::VERSAO,
+        ambiente.escuta,
+        ambiente.porta_publica,
+        if ambiente.debug { ", modo debug" } else { "" }
+    );
+    depurar!(
+        "config em {}, estado em {}",
+        ambiente.arquivo_config().display(),
+        ambiente.pasta_estado.display(),
+    );
+    info!("procurando o compositor em {}", base.display());
+
+    while !laco.parar {
+        if let Err(e) = eventos.dispatch(None, &mut laco) {
+            laco.falha_no_laco(e);
+        }
+    }
+    laco.encerrar();
+    ExitCode::SUCCESS
+}
 
 pub struct Laco {
-    pub comp: Arc<Compartilhado>,
+    nucleo: Nucleo,
     handle: LoopHandle<'static, Laco>,
     /// Runtime do usuário no host (`/host/run/user/<uid>`).
     base: PathBuf,
@@ -67,78 +152,32 @@ pub struct Laco {
     viva: Option<Viva>,
     descoberta: Option<RegistrationToken>,
     batimento: Option<RegistrationToken>,
+    /// O timer do próximo prazo (Motor ou janela).
+    prazo: Option<RegistrationToken>,
     /// Última razão de espera registrada no log (só loga quando muda).
     ultima_espera: Option<String>,
-    /// O personagem: a skin aprovada (ou a de teste, em debug).
-    skin: Option<Rc<Skin>>,
-    /// Quem está na tela: (id, impressão digital, origem). Uma aprovação que
-    /// não muda isso (aprovar de novo a mesma skin, revogar outra) não mexe
-    /// na tela.
-    na_tela: NaTela,
-    /// Onde procurar skins e aprovações, para escolher de novo.
-    onde: Onde,
-    /// A skin configurada (`aparencia.skin`).
-    configurada: String,
-    /// `claude-pet.toml`, relido a cada aprovação: trocar `aparencia.skin`
-    /// (o `zeca-contorno`, por exemplo) vale sem reiniciar o container.
-    arquivo_config: Option<PathBuf>,
-    /// O pet deve estar na tela (`/v1/comando` pode esconder e mostrar).
-    visivel: bool,
-    cerebro: Cerebro,
-    /// Timer do próximo prazo do cérebro.
-    prazo_cerebro: Option<RegistrationToken>,
-    /// Origem do relógio monotônico do cérebro.
-    inicio: Instant,
+    caixa: mpsc::Receiver<Comando>,
     pub parar: bool,
-}
-
-/// Quem está na tela: (id, impressão digital, origem).
-type NaTela = Option<(String, Option<String>, Option<Origem>)>;
-
-/// O relógio do cérebro para um evento: a hora em que o ingress o recebeu
-/// (parede e monotônico desde `inicio`), não a hora do processamento. Se o
-/// laço ficou parado (o handshake do Wayland, uma troca de personagem), os
-/// eventos da fila entram na hora em que chegaram: o calloop despacha o
-/// canal antes dos timers vencidos, e uma acomodação que um desses eventos
-/// cancela não vence antes dele (decisão 0032).
-fn relogio_da_chegada(inicio: Instant, recebido: &Recebido) -> Agora {
-    Agora {
-        parede_ms: recebido.recebido_ms,
-        mono_ms: recebido
-            .chegada
-            .saturating_duration_since(inicio)
-            .as_millis() as u64,
-    }
-}
-
-/// A escolha nova é exatamente o personagem que já está na tela (aprovar de
-/// novo a mesma skin, revogar a de outro id): nada a trocar.
-fn mesma_tela(havia_skin: bool, antes: &NaTela, depois: &NaTela) -> bool {
-    havia_skin && depois.is_some() && antes == depois
 }
 
 /// Uma sessão Wayland conectada.
 struct Viva {
-    sessao: wl::Sessao,
+    sessao: Sessao,
     fonte: RegistrationToken,
     assinatura: String,
     desde: Instant,
 }
 
 impl Laco {
-    /// `config` é a da partida: dela saem a skin configurada e a config do
-    /// cérebro; `arquivo_config` é de onde ela é relida a cada aprovação.
-    pub fn novo(
-        comp: Arc<Compartilhado>,
+    fn novo(
+        nucleo: Nucleo,
         handle: LoopHandle<'static, Laco>,
         base: PathBuf,
         curto: PathBuf,
-        onde: Onde,
-        arquivo_config: Option<PathBuf>,
-        config: &ConfigEfetiva,
+        caixa: mpsc::Receiver<Comando>,
     ) -> Laco {
-        let mut laco = Laco {
-            comp,
+        Laco {
+            nucleo,
             handle,
             base,
             curto,
@@ -146,125 +185,27 @@ impl Laco {
             viva: None,
             descoberta: None,
             batimento: None,
+            prazo: None,
             ultima_espera: None,
-            skin: None,
-            na_tela: None,
-            onde,
-            configurada: config.texto("aparencia.skin").to_owned(),
-            arquivo_config,
-            visivel: true,
-            cerebro: Cerebro::novo(ConfigCerebro::de(&config.config())),
-            prazo_cerebro: None,
-            inicio: Instant::now(),
+            caixa,
             parar: false,
-        };
-        laco.escolher_personagem();
-        laco
-    }
-
-    /// Relê o `claude-pet.toml` (o mesmo caminho e as mesmas variáveis da
-    /// partida): uma aprovação depois de trocar `aparencia.skin` já vale, e
-    /// o cérebro passa a usar `sessoes.origens` e `celebracao.modo` do
-    /// arquivo novo, como o `/v1/estado.config` mostra (decisão 0030).
-    fn reler_config(&mut self) {
-        let Some(arquivo) = &self.arquivo_config else {
-            return;
-        };
-        let config = crate::daemon::carregar_config(arquivo);
-        let skin = config.texto("aparencia.skin").to_owned();
-        if skin != self.configurada {
-            info!(
-                "config: aparencia.skin mudou de «{}» para «{skin}»",
-                self.configurada
-            );
-            self.configurada = skin;
-        }
-        let cerebro = ConfigCerebro::de(&config.config());
-        self.comp.definir_config(config);
-        if &cerebro != self.cerebro.config() {
-            info!(
-                "config: o cérebro passa a acompanhar as origens {} (celebração {:?})",
-                cerebro.origens.join(", "),
-                cerebro.modo
-            );
-            self.cerebro.reconfigurar(cerebro);
-            self.depois_do_cerebro(Vec::new());
         }
     }
 
-    /// Escolhe o personagem (decisões 0011 e 0026), publica no `/v1/estado`
-    /// e, com o compositor conectado, troca na tela se mudou.
-    pub fn escolher_personagem(&mut self) {
-        let Escolha {
-            skin,
-            pedida,
-            origem,
-            sha256,
-            avisos,
-        } = personagem::escolher(&self.onde, &self.configurada);
-        for aviso in &avisos {
-            aviso!("personagem: {aviso}");
-        }
-        match &skin {
-            Some(skin) => info!("personagem: skin «{}» ({})", skin.id, skin.nome),
-            None => info!("sem personagem (pedida: «{pedida}»): o pet fica escondido"),
-        }
-        let na_tela = skin
-            .as_ref()
-            .map(|s| (s.id.clone(), sha256.clone(), origem));
-        self.comp.definir_skin(InfoSkin {
-            id: skin.as_ref().map(|s| s.id.clone()),
-            pedida,
-            origem,
-            sha256,
-            avisos,
-        });
-        if mesma_tela(self.skin.is_some(), &self.na_tela, &na_tela) {
-            // A mesma skin, com a mesma impressão e da mesma origem: a tela
-            // fica como está (sem recomeçar a animação).
-            return;
-        }
-        self.na_tela = na_tela;
-        let skin = skin.map(Rc::new);
-        self.skin = skin.clone();
-        if self.viva.is_some() {
-            self.comp.definir_tela(if self.skin.is_some() {
-                Tela::Ativa
-            } else {
-                Tela::SemPersonagem
-            });
-            let visivel = self.visivel;
-            if let Some(sessao) = self.sessao_mut() {
-                sessao.trocar_skin(skin, visivel);
-            }
-        }
-    }
-
-    /// O relógio do cérebro: parede (o mesmo do `ts` dos hooks) e
-    /// monotônico desde a partida.
-    fn agora(&self) -> Agora {
-        Agora {
-            parede_ms: agora_desde_1970_ms(),
-            mono_ms: self.inicio.elapsed().as_millis() as u64,
-        }
-    }
-
-    /// Publica o estado inicial do cérebro (sem sessões).
-    pub fn iniciar_cerebro(&mut self) {
-        info!(
-            "cérebro: sessões de origem {}",
-            self.cerebro.config().origens.join(", ")
-        );
-        self.depois_do_cerebro(Vec::new());
-    }
-
-    /// A sessão Wayland, se conectada.
-    pub fn sessao_mut(&mut self) -> Option<&mut wl::Sessao> {
-        self.viva.as_mut().map(|viva| &mut viva.sessao)
+    /// Depois de cada lote: os eventos da janela, o painel e o próximo prazo.
+    fn assentar(&mut self) {
+        let janela = self
+            .viva
+            .as_mut()
+            .map(|viva| &mut viva.sessao as &mut dyn Overlay);
+        self.nucleo.eventos_da_janela(janela);
+        let janela = self.viva.as_ref().map(|viva| &viva.sessao as &dyn Overlay);
+        self.nucleo.publicar(janela);
+        self.armar_prazo();
     }
 
     /// SIGTERM e SIGINT acordam o laço por um pipe e pedem para parar.
-    pub fn instalar_sinais(&mut self) -> std::io::Result<()> {
+    fn instalar_sinais(&mut self) -> std::io::Result<()> {
         let (leitura, escrita) = UnixStream::pair()?;
         leitura.set_nonblocking(true)?;
         for sinal in [SIGTERM, SIGINT] {
@@ -283,156 +224,61 @@ impl Laco {
         Ok(())
     }
 
-    /// Comandos das outras threads (eventos, `/v1/comando` com reações e
-    /// aprovações, debug).
-    pub fn instalar_comandos(&mut self, canal: Channel<Comando>) -> Result<(), String> {
+    /// A caixa das outras threads (eventos, `/v1/comando` com reações e
+    /// aprovações, debug): o `Ping` acorda o laço e ele a esvazia.
+    fn instalar_caixa(&mut self, fonte: PingSource) -> Result<(), String> {
         self.handle
-            .insert_source(canal, |evento, _, laco| {
-                if let channel::Event::Msg(comando) = evento {
-                    laco.comando(comando);
-                }
+            .insert_source(fonte, |_, _, laco| {
+                laco.esvaziar_caixa();
+                laco.assentar();
             })
             .map(|_| ())
             .map_err(|e| e.to_string())
     }
 
-    fn comando(&mut self, comando: Comando) {
-        match comando {
-            Comando::Evento(recebido) => self.evento(*recebido),
-            Comando::Tocar { reacao, resposta } => {
-                let tocou = self.tocar(&reacao);
-                match &tocou {
-                    Tocou::NaTela { tag } => info!("tocar: «{reacao}» (tag {tag})"),
-                    Tocou::ForaDaTela { tag, motivo } => {
-                        aviso!("tocar: «{reacao}» (tag {tag}) fora da tela: {motivo}");
-                    }
-                    Tocou::SemPersonagem => aviso!("tocar: «{reacao}» sem personagem aprovado"),
-                    Tocou::Desconhecida { skin } => {
-                        aviso!("tocar: a skin «{skin}» não tem «{reacao}»");
-                    }
-                }
-                let _ = resposta.try_send(tocou);
-            }
-            Comando::Esconder | Comando::Mostrar => {
-                self.visivel = matches!(comando, Comando::Mostrar);
-                info!("{}", if self.visivel { "mostrar" } else { "esconder" });
-                let visivel = self.visivel;
-                if let Some(sessao) = self.sessao_mut() {
-                    sessao.definir_visivel(visivel);
-                }
-            }
-            Comando::Estresse { fps, segundos } => match self.sessao_mut() {
-                Some(sessao) => sessao.estresse(fps, segundos),
-                None => aviso!("debug: estresse pedido sem compositor"),
-            },
-            Comando::Quadro(resposta) => {
-                let quadro = self.sessao_mut().and_then(|s| s.quadro_esperado());
-                let _ = resposta.try_send(quadro);
-            }
-            Comando::RecarregarPersonagem(feito) => {
-                info!("aprovação mudou: escolhendo o personagem de novo");
-                self.reler_config();
-                self.escolher_personagem();
-                let _ = feito.try_send(());
-            }
-        }
-    }
-
-    /// `tocar` do `/v1/comando`: a tag que a skin toca para a reação e se
-    /// ela apareceu (decisão 0033). Escondido, não toca.
-    fn tocar(&mut self, reacao: &str) -> Tocou {
-        let Some(skin) = self.skin.clone() else {
-            return Tocou::SemPersonagem;
-        };
-        let Some(tag) = animador::tag_da_reacao(&skin, reacao)
-            .and_then(|i| skin.tags.get(i))
-            .map(|t| t.nome.clone())
-        else {
-            return Tocou::Desconhecida {
-                skin: skin.id.clone(),
+    fn esvaziar_caixa(&mut self) {
+        for _ in 0..LOTE_DA_CAIXA {
+            let Ok(comando) = self.caixa.try_recv() else {
+                return;
             };
-        };
-        if !self.visivel {
-            return Tocou::ForaDaTela {
-                tag,
-                motivo: "o pet está escondido (bin/pet mostrar)",
-            };
-        }
-        match self.sessao_mut().map(|s| s.tocar(reacao)) {
-            Some(true) => Tocou::NaTela { tag },
-            Some(false) => Tocou::ForaDaTela {
-                tag,
-                motivo: "a sessão Wayland ainda não tem o personagem",
-            },
-            None => Tocou::ForaDaTela {
-                tag,
-                motivo: "sem compositor",
-            },
+            let janela = self
+                .viva
+                .as_mut()
+                .map(|viva| &mut viva.sessao as &mut dyn Overlay);
+            self.nucleo.comando(comando, janela);
         }
     }
 
-    /// Um evento do Claude Code vai para o cérebro, no relógio da chegada
-    /// ([`relogio_da_chegada`]). No log só vão o nome do evento e o começo do
-    /// id da sessão (decisão 0019).
-    fn evento(&mut self, recebido: Recebido) {
-        let ev = &recebido.evento;
-        depurar!(
-            "evento {} da sessão {}",
-            ev.e,
-            ev.sid.as_deref().map_or_else(|| "?".into(), evento::curto)
-        );
-        let agora = relogio_da_chegada(self.inicio, &recebido);
-        let reacoes = self.cerebro.receber(ev, recebido.recebido_ms, agora);
-        self.depois_do_cerebro(reacoes);
-    }
-
-    /// Toca as reações, publica o cérebro e rearma o prazo dele.
-    fn depois_do_cerebro(&mut self, reacoes: Vec<Reacao>) {
-        for reacao in &reacoes {
-            self.reagir(reacao);
-        }
-        self.comp.publicar_cerebro(&self.cerebro.resumo());
-        self.armar_prazo_cerebro();
-    }
-
-    fn reagir(&mut self, reacao: &Reacao) {
-        info!(
-            "reação {}{} da sessão {}{}",
-            reacao.nome,
-            reacao
-                .nivel
-                .map_or_else(String::new, |n| format!(" ({n:?})")),
-            reacao.sid8,
-            if reacao.teste { " (teste)" } else { "" }
-        );
-        match self.sessao_mut().map(|s| s.tocar(reacao.nome)) {
-            Some(true) => {}
-            Some(false) => depurar!("reação {} sem animação na tela", reacao.nome),
-            None => depurar!("reação {} sem compositor", reacao.nome),
-        }
-    }
-
-    fn armar_prazo_cerebro(&mut self) {
-        if let Some(token) = self.prazo_cerebro.take() {
+    /// (Re)arma o prazo mais próximo: o do Motor (cérebro e animação) ou o
+    /// da janela. Quando vence, os comandos que já estão na caixa entram
+    /// antes: chegaram antes do prazo, e um deles pode cancelar uma
+    /// acomodação (decisão 0032).
+    fn armar_prazo(&mut self) {
+        if let Some(token) = self.prazo.take() {
             self.handle.remove(token);
         }
-        let Some(prazo) = self.cerebro.proximo_prazo() else {
+        let janela = self.viva.as_ref().map(|viva| &viva.sessao as &dyn Overlay);
+        let Some(prazo) = self.nucleo.proximo_prazo(janela) else {
             return;
         };
-        let quando = self.inicio + Duration::from_millis(prazo);
+        let quando = self.nucleo.inicio() + Duration::from_millis(prazo);
         let inserido = self
             .handle
             .insert_source(Timer::from_deadline(quando), |_, _, laco| {
-                // Este timer acaba aqui; o próximo é armado abaixo.
-                laco.prazo_cerebro = None;
-                let agora = laco.agora();
-                let reacoes = laco.cerebro.tique(agora);
-                laco.depois_do_cerebro(reacoes);
+                // Este timer acaba aqui; o próximo é armado no assentar.
+                laco.prazo = None;
+                laco.esvaziar_caixa();
+                let janela = laco
+                    .viva
+                    .as_mut()
+                    .map(|viva| &mut viva.sessao as &mut dyn Overlay);
+                laco.nucleo.vencer(janela);
+                laco.assentar();
                 TimeoutAction::Drop
             });
         match inserido {
-            Ok(token) => self.prazo_cerebro = Some(token),
-            Err(e) => erro!("não consegui armar o prazo do cérebro: {e}"),
+            Ok(token) => self.prazo = Some(token),
+            Err(e) => erro!("não consegui armar o prazo: {e}"),
         }
     }
 
@@ -442,15 +288,16 @@ impl Laco {
     /// se perde. Rearmar **não** bate: só o timer disparando prova que o
     /// laço anda. Um `dispatch` que falhasse sempre rearmaria sem nunca
     /// bater, e o vigia abortaria em 60 s (o Docker reinicia).
-    pub fn armar_batimento(&mut self) {
+    fn armar_batimento(&mut self) {
         if let Some(token) = self.batimento.take() {
             self.handle.remove(token);
         }
         let timer = Timer::from_duration(BATIMENTO);
         match self.handle.insert_source(timer, |_, _, laco| {
-            laco.comp.bater();
-            if let Some(sessao) = laco.sessao_mut() {
-                sessao.publicar();
+            laco.nucleo.comp.bater();
+            if laco.viva.is_some() {
+                let janela = laco.viva.as_ref().map(|viva| &viva.sessao as &dyn Overlay);
+                laco.nucleo.publicar(janela);
             }
             TimeoutAction::ToDuration(BATIMENTO)
         }) {
@@ -460,7 +307,7 @@ impl Laco {
     }
 
     /// Agenda a próxima rodada de descoberta.
-    pub fn armar_descoberta(&mut self, daqui_a: Duration) {
+    fn armar_descoberta(&mut self, daqui_a: Duration) {
         if let Some(token) = self.descoberta.take() {
             self.handle.remove(token);
         }
@@ -491,7 +338,7 @@ impl Laco {
             (!reconexao.pode_tentar(assinatura, agora))
                 .then(|| reconexao.espera_restante(assinatura, agora))
         };
-        let instancia = match descoberta::procurar(&self.base, &self.curto, em_espera) {
+        let instancia = match hyprland::procurar(&self.base, &self.curto, em_espera) {
             Ok(instancia) => instancia,
             Err(espera) => {
                 self.registrar_espera(espera.descrever());
@@ -505,12 +352,7 @@ impl Laco {
         };
         let assinatura = instancia.assinatura;
         let nome_wayland = instancia.nome_wayland;
-        let conexao = match wl::conectar(
-            instancia.wayland,
-            self.handle.clone(),
-            self.skin.clone(),
-            Arc::clone(&self.comp),
-        ) {
+        let conexao = match pet_wayland::conectar(instancia.wayland, self.nucleo.inicio()) {
             Ok(conexao) => conexao,
             Err(motivo) => {
                 let atraso = self.reconexao.falhou(&assinatura, Duration::ZERO, agora);
@@ -521,43 +363,37 @@ impl Laco {
                 return Some(atraso.min(INTERVALO_DESCOBERTA));
             }
         };
-        let wl::Conexao {
+        let pet_wayland::Conexao {
             conexao,
             fila,
             sessao,
         } = conexao;
         let fonte = WaylandSource::new(conexao, fila);
-        let token =
-            match self
-                .handle
-                .insert_source(fonte, |_, fila, laco| match laco.viva.as_mut() {
-                    Some(viva) => fila.dispatch_pending(&mut viva.sessao),
-                    None => Ok(0),
-                }) {
-                Ok(token) => token,
-                Err(e) => {
-                    erro!("não consegui registrar a conexão Wayland no laço: {e}");
-                    self.reconexao.falhou(&assinatura, Duration::ZERO, agora);
-                    return Some(INTERVALO_DESCOBERTA);
-                }
+        let token = match self.handle.insert_source(fonte, |_, fila, laco| {
+            let resultado = match laco.viva.as_mut() {
+                Some(viva) => fila.dispatch_pending(&mut viva.sessao),
+                None => Ok(0),
             };
+            laco.assentar();
+            resultado
+        }) {
+            Ok(token) => token,
+            Err(e) => {
+                erro!("não consegui registrar a conexão Wayland no laço: {e}");
+                self.reconexao.falhou(&assinatura, Duration::ZERO, agora);
+                return Some(INTERVALO_DESCOBERTA);
+            }
+        };
         info!("conectado ao compositor ({nome_wayland}, instância {assinatura})");
         self.ultima_espera = None;
-        self.viva = Some(Viva {
+        let viva = self.viva.insert(Viva {
             sessao,
             fonte: token,
             assinatura,
             desde: agora,
         });
-        self.comp.definir_tela(if self.skin.is_some() {
-            Tela::Ativa
-        } else {
-            Tela::SemPersonagem
-        });
-        let visivel = self.visivel;
-        if let Some(sessao) = self.sessao_mut() {
-            sessao.definir_visivel(visivel);
-        }
+        self.nucleo.conectou(&mut viva.sessao);
+        self.assentar();
         None
     }
 
@@ -571,15 +407,15 @@ impl Laco {
     /// Fim do processo: esconde o pet (quadro transparente), destrói a
     /// camada e espera, com prazo, o compositor confirmar que processou tudo,
     /// para o fade de saída do Hyprland sair vazio.
-    pub fn encerrar(&mut self) {
-        if let Some(sessao) = self.sessao_mut() {
-            sessao.encerrar();
+    fn encerrar(&mut self) {
+        if let Some(viva) = self.viva.as_mut() {
+            self.nucleo.encerrar(&mut viva.sessao);
         }
     }
 
     /// O `dispatch` do calloop falhou. A única fonte que falha é a conexão
     /// Wayland: derruba a sessão e volta a esperar.
-    pub fn falha_no_laco(&mut self, erro: impl std::fmt::Display) {
+    fn falha_no_laco(&mut self, erro: impl std::fmt::Display) {
         if self.viva.is_some() {
             self.derrubar(&format!("conexão Wayland caiu: {erro}"));
         } else {
@@ -597,6 +433,7 @@ impl Laco {
         self.handle.remove(viva.fonte);
         let viveu = viva.desde.elapsed();
         drop(viva.sessao);
+        self.nucleo.desconectou();
         let atraso = self
             .reconexao
             .falhou(&viva.assinatura, viveu, Instant::now());
@@ -605,65 +442,7 @@ impl Laco {
             viveu.as_secs(),
             atraso.as_secs()
         );
-        self.comp.definir_tela(Tela::Aguardando);
-        self.comp.publicar_painel(Painel::default());
         self.armar_descoberta(Duration::ZERO);
-    }
-}
-
-#[cfg(test)]
-mod testes {
-    use super::*;
-
-    #[test]
-    fn cerebro_conta_os_prazos_da_chegada_do_evento() {
-        let inicio = Instant::now();
-        let recebido = |chegada: Instant| Recebido {
-            evento: pet_core::evento::Evento {
-                e: "Stop".into(),
-                ..Default::default()
-            },
-            recebido_ms: 1_790_000_000_000,
-            chegada,
-        };
-        let agora = relogio_da_chegada(inicio, &recebido(inicio + Duration::from_millis(1_234)));
-        assert_eq!(
-            agora,
-            Agora {
-                parede_ms: 1_790_000_000_000,
-                mono_ms: 1_234
-            },
-            "a hora da chegada, mesmo processado bem depois"
-        );
-        // Chegou antes de o laço existir (o ingress sobe primeiro): zero.
-        let cedo = inicio
-            .checked_sub(Duration::from_millis(5))
-            .unwrap_or(inicio);
-        assert_eq!(relogio_da_chegada(inicio, &recebido(cedo)).mono_ms, 0);
-    }
-
-    #[test]
-    fn so_troca_a_tela_quando_muda_quem_esta_nela() {
-        let zeca =
-            |sha: &str, origem| Some(("zeca".to_owned(), Some(sha.to_owned()), Some(origem)));
-        let a = zeca("aa", Origem::Imagem);
-        assert!(mesma_tela(true, &a, &a), "aprovar de novo a mesma skin");
-        assert!(
-            !mesma_tela(true, &a, &zeca("bb", Origem::Imagem)),
-            "skin nova"
-        );
-        assert!(
-            !mesma_tela(true, &a, &zeca("aa", Origem::Snapshot)),
-            "a da imagem quebrou: vai a cópia de /state"
-        );
-        assert!(!mesma_tela(true, &a, &None), "revogou: esconde");
-        assert!(
-            !mesma_tela(false, &None, &None),
-            "nada antes, nada agora: publica de qualquer jeito"
-        );
-        assert!(
-            !mesma_tela(false, &a, &a),
-            "sem skin carregada ainda: troca"
-        );
+        self.armar_prazo();
     }
 }

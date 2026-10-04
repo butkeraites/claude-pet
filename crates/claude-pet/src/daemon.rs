@@ -1,22 +1,25 @@
 //! Subcomandos `rodar` (o daemon) e `saude` (healthcheck do Docker).
+//!
+//! `rodar` faz o que é igual em todo sistema (ambiente, config, estado
+//! compartilhado, a porta da entrada HTTP) e entrega ao laço do sistema
+//! (decisão 0040): no Linux, o calloop com o Wayland (`laco`); no Windows e
+//! no macOS, por enquanto, o laço sem janela ([`crate::sem_janela`]).
 
 use std::io::{ErrorKind, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
-use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 use pet_core::config::ConfigEfetiva;
-use smithay_client_toolkit::reexports::calloop::EventLoop;
-use smithay_client_toolkit::reexports::calloop::channel;
+use pet_core::plataforma::Caixa;
 
 use crate::ambiente::Ambiente;
+use crate::comando::Comando;
 use crate::estado::Compartilhado;
-use crate::laco::Laco;
-use crate::{comando, descoberta, ingress, vigia};
+use crate::ingress;
 
 pub fn rodar() -> ExitCode {
     let ambiente = match Ambiente::ler(|nome| std::env::var(nome).ok()) {
@@ -26,6 +29,7 @@ pub fn rodar() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    #[cfg(unix)]
     if let Err(e) = preparar_runtime_privado() {
         aviso!("XDG_RUNTIME_DIR privado: {e}");
     }
@@ -36,7 +40,6 @@ pub fn rodar() -> ExitCode {
     }
     let comp = Arc::new(Compartilhado::novo(config.clone(), ambiente.debug));
     comp.bater();
-    let (canal, comandos) = channel::sync_channel(comando::CAPACIDADE);
 
     let ouvinte = match TcpListener::bind(ambiente.escuta) {
         Ok(o) => o,
@@ -45,76 +48,57 @@ pub fn rodar() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    rodar_no_sistema(ambiente, config, comp, ouvinte)
+}
+
+#[cfg(target_os = "linux")]
+fn rodar_no_sistema(
+    ambiente: Ambiente,
+    config: ConfigEfetiva,
+    comp: Arc<Compartilhado>,
+    ouvinte: TcpListener,
+) -> ExitCode {
+    crate::laco::rodar(ambiente, config, comp, ouvinte)
+}
+
+/// Sem backend de janela ainda (Windows e macOS até o M8): o laço sem
+/// janela, com o cérebro e o `/v1/estado`.
+#[cfg(not(target_os = "linux"))]
+fn rodar_no_sistema(
+    ambiente: Ambiente,
+    config: ConfigEfetiva,
+    comp: Arc<Compartilhado>,
+    ouvinte: TcpListener,
+) -> ExitCode {
+    #[cfg(windows)]
+    let motivo = pet_windows::SEM_JANELA;
+    #[cfg(target_os = "macos")]
+    let motivo = pet_macos::SEM_JANELA;
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let motivo = "este sistema ainda não tem backend de janela";
+    crate::sem_janela::rodar(ambiente, config, comp, ouvinte, motivo)
+}
+
+/// Liga a entrada HTTP (uma thread) à caixa do laço do sistema.
+pub fn iniciar_entrada(
+    ambiente: &Ambiente,
+    comp: &Arc<Compartilhado>,
+    ouvinte: TcpListener,
+    caixa: Caixa<Comando>,
+) -> Result<(), String> {
     let ctx = Arc::new(ingress::Contexto {
-        comp: Arc::clone(&comp),
+        comp: Arc::clone(comp),
         porta_publica: ambiente.porta_publica,
         debug: ambiente.debug,
-        comandos: Some(canal),
+        comandos: Some(caixa),
         onde: ambiente.onde(),
-        aprovando: std::sync::Mutex::new(()),
+        aprovando: Mutex::new(()),
     });
-    if let Err(e) = thread::Builder::new()
+    thread::Builder::new()
         .name("ingress".into())
         .spawn(move || ingress::servir(ouvinte, ctx))
-    {
-        erro!("não consegui iniciar a entrada HTTP: {e}");
-        return ExitCode::FAILURE;
-    }
-    vigia::iniciar(Arc::clone(&comp));
-
-    let mut eventos: EventLoop<'static, Laco> = match EventLoop::try_new() {
-        Ok(eventos) => eventos,
-        Err(e) => {
-            erro!("não consegui criar o laço de eventos: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let base = descoberta::base_do_usuario(&ambiente.runtime_host);
-    let curto = std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
-    let mut laco = Laco::novo(
-        Arc::clone(&comp),
-        eventos.handle(),
-        base.clone(),
-        curto,
-        ambiente.onde(),
-        Some(ambiente.arquivo_config()),
-        &config,
-    );
-    if let Err(e) = laco.instalar_sinais() {
-        erro!("não consegui tratar SIGTERM/SIGINT: {e}");
-        return ExitCode::FAILURE;
-    }
-    if let Err(e) = laco.instalar_comandos(comandos) {
-        erro!("não consegui ligar o canal de comandos: {e}");
-        return ExitCode::FAILURE;
-    }
-    laco.armar_batimento();
-    laco.armar_descoberta(Duration::ZERO);
-    laco.iniciar_cerebro();
-
-    info!(
-        "claude-pet {} escutando em {} (porta pública {}){}",
-        pet_core::VERSAO,
-        ambiente.escuta,
-        ambiente.porta_publica,
-        if ambiente.debug { ", modo debug" } else { "" }
-    );
-    depurar!(
-        "config em {}, estado em {}",
-        ambiente.arquivo_config().display(),
-        ambiente.pasta_estado.display(),
-    );
-    info!("procurando o compositor em {}", base.display());
-
-    while !laco.parar {
-        if let Err(e) = eventos.dispatch(None, &mut laco) {
-            laco.falha_no_laco(e);
-        }
-    }
-    laco.encerrar();
-    ExitCode::SUCCESS
+        .map(|_| ())
+        .map_err(|e| format!("não consegui iniciar a entrada HTTP: {e}"))
 }
 
 /// `claude-pet saude`: pergunta ao próprio daemon se o laço principal está
@@ -174,7 +158,10 @@ pub fn carregar_config(caminho: &Path) -> ConfigEfetiva {
 
 /// Cria o `XDG_RUNTIME_DIR` do container (privado, 0700) se ele não existir.
 /// Nada daqui escreve no runtime do host (decisão 0007).
+#[cfg(unix)]
 fn preparar_runtime_privado() -> std::io::Result<()> {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+
     let Some(caminho) = std::env::var_os("XDG_RUNTIME_DIR") else {
         return Ok(());
     };
@@ -218,7 +205,7 @@ mod testes {
             debug: false,
             comandos: None,
             onde: crate::ambiente::Ambiente::ler(|_| None).unwrap().onde(),
-            aprovando: std::sync::Mutex::new(()),
+            aprovando: Mutex::new(()),
         });
         thread::spawn(move || ingress::servir(ouvinte, ctx));
         assert!(checar_saude(endereco));

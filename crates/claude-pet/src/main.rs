@@ -4,22 +4,26 @@
 //! - `rodar` (padrão): o daemon.
 //! - `saude`: healthcheck do Docker; sai 0 se o daemon está vivo.
 //! - `versao`: imprime a versão.
+//!
+//! O que é igual em todo sistema mora aqui e no `pet-core` (o Motor); o laço
+//! de cada sistema fica atrás de `cfg` (decisão 0040): no Linux, o calloop
+//! com o Wayland ([`laco`], `pet-wayland`).
 
 #[macro_use]
-mod registro;
+extern crate pet_core;
 
 mod ambiente;
 mod aprovacao;
 mod comando;
 mod daemon;
-mod descoberta;
 mod estado;
 mod ingress;
+#[cfg(target_os = "linux")]
 mod laco;
+mod nucleo;
 mod personagem;
-mod pet;
+mod sem_janela;
 mod vigia;
-mod wl;
 
 use std::process::ExitCode;
 
@@ -32,7 +36,7 @@ uso: claude-pet [rodar | saude | versao]
 ";
 
 fn main() -> ExitCode {
-    registro::iniciar(std::env::var("PET_LOG").ok().as_deref());
+    pet_core::registro::iniciar(std::env::var("PET_LOG").ok().as_deref());
     let comando = std::env::args().nth(1);
     match comando.as_deref() {
         None | Some("rodar") => daemon::rodar(),

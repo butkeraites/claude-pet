@@ -19,7 +19,9 @@ pub struct Ambiente {
     pub pasta_config: PathBuf,
     /// Pasta do estado persistente (`PET_ESTADO`).
     pub pasta_estado: PathBuf,
-    /// Onde o `/run/user` do host está montado (`PET_HOST_RUNTIME`).
+    /// Onde o `/run/user` do host está montado (`PET_HOST_RUNTIME`); só a
+    /// descoberta do Wayland usa.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub runtime_host: PathBuf,
     /// Pastas onde procurar skins, em ordem (`PET_SKINS`, separadas por `:`).
     pub skins: Vec<PathBuf>,

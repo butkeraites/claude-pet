@@ -1,6 +1,13 @@
 [workspace]
 resolver = "3"
-members = ["crates/pet-core", "crates/claude-pet", "xtask"]
+members = [
+    "crates/pet-core",
+    "crates/pet-wayland",
+    "crates/pet-windows",
+    "crates/pet-macos",
+    "crates/claude-pet",
+    "xtask",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,6 +18,9 @@ repository = "https://github.com/butkeraites/claude-pet"
 
 [workspace.dependencies]
 pet-core = { path = "crates/pet-core" }
+pet-wayland = { path = "crates/pet-wayland" }
+pet-windows = { path = "crates/pet-windows" }
+pet-macos = { path = "crates/pet-macos" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 toml = "1.1.6"

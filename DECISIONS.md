@@ -1317,3 +1317,72 @@ sessão do Claude que terminou. No Hyprland o caminho óbvio é despachar
 executar nada no host, e mantém o daemon longe do socket que roda comandos e
 pode congelar o Hyprland. O anel casado com o `ts` acha o terminal sem ler
 títulos de janela.
+
+## 0040 — Costura de plataforma: o Motor no core, o Wayland num crate e a Caixa no lugar do canal do calloop (2026-10-03)
+
+**Problema:** o M4–M6 (arraste, balões, voos) e o porte para Windows e macOS
+(M8) precisam de um núcleo que não saiba em que sistema está. Até o M3, o
+que o pet decide morava espalhado no laço do calloop (`laco.rs`: cérebro,
+personagem, mostrar e esconder) e na sessão Wayland (`wl/mod.rs`: pet, palco,
+estresse, painel, relógio da animação), e a entrada HTTP falava com o laço
+pelo canal do calloop. A decisão 0038 antecipou esta costura para antes do
+M4; ela não pode mudar nada do que o pet faz.
+**Escolha (T8.0):**
+- **`pet_core::motor`**: o `Motor` (cérebro, personagem, pet e palco,
+  mostrar e esconder pela função pura `passo_de_visibilidade`, estresse,
+  commits, painel do `/v1/estado`, quadro esperado da nitidez) e os prazos
+  em milissegundos de um relógio monotônico que o laço injeta; o laço só
+  acorda no `proximo_prazo` e entrega os eventos da janela. 16 testes novos
+  com relógio falso e uma janela falsa (desenhar e marcar a próxima troca,
+  quadro em voo que adia e o `Redesenhar` que retoma, esconder e cancelar a
+  saída, trocar e revogar a skin, `tocar` com cada resposta, o cérebro
+  acenando no prazo, janela fechada e recriada, painel, quadro esperado,
+  estresse, encerrar, commit só de estado).
+- **`pet_core::plataforma`**: os traits `Overlay` (a janela) e `Desktop` (a
+  ligação com o ambiente) com capacidades (`CapOverlay`, `CapDesktop`), os
+  tipos simples `Monitor`, `EventoPonteiro`, `Botao`, `Alca`, `Fase`, `Passo`,
+  `Desenho` e `EventoOverlay`, e a **`Caixa`**: um `mpsc` limitado mais um
+  `Despertador` do sistema (no Linux, o `Ping` do calloop), no lugar do
+  `SyncSender` do calloop na entrada HTTP. Cheia, ela acorda o laço e a
+  entrada responde 503, como antes.
+- **`crates/pet-wayland`**: o `wl/` e a descoberta. A `Sessao` implementa o
+  `Overlay`: põe na tela a cena que o Motor manda e conta o que aconteceu
+  (camada pronta, quadro mostrado, camada fechada, ponteiro) como eventos; os
+  prazos dela (destruir 50 ms depois de esconder, reservas de escala e de
+  `enter`, recriar 250 ms depois de um `closed`) vencem no relógio do laço.
+  O que é só do Hyprland (`hyprland.lock`, o monitor FALLBACK, e no M4 o
+  socket de eventos e o foco) virou o adaptador `hyprland`, com um
+  `Desktop` ainda sem capacidade; o resto (socket por caminho longo, backoff)
+  ficou em `conexao`.
+- **`crates/pet-windows` e `crates/pet-macos`**: vazios, compilando, com
+  `#![cfg]` do próprio sistema. O daemon depende deles só no alvo deles.
+- **O daemon**: o `nucleo` (igual em todo sistema) junta o Motor com as
+  aprovações em disco e o `/v1/estado`; o `laco` do Linux só traz as fontes
+  (sinais, caixa, batimento, descoberta, Wayland) e **um** prazo, o mais
+  próximo entre o do Motor e o da janela. Antes de vencer um prazo o laço
+  esvazia a caixa: a garantia da decisão 0032 (um evento que chegou antes
+  cancela a acomodação) deixa de depender da ordem de despacho do calloop.
+  Onde ainda não há janela (Windows e macOS), o `sem_janela` roda só com a
+  `std`: o cérebro e o `/v1/estado` funcionam, como no Linux sem
+  compositor; um teste o roda no Linux.
+- **O log** (`registro`) foi para o core, com as mesmas mensagens.
+- **Portão:** o `bin/pet verificar` procura o socket de comandos em todos os
+  crates (provado com uma linha plantada no `pet-wayland`), barra crates de
+  sistema no `pet-core` e, com os alvos `x86_64-pc-windows-msvc` e
+  `aarch64-apple-darwin` instalados no rustup (instalados nesta máquina),
+  passa o `cargo clippy --target … -D warnings` no core, nos esboços e no
+  daemon. O check não linka: não pede o SDK da Microsoft nem o da Apple.
+
+Ao vivo, com a tela apagada e a sessão bloqueada, um daemon nativo de
+debug (porta 27399, `/state` de rascunho, skin `_teste`) ligado ao Hyprland
+de verdade: camada criada, `configure`, `enter`, `preferred_scale` 180/120,
+D = 5 com a célula em (1706, 951), o primeiro quadro, `tocar` respondendo
+`tocou: true`, esconder com o quadro transparente, mostrar recriando a
+camada, o quadro esperado do `/v1/debug/quadro` e a saída com "o compositor
+processou o quadro transparente e a destruição". Ficam pendentes, porque
+pedem a tela acesa e desbloqueada: `scripts/verificar-ao-vivo.sh
+--personagem` e `scripts/medir-custo.sh` (nitidez, fantasma, ritmo parado e
+custo no Hyprland iguais ao M1).
+**Por quê:** a costura é pequena agora e cara depois do M4–M6. Com o Motor
+puro, o que o pet faz é testado sem compositor, e o porte para outro sistema
+é escrever um `Overlay`, um `Desktop` e um laço, sem tocar no resto.

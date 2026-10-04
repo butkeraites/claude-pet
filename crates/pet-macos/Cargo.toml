@@ -1,0 +1,17 @@
+[package]
+name = "pet-macos"
+description = "Backend do macOS (M8, T8.5): por enquanto só o esboço que compila."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+# Só no macOS: em outro sistema o crate fica vazio (decisão 0040). Sem
+# dependência de SDK por enquanto: o `cargo check --target
+# aarch64-apple-darwin` roda neste notebook, sem linkar.
+[target.'cfg(target_os = "macos")'.dependencies]
+pet-core.workspace = true
+
+[lints]
+workspace = true

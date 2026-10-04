@@ -1,8 +1,12 @@
 //! Log mínimo no stderr (o Docker guarda e põe data). Nível em `PET_LOG`:
 //! `error`, `warn`, `info` (padrão) ou `debug`.
 //!
+//! Mora no core desde o T8.0 (decisão 0040) para o Motor, o daemon e os
+//! backends de cada sistema registrarem do mesmo jeito. Só usa a `std`.
+//!
 //! Regra de ouro: nunca registrar conteúdo vindo dos hooks ou títulos de
-//! janela — só nomes de evento, ids e contagens.
+//! janela — só nomes de evento, ids e contagens. O hook (`avisar`) nunca
+//! registra nada.
 
 use std::sync::atomic::{AtomicU8, Ordering};
 
@@ -39,18 +43,22 @@ pub fn escrever(nivel: u8, mensagem: std::fmt::Arguments<'_>) {
     }
 }
 
+#[macro_export]
 macro_rules! erro {
     ($($arg:tt)*) => { $crate::registro::escrever($crate::registro::ERRO, format_args!($($arg)*)) };
 }
 
+#[macro_export]
 macro_rules! aviso {
     ($($arg:tt)*) => { $crate::registro::escrever($crate::registro::AVISO, format_args!($($arg)*)) };
 }
 
+#[macro_export]
 macro_rules! info {
     ($($arg:tt)*) => { $crate::registro::escrever($crate::registro::INFO, format_args!($($arg)*)) };
 }
 
+#[macro_export]
 macro_rules! depurar {
     ($($arg:tt)*) => { $crate::registro::escrever($crate::registro::DEPURAR, format_args!($($arg)*)) };
 }

@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 
 use pet_core::cena::{self, Elemento};
 use pet_core::geometria::Ret;
+use pet_core::plataforma::{Desenho, Fase, Monitor};
 use pet_core::raster::{self, Alvo};
 use pet_core::skin::Skin;
 use smithay_client_toolkit::compositor::FrameCallbackData;
@@ -43,9 +44,9 @@ use smithay_client_toolkit::shell::wlr_layer::{
 use smithay_client_toolkit::shm::Shm;
 use smithay_client_toolkit::shm::slot::{Buffer, SlotPool};
 
-use super::Sessao;
-use super::saida;
-use super::shm::Lona;
+use crate::saida;
+use crate::sessao::Sessao;
+use crate::shm::Lona;
 
 /// Namespace da camada (decisão 0012); é por ele que o `hyprctl layers` e
 /// uma eventual regra do Hyprland acham o pet.
@@ -85,12 +86,18 @@ pub struct Pronta {
 }
 
 impl Pronta {
+    /// O monitor pronto, como o Motor o vê.
+    pub fn monitor(&self) -> Monitor {
+        Monitor {
+            nome: self.monitor.clone(),
+            logico: self.logico,
+            escala: self.escala,
+        }
+    }
+
     /// Tamanho do buffer em pixels do monitor: `round(w*s) x round(h*s)`.
     pub fn buffer(&self) -> (i32, i32) {
-        (
-            (self.logico.0 as f64 * self.escala).round() as i32,
-            (self.logico.1 as f64 * self.escala).round() as i32,
-        )
+        self.monitor().buffer()
     }
 }
 
@@ -146,46 +153,6 @@ impl Prontidao {
     }
 }
 
-/// Em que pé está a camada, para decidir mostrar ou esconder.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Fase {
-    /// Nenhuma camada.
-    Ausente,
-    /// Camada viva; `conteudo`: o compositor guarda pixels do pet nela.
-    Viva { conteudo: bool },
-    /// Escondendo: o quadro transparente já foi; a camada morre no próximo
-    /// frame callback ou num prazo curto.
-    Saindo,
-}
-
-/// O que fazer para chegar à visibilidade pedida.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Passo {
-    Nada,
-    /// Cria a camada (output NULL: o monitor focado).
-    Criar,
-    /// Desiste de esconder: a mesma camada volta a desenhar o pet.
-    Cancelar,
-    /// Quadro transparente agora; destrói no frame callback ou no prazo, para
-    /// o fade de saída do Hyprland fotografar um quadro vazio.
-    ApagarEDestruir,
-    /// Nada do pet no compositor (nunca desenhou): destrói já.
-    Destruir,
-}
-
-/// Mostrar/esconder como função pura. Pedir para mostrar enquanto a camada
-/// ainda está saindo **cancela** a saída: sem isso o pedido se perdia e a
-/// camada morria logo depois, deixando o pet escondido.
-pub fn passo_de_visibilidade(fase: Fase, mostrar: bool) -> Passo {
-    match (fase, mostrar) {
-        (Fase::Ausente, true) => Passo::Criar,
-        (Fase::Saindo, true) => Passo::Cancelar,
-        (Fase::Viva { conteudo: true }, false) => Passo::ApagarEDestruir,
-        (Fase::Viva { conteudo: false }, false) => Passo::Destruir,
-        (Fase::Viva { .. }, true) | (Fase::Ausente | Fase::Saindo, false) => Passo::Nada,
-    }
-}
-
 pub struct Superficie {
     pub camada: LayerSurface,
     viewport: WpViewport,
@@ -224,18 +191,6 @@ pub struct Superficie {
     /// Commits de quadro feitos nesta superfície e quando foi o último.
     seq: u64,
     ultimo_commit: Option<Instant>,
-}
-
-/// O que aconteceu num pedido de desenho.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Desenho {
-    Enviado {
-        retangulos: usize,
-        area: i64,
-    },
-    SemMudanca,
-    /// Há um quadro em voo; desenha no frame callback.
-    Adiado,
 }
 
 impl Superficie {
@@ -439,7 +394,8 @@ impl Superficie {
         self.conteudo
     }
 
-    /// Em que pé a camada está, para [`passo_de_visibilidade`].
+    /// Em que pé a camada está, para o
+    /// [`pet_core::plataforma::passo_de_visibilidade`].
     pub fn fase(&self) -> Fase {
         if self.saindo {
             Fase::Saindo
@@ -556,7 +512,7 @@ impl Drop for Superficie {
 #[cfg(test)]
 mod testes {
     use super::*;
-    use crate::wl::saida::Monitor;
+    use crate::saida::Monitor;
 
     fn edp() -> Monitor {
         Monitor {
@@ -640,7 +596,7 @@ mod testes {
         p.prazo_escala = true;
         p.prazo_enter = true;
         let fallback = Monitor {
-            nome: saida::RESERVA_DO_HYPRLAND.into(),
+            nome: crate::hyprland::RESERVA.into(),
             logico: (1920, 1080),
             modo: Some((1920, 1080)),
         };
@@ -654,29 +610,6 @@ mod testes {
         assert_eq!(p.decidir(true, Some(&fallback), Some(&edp())), None);
         assert_eq!(p.decidir(true, Some(&zerado), Some(&edp())), None);
         assert!(p.decidir(true, Some(&edp()), None).is_some());
-    }
-
-    #[test]
-    fn mostrar_e_esconder_por_fase() {
-        use Passo::*;
-        let viva = |conteudo| Fase::Viva { conteudo };
-        assert_eq!(passo_de_visibilidade(Fase::Ausente, true), Criar);
-        assert_eq!(passo_de_visibilidade(Fase::Ausente, false), Nada);
-        assert_eq!(passo_de_visibilidade(viva(true), true), Nada);
-        assert_eq!(passo_de_visibilidade(viva(false), true), Nada);
-        assert_eq!(passo_de_visibilidade(viva(true), false), ApagarEDestruir);
-        assert_eq!(passo_de_visibilidade(viva(false), false), Destruir);
-        assert_eq!(passo_de_visibilidade(Fase::Saindo, false), Nada);
-    }
-
-    #[test]
-    fn mostrar_logo_depois_de_esconder_cancela_a_saida() {
-        // A corrida da revisão: esconder e mostrar em seguida (no mesmo lote
-        // do canal ou antes do frame callback). Antes, o pedido de mostrar
-        // não fazia nada e a camada morria em seguida: pet escondido.
-        let fase = Fase::Viva { conteudo: true };
-        assert_eq!(passo_de_visibilidade(fase, false), Passo::ApagarEDestruir);
-        assert_eq!(passo_de_visibilidade(Fase::Saindo, true), Passo::Cancelar);
     }
 
     #[test]

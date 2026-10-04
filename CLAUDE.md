@@ -54,6 +54,7 @@ Fora dele, use `~/.cargo/bin/cargo`.
 | Comando | O que faz |
 |---|---|
 | `bin/pet verificar` | portão antes de **todo** commit: fmt, clippy, testes, compose, plugin |
+| `rustup target add x86_64-pc-windows-msvc aarch64-apple-darwin` | com os alvos instalados, o `verificar` também passa o clippy do núcleo, dos esboços e do daemon para Windows e macOS (sem linkar, sem SDK) |
 | `bin/pet subir` / `parar` / `logs` / `estado` | compose e estado do pet |
 | `bin/pet testar rapido` / `pequeno` | eventos sintéticos pelo `avisar.sh` de verdade (`PET_TESTE=1`) → `nod` / `done_small` |
 | `bin/pet tocar <reação>` / `esconder` / `mostrar` | `/v1/comando` (não persiste); o `tocar` diz a tag que a skin tocou e se apareceu na tela |
@@ -72,28 +73,45 @@ Fora dele, use `~/.cargo/bin/cargo`.
 
 ## Arquitetura em uma tela
 
-- Um binário Rust (`crates/claude-pet`) no container `alpine`, uid 1000,
-  rootfs somente leitura. Threads: principal (calloop, a partir do M1),
-  ingress HTTP, leitor do `.socket2.sock` (M4), watchdog.
-- `crates/pet-core` é **puro**: cérebro, pontuação, animador, skin,
-  raster. **Nunca** depende de crates Wayland — os testes ficam rápidos.
+- Crates (decisão 0040):
+  - `crates/pet-core` é **puro** (só `std` e crates de dados): cérebro,
+    animador, skin, raster, o **Motor** (`pet_core::motor`: personagem, pet e
+    palco, mostrar/esconder, estresse, painel, prazos em ms num relógio
+    injetado) e os contratos de cada sistema (`pet_core::plataforma`: os
+    traits `Overlay` e `Desktop`, `Monitor`, `EventoPonteiro` e a `Caixa`).
+    **Nunca** depende de crates Wayland ou de sistema — os testes ficam
+    rápidos e o `bin/pet verificar` confere;
+  - `crates/pet-wayland`: a camada OVERLAY (a `Sessao` é o `Overlay` do
+    Wayland), os buffers e a descoberta; o que é só do Hyprland
+    (`hyprland.lock`, o monitor FALLBACK, o socket de eventos no M4) fica no
+    adaptador `hyprland`;
+  - `crates/pet-windows` e `crates/pet-macos`: esboços vazios que compilam
+    (`cargo clippy --target` no `bin/pet verificar`, com os alvos do
+    rustup instalados);
+  - `crates/claude-pet`: o daemon (binário estático no container `alpine`,
+    uid 1000, rootfs somente leitura). O `nucleo` junta o Motor com as
+    aprovações em disco e o `/v1/estado`; o `laco` é o do Linux (calloop
+    com o Wayland); o `sem_janela` roda onde ainda não há janela (Windows e
+    macOS). Threads: principal (o laço), ingress HTTP, vigia.
 - Uma camada OVERLAY do tamanho do monitor focado, criada com output NULL,
   nunca redimensionada, sem subsurfaces; o Zeca anda dentro do buffer.
   Cada pixel de arte vira um bloco D×D inteiro de pixels do monitor.
 - Eventos do Claude Code chegam por `POST 127.0.0.1:27380/v1/evento`
   vindos do plugin `bichinho` (hooks async → `plugin/scripts/avisar.sh`),
   são validados campo a campo (`pet_core::evento`, decisão 0019) e vão
-  pelo canal do calloop para o cérebro (`pet_core::cerebro`, decisões
-  0020 e 0032), que mora no laço principal, conta os prazos da chegada de
-  cada evento e funciona mesmo sem compositor.
+  pela `Caixa` (um `mpsc` limitado que acorda o laço; no Linux, por um
+  `Ping` do calloop) para o cérebro (`pet_core::cerebro`, decisões 0020 e
+  0032), que mora no Motor, conta os prazos da chegada de cada evento e
+  funciona mesmo sem compositor. Antes de vencer um prazo, o laço esvazia a
+  caixa.
 - Comandos chegam por `POST /v1/comando`, sempre `{"cmd", "arg"}`: as
   reações (`tocar`, 200 com a tag e se apareceu na tela; `esconder` e
   `mostrar`, 204) e as aprovações (`aprovar_skin`, `revogar_skin`; 200
   depois de o laço trocar o personagem), com as mesmas checagens de `Host`,
   `X-Pet` e `Content-Type` (decisões 0030 e 0033). Só as aprovações passam
-  pelo cadeado: uma reação nunca espera uma aprovação. Uma reação toca a tag do estado de mesmo nome no
-  `skin.json`, ou a reserva do catálogo (`pet_core::estados`), nunca o
-  repouso.
+  pelo cadeado: uma reação nunca espera uma aprovação. Uma reação toca a
+  tag do estado de mesmo nome no `skin.json`, ou a reserva do catálogo
+  (`pet_core::estados`), nunca o repouso.
 
 ## Regras de ouro
 
@@ -103,8 +121,12 @@ Fora dele, use `~/.cargo/bin/cargo`.
   fala com o pet leva `-q --noproxy '*'` (nenhum curlrc, nenhum proxy) e o
   jq do `avisar.sh` roda sem `~/.jq` (decisão 0031).
 - **Hyprland:** o daemon **nunca** abre o `.socket.sock` e nunca chama
-  `hyprctl dispatch`/`keyword`. Só lê eventos do `.socket2.sock`.
-  `hyprctl` só aparece em scripts de teste do host.
+  `hyprctl dispatch`/`keyword` (nem em `pet-wayland`). Só lê eventos do
+  `.socket2.sock`. `hyprctl` só aparece em scripts de teste do host.
+- **Portável:** `unsafe` proibido no `pet-core` e no daemon do Linux; o que
+  é de um sistema fica atrás de `cfg` e dos traits de
+  `pet_core::plataforma`. Lógica nova do pet (arrastar, balões, voos) entra
+  no Motor, com teste em relógio falso, não no `pet-wayland`.
 - **Config do Hyprland** (`~/.config/hypr/*.lua`): só pela skill
   `omarchy` e com consentimento do Renan.
 - **Arte:** o pack e tudo derivado dele (sheet, GIFs, folhas de contato,

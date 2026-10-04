@@ -7,10 +7,10 @@
 
 use std::rc::Rc;
 
-use pet_core::animador::Animador;
-use pet_core::cena::Elemento;
-use pet_core::geometria::{self, Ret};
-use pet_core::skin::Skin;
+use crate::animador::Animador;
+use crate::cena::Elemento;
+use crate::geometria::{self, Ret};
+use crate::skin::Skin;
 
 /// Onde e em que escala o pet é desenhado numa superfície.
 #[derive(Debug, Clone, Copy, PartialEq)]

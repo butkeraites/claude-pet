@@ -7,9 +7,7 @@
 use smithay_client_toolkit::output::OutputState;
 use smithay_client_toolkit::reexports::client::protocol::wl_output::{Transform, WlOutput};
 
-/// Nome do output que o Hyprland cria quando não sobra nenhum monitor de
-/// verdade: nunca é casa do pet.
-pub const RESERVA_DO_HYPRLAND: &str = "FALLBACK";
+use crate::hyprland;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Monitor {
@@ -21,9 +19,9 @@ pub struct Monitor {
 }
 
 impl Monitor {
-    /// Serve de casa para o pet: não é o FALLBACK e tem tamanho.
+    /// Serve de casa para o pet: não é o FALLBACK do Hyprland e tem tamanho.
     pub fn utilizavel(&self) -> bool {
-        self.nome != RESERVA_DO_HYPRLAND && self.logico.0 > 0 && self.logico.1 > 0
+        !hyprland::eh_reserva(&self.nome) && self.logico.0 > 0 && self.logico.1 > 0
     }
 
     /// Escala pelo modo: largura do modo ÷ largura lógica.

@@ -10,8 +10,11 @@ use std::time::{Duration, Instant};
 
 use pet_core::cerebro::Resumo;
 use pet_core::config::ConfigEfetiva;
-use pet_core::geometria::Ret;
 use serde::Serialize;
+
+/// O que o Motor publica para o `/v1/estado` (escrito só pelo laço; a
+/// entrada HTTP só lê).
+pub use pet_core::motor::Painel;
 use serde_json::{Value, json};
 
 /// Batimento mais velho que isto: `/saude` responde 503.
@@ -62,35 +65,6 @@ pub struct InfoSkin {
     /// Impressão digital da skin na tela (decisão 0026).
     pub sha256: Option<String>,
     pub avisos: Vec<String>,
-}
-
-/// O que a sessão Wayland publica para o `/v1/estado` (escrito só pela
-/// thread principal; o ingress só lê).
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
-pub struct Painel {
-    /// Nome do monitor da camada (`wl_output` v4).
-    pub monitor: Option<String>,
-    /// Escala do monitor (`preferred_scale` ÷ 120).
-    pub escala: Option<f64>,
-    /// Pixels do monitor por pixel de arte.
-    pub d: Option<i32>,
-    /// Célula do sprite em pixels do monitor, relativa ao monitor e
-    /// recortada a ele (a foto e a checagem de nitidez recortam por aqui).
-    pub sprite_disp: Option<Ret>,
-    /// Região clicável, em pixels lógicos da superfície.
-    pub regiao_entrada: Option<Ret>,
-    /// O pet está desenhado na tela.
-    pub visivel: bool,
-    /// Teste de estresse rodando.
-    pub estresse: bool,
-    /// Commits Wayland no último minuto (orçamento: até 120 parado).
-    pub commits_por_min: usize,
-    pub commits_total: u64,
-    /// SHM do buffer do monitor (o Hyprland guarda uma textura do mesmo
-    /// tamanho, fora do container).
-    pub shm_bytes: usize,
-    /// A reação tocando na tela agora (`nod`, `done_small`, …).
-    pub reacao: Option<String>,
 }
 
 pub struct Compartilhado {
@@ -293,6 +267,7 @@ mod testes {
 
     #[test]
     fn painel_aparece_no_estado() {
+        use pet_core::geometria::Ret;
         let c = novo();
         c.publicar_painel(Painel {
             monitor: Some("eDP-1".into()),

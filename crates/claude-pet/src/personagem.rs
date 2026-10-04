@@ -22,6 +22,16 @@ use crate::aprovacao;
 /// A skin xadrez de QA.
 pub const SKIN_DE_TESTE: &str = "_teste";
 
+/// Quem está na tela: (id, impressão digital, origem). Uma aprovação que não
+/// muda isso (aprovar de novo a mesma skin, revogar outra) não mexe na tela.
+pub type NaTela = Option<(String, Option<String>, Option<Origem>)>;
+
+/// A escolha nova é exatamente o personagem que já está na tela (aprovar de
+/// novo a mesma skin, revogar a de outro id): nada a trocar.
+pub fn mesma_tela(havia_skin: bool, antes: &NaTela, depois: &NaTela) -> bool {
+    havia_skin && depois.is_some() && antes == depois
+}
+
 #[derive(Debug)]
 pub struct Escolha {
     /// A skin que vai para a tela, se houver.
@@ -154,6 +164,31 @@ mod testes {
             debug,
             debug_personagem,
         }
+    }
+
+    #[test]
+    fn so_troca_a_tela_quando_muda_quem_esta_nela() {
+        let zeca =
+            |sha: &str, origem| Some(("zeca".to_owned(), Some(sha.to_owned()), Some(origem)));
+        let a = zeca("aa", Origem::Imagem);
+        assert!(mesma_tela(true, &a, &a), "aprovar de novo a mesma skin");
+        assert!(
+            !mesma_tela(true, &a, &zeca("bb", Origem::Imagem)),
+            "skin nova"
+        );
+        assert!(
+            !mesma_tela(true, &a, &zeca("aa", Origem::Snapshot)),
+            "a da imagem quebrou: vai a cópia de /state"
+        );
+        assert!(!mesma_tela(true, &a, &None), "revogou: esconde");
+        assert!(
+            !mesma_tela(false, &None, &None),
+            "nada antes, nada agora: publica de qualquer jeito"
+        );
+        assert!(
+            !mesma_tela(false, &a, &a),
+            "sem skin carregada ainda: troca"
+        );
     }
 
     #[test]

@@ -13,7 +13,7 @@
 //! - `GET /v1/estado`: o que o pet está vendo e pensando (só metadados).
 //! - `POST /v1/evento`: um evento dos hooks no formato de fio v1
 //!   (decisão 0019, [`pet_core::evento`]); 204, ou 400 sem `v`/`e` válidos.
-//!   Vai para o laço principal pelo canal do calloop.
+//!   Vai para o laço principal pela caixa ([`Caixa`]).
 //! - `POST /v1/comando`, sempre `{"cmd": …, "arg": …}` e mais nada:
 //!   - `tocar` com o nome da reação (M3, decisões 0019 e 0033) espera o laço
 //!     principal tocar (até 2 s) e responde 200 com a tag que a skin tocou e
@@ -40,10 +40,10 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use pet_core::evento::{self, Lido};
+use pet_core::plataforma::Caixa;
 use pet_core::skin::codificar_png;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use smithay_client_toolkit::reexports::calloop::channel::SyncSender;
 
 use crate::aprovacao;
 use crate::comando::{Comando, QuadroEsperado, Recebido, Tocou};
@@ -104,8 +104,8 @@ pub struct Contexto {
     pub porta_publica: u16,
     /// Rotas `/v1/debug/*` ligadas (`PET_DEBUG=1`).
     pub debug: bool,
-    /// Canal para o laço principal.
-    pub comandos: Option<SyncSender<Comando>>,
+    /// A caixa do laço principal.
+    pub comandos: Option<Caixa<Comando>>,
     /// Onde estão as skins da imagem e as aprovações (`/state`).
     pub onde: Onde,
     /// Uma aprovação ou revogação por vez.
@@ -320,7 +320,7 @@ fn receber_evento(req: &Requisicao, ctx: &Contexto) -> (u16, String) {
         recebido_ms,
         chegada,
     };
-    match canal.try_send(Comando::Evento(Box::new(recebido))) {
+    match canal.tentar(Comando::Evento(Box::new(recebido))) {
         Ok(()) => {
             ctx.comp.evento_aceito(|| registro);
             (204, String::new())
@@ -400,7 +400,7 @@ fn receber_comando(req: &Requisicao, ctx: &Contexto) -> (u16, String) {
     let Some(canal) = &ctx.comandos else {
         return (503, erro_json("laço principal indisponível"));
     };
-    match canal.try_send(comando) {
+    match canal.tentar(comando) {
         Ok(()) => (204, String::new()),
         Err(_) => (503, erro_json("laço principal ocupado")),
     }
@@ -418,7 +418,7 @@ fn tocar(reacao: String, ctx: &Contexto) -> (u16, String) {
         reacao: reacao.clone(),
         resposta,
     };
-    if canal.try_send(pedido).is_err() {
+    if canal.tentar(pedido).is_err() {
         return (503, erro_json("laço principal ocupado"));
     }
     match espera.recv_timeout(ESPERA_LACO) {
@@ -501,7 +501,7 @@ fn revogar_skin(arg: &Value, ctx: &Contexto) -> (u16, String) {
 fn escolher_de_novo(mut resposta: Value, ctx: &Contexto) -> Value {
     if let Some(canal) = &ctx.comandos {
         let (feito, espera) = mpsc::sync_channel(1);
-        let aplicado = canal.send(Comando::RecarregarPersonagem(feito)).is_ok()
+        let aplicado = canal.mandar(Comando::RecarregarPersonagem(feito)).is_ok()
             && espera.recv_timeout(ESPERA_LACO).is_ok();
         if !aplicado {
             aviso!("o laço principal não confirmou a troca de personagem");
@@ -537,7 +537,7 @@ fn rotear_debug(req: &Requisicao, ctx: &Contexto, rota: &str) -> (u16, String) {
             Err(motivo) => return (400, erro_json(&motivo)),
         },
     };
-    match canal.try_send(comando) {
+    match canal.tentar(comando) {
         Ok(()) => (204, String::new()),
         Err(_) => (503, erro_json("laço principal ocupado")),
     }
@@ -563,9 +563,9 @@ fn parametros_estresse(corpo: &[u8]) -> Result<(u32, u32), String> {
     Ok((campo("fps", 30, 60)?, campo("segundos", 15, 120)?))
 }
 
-fn pedir_quadro(canal: &SyncSender<Comando>) -> (u16, String) {
+fn pedir_quadro(canal: &Caixa<Comando>) -> (u16, String) {
     let (resposta, recebe) = mpsc::sync_channel(1);
-    if canal.try_send(Comando::Quadro(resposta)).is_err() {
+    if canal.tentar(Comando::Quadro(resposta)).is_err() {
         return (503, erro_json("laço principal ocupado"));
     }
     match recebe.recv_timeout(ESPERA_LACO) {
@@ -733,12 +733,14 @@ mod testes {
         contexto_com(false)
     }
 
-    /// Contexto de debug com o canal ligado a um receptor do teste.
-    fn contexto_debug() -> (
-        Contexto,
-        smithay_client_toolkit::reexports::calloop::channel::Channel<Comando>,
-    ) {
-        let (canal, recebe) = smithay_client_toolkit::reexports::calloop::channel::sync_channel(16);
+    /// Uma caixa de teste: o receptor faz o papel do laço.
+    fn caixa(capacidade: usize) -> (Caixa<Comando>, mpsc::Receiver<Comando>) {
+        Caixa::nova(capacidade, Arc::new(pet_core::plataforma::SemDespertador))
+    }
+
+    /// Contexto de debug com a caixa ligada a um receptor do teste.
+    fn contexto_debug() -> (Contexto, mpsc::Receiver<Comando>) {
+        let (canal, recebe) = caixa(16);
         let ctx = Contexto {
             comandos: Some(canal),
             ..contexto_com(true)
@@ -760,23 +762,9 @@ mod testes {
         post_tipo(caminho, Some("application/json"), corpo)
     }
 
-    /// Tudo o que chegou no canal, na ordem.
-    fn drenar(
-        recebe: smithay_client_toolkit::reexports::calloop::channel::Channel<Comando>,
-    ) -> Vec<Comando> {
-        use smithay_client_toolkit::reexports::calloop::{EventLoop, channel::Event};
-        let mut laco = EventLoop::<Vec<Comando>>::try_new().unwrap();
-        laco.handle()
-            .insert_source(recebe, |evento, _, lista: &mut Vec<Comando>| {
-                if let Event::Msg(c) = evento {
-                    lista.push(c);
-                }
-            })
-            .unwrap();
-        let mut recebidos = Vec::new();
-        laco.dispatch(Some(Duration::from_millis(50)), &mut recebidos)
-            .unwrap();
-        recebidos
+    /// Tudo o que chegou na caixa, na ordem.
+    fn drenar(recebe: mpsc::Receiver<Comando>) -> Vec<Comando> {
+        recebe.try_iter().collect()
     }
 
     #[test]
@@ -899,8 +887,7 @@ mod testes {
                 "a skin «zeca» não tem «nod»",
             ),
         ] {
-            let (canal, recebe) =
-                smithay_client_toolkit::reexports::calloop::channel::sync_channel(4);
+            let (canal, recebe) = caixa(4);
             let laco = laco_de_teste(recebe, tocou);
             let ctx = Contexto {
                 comandos: Some(canal),
@@ -922,7 +909,7 @@ mod testes {
         // Só as aprovações passam pelo cadeado (decisão 0030): com o cadeado
         // preso, `tocar`, `esconder` e `mostrar` respondem na hora, e uma
         // revogação espera até o cadeado soltar.
-        let (canal, recebe) = smithay_client_toolkit::reexports::calloop::channel::sync_channel(16);
+        let (canal, recebe) = caixa(16);
         let laco = laco_de_teste(recebe, Tocou::NaTela { tag: "nod".into() });
         let ctx = Arc::new(Contexto {
             comandos: Some(canal),
@@ -978,7 +965,7 @@ mod testes {
     fn um_comando_so_para_reacoes_e_aprovacoes() {
         // As reações do M3 e as aprovações do M2 dividem o `/v1/comando`,
         // com o mesmo formato e as mesmas checagens (decisão 0030).
-        let (canal, recebe) = smithay_client_toolkit::reexports::calloop::channel::sync_channel(16);
+        let (canal, recebe) = caixa(16);
         let laco = laco_de_teste(recebe, Tocou::NaTela { tag: "nod".into() });
         let ctx = Contexto {
             comandos: Some(canal),
@@ -1066,7 +1053,7 @@ mod testes {
     #[test]
     fn comando_aprova_e_revoga_e_avisa_o_laco() {
         let a = crate::aprovacao::testes::Ambiente::novo("ingress");
-        let (canal, recebe) = smithay_client_toolkit::reexports::calloop::channel::sync_channel(4);
+        let (canal, recebe) = caixa(4);
         let laco = laco_de_teste(recebe, Tocou::SemPersonagem);
         let ctx = Contexto {
             comandos: Some(canal),
@@ -1110,39 +1097,28 @@ mod testes {
     }
 
     /// Um "laço principal" numa thread: confirma cada troca de personagem,
-    /// responde cada `tocar` com `tocou` e devolve, quando o canal fecha, os
+    /// responde cada `tocar` com `tocou` e devolve, quando a caixa fecha, os
     /// comandos que chegaram, na ordem.
     fn laco_de_teste(
-        recebe: smithay_client_toolkit::reexports::calloop::channel::Channel<Comando>,
+        recebe: mpsc::Receiver<Comando>,
         tocou: Tocou,
     ) -> thread::JoinHandle<Vec<String>> {
-        use smithay_client_toolkit::reexports::calloop::EventLoop;
-        use smithay_client_toolkit::reexports::calloop::channel::Event;
         thread::spawn(move || {
-            let mut laco = EventLoop::<(Vec<String>, bool)>::try_new().unwrap();
-            laco.handle()
-                .insert_source(
-                    recebe,
-                    move |evento, _, estado: &mut (Vec<String>, bool)| match evento {
-                        Event::Msg(Comando::RecarregarPersonagem(feito)) => {
-                            estado.0.push("RecarregarPersonagem".into());
-                            let _ = feito.try_send(());
-                        }
-                        Event::Msg(Comando::Tocar { reacao, resposta }) => {
-                            estado.0.push(format!("Tocar({reacao})"));
-                            let _ = resposta.try_send(tocou.clone());
-                        }
-                        Event::Msg(outro) => estado.0.push(format!("{outro:?}")),
-                        Event::Closed => estado.1 = true,
-                    },
-                )
-                .unwrap();
-            let mut estado = (Vec::new(), false);
-            while !estado.1 {
-                laco.dispatch(Some(Duration::from_millis(20)), &mut estado)
-                    .unwrap();
+            let mut vistos = Vec::new();
+            while let Ok(comando) = recebe.recv() {
+                match comando {
+                    Comando::RecarregarPersonagem(feito) => {
+                        vistos.push("RecarregarPersonagem".into());
+                        let _ = feito.try_send(());
+                    }
+                    Comando::Tocar { reacao, resposta } => {
+                        vistos.push(format!("Tocar({reacao})"));
+                        let _ = resposta.try_send(tocou.clone());
+                    }
+                    outro => vistos.push(format!("{outro:?}")),
+                }
             }
-            estado.0
+            vistos
         })
     }
 
@@ -1213,19 +1189,7 @@ mod testes {
             403
         );
         drop(ctx);
-        let mut recebidos = Vec::new();
-        let mut laco =
-            smithay_client_toolkit::reexports::calloop::EventLoop::<Vec<String>>::try_new()
-                .unwrap();
-        laco.handle()
-            .insert_source(recebe, |evento, _, lista: &mut Vec<String>| {
-                if let smithay_client_toolkit::reexports::calloop::channel::Event::Msg(c) = evento {
-                    lista.push(format!("{c:?}"));
-                }
-            })
-            .unwrap();
-        laco.dispatch(Some(Duration::from_millis(50)), &mut recebidos)
-            .unwrap();
+        let recebidos: Vec<String> = drenar(recebe).iter().map(|c| format!("{c:?}")).collect();
         assert_eq!(
             recebidos,
             vec![
