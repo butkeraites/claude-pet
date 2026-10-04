@@ -39,7 +39,6 @@ use std::rc::Rc;
 use serde::Serialize;
 
 use crate::animador;
-use crate::aviso::EVENTOS_COM_TERMINAL;
 use crate::cena::{self, Elemento};
 use crate::cerebro::{self, Agora, Cerebro, ConfigCerebro, Pendencia, Reacao, Resumo, TipoAviso};
 use crate::confete::{Chuva, Grade};
@@ -384,13 +383,14 @@ impl Motor {
 
     /// Um evento do Claude Code, no relógio da chegada (decisão 0032).
     ///
-    /// No `SessionStart` e no `UserPromptSubmit` de uma sessão que o cérebro
+    /// No prompt do teclado e no começo de uma sessão que o cérebro
     /// acompanha, casa a janela do terminal dela: a que o anel de ativações
-    /// diz que estava ativa na hora (`ts`) do hook (decisão 0055).
+    /// diz que estava ativa na hora (`ts`) do hook (decisão 0055). O começo
+    /// só preenche, a compactação nunca casa (decisão 0060).
     pub fn evento(&mut self, ev: &Evento, recebido_ms: u64, agora: Agora) -> Vec<Reacao> {
         self.acertar_relogio(agora);
         let reacoes = self.cerebro.receber(ev, recebido_ms, agora);
-        if EVENTOS_COM_TERMINAL.contains(&ev.e.as_str())
+        if let Some(origem) = janelas::origem(&ev.e, ev.src.as_deref())
             && let Some(sid) = &ev.sid
         {
             let chave = (ev.teste, sid.clone());
@@ -398,7 +398,7 @@ impl Motor {
                 let ts = cerebro::hora_do_evento(ev.ts, recebido_ms);
                 let achado = self.desktop.anel.em(ts);
                 self.identidades
-                    .observar(chave, achado, ev.term.clone(), ts);
+                    .observar(chave, achado, ev.term.clone(), ts, origem);
             }
         }
         self.esquecer_janelas_sem_sessao();

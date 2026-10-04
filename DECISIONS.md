@@ -2385,3 +2385,50 @@ ativo (T4.5).
 qualquer estado da conexão, senão o laço gira; e o compositor, que pôs a
 camada no monitor em foco, sabe mais que um foco antigo que pode ter se
 perdido.
+
+## 0060 — Revisão da janela de cada sessão: o começo só preenche, a compactação nunca casa e o hook atrasado não desfaz (2026-10-04)
+
+**Problema:** as revisões do M4 acharam que a janela de cada sessão (decisão
+0055) podia grudar no lugar errado com certeza.
+- **O `SessionStart` de qualquer origem casava como um prompt**, e uma
+  janela certa sempre trocava a de antes. O Claude Code manda
+  `SessionStart` com `source: compact` depois de uma compactação, que
+  acontece no meio de um turno longo, com o Renan em qualquer janela (o
+  `hooks.json` registra o evento sem filtro, e o hook manda o `src`). O
+  navegador virava o "terminal" da sessão: 10 s com ele em foco davam o
+  pronto como visto sem o Renan ter visto, e o clique "focava" o navegador,
+  já ativo, e marcava o aviso. Só o próximo prompt no terminal consertava.
+  O `SessionStart` de `startup` e `resume` também roda depois de o Claude
+  Code subir (1–3 s), com o Renan podendo já estar noutra janela.
+- **Hooks assíncronos chegam fora de ordem**, e o `observar` aplicava na
+  ordem de chegada: um prompt atrasado desfazia o casamento de um mais novo.
+- **Um prompt que não veio do teclado** (o `source` do `UserPromptSubmit`,
+  que o cérebro já guarda: `user`, `system`) casaria do mesmo jeito.
+
+**Escolha (revisão do T4.8):**
+- **De onde vem a hora** (`motor::janelas::origem`): o `UserPromptSubmit`
+  sem `src` ou com `user` é o prompt do teclado e troca a janela; o
+  `SessionStart` sem `src` ou com `startup`, `resume`, `clear` ou `fork` é
+  o começo e **só preenche** uma janela que ainda não é certa (sem
+  identidade, com dúvida, sem anel, sem janela ou com a janela fechada); a
+  compactação (`compact`), um prompt de sistema e qualquer origem
+  desconhecida **não casam**.
+- **O hook atrasado** (`Identidades::observar`): uma observação com a hora
+  mais velha que a do último casamento da sessão é ignorada, ids de terminal
+  inclusive.
+- O hook continua mandando os ids de terminal no `SessionStart` de toda
+  origem (decisão 0054); o pet só não casa a janela com o da compactação.
+- **Testes:** no Motor, a compactação 30 s depois de o Renan ir ao navegador
+  deixa a sessão no foot e o pronto pendente depois de 10 s com o navegador
+  em foco; o prompt de sistema não casa e o do teclado troca; o prompt
+  atrasado não desfaz o mais novo; o `resume` com o Renan noutra janela não
+  troca a certa, e o começo de uma sessão nova preenche. Na função de origem
+  e nas identidades, as mesmas regras, conferidas por três mutações (a
+  compactação casando, sem a guarda do atrasado, o começo trocando a
+  certa). No daemon de verdade (`tests/janela.rs`), a compactação com a
+  terceira janela ativa há mais de 1 s não troca a janela da sessão.
+
+**Por quê:** o prompt do teclado é o único momento em que a janela ativa
+é, com quase certeza, o terminal da sessão; o resto ou preenche um vazio ou
+fica de fora. Errar com certeza manda o Renan para a janela errada e apaga
+um aviso que ele não viu.

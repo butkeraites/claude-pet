@@ -1714,3 +1714,94 @@ fn foco_que_chega_depois_da_camada_pedida_ainda_leva_o_pet() {
         "volta ao eDP-1"
     );
 }
+
+// --- a janela da sessão: o começo, a compactação e o hook atrasado (decisão
+// 0060) ------------------------------------------------------------------------
+
+fn evento_de(e: &str, sid: &str, src: Option<&str>, ts_ms: u64) -> Evento {
+    Evento {
+        e: e.into(),
+        sid: Some(sid.into()),
+        turno: Some(format!("{sid}-{ts_ms}")),
+        ent: Some("cli".into()),
+        proj: Some("api".into()),
+        src: src.map(str::to_owned),
+        ts: Some(PAREDE + ts_ms),
+        ..Evento::default()
+    }
+}
+
+#[test]
+fn a_compactacao_no_meio_do_turno_nao_troca_a_janela_da_sessao() {
+    // A sessão casou com o foot1 no prompt. Num turno longo o Claude Code
+    // compacta o contexto (`SessionStart` com `compact`) com o Renan no
+    // navegador há 30 s: a janela da sessão continua o foot1, e 10 s com o
+    // navegador em foco não dão o pronto como visto.
+    let mut motor = Motor::novo(ConfigCerebro::default());
+    motor.acertar_relogio(em(0));
+    ligar_desktop(&mut motor, 0);
+    ativou(&mut motor, Some("f00d01"), 1_000);
+    prompt_em(&mut motor, "sessao-a", "api", 2_000);
+    ativou(&mut motor, Some("f00d03"), 3_000);
+    let compacta = evento_de("SessionStart", "sessao-a", Some("compact"), 33_000);
+    motor.evento(&compacta, PAREDE + 33_000, em(33_000));
+    let a = janela_da(&motor, "sessao-a").unwrap();
+    assert_eq!(
+        (a.endereco.as_deref(), a.certeza),
+        (Some("f00d01"), janelas::Certeza::Certa)
+    );
+    pronto_em(&mut motor, "sessao-a", "api", 40_000);
+    motor.tique(em(60_000));
+    assert_eq!(
+        pendentes(&motor),
+        vec![("sessao-a".to_owned(), TipoAviso::Pronto)],
+        "o navegador em foco não é o terminal da sessão"
+    );
+    // Um prompt que não veio do teclado (`source` de sistema) também não
+    // casa; o do teclado, sim.
+    let sistema = evento_de("UserPromptSubmit", "sessao-a", Some("system"), 70_000);
+    motor.evento(&sistema, PAREDE + 70_000, em(70_000));
+    assert_eq!(
+        janela_da(&motor, "sessao-a").unwrap().endereco.as_deref(),
+        Some("f00d01")
+    );
+    prompt_em(&mut motor, "sessao-a", "api", 80_000);
+    assert_eq!(
+        janela_da(&motor, "sessao-a").unwrap().endereco.as_deref(),
+        Some("f00d03"),
+        "o --resume noutro terminal"
+    );
+}
+
+#[test]
+fn o_hook_atrasado_e_o_comeco_nao_desfazem_a_janela_certa() {
+    let mut motor = Motor::novo(ConfigCerebro::default());
+    motor.acertar_relogio(em(0));
+    ligar_desktop(&mut motor, 0);
+    ativou(&mut motor, Some("f00d01"), 1_000);
+    ativou(&mut motor, Some("f00d02"), 15_000);
+    // O prompt de 20 s (no foot2) chega antes do de 10 s (no foot1): os hooks
+    // são assíncronos.
+    prompt_em(&mut motor, "sessao-a", "api", 20_000);
+    let atrasado = evento_de("UserPromptSubmit", "sessao-a", None, 10_000);
+    motor.evento(&atrasado, PAREDE + 20_100, em(20_100));
+    assert_eq!(
+        janela_da(&motor, "sessao-a").unwrap().endereco.as_deref(),
+        Some("f00d02")
+    );
+    // Um `resume` com o Renan noutra janela não troca a janela certa.
+    ativou(&mut motor, Some("f00d04"), 25_000);
+    let volta = evento_de("SessionStart", "sessao-a", Some("resume"), 30_000);
+    motor.evento(&volta, PAREDE + 30_000, em(30_000));
+    assert_eq!(
+        janela_da(&motor, "sessao-a").unwrap().endereco.as_deref(),
+        Some("f00d02")
+    );
+    // Uma sessão nova sem janela: o começo preenche.
+    let nova = evento_de("SessionStart", "sessao-b", Some("startup"), 31_000);
+    motor.evento(&nova, PAREDE + 31_000, em(31_000));
+    assert_eq!(
+        janela_da(&motor, "sessao-b").unwrap().endereco.as_deref(),
+        Some("f00d04")
+    );
+}

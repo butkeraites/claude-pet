@@ -43,6 +43,19 @@ fn prompt(d: &Daemon, sid: &str, ts: u64, term: Value) {
     assert_eq!(status, 204, "{resposta}");
 }
 
+/// O começo de uma sessão (o `source` do hook em `src`).
+fn comeco(d: &Daemon, sid: &str, ts: u64, src: &str) {
+    let corpo = json!({"v": 1, "e": "SessionStart", "sid": sid, "ts": ts, "ent": "cli",
+                       "proj": "meu-projeto", "src": src});
+    let (status, resposta) = d.post_json("/v1/evento", &corpo.to_string());
+    assert_eq!(status, 204, "{resposta}");
+}
+
+/// Quantos eventos o pet já aceitou (para esperar um ser processado).
+fn aceitos(estado: &Value) -> u64 {
+    estado["eventos"]["aceitos"].as_u64().unwrap_or(0)
+}
+
 fn janela<'a>(estado: &'a Value, sid8: &str) -> &'a Value {
     estado["sessoes"]
         .as_array()
@@ -86,6 +99,26 @@ fn o_prompt_casa_a_sessao_com_a_janela_ativa_e_a_troca_perto_deixa_duvida() {
     });
     assert_eq!(janela(&estado, "bbbb2222")["endereco"], "f00d02");
     // A de A não mudou.
+    assert_eq!(janela(&estado, "aaaa1111")["endereco"], "f00d01");
+    // O Renan vai a outra janela e, no meio de um turno longo de B, o Claude
+    // Code compacta o contexto: o `SessionStart` com `compact` não troca a
+    // janela de B, e um prompt atrasado de A (os hooks são assíncronos) não
+    // desfaz a janela de A (decisão 0060).
+    h.mandar("activewindowv2>>f00d03\n");
+    esperar(&d, "a terceira janela", |e| {
+        e["desktop"]["janela_ativa"] == "f00d03"
+    });
+    thread::sleep(Duration::from_millis(1_100));
+    let antes = aceitos(&d.get_json("/v1/estado"));
+    comeco(&d, "bbbb2222-sessao", agora_ms(), "compact");
+    prompt(&d, "aaaa1111-sessao", agora_ms() - 30_000, json!(null));
+    let estado = esperar(&d, "a compactação e o prompt atrasado", |e| {
+        aceitos(e) >= antes + 2
+    });
+    assert_eq!(
+        janela(&estado, "bbbb2222"),
+        &json!({"endereco": "f00d02", "certeza": "certa"})
+    );
     assert_eq!(janela(&estado, "aaaa1111")["endereco"], "f00d01");
     // O foot1 fecha: A fica sem janela.
     h.mandar("closewindow>>f00d01\n");

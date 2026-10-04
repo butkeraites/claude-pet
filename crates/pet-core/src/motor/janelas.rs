@@ -195,6 +195,35 @@ impl Anel {
 /// Uma sessão do Claude: (é teste, `session_id`), como o cérebro.
 pub type Chave = (bool, String);
 
+/// De que evento do Claude vem a hora casada com o anel (decisão 0060).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origem {
+    /// O prompt que o Renan mandou do teclado: a janela ativa é o terminal
+    /// da sessão, e ela troca a de antes (um `--resume` em outro terminal).
+    Prompt,
+    /// O começo da sessão (`startup`, `resume`, `clear`, `fork`): o hook roda
+    /// depois de o Claude Code subir, e o Renan pode já estar noutra janela.
+    /// Só preenche uma janela que ainda não é certa.
+    Comeco,
+}
+
+/// Se o evento `e` (com o `source` dele, `src`) casa a janela da sessão, e
+/// como. O `SessionStart` de uma compactação (`compact`) chega no meio de um
+/// turno longo, com o Renan em qualquer janela: nunca casa. Um prompt que não
+/// veio do teclado (`src` que não é `user`), também não. Uma origem
+/// desconhecida não casa.
+pub fn origem(e: &str, src: Option<&str>) -> Option<Origem> {
+    match e {
+        "UserPromptSubmit" if src.is_none_or(|s| s == "user") => Some(Origem::Prompt),
+        "SessionStart"
+            if src.is_none_or(|s| matches!(s, "startup" | "resume" | "clear" | "fork")) =>
+        {
+            Some(Origem::Comeco)
+        }
+        _ => None,
+    }
+}
+
 /// O quanto se sabe da janela de uma sessão (decisão 0055).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -256,25 +285,43 @@ pub struct Identidades {
 
 impl Identidades {
     /// Um `SessionStart` ou `UserPromptSubmit` da sessão `chave`, na hora
-    /// `ts` (o `ts` do hook), com o que o anel achou nessa hora. Uma janela
-    /// certa troca a de antes; sem certeza, a de antes fica (o terminal de
-    /// uma sessão não muda), e só sem nenhuma a dúvida é guardada.
-    pub fn observar(&mut self, chave: Chave, achado: Achado, terminal: Option<Terminal>, ts: u64) {
+    /// `ts` (o `ts` do hook), com o que o anel achou nessa hora. A janela
+    /// certa de um prompt troca a de antes; a do começo da sessão só
+    /// preenche uma que ainda não é certa (decisão 0060). Sem certeza, a de
+    /// antes fica (o terminal de uma sessão não muda), e só sem nenhuma a
+    /// dúvida é guardada. Um hook atrasado (os hooks são assíncronos e chegam
+    /// fora de ordem), com a hora mais velha que a do último casado, não
+    /// desfaz o que o mais novo decidiu.
+    pub fn observar(
+        &mut self,
+        chave: Chave,
+        achado: Achado,
+        terminal: Option<Terminal>,
+        ts: u64,
+        origem: Origem,
+    ) {
         let atual = self.mapa.entry(chave).or_insert(Identidade {
             janela: None,
             certeza: Certeza::SemAnel,
             terminal: None,
             em_ms: ts,
         });
+        if ts < atual.em_ms {
+            return;
+        }
         atual.em_ms = ts;
         if terminal.is_some() {
             atual.terminal = terminal;
         }
         match achado {
-            Achado::Janela(janela) => {
+            Achado::Janela(janela)
+                if origem == Origem::Prompt || atual.certeza != Certeza::Certa =>
+            {
                 atual.janela = Some(janela);
                 atual.certeza = Certeza::Certa;
             }
+            // O começo da sessão não troca uma janela certa.
+            Achado::Janela(_) => {}
             _ if atual.janela.is_some() => {}
             Achado::Duvida => atual.certeza = Certeza::Duvida,
             Achado::Nenhuma => atual.certeza = Certeza::SemJanela,
@@ -401,7 +448,7 @@ mod testes {
             tmux: Some("%3".into()),
             ..Terminal::default()
         };
-        ids.observar(s1.clone(), Achado::Duvida, None, T0);
+        ids.observar(s1.clone(), Achado::Duvida, None, T0, Origem::Prompt);
         assert_eq!(ids.de(&s1).unwrap().certeza, Certeza::Duvida);
         assert_eq!(ids.de(&s1).unwrap().janela, None);
         ids.observar(
@@ -409,10 +456,11 @@ mod testes {
             Achado::Janela(a("foot1")),
             Some(tmux.clone()),
             T0 + 10,
+            Origem::Prompt,
         );
         assert_eq!(ids.de(&s1).unwrap().janela, Some(a("foot1")));
         // Um prompt com dúvida não apaga a janela certa de antes.
-        ids.observar(s1.clone(), Achado::Duvida, None, T0 + 20);
+        ids.observar(s1.clone(), Achado::Duvida, None, T0 + 20, Origem::Prompt);
         let i = ids.de(&s1).unwrap();
         assert_eq!(
             (i.janela.clone(), i.certeza),
@@ -420,7 +468,13 @@ mod testes {
         );
         assert_eq!(i.terminal, Some(tmux), "os ids de terminal ficam");
         // Uma certa nova troca (o `--resume` em outro terminal).
-        ids.observar(s1.clone(), Achado::Janela(a("foot2")), None, T0 + 30);
+        ids.observar(
+            s1.clone(),
+            Achado::Janela(a("foot2")),
+            None,
+            T0 + 30,
+            Origem::Prompt,
+        );
         assert_eq!(ids.de(&s1).unwrap().janela, Some(a("foot2")));
         // A janela fechou.
         ids.fechou(&a("foot2"));
@@ -441,17 +495,110 @@ mod testes {
         ids.manter(|_| false);
         assert!(ids.de(&s1).is_none());
         let mut outras = Identidades::default();
-        outras.observar((true, "t".into()), Achado::Nenhuma, None, T0);
+        outras.observar(
+            (true, "t".into()),
+            Achado::Nenhuma,
+            None,
+            T0,
+            Origem::Prompt,
+        );
         assert_eq!(
             outras.de(&(true, "t".into())).unwrap().certeza,
             Certeza::SemJanela
         );
-        outras.observar((true, "u".into()), Achado::Desconhecida, None, T0);
+        outras.observar(
+            (true, "u".into()),
+            Achado::Desconhecida,
+            None,
+            T0,
+            Origem::Prompt,
+        );
         assert_eq!(
             outras.de(&(true, "u".into())).unwrap().certeza,
             Certeza::SemAnel
         );
         assert!(!Certeza::Fechou.motivo().is_empty());
+    }
+
+    #[test]
+    fn so_o_prompt_do_teclado_e_o_comeco_casam_e_a_compactacao_nunca() {
+        assert_eq!(origem("UserPromptSubmit", None), Some(Origem::Prompt));
+        assert_eq!(
+            origem("UserPromptSubmit", Some("user")),
+            Some(Origem::Prompt)
+        );
+        assert_eq!(origem("UserPromptSubmit", Some("system")), None);
+        for src in [
+            None,
+            Some("startup"),
+            Some("resume"),
+            Some("clear"),
+            Some("fork"),
+        ] {
+            assert_eq!(origem("SessionStart", src), Some(Origem::Comeco), "{src:?}");
+        }
+        assert_eq!(origem("SessionStart", Some("compact")), None);
+        assert_eq!(origem("SessionStart", Some("novo_no_futuro")), None);
+        assert_eq!(origem("Stop", None), None);
+    }
+
+    #[test]
+    fn o_comeco_so_preenche_e_o_hook_atrasado_nao_desfaz() {
+        let mut ids = Identidades::default();
+        let s = (false, "s".to_owned());
+        // O começo sem janela certa preenche.
+        ids.observar(
+            s.clone(),
+            Achado::Janela(a("foot1")),
+            None,
+            T0,
+            Origem::Comeco,
+        );
+        assert_eq!(ids.de(&s).unwrap().janela, Some(a("foot1")));
+        // Um começo depois (o `resume` com o Renan noutra janela) não troca a
+        // certa; o prompt troca.
+        ids.observar(
+            s.clone(),
+            Achado::Janela(a("navegador")),
+            None,
+            T0 + 1_000,
+            Origem::Comeco,
+        );
+        assert_eq!(ids.de(&s).unwrap().janela, Some(a("foot1")));
+        ids.observar(
+            s.clone(),
+            Achado::Janela(a("foot2")),
+            None,
+            T0 + 20_000,
+            Origem::Prompt,
+        );
+        assert_eq!(ids.de(&s).unwrap().janela, Some(a("foot2")));
+        // O prompt de antes chega atrasado (os hooks são assíncronos): o mais
+        // novo fica, até com os ids de terminal.
+        let tmux = Terminal {
+            tmux: Some("%9".into()),
+            ..Terminal::default()
+        };
+        ids.observar(
+            s.clone(),
+            Achado::Janela(a("foot1")),
+            Some(tmux),
+            T0 + 10_000,
+            Origem::Prompt,
+        );
+        let i = ids.de(&s).unwrap();
+        assert_eq!((i.janela.clone(), i.em_ms), (Some(a("foot2")), T0 + 20_000));
+        assert_eq!(i.terminal, None);
+        // Com a janela fechada, o começo preenche de novo.
+        ids.fechou(&a("foot2"));
+        ids.observar(
+            s.clone(),
+            Achado::Janela(a("foot3")),
+            None,
+            T0 + 30_000,
+            Origem::Comeco,
+        );
+        assert_eq!(ids.de(&s).unwrap().janela, Some(a("foot3")));
     }
 
     #[test]
