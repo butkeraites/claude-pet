@@ -23,7 +23,7 @@ pe = [26, 45]
 # Tags com os pés no chão (o lint confere a linha dos pés em todos os quadros delas).
 chao = [
   "respira", "ginga", "blink", "peck", "nod", "chirp", "wave", "work_session", "yawn",
-  "nap", "wake",
+  "sleep", "wake",
 ]
 
 [escuro]
@@ -62,11 +62,17 @@ done_medium = ["short_flight"]
 done_big = ["big_flight"]
 # erro: o susto, com o chapéu voando.
 error = ["scared"]
-# cansado (o começo da soneca): o bocejo; dormindo: adormece com o chapéu escorregando,
-# ronca e acorda; acordando (o fim da soneca): se espreguiça.
+# cansado (o começo da soneca): o bocejo; acordando (o fim da soneca): se espreguiça. Os dois
+# começam e terminam na pose neutra, como a soneca de hoje toca (o bocejo, a pose com o selo
+# «zZ» e o despertar; decisão 0053).
 yawn = ["yawn"]
-sleep = ["nap"]
 wake = ["wake"]
+# dormindo: só o laço do sono (ronca com os «z» subindo, 520 ms por quadro: ~1,9 troca/s,
+# dentro dos 2 fps do dormindo no PLANO), sem a entrada e a saída, como o `sleep` do Zeca do
+# pack: é o estado que fica entre o cansado e o acordando, e um laço que adormece e acorda a
+# cada volta estaria errado (decisão 0068). Adormecer e acordar do sono (`sleep_in` e
+# `sleep_out`) ficam no manifesto, para quando o core tocar a entrada e a saída de um laço.
+sleep = ["sleep"]
 # arrastado: bate asas em laço; solto: o pouso com poeira dos dois lados.
 dangle = ["fly"]
 land = ["landing"]
@@ -143,9 +149,9 @@ nota = "bocejo"
 partes = [{ anim = "yawn" }]
 
 [[tag]]
-nome = "nap"
-nota = "dormindo: adormece com o chapéu escorregando, ronca duas vezes e acorda"
-partes = [{ anim = "sleep_in" }, { anim = "sleep", vezes = 2 }, { anim = "sleep_out" }]
+nome = "sleep"
+nota = "dormindo: ronca com o chapéu sobre o olho e os «z» subindo (laço)"
+partes = [{ anim = "sleep" }]
 
 [[tag]]
 nome = "wake"

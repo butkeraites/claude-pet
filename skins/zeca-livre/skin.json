@@ -14,7 +14,7 @@
     "wave",
     "work_session",
     "yawn",
-    "nap",
+    "sleep",
     "wake"
   ],
   "corpo_px": 34,
@@ -63,7 +63,7 @@
       "chirp"
     ],
     "sleep": [
-      "nap"
+      "sleep"
     ],
     "thinking": [
       "peck"

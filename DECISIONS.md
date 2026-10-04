@@ -2859,3 +2859,100 @@ entraram depois da prancha e dos GIFs que ele olhou.
 não se faz por ele, nem com o pedido passado adiante, e menos ainda com
 quadros que ele não viu. A aprovação de teste prova o caminho inteiro sem
 deixar rastro, e o que falta é um comando dele.
+
+## 0068 — Revisão da skin livre: o anel do tema escuro nunca junta peças soltas, e o `sleep` é só o laço do sono (2026-10-04)
+
+**Problema:** duas revisões da branch `skin-zeca-livre` acharam:
+- **O anel colava peças:** o anel do tema escuro (`light_outline`) pintava todo
+  pixel de fundo encostado no contorno, então um vão de 1-2 px entre duas
+  peças virava anel e as juntava numa mancha só. A correção do tufo esquerdo
+  da poeira (decisão 0065) só valia no visual padrão: no escuro, o que o
+  diretor manda usar **sempre** e o que o hackerman do Renan mostra, o tufo
+  continuava preso ao rabo. O mesmo colava o chapéu voando no topete (o take
+  do susto), as notas e o «!» no bico aberto, a tecla no bico e o grão no pé:
+  27 dos 134 quadros. O lint `fx_sobre_o_corpo` só olhava o quadro padrão.
+- **O `sleep` com o cochilo inteiro:** `sleep = ["nap"]` assava no estado a
+  entrada, dois roncos e a saída (16 quadros em 6,4 s, 2,49 trocas/s). O
+  `sleep` do catálogo é o «dormindo», o estado entre o cansado (`yawn`) e o
+  acordando (`wake`), com ritmo de até 2 fps no PLANO; segurado em laço, como
+  o PLANO prevê, o Zeca adormeceria e acordaria a cada 6,4 s. Hoje o core só
+  segura o `dangle`, então nada quebrava ainda; mudar depois mudaria a
+  impressão digital e pediria outra aprovação.
+
+**Escolha (TS.4):**
+- **Cada pixel do anel é de uma peça** (componente 8-vizinho do quadro): o
+  vão que encosta em duas peças fica de fundo (um entalhe) e, onde os anéis
+  de duas peças se encostariam, o da menor cede (o efeito, o chapéu no ar, a
+  poeira; empate, a de índice menor fica). O bolsão de até 3 px que o anel
+  fecha continua virando anel, mas só existe dentro de uma peça. O miolo não
+  muda; os outros 107 quadros saem iguais. Mantém o tufo onde o diretor o pôs
+  (apagar o tufo, a saída mínima que ele mesmo deu, só resolveria a poeira).
+- **A regra conferida em dois lugares:** no gerador, `anel_junta_pecas` (cada
+  mancha do escuro tem uma peça do padrão, e só uma) entra na verificação dos
+  dois visuais e reprova o `--quadros`; na montagem, `anel_sem_ponte` reprova
+  a skin cujo escuro junte peças. O anel antigo reprova exatamente nos 27
+  quadros; um teste com um confete a 1 px do corpo reprova e a 3 px passa.
+- **`sleep` = só o laço do sono** (a tag `sleep`: 5 quadros de 520 ms, ~1,9
+  troca/s, nenhum na pose neutra; um teste confere os dois), como o `sleep` do
+  Zeca do pack. O bocejo e o acordar continuam gestos que começam e terminam
+  na pose neutra, como a soneca de hoje toca (bocejo, a pose com o selo «zZ»,
+  despertar; decisão 0053). A tag `nap` saiu da skin; o `sleep_in` e o
+  `sleep_out` ficam no gerador e no manifesto (`uso.transicoes.lacos`). Quando
+  o core segurar o sono e souber tocar a entrada e a saída de um laço, elas
+  entram (no `yawn` e no `wake`, ou num campo novo do formato), com uma folha
+  nova e outra aprovação. Até lá, `bin/pet tocar sleep` entra e sai do laço de
+  uma vez, como no pack.
+- **O que muda nas skins:** 18 tags, 199 quadros em 93 células (eram 210 em
+  97); no claro só o `nap` virou `sleep`; no escuro, além disso, só pixels do
+  anel, em 9 tags. Impressões novas: `zeca-livre` `60465a8f6242…` e
+  `zeca-livre-escuro` `165852bd8825…`, com as folhas de contato novas em
+  `tmp/previa-zeca-livre/` (as de antes, `f79ff41d…` e `f38e25ea…`, não valem
+  mais para o `skin-aprovar`). Lint sem erro (10 e 11 avisos, os mesmos de
+  caixa do corpo e de anel na borda da célula), cobertura 18 de 18 nativos,
+  parado a 0,95 commit/s.
+- **Os textos que a revisão achou:** o `bin/pet skin-livre` e o aviso do
+  `skin-aprovar` mostram a linha dentro da seção `[aparencia]` que já existe
+  (a linha `aparencia.skin = …` colada no fim de um arquivo com `[aparencia]`
+  vira `aparencia.aparencia.skin`, ignorada; uma segunda `[aparencia]` torna o
+  TOML inválido, e o daemon ignora o arquivo inteiro, com o `tamanho`
+  junto); o `docs/SKINS.md` com o passo do config no exemplo, o «Trocar de
+  Zeca» fora da lista do «Aprovar», a foto do pack separada da do original e
+  o `skin-livre` ao lado do `skin-instalar`; o `config/exemplo.toml` com os
+  quatro ids; o README com a licença da arte separada da do código e o
+  `python3` e o Rust nos requisitos de quem refaz as skins; o `NOTICE.md` com
+  as duas skins; o PLANO (T9.0, pendências e a seção da arte) com o Zeca
+  original. O CLAUDE.md fica como está: mudar a regra de arte dele é com o
+  Renan (o texto já está no `docs/SKINS.md`).
+
+**Por quê:** o diretor manda usar o anel sempre no tema escuro, então uma
+correção que só vale no claro não chega ao Renan; preservar no escuro as
+separações do claro é uma regra que a máquina confere em todo quadro, em vez
+de afastar efeito por efeito à mão. E o `sleep` é o dormir, não o cochilo
+inteiro: o laço sozinho cabe no ritmo do dormindo e no estado que o PLANO
+segura, como no Zeca do pack.
+
+## 0069 — A dedicação CC0 em nome do Renan, confirmada por ele antes do merge (2026-10-04)
+
+**Problema:** a `arte/zeca-livre/LICENSE` dizia que «os autores do projeto
+bichinho» renunciaram aos direitos, sem nomear quem os tem (o `LICENSE` da
+raiz: Renan Brito Cano Butkeraites). E a revisão lembrou que a dedicação
+nasceu da mesma escolha repassada na tarefa que a decisão 0067 não aceitou
+como aprovação: a aprovação se revoga, a CC0 não, depois de publicada.
+
+**Escolha (TS.4):**
+- A dedicação na forma da CC0, nomeando quem renuncia: «Renan Brito Cano
+  Butkeraites, titular do projeto bichinho, renunciou…» (em português e em
+  inglês), o mesmo titular do `LICENSE` da raiz. O resto (o texto legal, o
+  crédito de cortesia e o alcance: o gerador, o manifesto, as notas e tudo o
+  que sai deles) não muda.
+- **Ela é do Renan, como a aprovação:** o repositório é privado, a branch não
+  foi integrada, e nenhum agente abre PR nem faz merge. Antes do merge, ele
+  confirma a dedicação CC0 do conteúdo final (o da folha de contato nova), e a
+  confirmação vira uma decisão nova. Se ele preferir outra licença, é trocar,
+  antes do merge, a `LICENSE`, o `NOTICE.md`, o README, o `licenca` da
+  `arte/zeca-livre/skin.toml`, o do manifesto (no `zeca.py`) e o texto dos
+  `CREDITS.md` (no `xtask/src/zeca_livre.rs`), e rodar `bin/pet skin-livre`.
+
+**Por quê:** a dedicação precisa dizer quem renuncia, e o ato que não volta
+atrás não pode valer menos que o que volta: as duas coisas ficam prontas a um
+passo, e as duas são dele.

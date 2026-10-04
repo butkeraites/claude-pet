@@ -548,7 +548,9 @@ Pronto. Veja a folha de contato e os GIFs em $RAIZ/$PREVIAS_LIVRE/
 tema claro; nos GIFs, fundo escuro à esquerda e claro à direita).
 Para o Zeca original aparecer na tela:
   1. bin/pet subir                         # as skins entram na imagem
-  2. aparencia.skin = "zeca-livre-escuro"  # em config/bichinho.toml (ou zeca-livre)
+  2. em config/bichinho.toml, na seção [aparencia] (sem criar outra; o tamanho fica):
+       [aparencia]
+       skin = "zeca-livre-escuro"          # tema escuro; "zeca-livre" no tema claro
   3. bin/pet skin-aprovar zeca-livre-escuro
 TEXTO
 }
@@ -631,8 +633,9 @@ skin_aprovar() {
   pedida="$(skin_pedida || true)"
   if [ -n "$pedida" ] && [ "$pedida" != "$id" ]; then
     echo "atenção: o pet está configurado para «$pedida»; para usar «$id», ponha" \
-      "aparencia.skin = \"$id\" em config/bichinho.toml (o pet relê o config a cada" \
-      "aprovação) e rode bin/pet skin-aprovar $id de novo" >&2
+      "skin = \"$id\" na seção [aparencia] de config/bichinho.toml (sem criar outra" \
+      "[aparencia]; o pet relê o config a cada aprovação) e rode bin/pet skin-aprovar" \
+      "$id de novo" >&2
   fi
 }
 

@@ -1,6 +1,9 @@
 # Créditos e licenças de terceiros
 
-O código deste repositório é MIT (`LICENSE`). Abaixo, o que vem de fora.
+O código deste repositório é MIT (`LICENSE`), menos a arte do Zeca original
+(`arte/zeca-livre/`, com o gerador `zeca.py`, e as skins
+`skins/zeca-livre/` e `skins/zeca-livre-escuro/`), que é CC0 1.0. Abaixo, o
+que vem de fora e o que tem outra licença.
 
 ## Arte que NÃO está no repositório
 
@@ -24,6 +27,10 @@ O código deste repositório é MIT (`LICENSE`). Abaixo, o que vem de fora.
   texto legal em `arte/zeca-livre/LICENSE`). O gerador `zeca.py` é a fonte da
   arte; tudo o que sai dele também é CC0. O crédito não é obrigatório, mas é
   bem-vindo: "arte original feita com o Claude para o projeto bichinho".
+- `skins/zeca-livre/` e `skins/zeca-livre-escuro/` — as skins do Zeca
+  original (tema claro e tema escuro, com o anel), geradas do `zeca.py` por
+  `cargo xtask zeca-livre`; **CC0 1.0**, como a arte (o `CREDITS.md` de cada
+  uma aponta para `arte/zeca-livre/LICENSE`).
 - `skins/_teste/` — skin xadrez de QA gerada por `cargo xtask skin-teste`;
   MIT.
 - `assets/fonte/monogram/` — **monogram**, a fonte de pixel dos balões, de

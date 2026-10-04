@@ -20,7 +20,7 @@ monitor que está em foco. Sem som.
 > (M3), a costura para Windows e macOS com o hook nativo (parte do M8) e
 > arrastar, seguir o monitor ativo e o clique que leva ao terminal (M4). Na
 > branch `skin-zeca-livre`: o Zeca original, arte livre em CC0, como skin
-> (TS.1–TS.3). O destino é um lançamento open source para Linux, macOS e
+> (TS.1–TS.4). O destino é um lançamento open source para Linux, macOS e
 > Windows. O repositório de desenvolvimento ainda se chama `claude-pet`.
 > Veja `PLANO.md` para os marcos e `PROGRESS.md` para o andamento.
 
@@ -40,6 +40,12 @@ monitor que está em foco. Sem som.
   sem subcomando não faz nada: o pet fica surdo, mas nada mais roda.
 - `curl` e `jq` no host para o `bin/pet` (e para o `avisar.sh`, o hook de
   reserva até a troca).
+- Para refazer as skins no host (`bin/pet skin-livre`, `bin/pet
+  skin-instalar`) e para o `bin/pet verificar`: o Rust do `rustup` (o
+  `~/.cargo/bin`, que o `bin/pet` acrescenta ao PATH) e, para o Zeca original,
+  `python3` (só a biblioteca padrão). Para só usar as skins que já estão no
+  repositório, nenhum dos dois: o `bin/pet subir` compila o pet dentro do
+  Docker e leva as skins de `skins/` para a imagem.
 
 ## Subir
 
@@ -277,4 +283,10 @@ Documentação para quem mexe no código: `CLAUDE.md`, `DECISIONS.md` e
 
 ## Licença
 
-Código sob MIT (`LICENSE`). Arte de terceiros e créditos em `NOTICE.md`.
+Código sob MIT (`LICENSE`), exceto a arte do Zeca original: `arte/zeca-livre/`
+(inclusive o gerador `zeca.py`, que é a fonte da arte) e as skins
+`skins/zeca-livre/` e `skins/zeca-livre-escuro/` são dedicadas ao domínio
+público pela **CC0 1.0** (`arte/zeca-livre/LICENSE`; crédito de cortesia, não
+obrigatório: "arte original feita com o Claude para o projeto bichinho"). Arte
+de terceiros e créditos em `NOTICE.md`; os arquivos do pack *Cute Parrots!*
+nunca estão no repositório.

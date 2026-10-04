@@ -460,7 +460,22 @@ estado ganhou entrada e saída, listadas em `uso.transicoes.lacos` do manifesto.
 | `landing` | 5 | 0,71 s | desce com os pés para baixo, agacha no impacto com poeira dos dois lados, o chapéu quica e assenta |
 
 Total: 22 animações, 134 quadros, 16 cores (+1 do anel), zero furo, recorte solto, órfão ou efeito
-sobre o corpo nos dois visuais.
+sobre o corpo nos dois visuais, e nenhuma peça solta juntada pelo anel (abaixo).
+
+### O anel não junta peças soltas (revisão, decisão 0068)
+
+A revisão achou o defeito da poeira de volta, só no tema escuro: o `light_outline` pintava de anel
+todo pixel de fundo encostado no contorno, então um vão de 1-2 px entre duas peças virava anel e as
+colava. A correção do tufo esquerdo (acima) só valia no visual padrão; no escuro, o que o diretor
+manda usar sempre, o tufo continuava preso ao rabo pelo anel. O mesmo colava o chapéu voando no
+topete (o take do susto), as notas e o «!» no bico aberto, a tecla no bico e o grão no pé, em 27 dos
+134 quadros.
+
+Agora cada pixel do anel é de uma peça (componente 8-viz do quadro): o vão que encosta em duas peças
+fica de fundo (um entalhe) e, onde os anéis de duas peças se encostariam, o da menor (o efeito, o
+chapéu no ar, a poeira) cede. O miolo não muda, e nos 107 quadros sem vão estreito o anel é o mesmo
+de antes. A regra entrou no lint (`anel_junta_pecas`: cada mancha do escuro tem uma peça do padrão,
+e só uma) e na montagem das skins (`anel_sem_ponte` no `cargo xtask zeca-livre`).
 
 ### Como o pet usa (skins `zeca-livre` e `zeca-livre-escuro`)
 
@@ -469,8 +484,10 @@ quadros padrão e o escuro, sempre os com anel (decisão 0066; a montagem confer
 padrão com o anel, sem mexer no miolo). Cada estado do pet vira uma sequência dos quadros acima:
 o repouso é a pose neutra com rajadas do respira (0-3), do piscar e da ginga, a cada 4 s ou mais
 (o orçamento de commits não deixa o respira em laço); o aceno (T0) é o `nod`; o pulinho (T1), o
-`hop`; o trabalho, a chamada e a soneca tocam com a entrada e a saída; o voo curto e o voo grande
-são `takeoff` + `fly` + `landing`. O mapa inteiro, com o porquê de cada um, está no `skin.toml` e no
+`hop`; o trabalho e a chamada tocam com a entrada e a saída; o dormindo é só o laço do `sleep`
+(o estado entre o bocejo e o acordar; a 1,9 troca/s, dentro dos 2 fps do dormindo; decisão 0068),
+e o `sleep_in`/`sleep_out` ficam no manifesto para quando o pet tocar a entrada e a saída de um
+laço; o voo curto e o voo grande são `takeoff` + `fly` + `landing`. O mapa inteiro, com o porquê de cada um, está no `skin.toml` e no
 `docs/SKINS.md`.
 
 ### Para um pixel artist (M9, T9.2)

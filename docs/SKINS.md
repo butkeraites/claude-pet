@@ -67,7 +67,9 @@ regra de diferenciação e o que ainda pede um pixel artist) estão em
 ```sh
 bin/pet skin-livre                # refaz as duas skins, com lint, cobertura e prévias em tmp/previa-zeca-livre/
 bin/pet subir                     # as skins entram na imagem
-bin/pet skin-aprovar zeca-livre-escuro   # depois de ver a folha de contato
+# olhe tmp/previa-zeca-livre/contato-zeca-livre-escuro.png e os GIFs; então, em
+# config/bichinho.toml, na seção [aparencia] que já existe: skin = "zeca-livre-escuro"
+bin/pet skin-aprovar zeca-livre-escuro   # relê o config e troca na hora
 ```
 
 - `cargo xtask zeca-livre` roda o gerador numa pasta temporária
@@ -90,6 +92,12 @@ bin/pet skin-aprovar zeca-livre-escuro   # depois de ver a folha de contato
   contorno `#2B2136` tem 1,27:1 contra o fundo do hackerman). A escolha é por
   skin, `zeca-livre-escuro` ou `zeca-livre`, no config; a montagem confere que
   o escuro é o padrão com o anel, sem mexer em pixel nenhum do miolo.
+- **O anel nunca junta peças soltas** (decisão 0068): o vão que encosta em
+  duas peças fica de fundo e, onde os anéis de duas peças se encostariam, o da
+  menor cede. Assim a poeira do pouso não cola no rabo, o chapéu voando não
+  cola no topete e as notas não colam no bico. O gerador reprova
+  (`anel_junta_pecas`) e a montagem também, se uma peça solta no padrão virar
+  uma mancha só no escuro.
 
 ### Estados do Zeca original
 
@@ -107,7 +115,7 @@ bin/pet skin-aprovar zeca-livre-escuro   # depois de ver a folha de contato
 | `done_big` (T3) | `big_flight` | decola, voa mais tempo, pousa e pia |
 | `error` | `scared` | o susto: encolhe, arregala, o chapéu voa e cai torto |
 | `yawn` | `yawn` | o bocejo |
-| `sleep` | `nap` | adormece com o chapéu escorregando, ronca duas vezes e acorda |
+| `sleep` | `sleep` | o laço do sono: ronca com o chapéu sobre o olho e os «z» subindo, 520 ms por quadro (~1,9 troca/s, dentro dos 2 fps do dormindo); sem entrada nem saída, porque é o estado entre o cansado e o acordando (decisão 0068) |
 | `wake` | `wake` | se espreguiça e o chapéu pula |
 | `dangle` | `fly` | bate asas em laço enquanto é arrastado |
 | `land` | `landing` | pousa com poeira dos dois lados e o chapéu quicando |
@@ -266,14 +274,26 @@ A skin `_teste` só aparece com `PET_DEBUG=1`.
   `/state` (se a da imagem mudou, sumiu ou quebrou); senão ninguém.
   `bin/pet estado` mostra `skin.origem` (`imagem` ou `snapshot`),
   `skin.sha256` e os avisos.
-- **Depois de reconstruir a skin** (arte nova, pack reinstalado): `bin/pet
-  skin-instalar` gera as prévias de novo; olhe a folha, rode `bin/pet subir`
-  e `bin/pet skin-aprovar`. Até lá o pet continua com a cópia aprovada antiga
-  e avisa "mudou depois da aprovação"; aprovar sem prévias novas é recusado.
+- **Depois de reconstruir a skin** (arte nova, pack reinstalado, gerador ou
+  receita do Zeca original mudados): `bin/pet skin-instalar` (o do pack) ou
+  `bin/pet skin-livre` (o original) gera as prévias de novo; olhe a folha,
+  rode `bin/pet subir` e `bin/pet skin-aprovar`. Até lá o pet continua com a
+  cópia aprovada antiga e avisa "mudou depois da aprovação"; aprovar sem
+  prévias novas é recusado.
 - `bin/pet skin-revogar [id]` apaga a aprovação e a cópia: o pet some.
-- A aprovação é por id. Para usar `zeca-contorno`: ponha `aparencia.skin =
-  "zeca-contorno"` em `config/bichinho.toml` e rode `bin/pet skin-aprovar
-  zeca-contorno` — o pet relê o config a cada aprovação, sem reiniciar.
+- A aprovação é por id. Para usar `zeca-contorno`: ponha `skin =
+  "zeca-contorno"` na seção `[aparencia]` de `config/bichinho.toml` (a que já
+  existe; uma segunda `[aparencia]` invalida o arquivo inteiro) e rode
+  `bin/pet skin-aprovar zeca-contorno` — o pet relê o config a cada
+  aprovação, sem reiniciar.
+- Para conferir o personagem com as rotas de debug (nitidez, foto
+  mascarada): `scripts/verificar-ao-vivo.sh --personagem` (aprova só para o
+  teste se faltar aprovação e revoga no fim) ou `PET_DEBUG_PERSONAGEM=1` na
+  pilha de dev. Precisa da tela acesa e **desbloqueada**: com o lock do
+  Omarchy o Hyprland só desenha a tela de senha. A foto do Zeca do pack tem
+  pixels do pack: fica em `tmp/`, nunca no git nem em `docs/`. A mascarada
+  do Zeca original só tem arte CC0, mas a captura do monitor de onde ela sai
+  tem o que estiver na tela: também nasce em `tmp/`.
 
 ### Trocar de Zeca
 
@@ -281,10 +301,10 @@ As aprovações ficam guardadas por skin em `/state/skins/<id>/`: o Zeca
 original e o do pack podem estar aprovados ao mesmo tempo, e quem aparece é
 o `aparencia.skin`.
 
-1. Ponha o id em `config/bichinho.toml`, na seção `[aparencia]`: `skin =
-   "zeca-livre-escuro"` (o original, tema escuro), `"zeca-livre"` (o
-   original, tema claro), `"zeca"` ou `"zeca-contorno"` (o do pack). Sem a
-   chave, vale o `zeca`.
+1. Ponha o id em `config/bichinho.toml`, na seção `[aparencia]` (a que já
+   existe, ao lado do `tamanho`): `skin = "zeca-livre-escuro"` (o original,
+   tema escuro), `"zeca-livre"` (o original, tema claro), `"zeca"` ou
+   `"zeca-contorno"` (o do pack). Sem a chave, vale o `zeca`.
 2. Se a skin **ainda não foi aprovada:** olhe a folha de contato dela
    (`tmp/previa-zeca-livre/` ou `tmp/previa-zeca-m2/`) e rode `bin/pet
    skin-aprovar <id>`, que relê o config e troca na hora.
@@ -296,9 +316,3 @@ o `aparencia.skin`.
 Sem aprovação da skin configurada, o pet fica escondido (`tela:
 sem_personagem`), e o `bin/pet skin-aprovar` de outro id avisa quando o
 config pede outra skin.
-- Para conferir o personagem com as rotas de debug (nitidez, foto
-  mascarada): `scripts/verificar-ao-vivo.sh --personagem` (aprova só para o
-  teste se faltar aprovação e revoga no fim) ou `PET_DEBUG_PERSONAGEM=1` na
-  pilha de dev. Precisa da tela acesa e **desbloqueada**: com o lock do
-  Omarchy o Hyprland só desenha a tela de senha. A foto do Zeca tem pixels
-  do pack: fica em `tmp/`, nunca no git nem em `docs/`.

@@ -420,6 +420,58 @@ pub fn so_anel(padrao: &[u8], escuro: &[u8]) -> bool {
             })
 }
 
+/// As peças de um quadro: os componentes 8-vizinhos dos pixels opacos, como rótulo por pixel
+/// (`None` no transparente), e quantas são.
+fn pecas(rgba: &[u8]) -> (Vec<Option<usize>>, usize) {
+    let c = CELULA as usize;
+    let mut rotulo: Vec<Option<usize>> = vec![None; c * c];
+    let mut n = 0;
+    for inicio in 0..c * c {
+        if rgba[inicio * 4 + 3] == 0 || rotulo[inicio].is_some() {
+            continue;
+        }
+        rotulo[inicio] = Some(n);
+        let mut pilha = vec![inicio];
+        while let Some(i) = pilha.pop() {
+            let (x, y) = ((i % c) as i32, (i / c) as i32);
+            for (dx, dy) in (-1..=1).flat_map(|dy| (-1..=1).map(move |dx| (dx, dy))) {
+                let (vx, vy) = (x + dx, y + dy);
+                if (dx, dy) == (0, 0)
+                    || !(0..c as i32).contains(&vx)
+                    || !(0..c as i32).contains(&vy)
+                {
+                    continue;
+                }
+                let j = vy as usize * c + vx as usize;
+                if rgba[j * 4 + 3] != 0 && rotulo[j].is_none() {
+                    rotulo[j] = Some(n);
+                    pilha.push(j);
+                }
+            }
+        }
+        n += 1;
+    }
+    (rotulo, n)
+}
+
+/// O anel do escuro não junta peças que o padrão deixa soltas (decisão 0068): cada peça do
+/// escuro tem uma peça do padrão, e só uma. Sem isso, o anel enchia os vãos de 1-2 px e colava a
+/// poeira do pouso no rabo, o chapéu voando no topete e as notas no bico.
+pub fn anel_sem_ponte(padrao: &[u8], escuro: &[u8]) -> bool {
+    let ((rp, np), (re, ne)) = (pecas(padrao), pecas(escuro));
+    let mut dentro: Vec<Option<usize>> = vec![None; ne];
+    for (p, e) in rp.iter().zip(&re) {
+        if let (Some(p), Some(e)) = (*p, *e) {
+            match dentro[e] {
+                None => dentro[e] = Some(p),
+                Some(q) if q != p => return false,
+                Some(_) => {}
+            }
+        }
+    }
+    np == ne && dentro.iter().all(Option::is_some)
+}
+
 /// Duração de uma tag da receita, em ms.
 fn duracao_ms(t: &TagReceita, m: &Manifesto) -> u32 {
     t.partes
@@ -495,6 +547,12 @@ pub fn montar(r: &Receita, m: &Manifesto, pasta: &Path) -> Result<Vec<Montada>, 
     if let Some(i) = (0..padrao.len()).find(|&i| !so_anel(&padrao[i].rgba, &escuro[i].rgba)) {
         return Err(format!(
             "o quadro {i} do escuro não é o padrão com o anel por fora (o gerador mudou o miolo?)"
+        ));
+    }
+    if let Some(i) = (0..padrao.len()).find(|&i| !anel_sem_ponte(&padrao[i].rgba, &escuro[i].rgba))
+    {
+        return Err(format!(
+            "o anel do quadro {i} do escuro junta peças que o padrão deixa soltas (decisão 0068)"
         ));
     }
     let mut skins = Vec::new();
@@ -938,6 +996,45 @@ mod testes {
         ));
     }
 
+    /// O corpo do `pulo_02` com um confete de 2x2 em x0..x0+1, y 20-21 (o corpo vai até x30).
+    fn corpo_com_confete(x0: usize) -> Vec<u8> {
+        let mut rgba = bloco(10, 20, 30, 44, [200, 10, 10]);
+        let confete = bloco(x0, 20, x0 + 1, 21, [9, 9, 200]);
+        for (i, px) in confete.chunks_exact(4).enumerate() {
+            if px[3] != 0 {
+                rgba[i * 4..i * 4 + 4].copy_from_slice(px);
+            }
+        }
+        rgba
+    }
+
+    #[test]
+    fn anel_que_junta_pecas_reprova() {
+        // A 1 px do corpo, o anel de cada um enche o vão e cola o confete no corpo (decisão 0068).
+        let montar_com = |x0: usize| {
+            let (pasta, m) = gerador_de_mentira();
+            let rgba = corpo_com_confete(x0);
+            for (sub, img) in [("frames", rgba.clone()), ("frames/escuro", com_anel(&rgba))] {
+                let png = pet_core::skin::codificar_png(CELULA, CELULA, &img).unwrap();
+                fs::write(pasta.caminho().join(sub).join("pulo_02.png"), png).unwrap();
+            }
+            let mut r = receita_de_mentira();
+            r.tag[1].partes.push(Parte {
+                anim: "pulo".into(),
+                quadros: Some([2, 2]),
+                vezes: None,
+            });
+            montar(&r, &m, pasta.caminho())
+        };
+        let erro = montar_com(32).unwrap_err();
+        assert!(erro.contains("junta peças"), "{erro}");
+        // A 3 px, sobra 1 px de fundo entre os dois anéis: passa.
+        assert!(montar_com(34).is_ok());
+        let colado = corpo_com_confete(32);
+        assert!(!anel_sem_ponte(&colado, &com_anel(&colado)));
+        assert!(anel_sem_ponte(&colado, &colado), "sem anel nada se junta");
+    }
+
     #[test]
     fn receita_errada_e_erro_claro() {
         let (pasta, m) = gerador_de_mentira();
@@ -1011,6 +1108,10 @@ mod testes {
                 crate::lint::celula(&escuro, q),
             );
             assert!(so_anel(&a, &b), "quadro {q}: o escuro mexeu no miolo");
+            assert!(
+                anel_sem_ponte(&a, &b),
+                "quadro {q}: o anel junta peças soltas"
+            );
             assert_ne!(a, b, "quadro {q}: o escuro sem anel");
         }
     }
@@ -1051,6 +1152,33 @@ mod testes {
                 sequencia(&skin.tags[nod])
                     .iter()
                     .any(|&q| skin.canonico[q] != pose)
+            );
+        }
+    }
+
+    #[test]
+    fn sono_e_so_o_laco_dentro_dos_2_fps() {
+        // O `sleep` fica entre o cansado e o acordando (decisão 0068): só o laço do sono, que
+        // em laço troca de imagem até 2 vezes por segundo (PLANO: dormindo até 2 fps) e nunca
+        // passa pela pose neutra (um laço com a entrada e a saída adormeceria e acordaria a cada
+        // volta).
+        use pet_core::animador::sequencia;
+        for id in ["zeca-livre", "zeca-livre-escuro"] {
+            let skin = skin_do_git(id);
+            let seq = sequencia(&skin.tags[skin.tags_do_estado("sleep")[0]]);
+            let ms: u32 = seq.iter().map(|&q| skin.quadros[q].duracao_ms).sum();
+            let trocas = (0..seq.len())
+                .filter(|&i| skin.canonico[seq[i]] != skin.canonico[seq[(i + 1) % seq.len()]])
+                .count();
+            let por_s = trocas as f64 * 1000.0 / ms as f64;
+            assert!(
+                trocas > 0 && por_s <= 2.0,
+                "{id}: {por_s} trocas/s dormindo"
+            );
+            let pose = skin.canonico[sequencia(&skin.tags[skin.tags_do_estado("idle")[0]])[0]];
+            assert!(
+                seq.iter().all(|&q| skin.canonico[q] != pose),
+                "{id}: o laço do sono passa pela pose neutra"
             );
         }
     }

@@ -25,7 +25,9 @@ recorte solto / orfaos / cores / margem nos dois visuais (lint, check_all) e rel
 exportados (verify_exports).  Rodada 3 (no repositorio): o trecho 'respira' sem quadros
 repetidos, efeito sem contorno e poeira fora do corpo (regra nova no lint), e as transicoes e
 os gestos que o pet pede (aceno, tchau, bocejo, acordar, entrar e sair do trabalho, do sono e
-da chamada, decolar e pousar).  Detalhes do que mudou e por que em notas.md.
+da chamada, decolar e pousar).  Na revisao, o anel do tema escuro deixou de juntar pecas que o
+visual padrao deixa soltas (regra nova no lint: anel_junta_pecas).  Detalhes do que mudou e por
+que em notas.md.
 
 So stdlib para compor, escrever e reler PNG (zlib + struct); ImageMagick ('magick') so para
 ampliar, montar a vitrine e gerar os GIFs.  Ferramentas de revisao: dev_zoom, dev_strip, dev_sheet
@@ -1026,14 +1028,39 @@ def pose(body='BODY', head='HEAD', eye='EYE', beak='BEAK', hat='HAT_6', wing='WI
     return L
 
 def light_outline(cv, color='Q', diag=False):
-    """Variante para tema escuro: anel de 1 px por fora do contorno."""
+    """Variante para tema escuro: anel de 1 px por fora do contorno.
+
+    O anel nunca junta pecas que o visual padrao deixa soltas (revisao da rodada 3): cada pixel do
+    anel e de uma peca (componente 8-viz do quadro); o vao que encosta em duas pecas fica de fundo
+    (um entalhe), e onde o anel de duas pecas se encostaria, o da menor (efeito, chapeu no ar,
+    poeira) cede.  Sem isso, o anel enchia os vaos de 1-2 px e colava a poeira do pouso no rabo,
+    o chapeu voando no topete e as notas no bico."""
     out = [r[:] for r in cv]
     nb = ((1, 0), (-1, 0), (0, 1), (0, -1)) + (((1, 1), (1, -1), (-1, 1), (-1, -1)) if diag else ())
+    peca, tamanho = {}, {}
+    opacos = [(x, y) for y in range(CELL) for x in range(CELL) if cv[y][x] is not None]
+    for k, comp in enumerate(_components(opacos, N8)):
+        tamanho[k] = len(comp)
+        for p in comp:
+            peca[p] = k
+    def pecas(x, y, viz):
+        return {peca[(x + dx, y + dy)] for dx, dy in viz if (x + dx, y + dy) in peca}
+    dono = {}
     for y in range(CELL):
         for x in range(CELL):
-            if cv[y][x] is None and any(0 <= x + dx < CELL and 0 <= y + dy < CELL and cv[y + dy][x + dx] is not None
-                                        for dx, dy in nb):
+            if cv[y][x] is None and pecas(x, y, nb):
+                encosta = pecas(x, y, N8)
+                if len(encosta) > 1:
+                    continue                       # entalhe: o vao entre duas pecas fica de fundo
+                dono[(x, y)] = encosta.pop()
                 out[y][x] = color
+    def forca(k):                                  # a peca maior ganha; empate, a de indice menor
+        return (tamanho[k], -k)
+    cede = [p for p, k in dono.items()
+            if any(dono.get((p[0] + dx, p[1] + dy), k) != k and forca(dono[(p[0] + dx, p[1] + dy)]) > forca(k)
+                   for dx, dy in N8)]
+    for x, y in cede:
+        out[y][x] = None
     # anel solto num vao de 1 px (chapeu flutuando, asa encostada) vira ruido: sai
     for y in range(CELL):
         for x in range(CELL):
@@ -1042,7 +1069,8 @@ def light_outline(cv, color='Q', diag=False):
                     for dx in (-1, 0, 1) for dy in (-1, 0, 1) if dx or dy):
                 out[y][x] = None
     # bolsao de fundo de ate 3 px que o proprio anel fechou (ex.: entre a ponta do bico e a
-    # gravata) vira anel: senao fica um furo escuro dentro do adesivo
+    # gravata) vira anel: senao fica um furo escuro dentro do adesivo.  So da mesma peca: um
+    # bolsao entre duas pecas nao fecha, porque o anel delas nunca se encosta (acima)
     for comp in holes(out):
         if len(comp) <= 3 and all(cv[y][x] is None for x, y in comp):
             for x, y in comp:
@@ -1441,6 +1469,23 @@ def fx_sobre_o_corpo(layers):
                 own[y][x] = li
     return out
 
+def anel_junta(cv, ring):
+    """Pecas soltas no visual padrao (componentes 8-viz) que o anel do tema escuro junta numa
+    mancha so: [(x, y) do primeiro pixel de cada peca juntada], por mancha.  Vazio = o anel so
+    contorna (revisao da rodada 3: o anel colava a poeira no rabo e o chapeu voando no topete)."""
+    def comps(c):
+        return _components([(x, y) for y in range(CELL) for x in range(CELL) if c[y][x] is not None], N8)
+    peca = {}
+    for k, comp in enumerate(comps(cv)):
+        for p in comp:
+            peca[p] = (k, comp[0])
+    out = []
+    for comp in comps(ring):
+        dentro = sorted({peca[p] for p in comp if p in peca})
+        if len(dentro) != 1:
+            out.append([inicio for _, inicio in dentro])
+    return out
+
 def lint(cv, own=None, layers=None):
     """Todas as regras duras de um quadro.  Devolve dict de listas (vazio = aprovado)."""
     bad = {}
@@ -1477,6 +1522,8 @@ def check_all(verbose=True):
             if hr: bad['furos_no_anel'] = hr
             orr = orphans(ring)
             if orr: bad['orfaos_no_anel'] = orr
+            junta = anel_junta(cv, ring)
+            if junta: bad['anel_junta_pecas'] = junta
             report[f'{name}_{i:02d}'] = (len(cols), bad, len(speckles(cv)), len(k_clumps(cv)))
             if verbose and bad:
                 print(f'{name}_{i:02d}: ' + '; '.join(f'{k} {v}' for k, v in bad.items()))
