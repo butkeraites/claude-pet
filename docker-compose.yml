@@ -39,6 +39,14 @@ services:
       PET_LOG: ${PET_LOG:-info}
       # Para conferir o cabeçalho Host das requisições.
       PET_PORTA_PUBLICA: ${PET_PORTA:-27380}
+      # As chaves do config que o ambiente pode trocar (config/exemplo.toml):
+      # sem valor aqui, só passam se estiverem no ambiente do `bin/pet subir`
+      # ou no .env; senão nem existem no container e vale o
+      # config/bichinho.toml (decisão 0046).
+      PET_APARENCIA_SKIN:
+      PET_APARENCIA_TAMANHO:
+      PET_CELEBRACAO_MODO:
+      PET_SESSOES_ORIGENS:
     tmpfs:
       - /tmp:size=16m,mode=1777
     volumes:

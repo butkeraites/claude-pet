@@ -34,7 +34,7 @@ aprovação. A pilha de dev (`PET_DEBUG=1`) mostra a skin xadrez `_teste`, ou o
 personagem aprovado com `PET_DEBUG_PERSONAGEM=1`. Formato, arte e aprovação
 em `docs/SKINS.md`.
 
-**Rumo (2026-10-03, decisões 0035–0042):** lançamento open source para
+**Rumo (2026-10-03, decisões 0035–0042; revisão em 2026-10-04, decisões 0043–0046):** lançamento open source para
 Linux, macOS e Windows, com o app **bichinho** (o personagem continua Zeca).
 O PLANO ganhou o M8 (multiplataforma) e o M9 (publicação). Antes do M4,
 na branch `m3b-portabilidade`: a costura de plataforma (T8.0: o Motor e os

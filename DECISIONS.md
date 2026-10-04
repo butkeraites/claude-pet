@@ -1759,3 +1759,43 @@ já escritos. E uma guarda com ponto cego dá uma garantia que não existe.
 máquina. O código dele tem de ser o revisado da `main`, tem de falhar para o
 lado de mandar menos e nunca pode deixar o conteúdo em log, em core dump ou
 em memória à toa.
+
+## 0046 — Revisão do tamanho: o tamanho novo entra junto com a escolha do personagem, e o compose repassa as chaves do config que o ambiente pode trocar (2026-10-04)
+
+**Problema:** a revisão do TP.2 achou dois problemas.
+- **Quadro a mais ao reler o config.** Numa aprovação, o config relido
+  aplicava o `aparencia.tamanho` novo na hora: refazia o palco e desenhava um
+  quadro forçado com a skin de agora. Só depois escolhia o personagem.
+  - Se a aprovação revogava a skin, ela era desenhada mais uma vez, no
+    tamanho novo, antes de sair.
+  - Se a aprovação trocava de skin, eram dois quadros forçados, e o primeiro
+    ia para o lixo.
+
+  Isso contrariava a regra de que, sem skin, o pet sai só com o quadro
+  transparente.
+- **Variável documentada que não fazia nada.** O `config/exemplo.toml` e a
+  decisão 0042 diziam que `PET_APARENCIA_TAMANHO=pequeno` valia como o
+  arquivo. O compose não passava a variável ao container: no Docker ela não
+  fazia nada, sem aviso. O mesmo valia para `PET_SESSOES_ORIGENS` (M3),
+  `PET_APARENCIA_SKIN` e `PET_CELEBRACAO_MODO`.
+
+**Escolha (revisão do TP.2):**
+- **O config relido só anota o tamanho novo.** A escolha do personagem que
+  vem em seguida cuida da tela:
+  - uma skin nova já nasce no palco novo;
+  - uma skin revogada sai só com o quadro transparente;
+  - a mesma skin ganha um quadro só, forçado, no palco novo
+    (`Motor::redesenhar_palco`).
+
+  Dois testes no núcleo do daemon reprovaram o código de antes. Eles usam a
+  janela de mentira e uma aprovação de verdade em pastas temporárias.
+- **O compose repassa as quatro variáveis sem valor:** `PET_APARENCIA_SKIN`,
+  `PET_APARENCIA_TAMANHO`, `PET_CELEBRACAO_MODO` e `PET_SESSOES_ORIGENS`. Elas
+  só existem no container se estiverem no ambiente do `bin/pet subir` ou no
+  `.env`. Conferido num container avulso: sem a variável, ela nem aparece; com
+  `PET_APARENCIA_TAMANHO=grande`, aparece. A precedência do config (o
+  ambiente antes do arquivo) passa a valer também no Docker.
+
+**Por quê:** uma aprovação é uma troca de personagem, e a tela tem de mudar
+uma vez só, do jeito certo. Uma opção documentada que não faz nada é pior que
+nenhuma.

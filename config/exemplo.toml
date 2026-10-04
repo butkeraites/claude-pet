@@ -11,7 +11,8 @@ skin = "zeca"
 # ou grande (~16%). Muda só o D (pixels do monitor por pixel de arte, sempre
 # inteiro), não a skin: não pede outra aprovação. Relido a cada aprovação; no
 # mais, vale quando o pet reinicia (bin/pet parar && bin/pet subir). Ou
-# PET_APARENCIA_TAMANHO=pequeno.
+# PET_APARENCIA_TAMANHO=pequeno no ambiente do `bin/pet subir` ou no .env (o
+# compose repassa; decisão 0046).
 tamanho = "normal"
 
 [celebracao]
@@ -21,5 +22,6 @@ modo = "proporcional"
 [sessoes]
 # De onde vêm as sessões do Claude Code que o pet acompanha
 # ($CLAUDE_CODE_ENTRYPOINT): "cli" é o terminal. Acrescente "sdk-cli" para
-# contar também as execuções `claude -p`. Ou PET_SESSOES_ORIGENS="cli,sdk-cli".
+# contar também as execuções `claude -p`. Ou PET_SESSOES_ORIGENS="cli,sdk-cli"
+# (no ambiente do `bin/pet subir` ou no .env).
 origens = ["cli"]

@@ -104,9 +104,15 @@ impl Nucleo {
     /// partida): uma aprovação depois de trocar `aparencia.skin` já vale, e
     /// o cérebro passa a usar `sessoes.origens` e `celebracao.modo` do
     /// arquivo novo, como o `/v1/estado.config` mostra (decisão 0030).
-    fn reler_config(&mut self, mut ov: Option<&mut dyn Overlay>) {
+    ///
+    /// O `aparencia.tamanho` novo só é anotado: quem redesenha é a escolha
+    /// do personagem que vem logo depois (uma skin nova já nasce no tamanho
+    /// novo; uma revogada sai sem nenhum quadro nele), ou o
+    /// [`Motor::redesenhar_palco`] se a skin ficou (decisão 0046). Devolve se
+    /// o tamanho mudou.
+    fn reler_config(&mut self, mut ov: Option<&mut dyn Overlay>) -> bool {
         let Some(pasta) = &self.pasta_config else {
-            return;
+            return false;
         };
         let config = crate::daemon::carregar_config(&crate::ambiente::arquivo_config_em(pasta));
         let skin = config.texto("aparencia.skin").to_owned();
@@ -120,14 +126,15 @@ impl Nucleo {
         let cerebro = ConfigCerebro::de(&config.config());
         let tamanho = config.config().tamanho;
         self.comp.definir_config(config);
-        if tamanho != self.motor.tamanho() {
+        let mudou_tamanho = tamanho != self.motor.tamanho();
+        if mudou_tamanho {
             info!(
                 "config: aparencia.tamanho mudou de «{}» para «{}»",
                 self.motor.tamanho().nome(),
                 tamanho.nome()
             );
             let agora = self.agora_ms();
-            self.motor.definir_tamanho(tamanho, janela(&mut ov), agora);
+            self.motor.definir_tamanho(tamanho, None, agora);
         }
         if &cerebro != self.motor.config_do_cerebro() {
             info!(
@@ -138,11 +145,13 @@ impl Nucleo {
             self.motor.reconfigurar_cerebro(cerebro);
             self.depois_do_cerebro(Vec::new(), janela(&mut ov));
         }
+        mudou_tamanho
     }
 
     /// Escolhe o personagem (decisões 0011 e 0026), publica no `/v1/estado`
-    /// e, com a janela aberta, troca na tela se mudou.
-    pub fn escolher_personagem(&mut self, ov: Option<&mut dyn Overlay>) {
+    /// e, com a janela aberta, troca na tela se mudou. Devolve se trocou
+    /// (`false`: o mesmo personagem continua na tela, sem recomeçar).
+    pub fn escolher_personagem(&mut self, ov: Option<&mut dyn Overlay>) -> bool {
         let Escolha {
             skin,
             pedida,
@@ -170,7 +179,7 @@ impl Nucleo {
         if mesma_tela(self.motor.skin().is_some(), &self.na_tela, &na_tela) {
             // A mesma skin, com a mesma impressão e da mesma origem: a tela
             // fica como está (sem recomeçar a animação).
-            return;
+            return false;
         }
         self.na_tela = na_tela;
         let skin = skin.map(Rc::new);
@@ -186,6 +195,7 @@ impl Nucleo {
             }
             None => self.motor.definir_skin(skin),
         }
+        true
     }
 
     /// Publica o estado inicial do cérebro (sem sessões).
@@ -239,8 +249,17 @@ impl Nucleo {
             }
             Comando::RecarregarPersonagem(feito) => {
                 info!("aprovação mudou: escolhendo o personagem de novo");
-                self.reler_config(janela(&mut ov));
-                self.escolher_personagem(ov);
+                let mudou_tamanho = self.reler_config(janela(&mut ov));
+                let trocou = self.escolher_personagem(janela(&mut ov));
+                // A mesma skin no tamanho novo: um quadro só, já no palco
+                // novo (uma skin trocada ou revogada já cuidou da tela).
+                if mudou_tamanho
+                    && !trocou
+                    && let Some(ov) = ov
+                {
+                    let agora = self.agora_ms();
+                    self.motor.redesenhar_palco(ov, agora);
+                }
                 let _ = feito.try_send(());
             }
         }
@@ -377,5 +396,109 @@ impl Nucleo {
     pub fn encerrar(&mut self, ov: &mut dyn Overlay) {
         let agora = self.agora_ms();
         self.motor.encerrar(ov, agora);
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use std::fs;
+    use std::sync::mpsc;
+
+    use pet_core::plataforma::Monitor;
+    use pet_core::plataforma::falsa::JanelaFalsa;
+
+    use super::*;
+    use crate::aprovacao::{self, testes::Ambiente};
+    use crate::personagem::Onde;
+
+    fn edp() -> Monitor {
+        Monitor {
+            nome: Some("eDP-1".into()),
+            logico: (1280, 800),
+            escala: 1.5,
+            ..Monitor::default()
+        }
+    }
+
+    /// Um núcleo com o «zeca» (a xadrez com outro id) aprovado, na janela de
+    /// mentira já pronta no eDP-1, com o primeiro quadro desenhado.
+    fn ligado(a: &Ambiente, config: &std::path::Path) -> (Nucleo, JanelaFalsa) {
+        aprovacao::aprovar("zeca", &a.sha(), &a.busca(), &a.estado).unwrap();
+        let efetiva = crate::daemon::carregar_config(&crate::ambiente::arquivo_config_em(config));
+        let comp = Arc::new(Compartilhado::novo(efetiva.clone(), false));
+        let onde = Onde {
+            busca: a.busca(),
+            estado: a.estado.clone(),
+            debug: false,
+            debug_personagem: false,
+        };
+        let mut nucleo = Nucleo::novo(
+            comp,
+            onde,
+            Some(config.to_owned()),
+            &efetiva,
+            Instant::now(),
+        );
+        let mut janela = JanelaFalsa::default();
+        nucleo.conectou(&mut janela);
+        janela.pronta = Some(edp());
+        janela.eventos.push(EventoOverlay::Pronta);
+        assert!(nucleo.eventos_da_janela(Some(&mut janela)));
+        assert_eq!(janela.pedidos, vec!["criar", "quadro 1"]);
+        (nucleo, janela)
+    }
+
+    fn recarregar(nucleo: &mut Nucleo, janela: &mut JanelaFalsa) -> Vec<String> {
+        let antes = janela.pedidos.len();
+        let (feito, recebeu) = mpsc::sync_channel(1);
+        nucleo.comando(Comando::RecarregarPersonagem(feito), Some(janela));
+        assert_eq!(recebeu.try_recv(), Ok(()));
+        janela.pedidos[antes..].to_vec()
+    }
+
+    #[test]
+    fn revogar_com_tamanho_novo_so_esconde() {
+        // O config pede outro tamanho e a aprovação some na mesma hora: o pet
+        // sai com o quadro transparente, sem um quadro antes no tamanho novo
+        // com a skin revogada.
+        let a = Ambiente::novo("nucleo-revoga");
+        let config = a.raiz.join("config");
+        fs::create_dir_all(&config).unwrap();
+        let (mut nucleo, mut janela) = ligado(&a, &config);
+        fs::write(
+            config.join("bichinho.toml"),
+            "[aparencia]\ntamanho = \"pequeno\"\n",
+        )
+        .unwrap();
+        aprovacao::revogar("zeca", &a.estado).unwrap();
+        assert_eq!(
+            recarregar(&mut nucleo, &mut janela),
+            vec!["apagar com zeca"]
+        );
+        assert_eq!(nucleo.comp.tela(), Tela::SemPersonagem);
+    }
+
+    #[test]
+    fn mesma_skin_com_tamanho_novo_redesenha_uma_vez() {
+        let a = Ambiente::novo("nucleo-tamanho");
+        let config = a.raiz.join("config");
+        fs::create_dir_all(&config).unwrap();
+        let (mut nucleo, mut janela) = ligado(&a, &config);
+        let d_antes = nucleo.motor.painel(Some(&janela), 0).d;
+        fs::write(
+            config.join("bichinho.toml"),
+            "[aparencia]\ntamanho = \"grande\"\n",
+        )
+        .unwrap();
+        janela.em_voo = true; // um quadro em voo não segura a troca
+        assert_eq!(
+            recarregar(&mut nucleo, &mut janela),
+            vec!["esquecer", "quadro 2"],
+            "um quadro só, forçado, no palco novo"
+        );
+        let d_depois = nucleo.motor.painel(Some(&janela), 0).d;
+        assert!(d_depois > d_antes, "{d_antes:?} → {d_depois:?}");
+        // De novo, sem mudar nada: a tela fica como está.
+        assert!(recarregar(&mut nucleo, &mut janela).is_empty());
     }
 }

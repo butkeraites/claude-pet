@@ -198,9 +198,15 @@ impl Motor {
             return;
         }
         self.tamanho = tamanho;
-        if let Some(ov) = ov
-            && self.palco.is_some()
-        {
+        if let Some(ov) = ov {
+            self.redesenhar_palco(ov, agora_ms);
+        }
+    }
+
+    /// Refaz o palco com o tamanho de agora e redesenha a tela toda já, se o
+    /// pet está num palco: o tamanho mudou e a skin não (decisão 0046).
+    pub fn redesenhar_palco(&mut self, ov: &mut dyn Overlay, agora_ms: u64) {
+        if self.palco.is_some() {
             ov.esquecer_cena();
             self.refazer_palco(ov, agora_ms);
         }
