@@ -2432,3 +2432,59 @@ perdido.
 é, com quase certeza, o terminal da sessão; o resto ou preenche um vazio ou
 fica de fora. Errar com certeza manda o Renan para a janela errada e apaga
 um aviso que ele não viu.
+
+## 0061 — Revisão do socket2 e do foreign-toplevel: o daemon sem core dump, a caixa cheia vira buraco e a semente volta com a fonte (2026-10-04)
+
+**Problema:** as revisões do M4 acharam três falhas no que o daemon lê do
+desktop (T4.4 e T4.9).
+- **Títulos podiam ir ao disco num core dump.** Desde o M4 o daemon tem
+  títulos de janela na memória: as linhas cruas do socket2
+  (`activewindow>>CLASSE,TÍTULO`, `windowtitlev2>>…`) passam pelo buffer do
+  leitor, e o título e o app id de cada janela do foreign-toplevel viram
+  `String` e são jogados fora (os bytes ficam no heap liberado). O release
+  usa `panic = "abort"` e o vigia aborta um laço travado; o `core_pattern`
+  do host é o `systemd-coredump`, o container tinha o core ilimitado e o
+  processo era `dumpable`. O hook já se protegia (decisão 0045); o daemon,
+  não. Isso quebrava a regra de ouro de que título nenhum chega ao disco.
+- **Eventos perdidos eram invisíveis.** Com a caixa do desktop cheia, o
+  evento só era contado; a memória das repetições do leitor seguia com um
+  valor que o laço nunca recebeu. Uma troca perdida para a janela B deixava
+  o anel em A, a próxima `activewindowv2>>B` era filtrada como repetida, e
+  um prompt mandado em B casava com A, com certeza.
+- **Depois de o socket2 voltar, nada ressemeava o anel.** O anel ficava no
+  buraco até o Renan trocar de janela, e os prompts do mesmo terminal davam
+  "não vi a janela dela", embora o foreign-toplevel da conexão soubesse a
+  janela ativa (a semente só saía numa troca de ativação).
+
+**Escolha (revisão do T4.4):**
+- **Sem core dump** (`bichinho::privacidade::sem_core_dump`, o mesmo do
+  hook, agora num lugar só): o `daemon::rodar` tira o `dumpable` antes de
+  tudo, antes do leitor do socket2 e da conexão Wayland. Sem ele o kernel
+  não faz o core, e o `/proc/<pid>` passa a ser do root (proc(5)). Como
+  segunda camada, o compose põe `ulimits: core: 0` (o `systemd-coredump`
+  recusa um processo com o limite abaixo de uma página). Testes no binário
+  de verdade: o `/proc/<pid>/status` do daemon e o do hook (com a entrada
+  ainda aberta) são do root; os dois reprovaram sem a chamada.
+- **A caixa cheia vira buraco** (`eventos::Entrega`): um evento que não
+  coube zera a memória das repetições e marca a perda; antes do próximo
+  evento o leitor manda `Ligado(false)` e `Ligado(true)` (o anel ganha um
+  buraco no lugar das trocas perdidas, e a próxima ativação passa mesmo
+  sendo a mesma janela), com um aviso no log com o total perdido. Um
+  `Ligado(true)` que não coube na ligação conta como perda. Teste com uma
+  caixa de 3 vagas que ninguém esvazia.
+- **A semente volta com a fonte** (`Desktop::janela_ativa`, com padrão
+  vazio): quando o socket2 conta `Ligado(true)`, o núcleo pede à conexão a
+  janela ativa de agora (no Wayland, a janela com `activated` e endereço no
+  foreign-toplevel) e a entrega como `JanelaInicial`, que entra no buraco.
+  Teste no núcleo com o desktop de mentira.
+- **O título do foreign-toplevel conferido** (`sessao::evento_do_toplevel`,
+  a costura pura do `Dispatch`): um teste manda o `title` e o `app_id` com
+  segredo e confere que nada deles fica nas janelas nem nos eventos. Antes,
+  essa garantia era só leitura de código.
+- O `perdidos` não foi para o `/v1/estado` (a revisão sugeriu): o buraco no
+  anel e o aviso no log já mostram a perda, sem mais um caminho do leitor
+  até o painel.
+
+**Por quê:** a memória do daemon tem o que nunca pode ir ao disco, e um
+core dump é disco; e o anel só serve se um "não sei" for marcado como não
+sei, em vez de virar uma certeza velha.

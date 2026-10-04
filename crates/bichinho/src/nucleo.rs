@@ -332,7 +332,20 @@ impl Nucleo {
         mut ov: Option<&mut dyn Punho>,
     ) -> bool {
         let agora = self.agora();
-        let mudou = self.motor.evento_desktop(janela(&mut ov), evento, agora);
+        let mut mudou = self.motor.evento_desktop(janela(&mut ov), evento, agora);
+        // A fonte das trocas voltou: o que mudou enquanto ela estava fora não
+        // chegou, e o anel fica num buraco até a próxima troca. A conexão sabe
+        // a janela ativa de agora (no Wayland, o foreign-toplevel): ela é a
+        // semente (decisão 0061).
+        if *evento == EventoDesktop::Ligado(true)
+            && let Some(ativa) = ov.as_deref().and_then(|p| p.ver_desktop().janela_ativa())
+        {
+            let semente = EventoDesktop::JanelaInicial {
+                janela: ativa,
+                parede_ms: agora.parede_ms,
+            };
+            mudou |= self.motor.evento_desktop(janela(&mut ov), &semente, agora);
+        }
         // Uma janela que fechou tira a janela das sessões dela.
         if matches!(evento, EventoDesktop::JanelaFechou(_)) {
             self.motor.tirar_mudanca_do_cerebro();
@@ -605,6 +618,40 @@ mod testes {
         assert!(nucleo.evento_desktop(&EventoDesktop::Ligado(true), Some(&mut janela)));
         nucleo.publicar(Some(&janela));
         assert_eq!(nucleo.comp.estado_json()["desktop"]["eventos"], "ligado");
+    }
+
+    #[test]
+    fn a_fonte_das_trocas_que_volta_ressemeia_o_anel_pela_conexao() {
+        use pet_core::plataforma::Alca;
+        let a = Ambiente::novo("nucleo-semente");
+        let config = a.raiz.join("config");
+        fs::create_dir_all(&config).unwrap();
+        let (mut nucleo, mut janela) = ligado(&a, &config);
+        nucleo.evento_desktop(&EventoDesktop::Ligado(true), Some(&mut janela));
+        let ativa = EventoDesktop::JanelaAtiva {
+            janela: Some(Alca("f00d01".into())),
+            parede_ms: 1,
+        };
+        nucleo.evento_desktop(&ativa, Some(&mut janela));
+        // O socket2 cai: o anel ganha um buraco (o que vier no meio não chega).
+        nucleo.evento_desktop(&EventoDesktop::Ligado(false), Some(&mut janela));
+        nucleo.publicar(Some(&janela));
+        assert_eq!(
+            nucleo.comp.estado_json()["desktop"]["anel"][0]["tipo"],
+            "buraco"
+        );
+        // Ele volta, e o foreign-toplevel da conexão diz que a ativa agora é o
+        // foot2: ela é a semente, sem esperar o Renan trocar de janela.
+        janela.desktop.ativa = Some(Alca("f00d02".into()));
+        assert!(nucleo.evento_desktop(&EventoDesktop::Ligado(true), Some(&mut janela)));
+        nucleo.publicar(Some(&janela));
+        let estado = nucleo.comp.estado_json();
+        let anel = &estado["desktop"]["anel"];
+        assert_eq!(
+            (&anel[0]["tipo"], &anel[0]["janela"]),
+            (&"semente".into(), &"f00d02".into())
+        );
+        assert_eq!(estado["desktop"]["janela_ativa"], "f00d02");
     }
 
     #[test]

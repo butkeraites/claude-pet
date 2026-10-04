@@ -304,9 +304,53 @@ fn dormir(comum: &Comum, quanto: Duration) -> bool {
     }
 }
 
-fn mandar(caixa: &Caixa<EventoDesktop>, comum: &Comum, evento: EventoDesktop) {
-    if caixa.tentar(evento).is_err() {
+/// Manda sem esperar; `false` se a caixa estava cheia (o evento se perdeu e
+/// é contado).
+fn mandar(caixa: &Caixa<EventoDesktop>, comum: &Comum, evento: EventoDesktop) -> bool {
+    let foi = caixa.tentar(evento).is_ok();
+    if !foi {
         comum.perdidos.fetch_add(1, Ordering::Relaxed);
+    }
+    foi
+}
+
+/// A entrega de uma ligação: lembra as repetições e se algo se perdeu.
+#[derive(Debug, Default)]
+struct Entrega {
+    repetidos: Repetidos,
+    /// Um evento não coube na caixa (o laço atrasado) desde a última
+    /// entrega.
+    perdeu: bool,
+}
+
+impl Entrega {
+    /// Manda o evento de uma linha. Depois de uma perda, o laço vê a fonte
+    /// cair e voltar antes do próximo evento (decisão 0061): o anel ganha um
+    /// buraco no lugar da troca que se perdeu, e a memória das repetições
+    /// recomeça, para a próxima ativação passar mesmo que seja a mesma janela
+    /// de antes.
+    fn linha(&mut self, caixa: &Caixa<EventoDesktop>, comum: &Comum, linha: Linha, parede_ms: u64) {
+        let Some(evento) = self.repetidos.filtrar(linha, parede_ms) else {
+            return;
+        };
+        if self.perdeu {
+            if !(mandar(caixa, comum, EventoDesktop::Ligado(false))
+                && mandar(caixa, comum, EventoDesktop::Ligado(true)))
+            {
+                self.repetidos = Repetidos::default();
+                return;
+            }
+            self.perdeu = false;
+            aviso!(
+                "eventos do Hyprland: {} evento(s) não couberam na caixa (o laço atrasado); o \
+                 anel ganhou um buraco",
+                comum.perdidos.load(Ordering::Relaxed)
+            );
+        }
+        if !mandar(caixa, comum, evento) {
+            self.perdeu = true;
+            self.repetidos = Repetidos::default();
+        }
     }
 }
 
@@ -346,9 +390,9 @@ fn ler_para_sempre(
             return;
         }
         info!("eventos do Hyprland: ligado ao socket de eventos");
-        mandar(caixa, comum, EventoDesktop::Ligado(true));
+        let contou = mandar(caixa, comum, EventoDesktop::Ligado(true));
         let inicio = Instant::now();
-        let motivo = ler_linhas(fluxo, caixa, comum);
+        let motivo = ler_linhas(fluxo, caixa, comum, contou);
         *comum.fluxo.lock().unwrap_or_else(|e| e.into_inner()) = None;
         if comum.parar.load(Ordering::Relaxed) {
             return;
@@ -368,11 +412,20 @@ fn ler_para_sempre(
     }
 }
 
-/// Lê até o fim da conexão. Devolve o motivo (sem nada da linha).
-fn ler_linhas(fluxo: UnixStream, caixa: &Caixa<EventoDesktop>, comum: &Comum) -> String {
+/// Lê até o fim da conexão. `contou`: o laço soube que a fonte ligou (o
+/// `Ligado(true)` coube na caixa). Devolve o motivo (sem nada da linha).
+fn ler_linhas(
+    fluxo: UnixStream,
+    caixa: &Caixa<EventoDesktop>,
+    comum: &Comum,
+    contou: bool,
+) -> String {
     let mut leitor = BufReader::with_capacity(8192, fluxo);
     let mut linha = Vec::with_capacity(256);
-    let mut repetidos = Repetidos::default();
+    let mut entrega = Entrega {
+        perdeu: !contou,
+        ..Entrega::default()
+    };
     loop {
         linha.clear();
         match (&mut leitor)
@@ -398,9 +451,7 @@ fn ler_linhas(fluxo: UnixStream, caixa: &Caixa<EventoDesktop>, comum: &Comum) ->
         let Some(traduzida) = traduzir(&linha) else {
             continue;
         };
-        if let Some(evento) = repetidos.filtrar(traduzida, agora_parede_ms()) {
-            mandar(caixa, comum, evento);
-        }
+        entrega.linha(caixa, comum, traduzida, agora_parede_ms());
     }
 }
 
@@ -638,6 +689,58 @@ mod testes {
         leitor.parar();
         assert!(antes.elapsed() < Duration::from_secs(2), "parar não espera");
         assert_eq!(leitor.perdidos(), 0);
+    }
+
+    #[test]
+    fn caixa_cheia_vira_buraco_e_a_proxima_ativacao_passa() {
+        // O laço atrasado não esvazia a caixa (3 vagas): a3 se perde, e o
+        // a4 também (nem o aviso de que a fonte "caiu" coube).
+        let t = Temp::nova("socket2-cheia");
+        let caminho = t.0.join(".socket2.sock");
+        let escreve = socket2_falso(&caminho);
+        let (caixa, recebe) = Caixa::nova(3, Arc::new(SemDespertador));
+        let mut leitor = Leitor::iniciar_com(
+            caminho,
+            t.0.clone(),
+            "cheia".into(),
+            caixa,
+            Duration::from_millis(20),
+        )
+        .unwrap();
+        escreve
+            .send(
+                b"activewindowv2>>a1\nactivewindowv2>>a2\nactivewindowv2>>a3\nactivewindowv2>>a4\n"
+                    .to_vec(),
+            )
+            .unwrap();
+        let limite = Instant::now() + Duration::from_secs(5);
+        while leitor.perdidos() < 2 {
+            assert!(Instant::now() < limite, "nada se perdeu");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let ativa = |a: &str| EventoDesktop::JanelaAtiva {
+            janela: Some(Alca(a.into())),
+            parede_ms: 0,
+        };
+        let sem_hora = |e: EventoDesktop| match e {
+            EventoDesktop::JanelaAtiva { janela, .. } => EventoDesktop::JanelaAtiva {
+                janela,
+                parede_ms: 0,
+            },
+            outro => outro,
+        };
+        assert_eq!(proximo(&recebe), EventoDesktop::Ligado(true));
+        assert_eq!(sem_hora(proximo(&recebe)), ativa("a1"));
+        assert_eq!(sem_hora(proximo(&recebe)), ativa("a2"));
+        // O laço esvaziou. A próxima linha (o a4 de novo, que o filtro das
+        // repetidas seguraria) chega depois de a fonte "cair e voltar": o
+        // anel ganha um buraco no lugar das trocas perdidas.
+        escreve.send(b"activewindowv2>>a4\n".to_vec()).unwrap();
+        assert_eq!(proximo(&recebe), EventoDesktop::Ligado(false));
+        assert_eq!(proximo(&recebe), EventoDesktop::Ligado(true));
+        assert_eq!(sem_hora(proximo(&recebe)), ativa("a4"));
+        assert_eq!(leitor.perdidos(), 2);
+        leitor.parar();
     }
 
     #[test]

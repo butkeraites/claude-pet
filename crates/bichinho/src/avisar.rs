@@ -52,7 +52,9 @@ const LIMITE_DND: u64 = 16 * 1024 * 1024;
 pub fn rodar(mut argumentos: impl Iterator<Item = String>) -> ExitCode {
     // Pânico sai 0, calado: o gancho padrão imprimiria no stderr.
     std::panic::set_hook(Box::new(|_| std::process::exit(0)));
-    sem_core_dump();
+    // No Linux o hook não deixa core dump: um aborto (falta de memória, por
+    // exemplo) levaria a entrada (o prompt) para o `systemd-coredump`.
+    crate::privacidade::sem_core_dump();
     let _ = std::thread::Builder::new().name("prazo".into()).spawn(|| {
         std::thread::sleep(PRAZO_TOTAL);
         std::process::exit(0);
@@ -92,18 +94,6 @@ pub fn rodar(mut argumentos: impl Iterator<Item = String>) -> ExitCode {
     let _ = enviar(porta, &corpo);
     ExitCode::SUCCESS
 }
-
-/// No Linux o hook não deixa core dump: um aborto (falta de memória, por
-/// exemplo) levaria a entrada (o prompt) para o `systemd-coredump`. Sem
-/// `unsafe`: o `prctl` pelo invólucro seguro do `rustix`.
-#[cfg(target_os = "linux")]
-fn sem_core_dump() {
-    use rustix::process::{DumpableBehavior, set_dumpable_behavior};
-    let _ = set_dumpable_behavior(DumpableBehavior::NotDumpable);
-}
-
-#[cfg(not(target_os = "linux"))]
-fn sem_core_dump() {}
 
 /// O "não perturbe" do Omarchy (só existe no Linux), em
 /// `${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/notifications.json`. Só o

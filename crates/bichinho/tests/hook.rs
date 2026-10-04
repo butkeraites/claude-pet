@@ -1114,6 +1114,41 @@ fn entrada_que_nunca_fecha_tem_prazo() {
     assert!(captor.nada(), "nada sai de uma entrada pela metade");
 }
 
+/// Com a entrada ainda aberta (o prompt chegando), o hook já tirou o
+/// `dumpable`: um aborto não levaria o prompt ao disco num core dump
+/// (decisões 0045 e 0061). Sem o `dumpable`, o `/proc/<pid>` passa a ser do
+/// root (proc(5)).
+#[cfg(target_os = "linux")]
+#[test]
+fn o_hook_nao_deixa_core_dump() {
+    use std::os::unix::fs::MetadataExt;
+    let banca = Banca::nova();
+    let captor = Captor::novo(true);
+    let mut filho = hook()
+        .args(["avisar", "Stop"])
+        .env_clear()
+        .env("HOME", banca.pasta.join("home"))
+        .env("PET_PORTA", captor.porta.to_string())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = filho.stdin.take().unwrap();
+    stdin.write_all(br#"{"session_id": "s"#).unwrap();
+    let status = format!("/proc/{}/status", filho.id());
+    let dono = || std::fs::metadata(&status).map(|m| m.uid()).ok();
+    // É a primeira coisa que ele faz; a entrada aberta o segura vivo.
+    let limite = Instant::now() + Duration::from_secs(2);
+    while dono() != Some(0) && Instant::now() < limite {
+        thread::sleep(Duration::from_millis(10));
+    }
+    let visto = dono();
+    drop(stdin);
+    let _ = filho.wait();
+    assert_eq!(visto, Some(0), "o hook continua podendo deixar core dump");
+}
+
 #[test]
 fn pelo_pet_de_verdade() {
     // O daemon de verdade (debug) recebe todos os casos sem recusar nem

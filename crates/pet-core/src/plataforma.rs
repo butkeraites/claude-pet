@@ -194,6 +194,12 @@ pub trait Desktop {
     fn info(&self) -> InfoDesktop {
         InfoDesktop::default()
     }
+    /// A janela ativa agora, pelo que a própria conexão sabe (no Wayland, o
+    /// foreign-toplevel), se ela sabe: a semente do anel quando a fonte das
+    /// trocas volta (decisão 0061).
+    fn janela_ativa(&self) -> Option<Alca> {
+        None
+    }
 }
 
 /// O cursor por cima do pet.
@@ -503,6 +509,8 @@ pub mod falsa {
         pub focos: Vec<Alca>,
         /// O que o desktop conta ao Motor no próximo [`Desktop::eventos`].
         pub eventos: Vec<EventoDesktop>,
+        /// A janela que a conexão diz estar ativa ([`Desktop::janela_ativa`]).
+        pub ativa: Option<Alca>,
     }
 
     impl Default for DesktopFalso {
@@ -518,6 +526,7 @@ pub mod falsa {
                 janelas: Vec::new(),
                 focos: Vec::new(),
                 eventos: Vec::new(),
+                ativa: None,
             }
         }
     }
@@ -547,6 +556,10 @@ pub mod falsa {
                 protocolos: vec!["falso".into()],
                 janelas: self.janelas.len(),
             }
+        }
+
+        fn janela_ativa(&self) -> Option<Alca> {
+            self.ativa.clone()
         }
     }
 

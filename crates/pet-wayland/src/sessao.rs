@@ -694,6 +694,11 @@ impl Desktop for Sessao {
             janelas: self.janelas.com_endereco(),
         }
     }
+
+    /// A janela que o foreign-toplevel diz estar ativa agora.
+    fn janela_ativa(&self) -> Option<Alca> {
+        self.janelas.ativa().map(|a| Alca(a.to_owned()))
+    }
 }
 
 /// As janelas que o compositor anuncia: cada uma é mapeada para o endereço
@@ -727,8 +732,33 @@ impl Dispatch<ZwlrForeignToplevelManagerV1, ()> for Sessao {
     ]);
 }
 
-/// Uma janela: só o "ativa" e o "fechou" interessam. O título e o app id
-/// chegam e são jogados fora aqui, sem ser guardados.
+/// Um evento de uma janela do foreign-toplevel: só o "ativa" e o "fechou"
+/// interessam. O título e o app id chegam aqui e são jogados fora, sem ser
+/// guardados em lugar nenhum (decisões 0056 e 0061). Devolve `true` se a
+/// janela fechou (o handle tem de ser destruído).
+fn evento_do_toplevel<I: std::hash::Hash + Eq + Clone, H>(
+    janelas: &mut Janelas<I, H>,
+    eventos: &mut Vec<EventoDesktop>,
+    id: &I,
+    evento: zwlr_foreign_toplevel_handle_v1::Event,
+    parede_ms: u64,
+) -> bool {
+    match evento {
+        zwlr_foreign_toplevel_handle_v1::Event::State { state } => {
+            let ativa = toplevel::tem_ativa(&state);
+            if let Some(evento) = janelas.estado(id, ativa, parede_ms) {
+                eventos.push(evento);
+            }
+            false
+        }
+        zwlr_foreign_toplevel_handle_v1::Event::Closed => {
+            janelas.fechou(id);
+            true
+        }
+        _ => false,
+    }
+}
+
 impl Dispatch<ZwlrForeignToplevelHandleV1, ()> for Sessao {
     fn event(
         sessao: &mut Self,
@@ -738,21 +768,15 @@ impl Dispatch<ZwlrForeignToplevelHandleV1, ()> for Sessao {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        match evento {
-            zwlr_foreign_toplevel_handle_v1::Event::State { state } => {
-                let ativa = toplevel::tem_ativa(&state);
-                if let Some(evento) = sessao
-                    .janelas
-                    .estado(&handle.id(), ativa, agora_parede_ms())
-                {
-                    sessao.eventos_desktop.push(evento);
-                }
-            }
-            zwlr_foreign_toplevel_handle_v1::Event::Closed => {
-                sessao.janelas.fechou(&handle.id());
-                handle.destroy();
-            }
-            _ => {}
+        let fechou = evento_do_toplevel(
+            &mut sessao.janelas,
+            &mut sessao.eventos_desktop,
+            &handle.id(),
+            evento,
+            agora_parede_ms(),
+        );
+        if fechou {
+            handle.destroy();
         }
     }
 }
@@ -1216,6 +1240,53 @@ mod testes {
         assert!(!wayland_debug(Some(OsStr::new("server"))));
         assert!(!wayland_debug(Some(OsStr::new("0"))));
         assert!(!wayland_debug(None));
+    }
+
+    #[test]
+    fn titulo_e_app_id_do_toplevel_nao_ficam_em_lugar_nenhum() {
+        use zwlr_foreign_toplevel_handle_v1::Event;
+        let mut janelas: Janelas<u32, &str> = Janelas::default();
+        let mut eventos = Vec::new();
+        janelas.nova(1, "h1");
+        let ativa: Vec<u8> = toplevel::ESTADO_ATIVA.to_ne_bytes().to_vec();
+        for evento in [
+            Event::Title {
+                title: "SEGREDO-titulo da janela".into(),
+            },
+            Event::AppId {
+                app_id: "SEGREDO-app-id".into(),
+            },
+            Event::State { state: ativa },
+            Event::Done,
+        ] {
+            assert!(!evento_do_toplevel(
+                &mut janelas,
+                &mut eventos,
+                &1,
+                evento,
+                10
+            ));
+        }
+        if let Some(semente) = janelas.endereco(&1, "5bbf4e6128f0".into(), 20) {
+            eventos.push(semente);
+        }
+        assert_eq!(
+            eventos,
+            vec![EventoDesktop::JanelaInicial {
+                janela: Alca("5bbf4e6128f0".into()),
+                parede_ms: 20
+            }]
+        );
+        let rastro = format!("{janelas:?} {eventos:?}");
+        assert!(!rastro.contains("SEGREDO"), "{rastro}");
+        assert!(evento_do_toplevel(
+            &mut janelas,
+            &mut eventos,
+            &1,
+            Event::Closed,
+            30
+        ));
+        assert_eq!(janelas.com_endereco(), 0);
     }
 
     #[test]

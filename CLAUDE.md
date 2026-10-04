@@ -165,6 +165,11 @@ Fora dele, use `~/.cargo/bin/cargo`.
 - **Hyprland:** o daemon **nunca** abre o `.socket.sock` e nunca chama
   `hyprctl dispatch`/`keyword` (nem em `pet-wayland`). Só lê eventos do
   `.socket2.sock`. `hyprctl` só aparece em scripts de teste do host.
+- **Títulos de janela** passam pela memória do daemon (as linhas do socket2,
+  o título e o app id do foreign-toplevel) e são jogados fora na hora: nunca
+  no log, no `/v1/estado`, no `/v1/debug/eventos` nem no disco. Por isso o
+  daemon, como o hook, não deixa core dump (`privacidade::sem_core_dump` no
+  começo do `rodar` e `ulimits: core: 0` no compose; decisão 0061).
 - **Portável:** `unsafe` proibido no `pet-core` e no daemon do Linux; o que
   é de um sistema fica atrás de `cfg` e dos traits de
   `pet_core::plataforma`. Lógica nova do pet (arrastar, balões, voos) entra

@@ -117,6 +117,14 @@ impl<I: Hash + Eq + Clone, H> Janelas<I, H> {
     pub fn com_endereco(&self) -> usize {
         self.mapa.values().filter(|j| j.endereco.is_some()).count()
     }
+
+    /// O endereço da janela ativa agora, se ela tem endereço.
+    pub fn ativa(&self) -> Option<&str> {
+        self.mapa
+            .values()
+            .find(|j| j.ativa && j.endereco.is_some())
+            .and_then(|j| j.endereco.as_deref())
+    }
 }
 
 #[cfg(test)]
@@ -158,6 +166,7 @@ mod testes {
         assert!(j.estado(&1, true, 60).is_some());
         assert_eq!(j.achar("abc"), Some(&"h2"));
         assert_eq!(j.com_endereco(), 2);
+        assert_eq!(j.ativa(), Some("5bbf4e6128f0"), "a 1 voltou a ser a ativa");
         assert!(j.fechou(&2).is_some());
         assert_eq!(j.achar("abc"), None);
         assert_eq!(j.estado(&9, true, 70), None, "janela desconhecida");
