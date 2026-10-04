@@ -18,8 +18,9 @@
 //!
 //! `--copia <pasta>` põe numa pasta só a folha (`contato-<id>.png`, com o
 //! `contato-<id>.sha256`) e os GIFs dos estados que mais importam (parado,
-//! piando, comendo, voando, mergulho, susto, pousando), com nomes legíveis;
-//! as cópias velhas desses nomes são apagadas antes.
+//! pulinho, esperando, trabalhando, voo curto, voo grande, susto, pouso), com
+//! o nome do estado, não do desenho (servem para qualquer skin); as cópias
+//! velhas desses nomes, e dos nomes de antes, são apagadas antes.
 //!
 //! Todos os quadros são recortados no mesmo retângulo (a união de tudo que
 //! é opaco na skin, com folga), para o movimento entre eles aparecer.
@@ -49,7 +50,8 @@ const COLUNAS: usize = 12;
 /// Escala dos rótulos (fonte 3x5).
 const LETRA: i32 = 2;
 /// Quanto tempo de repouso o `repouso.gif` mostra: um ciclo inteiro do
-/// Zeca (três respiradas e uma levantada, ~18 s).
+/// Zeca (no do pack, três respiradas e uma levantada, ~18 s; no original,
+/// uma respirada, uma piscada e a ginga, ~16 s).
 const REPOUSO_MS: u64 = 20_000;
 
 /// Retângulo da célula que aparece na folha e nos GIFs.
@@ -410,14 +412,26 @@ pub fn gif_do_repouso(
 }
 
 /// Prévias com nome legível: (nome do arquivo, estado semântico). O
-/// `parado` é o repouso.
+/// `parado` é o repouso. O nome diz o estado, não o desenho: vale para o Zeca
+/// do pack e para o original (TS.2).
 const PREVIAS: &[(&str, &str)] = &[
-    ("piando", "waiting"),
-    ("comendo", "working"),
-    ("decolando-voando", "done_medium"),
-    ("mergulho-chapeu-voando", "done_big"),
-    ("susto-chapeu-voando", "error"),
-    ("pousando", "land"),
+    ("pulinho", "done_small"),
+    ("esperando", "waiting"),
+    ("trabalhando", "working"),
+    ("voo-curto", "done_medium"),
+    ("voo-grande", "done_big"),
+    ("susto", "error"),
+    ("pouso", "land"),
+];
+/// Os nomes das prévias até a skin livre, que eram do desenho do Zeca do pack:
+/// as cópias velhas com eles também saem.
+const PREVIAS_ANTIGAS: &[&str] = &[
+    "piando",
+    "comendo",
+    "decolando-voando",
+    "mergulho-chapeu-voando",
+    "susto-chapeu-voando",
+    "pousando",
 ];
 
 fn gravar(caminho: &Path, dados: &[u8]) -> Result<(), String> {
@@ -490,6 +504,7 @@ pub fn executar(lista: &[String]) -> Result<(), String> {
         let id = &skin.id;
         let nomes_gif: Vec<String> = std::iter::once("parado")
             .chain(PREVIAS.iter().map(|(nome, _)| *nome))
+            .chain(PREVIAS_ANTIGAS.iter().copied())
             .map(|nome| format!("{id}-{nome}.gif"))
             .collect();
         for velho in nomes_gif

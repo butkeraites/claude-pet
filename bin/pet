@@ -63,6 +63,9 @@ uso: bin/pet <comando>
                   instala o Zeca a partir do pack Cute Parrots! (lê o zip em
                   memória, gera skins-locais/zeca e zeca-contorno, mostra
                   lint, cobertura e as prévias em tmp/previa-zeca-m2/)
+  skin-livre      refaz o Zeca original (arte livre, CC0) em skins/zeca-livre e
+                  zeca-livre-escuro a partir do gerador arte/zeca-livre/zeca.py,
+                  com lint, cobertura e as prévias em tmp/previa-zeca-livre/
   skin-aprovar [id]
                   aprova o personagem que você viu na folha de contato
                   (padrão: a skin configurada); só vale se a skin for a da
@@ -457,8 +460,19 @@ absoluto() {
   esac
 }
 
-# Onde ficam as prévias que o Renan olha antes de aprovar (fora do git).
+# Onde ficam as prévias que o Renan olha antes de aprovar (fora do git): as do
+# Zeca do pack em tmp/previa-zeca-m2/ e as do Zeca original (decisão 0066) em
+# tmp/previa-zeca-livre/.
 PREVIAS="tmp/previa-zeca-m2"
+PREVIAS_LIVRE="tmp/previa-zeca-livre"
+
+# A pasta das prévias de uma skin, pelo id.
+previas_da_skin() {
+  case "$1" in
+    zeca-livre | zeca-livre-*) printf '%s' "$PREVIAS_LIVRE" ;;
+    *) printf '%s' "$PREVIAS" ;;
+  esac
+}
 
 # skin-instalar <zip|pasta>: o pack Cute Parrots! vira o Zeca em
 # skins-locais/ (fora do git, decisão 0011). O zip é lido em memória pelo
@@ -500,6 +514,42 @@ nos GIFs, fundo escuro à esquerda e claro à direita).
 Para o Zeca aparecer na tela:
   1. bin/pet subir                 # a skin entra na imagem local
   2. bin/pet skin-aprovar zeca     # ou zeca-contorno; sem aprovação ele fica escondido
+TEXTO
+}
+
+# skin-livre: o Zeca original (arte livre, CC0; decisões 0065 e 0066) sai do
+# gerador arte/zeca-livre/zeca.py, em skins/ (vai para o git): refaz as duas
+# skins (zeca-livre para tema claro e zeca-livre-escuro, com o anel, para tema
+# escuro) com os mesmos bytes, roda o lint e a cobertura e põe as folhas de
+# contato e os GIFs em tmp/previa-zeca-livre/. Como no pack, a skin só aparece
+# na tela depois de `bin/pet subir` e de `bin/pet skin-aprovar <id>`.
+skin_livre() {
+  [ "$#" -eq 0 ] || {
+    echo "uso: bin/pet skin-livre" >&2
+    return 2
+  }
+  local variante
+  echo "▸ gerando o Zeca original (arte/zeca-livre/zeca.py) em skins/"
+  cargo xtask zeca-livre || return 1
+  echo "▸ lint"
+  cargo xtask lint-skin skins/zeca-livre skins/zeca-livre-escuro || return 1
+  echo "▸ cobertura (os estados do MVP têm de ser nativos)"
+  for variante in zeca-livre zeca-livre-escuro; do
+    cargo xtask cobertura "skins/$variante" --nativos mvp || return 1
+  done
+  echo "▸ prévias"
+  for variante in zeca-livre zeca-livre-escuro; do
+    cargo xtask contato "skins/$variante" --copia "$PREVIAS_LIVRE" || return 1
+  done
+  cat <<TEXTO
+
+Pronto. Veja a folha de contato e os GIFs em $RAIZ/$PREVIAS_LIVRE/
+(contato-zeca-livre-escuro.png para tema escuro, contato-zeca-livre.png para
+tema claro; nos GIFs, fundo escuro à esquerda e claro à direita).
+Para o Zeca original aparecer na tela:
+  1. bin/pet subir                         # as skins entram na imagem
+  2. aparencia.skin = "zeca-livre-escuro"  # em config/bichinho.toml (ou zeca-livre)
+  3. bin/pet skin-aprovar zeca-livre-escuro
 TEXTO
 }
 
@@ -552,16 +602,18 @@ skin_aprovar() {
   # Aprova-se o que foi visto (decisão 0026): a folha de contato traz a
   # impressão digital da skin no título e no contato-<id>.sha256; se a skin
   # mudou depois das prévias, a folha não é mais a que vai para a tela.
-  local folha="$PREVIAS/contato-$id.png" vista
-  vista="$(cat "$PREVIAS/contato-$id.sha256" 2>/dev/null || true)"
+  local previas folha vista
+  previas="$(previas_da_skin "$id")"
+  folha="$previas/contato-$id.png"
+  vista="$(cat "$previas/contato-$id.sha256" 2>/dev/null || true)"
   if [ -z "$vista" ]; then
     echo "não achei a folha de contato de «$id» ($folha): gere as prévias e olhe antes de aprovar" >&2
-    echo "  (bin/pet skin-instalar <zip>, ou cargo xtask contato $pasta --copia $PREVIAS)" >&2
+    echo "  (bin/pet skin-instalar <zip> ou bin/pet skin-livre, ou cargo xtask contato $pasta --copia $previas)" >&2
     return 1
   fi
   if [ "$vista" != "$sha" ]; then
     echo "a skin «$id» mudou depois da folha de contato (folha: sha ${vista:0:12}; skin: sha ${sha:0:12})." >&2
-    echo "  Gere as prévias de novo e olhe antes de aprovar: cargo xtask contato $pasta --copia $PREVIAS" >&2
+    echo "  Gere as prévias de novo e olhe antes de aprovar: cargo xtask contato $pasta --copia $previas" >&2
     return 1
   fi
   echo "aprovando «$id» ($pasta, sha ${sha:0:12}), a da folha $folha"
@@ -791,6 +843,7 @@ case "$comando" in
   mostrar) comando '{"cmd": "mostrar"}' ;;
   foto) foto ;;
   skin-instalar) skin_instalar "$@" ;;
+  skin-livre) skin_livre "$@" ;;
   skin-aprovar) skin_aprovar "$@" ;;
   skin-revogar) skin_revogar "$@" ;;
   reconstruir)

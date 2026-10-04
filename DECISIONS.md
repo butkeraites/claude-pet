@@ -2741,3 +2741,69 @@ qualquer um puder refazer os mesmos bytes; o gerador é a fonte, e conferir o
 determinismo a cada commit impede que um PNG mexido à mão ou um gerador
 mudado sem regenerar passe calado. As correções e as transições cabem no rig
 sem desenho novo; o que pede desenho fica anotado em vez de improvisado.
+
+## 0066 — A skin livre `zeca-livre`, a variante do tema escuro como segunda skin e o mapa dos estados com o aceno próprio (2026-10-04)
+
+**Problema:** a arte original (decisão 0065) só vira personagem como skin: a
+folha no formato do pet, o `skin.json` com os estados que o core toca e a
+aprovação pela folha de contato. O diretor de arte manda usar no tema escuro
+**sempre** os quadros com o anel de 1 px `#5E5A86` (o contorno `#2B2136` tem
+1,27:1 contra o fundo escuro), e o Renan usa o tema escuro (hackerman):
+faltava decidir como o pet escolhe a variante. E o mapa precisava cobrir
+cada estado do catálogo, com o aceno do T0 sem se confundir com o repouso
+(no Zeca do pack, o `nod` é um pedaço da rajada `stand_look_sit`).
+
+**Escolha (TS.2):**
+- **A variante é uma segunda skin, `zeca-livre-escuro`,** ao lado da
+  `zeca-livre`, como o `zeca-contorno` do pack (decisão 0025): a mesma arte,
+  o mesmo toque e o mesmo `corpo_px` (o tamanho na tela não muda) e o `pe` uma
+  linha abaixo (o anel debaixo dos pés vira o chão). Quem escolhe é o
+  `aparencia.skin` do config; a aprovação continua por id e pelo conteúdo
+  exato (decisões 0026 e 0029). Nada muda no core, no formato do `skin.json`
+  (que recusa campo desconhecido) nem na impressão digital, então a aprovação
+  do Zeca do pack fica intacta. **Rejeitado por agora:** um campo de variante
+  na skin com um `aparencia.tema = escuro|claro`, que pediria mudar o
+  formato, a impressão digital (duas folhas) e a escolha do personagem no
+  daemon; detectar o tema do sistema sozinho fica para o M8/M9.
+- **As duas em `skins/`, no git** (`redistribuivel: true`, `licenca:
+  CC0-1.0`, `CREDITS.md`), montadas pelo `cargo xtask zeca-livre` com a
+  receita `arte/zeca-livre/skin.toml`: 18 tags feitas de pedaços das
+  animações do gerador, 210 quadros em 97 células (quadros iguais numa célula
+  só). A montagem confere que o escuro é o padrão com o anel (nenhum pixel do
+  miolo muda) e que as duas carregam sem aviso; o `--conferir` passa a
+  comparar também as skins, byte a byte.
+- **O mapa** (todos os estados do catálogo nativos, menos os poofs, que são
+  procedurais; `cobertura --nativos mvp` sem falta e nada em reserva):
+  repouso = a pose neutra com rajadas do `respira` (0-3), do `blink` e da
+  `ginga`; trabalhando = entra, bate na tecla duas vezes e sai
+  (`work_session`); pensando = bica o grão; esperando e chamada = a chamada
+  com o «!» (`attention_call`, com entrada e saída); pronto, oi e risadinha =
+  o pio com o olho feliz; **aceno (T0) = o `nod` próprio**, a tirada de
+  chapéu, que abaixa a cabeça, sem nenhuma imagem em comum com o repouso (um
+  teste confere); T1 = o pulo; T2 e T3 = voo curto e voo grande (decola,
+  voa e pousa; o grande pia no fim); erro = o susto; bocejo, soneca (`nap`:
+  adormece, ronca e acorda) e acordar (se espreguiça); arrastado = bate asas
+  em laço; solto = o pouso com poeira dos dois lados; tchau e aceno de asa =
+  o `wave`. Os laços tocados como reação (trabalho, chamada, sono) vêm com a
+  entrada e a saída, porque o pet volta à pose neutra no fim de toda reação.
+- **Orçamento:** o repouso fica em 0,95 commit/s, pelo `animador::Repouso`
+  (o mesmo do daemon), seguido por 10 min num teste: um ciclo de ~16 s, a
+  ginga a cada ~16 s (os 8-20 s do manifesto). O `respira` em laço, como o
+  manifesto sugere para outros apps, daria 3,6 commits/s e estouraria o
+  orçamento de 2/s parado (decisão 0005).
+- **Tamanho:** o corpo parado tem 34 pixels de arte (do topo do chapéu aos
+  pés), contra 19 no Zeca do pack. No eDP-1 o D é 4 no `pequeno` e no
+  `normal` (o corpo dá ~91 pixels lógicos, 11,3% da altura; D = 3 daria 8,5%)
+  e 6 no `grande`; no 4K, 6, 7 e 9. O D continua inteiro (decisão 0042).
+- **Prévias e aprovação:** `bin/pet skin-livre` refaz as duas skins, roda o
+  lint e a cobertura e põe as folhas de contato (impressão digital no título)
+  e os GIFs em `tmp/previa-zeca-livre/`; o `bin/pet skin-aprovar` procura lá
+  a folha de uma skin `zeca-livre*`. Os GIFs do `--copia` do `contato` passam
+  a ter o nome do estado (parado, pulinho, esperando, trabalhando, voo-curto,
+  voo-grande, susto, pouso), não o do desenho do pack; as cópias com os nomes
+  antigos são apagadas.
+
+**Por quê:** uma segunda skin é o caminho que o pet já tem (o contorno creme
+do pack), não toca no formato nem em aprovação nenhuma, e deixa o Renan
+trocar de tema com uma linha de config. O mapa usa a arte inteira, sem
+reserva, e o aceno ganhou um gesto que ninguém confunde com o repouso.

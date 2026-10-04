@@ -29,7 +29,8 @@ Campos do `skin.json`:
 ## Onde as skins moram
 
 - `skins/` vai para o git: só arte que pode ser redistribuída (a xadrez
-  `_teste`, gerada por `cargo xtask skin-teste`).
+  `_teste`, gerada por `cargo xtask skin-teste`, e o Zeca original,
+  `zeca-livre` e `zeca-livre-escuro`, gerados por `cargo xtask zeca-livre`).
 - `skins-locais/` fica fora do git e entra **só** na imagem Docker local,
   que nunca vai a registry (decisão 0011). É onde moram as skins feitas de
   packs comprados, como o Zeca.
@@ -39,7 +40,82 @@ Campos do `skin.json`:
   `arte/`…) para uma skin não redistribuível; o lint acusa uma dentro de
   `skins/`. Fora do repositório, qualquer lugar.
 
-## O Zeca
+## Os dois Zecas
+
+O Zeca tem duas artes, e as duas podem ficar instaladas ao mesmo tempo:
+
+| Skin | Arte | Onde | Licença |
+|---|---|---|---|
+| `zeca-livre-escuro` | o Zeca original com o anel de 1 px por fora, para tema escuro | `skins/` (no git) | CC0 1.0 |
+| `zeca-livre` | o Zeca original, para tema claro | `skins/` (no git) | CC0 1.0 |
+| `zeca` | o Zeca feito do pack *Cute Parrots!* | `skins-locais/` (fora do git) | a do pack: não pode ser redistribuído |
+| `zeca-contorno` | o mesmo, com contorno creme | `skins-locais/` (fora do git) | a do pack |
+
+Quem aparece é o `aparencia.skin` do `config/bichinho.toml` (sem a chave, o
+`zeca`), e cada uma precisa da própria aprovação (decisões 0026 e 0066).
+
+## O Zeca original (arte livre, CC0)
+
+Desenhado do zero, sem nenhum pixel do pack, por um gerador em Python que é a
+fonte da arte: `arte/zeca-livre/zeca.py` (paleta, grades das peças, rig e 22
+animações; decisão 0065). Arte original feita com o Claude para o projeto
+bichinho, dedicada ao domínio público pela **CC0 1.0**
+(`arte/zeca-livre/LICENSE`). As notas de arte (o que cada animação faz, a
+regra de diferenciação e o que ainda pede um pixel artist) estão em
+`arte/zeca-livre/notas.md`.
+
+```sh
+bin/pet skin-livre                # refaz as duas skins, com lint, cobertura e prévias em tmp/previa-zeca-livre/
+bin/pet subir                     # as skins entram na imagem
+bin/pet skin-aprovar zeca-livre-escuro   # depois de ver a folha de contato
+```
+
+- `cargo xtask zeca-livre` roda o gerador numa pasta temporária
+  (`zeca.py --quadros`, sem ImageMagick) e grava o `arte/zeca-livre/anims.json`
+  e as duas skins, montadas pela receita `arte/zeca-livre/skin.toml`: as tags
+  são pedaços das animações do gerador (`anim`, o trecho `quadros = [de,
+  ate]` e `vezes`), quadros iguais numa célula só da folha. O toque e o
+  `corpo_px` saem da pose parada sem anel, então as duas variantes têm o
+  mesmo tamanho na tela; no escuro o `pe` fica uma linha abaixo (o anel
+  debaixo dos pés vira o chão).
+- `cargo xtask zeca-livre --conferir` não grava nada: roda o gerador duas
+  vezes, compara os bytes e confere que o manifesto e as skins do git são o
+  que sai agora. O `bin/pet verificar` roda quando há `python3`. **PNG da arte
+  livre nunca se edita à mão:** mexa no `zeca.py` ou no `skin.toml` e rode
+  `bin/pet skin-livre`.
+- `python3 arte/zeca-livre/zeca.py` grava as prévias da própria arte (quadros
+  dos dois visuais, folhas, GIFs com o fundo escuro, o escuro com anel e o
+  claro, e a vitrine) em `tmp/zeca-livre/`.
+- **Tema escuro = sempre a variante com anel** (o diretor de arte manda: o
+  contorno `#2B2136` tem 1,27:1 contra o fundo do hackerman). A escolha é por
+  skin, `zeca-livre-escuro` ou `zeca-livre`, no config; a montagem confere que
+  o escuro é o padrão com o anel, sem mexer em pixel nenhum do miolo.
+
+### Estados do Zeca original
+
+| Estado | Tag | O que ele faz |
+|---|---|---|
+| `idle` | `respira`, `blink`, `ginga` | pose neutra; com pelo menos 4 s entre elas, uma respirada com o chapéu atrasando, uma piscada e a ginga (queixo erguido, olho malandro, o quadril vai e o pé bate). ~16 s por ciclo, 0,95 commit/s |
+| `working` | `work_session` | debruça e dá o passo, bate na tecla duas vezes e endireita |
+| `thinking` | `peck` | bica o grão, com o chapéu escorregando até o bico |
+| `waiting`, `alert` | `attention_call` | apruma com o «!», pula e abana a asa duas vezes, sai com o olho malandro |
+| `ready`, `hello`, `giggle` | `chirp` | pia com as notas e o olho feliz |
+| `nod` (T0) | `nod` | a tirada de chapéu: a cabeça abaixa e o chapéu tomba (o respira e a ginga sobem a cabeça: o aceno não se confunde com o repouso) |
+| `wave`, `bye` | `wave` | abana a asa |
+| `done_small` (T1) | `hop` | o pulo comemorando, com o chapéu rodopiando e a poeira do pouso |
+| `done_medium` (T2) | `short_flight` | decola, bate asas e pousa |
+| `done_big` (T3) | `big_flight` | decola, voa mais tempo, pousa e pia |
+| `error` | `scared` | o susto: encolhe, arregala, o chapéu voa e cai torto |
+| `yawn` | `yawn` | o bocejo |
+| `sleep` | `nap` | adormece com o chapéu escorregando, ronca duas vezes e acorda |
+| `wake` | `wake` | se espreguiça e o chapéu pula |
+| `dangle` | `fly` | bate asas em laço enquanto é arrastado |
+| `land` | `landing` | pousa com poeira dos dois lados e o chapéu quicando |
+
+O corpo parado tem 34 pixels de arte (do topo do chapéu aos pés): no eDP-1,
+D = 4 no `pequeno` e no `normal` e 6 no `grande`; no 4K, 6, 7 e 9.
+
+## O Zeca do pack
 
 ```sh
 bin/pet skin-instalar ~/Downloads/"Cute Parrots! -Pixel Art Asset Pack.zip"
@@ -144,7 +220,8 @@ precisa virar uma trilha separada), senão ele desce junto com o Zeca
 |---|---|
 | `cargo xtask lint-skin <pasta>…` | erros (não carrega, duração fora de 16–5000 ms, não redistribuível em `skins/`) e avisos (cores, alfa parcial, preto puro, corpo pulando > 3 px, pés fora da linha, borda da célula); o `bin/pet verificar` roda em todas |
 | `cargo xtask cobertura <pasta> [--nativos mvp]` | `cobertura.md`: cada estado do catálogo (`pet_core::estados`) como nativo, receita, reserva ou faltando; `--nativos` (uma lista, ou `mvp` = a tabela do PLANO, item 4, com o `nod` do T0) reprova se algum desses não for nativo |
-| `cargo xtask contato <pasta> [--copia <pasta>]` | folha de contato (todas as tags, fundo escuro e claro, ×4, impressão digital no título e em `contato.sha256`) e um GIF por tag com o fundo escuro e o claro lado a lado, mais o `repouso.gif` (o parado como o daemon toca), em `tmp/contato/<id>/` |
+| `cargo xtask contato <pasta> [--copia <pasta>]` | folha de contato (todas as tags, fundo escuro e claro, ×4, impressão digital no título e em `contato.sha256`) e um GIF por tag com o fundo escuro e o claro lado a lado, mais o `repouso.gif` (o parado como o daemon toca), em `tmp/contato/<id>/`; `--copia` põe a folha e os GIFs dos estados que mais importam, com o nome do estado (`<id>-parado.gif`, `-pulinho`, `-esperando`, `-trabalhando`, `-voo-curto`, `-voo-grande`, `-susto`, `-pouso`), numa pasta só |
+| `cargo xtask zeca-livre [--conferir]` | o Zeca original (CC0) do gerador `arte/zeca-livre/zeca.py`: grava o manifesto e as skins `zeca-livre` e `zeca-livre-escuro`; `--conferir` só confere (gerador duas vezes, mesmos bytes, igual ao git) |
 | `cargo xtask skin-importar …` | importa um pack qualquer (`.aseprite` ou tiras PNG) num esqueleto de skin (o id é o nome da pasta) |
 
 ## Reações (M3, decisões 0019, 0020 e 0030)
@@ -159,15 +236,16 @@ volta à pose, escolhendo a tag assim:
    `idle` (tocar o repouso não é reação);
 3. senão, uma tag com esse nome.
 
-| Reação | Zeca | `_teste` (debug) |
-|---|---|---|
-| `nod` | `nod` (composta: levanta e senta, 600 ms) | `wave` (reserva) |
-| `done_small` | `chirp` | `done_small` |
-| `bye` | `chirp` | não anima |
+| Reação | Zeca original | Zeca do pack | `_teste` (debug) |
+|---|---|---|---|
+| `nod` | `nod` (a tirada de chapéu, 810 ms) | `nod` (composta: levanta e senta, 600 ms) | `wave` (reserva) |
+| `done_small` | `hop` (o pulo) | `chirp` | `done_small` |
+| `bye` | `wave` (abana a asa) | `chirp` | não anima |
 
 Os três são nativos obrigatórios do personagem (`--nativos mvp`): sem um
-`nod` próprio, o aceno cairia no `wave`, que no Zeca é o mesmo pio do
-pulinho. Sem personagem aprovado, nada toca na tela: a reação fica em
+`nod` próprio, o aceno cairia no `wave`, que no Zeca do pack é o mesmo pio do
+pulinho. No Zeca do pack o `nod` ainda é um pedaço da rajada do repouso
+(`stand_look_sit`) e dá para confundir; no original ele é um gesto próprio. Sem personagem aprovado, nada toca na tela: a reação fica em
 `/v1/estado.ultima_reacao`.
 
 ## Aprovar (decisões 0026 e 0029)
@@ -177,8 +255,9 @@ A skin `_teste` só aparece com `PET_DEBUG=1`.
 
 - `bin/pet skin-aprovar [id]` calcula no host a impressão digital da skin
   (`sha256sum skin.json sheet.json sheet.png | sha256sum`), confere que é a
-  da folha de contato em `tmp/previa-zeca-m2/contato-<id>.sha256` (a mesma
-  que está no título da folha) e pede ao pet para aprovar. O pet só aprova se
+  da folha de contato em `tmp/previa-zeca-m2/contato-<id>.sha256` (no Zeca
+  original, `tmp/previa-zeca-livre/contato-<id>.sha256`; a mesma que está no
+  título da folha) e pede ao pet para aprovar. O pet só aprova se
   a skin **da imagem** tiver a mesma impressão (senão falta `bin/pet subir`).
   Ele guarda uma cópia dos três arquivos e o `aprovacao.json` em
   `/state/skins/<id>/` e troca de personagem na hora, com o pet na tela ou

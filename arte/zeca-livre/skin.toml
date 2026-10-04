@@ -1,0 +1,175 @@
+# O Zeca original como skin (decisões 0065 e 0066). Arte livre (CC0 1.0): os quadros
+# saem do gerador zeca.py, ao lado. `cargo xtask zeca-livre` monta duas skins com esta
+# receita, ambas em skins/ (redistribuíveis, vão para o git):
+# - skins/zeca-livre/: o visual padrão, para tema claro;
+# - skins/zeca-livre-escuro/: os mesmos quadros com o anel de 1 px #5E5A86 por fora,
+#   para tema escuro (o contorno #2B2136 tem só 1,27:1 contra o fundo do hackerman; o
+#   diretor de arte manda usar sempre esta variante no escuro).
+# A escolha entre as duas é `aparencia.skin` no config (decisão 0066).
+
+[skin]
+id = "zeca-livre"
+nome = "Zeca"
+autor = "projeto bichinho (arte original feita com o Claude)"
+licenca = "CC0-1.0"
+fonte = "arte/zeca-livre/zeca.py (o gerador, no repositório do bichinho)"
+# 48 px de célula viram 144 px em x3 nas prévias.
+escala_padrao = 3
+# Onde os pés pisam: o contorno de baixo dos pés é a linha 44, e eles pisam na 45 (no
+# escuro, o anel debaixo dos pés vira o chão: 46). x no meio dos dois pés (x18-34).
+# O toque e o corpo_px saem da pose parada (o primeiro quadro do respira, sem anel): as
+# duas variantes ficam do mesmo tamanho na tela.
+pe = [26, 45]
+# Tags com os pés no chão (o lint confere a linha dos pés em todos os quadros delas).
+chao = [
+  "respira", "ginga", "blink", "peck", "nod", "chirp", "wave", "work_session", "yawn",
+  "nap", "wake",
+]
+
+[escuro]
+id = "zeca-livre-escuro"
+nome = "Zeca (tema escuro, com anel)"
+
+# Estado semântico → tags (as chaves do catálogo, `pet_core::estados`). Em `idle`, o
+# primeiro quadro da primeira tag é a pose fixa e as rajadas do repouso tocam as tags em
+# ordem; nas reações, toca a primeira tag do estado uma vez e volta à pose.
+[estados]
+# parado: a pose neutra e, com pelo menos 4 s entre elas, uma respirada, uma piscada e a
+# ginga (~16 s por ciclo e ~0,95 commit/s; a ginga a cada ~16 s, dentro dos 8-20 s do
+# manifesto). O respira não toca em laço: a 3,6 commits/s estouraria o orçamento de 2/s
+# parado (decisão 0005).
+idle = ["respira", "blink", "ginga"]
+# trabalhando: debruça e dá o passo, bate na tecla e endireita (como reação toca uma vez;
+# o trabalho segurado em laço é do M6).
+working = ["work_session"]
+# pensando: bica um grão, a variação do ocioso (o «…» é efeito do M6).
+thinking = ["peck"]
+# esperando você e a chamada: apruma com o «!» e pula abanando a asa.
+waiting = ["attention_call"]
+alert = ["attention_call"]
+# pronto: o pio (notificação).
+ready = ["chirp"]
+# T0, o aceno discreto: a tirada de chapéu, um gesto próprio que abaixa a cabeça (o
+# respira e a ginga sobem), fora das rajadas do repouso.
+nod = ["nod"]
+# o aceno de asa.
+wave = ["wave"]
+# T1: o pulo comemorando.
+done_small = ["hop"]
+# T2 e T3: o voo curto e o voo grande, que pousa e pia (o caminho pela tela, o confete e a
+# faixa são do M6).
+done_medium = ["short_flight"]
+done_big = ["big_flight"]
+# erro: o susto, com o chapéu voando.
+error = ["scared"]
+# cansado (o começo da soneca): o bocejo; dormindo: adormece com o chapéu escorregando,
+# ronca e acorda; acordando (o fim da soneca): se espreguiça.
+yawn = ["yawn"]
+sleep = ["nap"]
+wake = ["wake"]
+# arrastado: bate asas em laço; solto: o pouso com poeira dos dois lados.
+dangle = ["fly"]
+land = ["landing"]
+# clique (risadinha): o pio com o olho feliz; oi: o pio; tchau: o aceno de asa.
+giggle = ["chirp"]
+hello = ["chirp"]
+bye = ["wave"]
+
+# Tags, na ordem da folha: cada uma é uma sequência de pedaços das animações do gerador
+# (as chaves de `animacoes` no anims.json), com o trecho opcional `quadros = [de, ate]`
+# (inclusive) e `vezes`. Quadros iguais viram a mesma célula da folha: repetir não custa
+# pixel nenhum.
+
+[[tag]]
+nome = "respira"
+nota = "repouso: respira com o chapéu atrasando (o trecho «respira» do manifesto)"
+partes = [{ anim = "idle", quadros = [0, 3] }]
+
+[[tag]]
+nome = "blink"
+nota = "repouso: pisca"
+partes = [{ anim = "blink" }]
+
+[[tag]]
+nome = "ginga"
+nota = "repouso: queixo erguido, olho malandro, o quadril vai e o pé bate (o trecho «ginga»)"
+partes = [{ anim = "idle", quadros = [7, 13] }]
+
+[[tag]]
+nome = "peck"
+nota = "bica o grão, com o chapéu escorregando até o bico"
+partes = [{ anim = "peck" }]
+
+[[tag]]
+nome = "nod"
+nota = "aceno discreto (T0): a tirada de chapéu"
+partes = [{ anim = "nod" }]
+
+[[tag]]
+nome = "chirp"
+nota = "pia com as notas e o olho feliz"
+partes = [{ anim = "chirp" }]
+
+[[tag]]
+nome = "wave"
+nota = "tchau: abana a asa"
+partes = [{ anim = "wave" }]
+
+[[tag]]
+nome = "hop"
+nota = "pulo comemorando, com o chapéu rodopiando e a poeira do pouso"
+partes = [{ anim = "hop" }]
+
+[[tag]]
+nome = "work_session"
+nota = "trabalhando: debruça e dá o passo, bate na tecla duas vezes e endireita"
+partes = [{ anim = "work_in" }, { anim = "work", vezes = 2 }, { anim = "work_out" }]
+
+[[tag]]
+nome = "attention_call"
+nota = "chamada: apruma com o «!», pula e abana a asa duas vezes, sai com o olho malandro"
+partes = [
+  { anim = "attention_in" }, { anim = "attention", vezes = 2 }, { anim = "attention_out" },
+]
+
+[[tag]]
+nome = "scared"
+nota = "susto: encolhe, arregala, o chapéu voa e cai torto, ajeita"
+partes = [{ anim = "scared" }]
+
+[[tag]]
+nome = "yawn"
+nota = "bocejo"
+partes = [{ anim = "yawn" }]
+
+[[tag]]
+nome = "nap"
+nota = "dormindo: adormece com o chapéu escorregando, ronca duas vezes e acorda"
+partes = [{ anim = "sleep_in" }, { anim = "sleep", vezes = 2 }, { anim = "sleep_out" }]
+
+[[tag]]
+nome = "wake"
+nota = "acordar: se espreguiça e o chapéu pula"
+partes = [{ anim = "wake" }]
+
+[[tag]]
+nome = "fly"
+nota = "bate asas (laço; o arrastado)"
+partes = [{ anim = "fly" }]
+
+[[tag]]
+nome = "landing"
+nota = "pousa com poeira dos dois lados e o chapéu quicando"
+partes = [{ anim = "landing" }]
+
+[[tag]]
+nome = "short_flight"
+nota = "voo curto (T2): decola, bate asas e pousa"
+partes = [{ anim = "takeoff" }, { anim = "fly", vezes = 3 }, { anim = "landing" }]
+
+[[tag]]
+nome = "big_flight"
+nota = "voo grande (T3): decola, voa mais tempo, pousa e pia"
+partes = [
+  { anim = "takeoff" }, { anim = "fly", vezes = 6 }, { anim = "landing" }, { anim = "chirp" },
+]

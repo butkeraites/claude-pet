@@ -14,9 +14,11 @@ da crítica final, o que o próprio rig resolve e os gestos e transições que o
 
 Para gerar tudo (quadros, folhas, GIFs, vitrine e a verificação), rode `python3 zeca.py`: leva
 cerca de 40 s e grava em `tmp/zeca-livre/`, na raiz do repositório (fora do git). O `anims.json`
-desta pasta sai do `cargo xtask zeca-livre`, que roda `python3 zeca.py --quadros` (só os quadros e o
-manifesto, sem ImageMagick, em ~4 s); o `cargo xtask zeca-livre --conferir` roda o gerador duas
-vezes, compara os bytes e confere que o que está no git é o que sai dele.
+desta pasta e as skins `skins/zeca-livre/` e `skins/zeca-livre-escuro/` saem do
+`cargo xtask zeca-livre`, que roda `python3 zeca.py --quadros` (só os quadros e o manifesto, sem
+ImageMagick, em ~4 s) e monta as skins pela receita `skin.toml`; o `cargo xtask zeca-livre
+--conferir` roda o gerador duas vezes, compara os bytes e confere que o que está no git é o que sai
+dele.
 
 ---
 
@@ -28,6 +30,7 @@ Nesta pasta (no git):
 |---|---|
 | `zeca.py` | Fonte da arte: paleta, grades das peças, gerador do chapéu, motor do rig, 22 animações, exportação, vitrine, verificação (lint) e releitura dos PNG |
 | `anims.json` | Manifesto com quadros, ms, loop, paleta, anel, licença, `uso` (tema, idle, transições de cada laço), `gatilhos_sugeridos` e `trechos` do idle; os caminhos dos quadros são relativos à pasta de saída do gerador |
+| `skin.toml` | A receita das skins: as tags (pedaços das animações), o mapa dos estados do pet, os pés e as tags no chão |
 | `LICENSE` | A dedicação CC0 1.0, o crédito de cortesia e o texto legal |
 | `notas.md` | Este arquivo |
 
@@ -458,6 +461,17 @@ estado ganhou entrada e saída, listadas em `uso.transicoes.lacos` do manifesto.
 
 Total: 22 animações, 134 quadros, 16 cores (+1 do anel), zero furo, recorte solto, órfão ou efeito
 sobre o corpo nos dois visuais.
+
+### Como o pet usa (skins `zeca-livre` e `zeca-livre-escuro`)
+
+O `cargo xtask zeca-livre` monta as duas skins com a receita `skin.toml`: o tema claro usa os
+quadros padrão e o escuro, sempre os com anel (decisão 0066; a montagem confere que o escuro é o
+padrão com o anel, sem mexer no miolo). Cada estado do pet vira uma sequência dos quadros acima:
+o repouso é a pose neutra com rajadas do respira (0-3), do piscar e da ginga, a cada 4 s ou mais
+(o orçamento de commits não deixa o respira em laço); o aceno (T0) é o `nod`; o pulinho (T1), o
+`hop`; o trabalho, a chamada e a soneca tocam com a entrada e a saída; o voo curto e o voo grande
+são `takeoff` + `fly` + `landing`. O mapa inteiro, com o porquê de cada um, está no `skin.toml` e no
+`docs/SKINS.md`.
 
 ### Para um pixel artist (M9, T9.2)
 
