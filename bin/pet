@@ -248,6 +248,19 @@ daemon_sem_socket_de_comandos() {
   fi
 }
 
+# Decisão 0035: nenhum texto do projeto cita o personagem de terceiros nem o
+# estúdio dele. Procura sem caixa nos arquivos rastreados e nos novos (os
+# ignorados ficam de fora); os colchetes fazem o padrão não casar consigo
+# mesmo.
+sem_nomes_de_terceiros() {
+  local achados
+  achados="$(git grep --untracked -n -i -E 'cari[o]ca|dis[n]ey' -- . 2>/dev/null || true)"
+  if [ -n "$achados" ]; then
+    printf 'texto citando personagem de terceiros (decisão 0035):\n%s\n' "$achados" >&2
+    return 1
+  fi
+}
+
 # Lint de todas as skins da máquina: skins/ (git) e skins-locais/ (packs).
 # Avisos não reprovam; erros sim (PLANO.md, `verificar`).
 lint_skins() {
@@ -434,6 +447,7 @@ verificar() {
   passo "cargo fmt" cargo fmt --all --check
   passo "pet-core sem Wayland" core_sem_wayland
   passo "daemon sem socket de comandos" daemon_sem_socket_de_comandos
+  passo "nomes de terceiros" sem_nomes_de_terceiros
   passo "cargo clippy" cargo clippy --all-targets --quiet -- -D warnings
   passo "cargo test" cargo test --quiet
   passo "lint-skin" lint_skins

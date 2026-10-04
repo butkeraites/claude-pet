@@ -10,10 +10,10 @@ robô desenhados em ASCII) foi recusado como "muito feio". Um bichinho que
 fica o dia inteiro na tela precisa de arte de verdade.
 **Escolha:** a base é a arara do pack *Cute Parrots!* da exclusiveOlive
 (itch.io, 48x48, ~20 animações). Ela vira o **Zeca**, um papagaio malandro
-"estilo Zé Carioca, um pouco diferente": corpo verde, chapéu-palheta e
-gravata-borboleta com faixa laranja. Corpo e animações são da artista; nós
-só desenhamos os acessórios pequenos e a troca de paleta. Nada de nome ou
-visual da Disney.
+com visual próprio: corpo verde, chapéu-palheta e gravata-borboleta com
+faixa laranja. Corpo e animações são da artista; nós só desenhamos os
+acessórios pequenos e a troca de paleta. Nada de nome ou visual copiado de
+personagem de terceiros (decisão 0035).
 **Por quê:** o pack já cobre praticamente todos os estados do pet
 (comer, piar, decolar, planar, pousar, dormir, machucar). Desenhar o bicho
 inteiro do zero cairia na "arte de programador" que já foi recusada.
@@ -554,8 +554,9 @@ visuais sobre o pack comprado e escolheu.
   `#CE3F6F`; a troca de paleta é vazia), **chapéu-palheta** com **faixa
   laranja** (`#FA9662`) e uma **gravata-borboleta rosa** pequena no peito
   (o rosa do bico, com o nó em `#CE3F6F`);
-- "estilo Zé Carioca, um pouco diferente": nada de nome nem visual da Disney
-  (sem paletó, sem charuto, sem guarda-chuva; faixa laranja e gravata rosa).
+- papagaio malandro com visual próprio: nada de nome nem visual copiado de
+  personagem de terceiros (sem paletó, sem charuto, sem guarda-chuva; faixa
+  laranja e gravata rosa; decisão 0035).
 
 Como o encaixe funciona (`cargo xtask zeca`, `arte/zeca/`):
 - chapéu e gravata são grades de texto nossas (MIT), só com cores da paleta
@@ -578,7 +579,7 @@ Como o encaixe funciona (`cargo xtask zeca`, `arte/zeca/`):
 A fonte monogram, que estava na lista do M2, vai para o M6 junto com os
 balões, que são os únicos que a usam.
 **Por quê:** o bico rosa com gravata rosa amarra as cores, e o chapéu de
-faixa laranja é a marca de malandro sem copiar o personagem da Disney. O
+faixa laranja é a marca de malandro sem copiar personagem nenhum. O
 encaixe por dados (regra do olho mais correções) deixa cada quadro conferido
 e reproduzível sem redesenhar nada do pack.
 
@@ -1190,3 +1191,129 @@ e uma reaprovação dele, e depois a conferência na tela.
 **Por quê:** o teste tem de achar o próprio resultado, não o do vizinho. O
 plano não pode mandar quebrar uma regra de ouro. Estado de máquina vai para
 o PROGRESS ou o corpo do PR; regra vai para o CLAUDE.md.
+
+## 0035 — O personagem é o Zeca, nunca associado a personagem de terceiros (2026-10-03)
+
+**Problema:** a pesquisa multiplataforma (`docs/pesquisa/09-multiplataforma.md`,
+achado 4) mostrou que textos do DECISIONS e do PLANO citavam um personagem de
+terceiros como referência de estilo. Papagaio verde, chapéu-palheta,
+gravata-borboleta e um nome curto não são protegidos sozinhos; somados a um
+texto que cita o personagem, facilitam uma reclamação (DMCA ou marca) contra
+o projeto quando ele for público.
+**Escolha (do Renan):**
+- o personagem continua **Zeca**, também em público: um papagaio malandro com
+  visual próprio;
+- nada no projeto (código, docs, balões, commits, PRs) o chama ou o descreve
+  como personagem de terceiros, nem cita nome, estúdio, título ou família de
+  um;
+- as passagens antigas (decisões 0001 e 0023, o PLANO) foram reescritas de
+  forma neutra, a pedido do Renan. É a única exceção à regra de nunca
+  reescrever o DECISIONS. A pesquisa nova já entrou reescrita;
+- guarda: o `bin/pet verificar` reprova se uma busca sem caixa pelo nome do
+  personagem e do estúdio achar algo nos arquivos do repositório (rastreados e
+  novos, fora os ignorados). O padrão está escrito de um jeito que não casa
+  consigo mesmo;
+- a arte não muda: sem paletó, charuto ou guarda-chuva, cores próprias (faixa
+  laranja, gravata rosa). O personagem padrão do app público continua em
+  aberto (T9.0);
+- o histórico do repositório privado ainda tem os textos antigos: o público
+  será um repositório novo, sem o histórico (decisão 0036, T9.1).
+
+**Por quê:** o risco está na combinação, e o texto era a parte que dependia só
+de nós. O nome é escolha do Renan. A guarda impede que um texto novo traga a
+referência de volta.
+
+## 0036 — O app se chama bichinho (2026-10-03)
+
+**Problema:** `claude-pet` é o nome do repositório, do binário, do compose e da
+camada (decisão 0012). Já existe outro projeto com esse nome no GitHub (MIT,
+desde 2026-02), e ele usa a marca de outra empresa. O nome do binário vai
+entrar no `hooks.json` e no PATH de quem instalar (pesquisa, achado 4).
+**Escolha (do Renan):**
+- o produto e o binário se chamam **bichinho**, como o plugin; "para o Claude
+  Code" fica só na descrição;
+- o T8.1 troca o nome do crate e do binário, do namespace da camada, do
+  projeto, do serviço e da imagem do compose, das mensagens da CLI e dos
+  docs, preservando o volume com a aprovação do Zeca;
+- ficam como estão: o repositório privado `butkeraites/claude-pet` (por ora),
+  as variáveis `PET_*`, o cabeçalho `X-Pet`, a porta 27380 (o `avisar.sh` do
+  plugin instalado continua falando com o pet até a troca), o `bin/pet`
+  (atalho de desenvolvimento), a skin `zeca` e as strings de autoria gravadas
+  na arte gerada (mudá-las mudaria a impressão digital aprovada);
+- o repositório público será novo e limpo, sem o histórico (M9, T9.1).
+
+Substitui a decisão 0012 no que ela dizia do repositório público, do binário,
+do compose e da camada.
+**Por quê:** um nome próprio evita a colisão e a marca alheia, e o binário
+precisa do nome final antes de o hook nativo ir para o PATH.
+
+## 0037 — Merge com merge commit, nunca squash (2026-10-03)
+
+**Problema:** o PLANO mandava `gh pr merge --squash`. Com squash, os commits
+de tarefa que o PROGRESS cita ficam fora da `main`.
+**Escolha (do Renan):** os PRs entram na `main` com merge commit (`gh pr merge
+--merge`): os commits da branch, um por tarefa, entram com os mesmos hashes.
+As linhas novas do PROGRESS nascem com "—" na coluna Commit e ganham o hash
+depois, num commit seguinte ou no PR.
+**Por quê:** o PROGRESS é o índice das tarefas e precisa apontar para commits
+que existem na `main`.
+
+## 0038 — Lançamento multiplataforma e a nova ordem: T8.0 e T8.1 antes do M4 (2026-10-03)
+
+**Problema:** o Renan quer, no fim, um lançamento open source para Linux,
+macOS e Windows. A pesquisa (`docs/pesquisa/09-multiplataforma.md`) mostrou que
+dá: o `pet-core` e o backend Wayland são reaproveitados, e por sistema mudam
+só a janela do bicho e a ligação com o desktop. Mostrou também que arraste,
+balões e voos (M4–M6) feitos dentro do `wl/` teriam de ser reescritos depois.
+**Escolha (do Renan):**
+- destino: open source; no macOS e no Windows o pet é um app nativo (AppKit,
+  Win32). O Docker fica só no Linux: no Mac e no Windows ele é uma VM sem
+  acesso à tela;
+- marcos novos no PLANO: **M8** (multiplataforma, T8.0–T8.8) e **M9**
+  (publicação, T9.0–T9.6), cada passo com a sua verificação;
+- ordem: agora, antes do M4, só a costura de plataforma (T8.0) e o hook
+  nativo com o nome novo (T8.1), mais o tamanho do Zeca no config (TP.2); depois
+  M4–M7; depois T8.2–T8.8 e o M9. A T9.0 (arte, nome e licença) pode correr
+  em paralelo, sem código. A T8.8 (GNOME) fica para a v1.1, salvo decisão em
+  contrário;
+- a conferência visual no macOS e no Windows precisa de uma máquina de verdade
+  ou dos runners do GitHub Actions; sem isso, o item fica NÃO VERIFICADO;
+- continuam abertas, com o Renan: a arte do personagem público, quanto gastar,
+  GNOME e X11 na v1.0, a assinatura no Windows, a conta da Apple e o CI.
+
+**Por quê:** as duas peças são pequenas (1 a 2 dias cada, pela pesquisa) e
+fazem o M4–M6 nascer no código portável; feitas depois do M7, custariam o
+dobro.
+
+## 0039 — O clique no Zeca foca o terminal da sessão pelo foreign-toplevel, não pelo socket de comandos (2026-10-03)
+
+**Problema:** o Renan quer que o clique no Zeca leve à janela do terminal da
+sessão do Claude que terminou. No Hyprland o caminho óbvio é despachar
+`focuswindow` pelo `hyprctl` (a pesquisa dos hooks sugeriu isso), mas isso é o
+`.socket.sock`, que executa comandos no host e que o daemon nunca abre
+(decisão 0006).
+**Escolha (escopo do M4):**
+- focar pelo Wayland: `zwlr_foreign_toplevel_manager_v1` com o
+  `hyprland_toplevel_mapping_manager_v1`, que liga cada handle de toplevel ao
+  endereço de janela do Hyprland (o mesmo do `activewindowv2`), e
+  `zwlr_foreign_toplevel_handle_v1.activate(seat)`. A ideia de despachar
+  `focuswindow` pelo socket de comandos fica descartada; a 0006 continua
+  inteira. No M4, conferir na 0.56.2 que os dois protocolos estão no registro;
+- identidade de janela por sessão: um anel com as últimas ativações (endereço
+  e hora de chegada do `activewindowv2` no socket2, nunca o título), casado com
+  o `ts` do hook (`UserPromptSubmit`, `SessionStart`) de cada sessão, e
+  reforçado por dicas da cadeia de PIDs que o hook manda (`CLAUDE_PID` e pais,
+  ids de terminal). As dicas entram como campo novo e opcional do fio v1, com
+  decisão própria quando chegarem;
+- pendências em ciclo, a mais urgente primeiro (a prioridade do cérebro); o
+  clique sem pendência mostra um balão com as sessões abertas e o estado de
+  cada uma. O balão mínimo e a fonte de pixel vêm do M6 para o M4;
+- sem como focar (janela fechada, sessão sem identidade, protocolo ausente),
+  o balão diz isso e mostra a lista;
+- nos outros desktops (T8.7) o foco entra como `Desktop::focar` de cada
+  adaptador.
+
+**Por quê:** o foreign-toplevel é uma ação de alto nível sobre uma janela, sem
+executar nada no host, e mantém o daemon longe do socket que roda comandos e
+pode congelar o Hyprland. O anel casado com o `ts` acha o terminal sem ler
+títulos de janela.

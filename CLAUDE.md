@@ -10,67 +10,41 @@ comemora quando o Claude termina, chama quando o Claude precisa dele, dorme
 quando ninguém mexe. Fica sempre por cima de tudo, pode ser arrastado e
 segue o monitor ativo. Roda em Docker. **Sem som** (decisão 0002).
 
-O plano completo, com marcos M0–M7 e como verificar cada um, está em
+O plano completo, com marcos M0–M9 e como verificar cada um, está em
 `PLANO.md`. As decisões, com o porquê, estão em `DECISIONS.md`.
 
 ## Estado do repositório
 
-**M0 (fundação) concluído. M1 (overlay) concluído na branch `m1-overlay`,
-com o portão fechado com a tela acesa** (atualização da decisão 0005):
-nitidez exata, sem fantasma, parado a 0,70 commit/s e +0,58 ponto de CPU do
-Hyprland; sob repintura de tela cheia, +0,20 de CPU e +1,6 de GPU. A camada
-única fica; o plano B não é necessário. Fotos em `docs/fotos/m1/`. Falta só
-o clique manual (clicar ao lado do pet chega na janela de baixo).
+**Na `main` (tags `v0.1.0`–`v0.3.0`):** M0 (fundação), M1 (overlay nítido e
+barato; portão fechado com a tela acesa, decisão 0005), M2 (o Zeca, aprovado
+pelo Renan pela folha de contato, decisões 0023–0029) e M3 (hooks → reação:
+plugin `bichinho`, cérebro mínimo com `nod`, `done_small` e `bye`, `bin/pet
+testar`, decisões 0019–0022 e 0030–0034). O andamento por tarefa está no
+`PROGRESS.md`.
 
-O daemon acha o Hyprland pelo `hyprland.lock`, conecta ao Wayland (Rust
-puro, SCTK), cria a camada OVERLAY `claude-pet` no monitor focado e desenha
-a skin em blocos D×D de pixels do monitor, com orçamento de commits.
-Repositório privado em `github.com/butkeraites/claude-pet`.
+O Zeca só aparece com a skin da imagem aprovada (`bin/pet skin-aprovar`, que
+só aprova a skin da folha de contato vista; decisões 0026 e 0029). Sem
+aprovação a produção fica conectada e escondida (`tela: sem_personagem`).
+Aprovar e revogar trocam na tela na hora, e o config é relido a cada
+aprovação. A pilha de dev (`PET_DEBUG=1`) mostra a skin xadrez `_teste`, ou o
+personagem aprovado com `PET_DEBUG_PERSONAGEM=1`. Formato, arte e aprovação
+em `docs/SKINS.md`.
 
-**M2 (Zeca) na branch `m2-zeca`:** o pack *Cute Parrots!* (exclusiveOlive,
-zip em `~/Downloads`, fora do repo) vira o Zeca: Parrot 2 verde no visual
-"Malandro rosa" (bico rosa original, chapéu-palheta de faixa laranja,
-gravata-borboleta rosa dentro do contorno do pack) e o "chapéu voa e volta"
-no susto e no mergulho, caindo na cabeça depois do pouso (decisões
-0023–0025 e a revisão 0028). `bin/pet skin-instalar <zip>` gera
-`skins-locais/zeca` e `zeca-contorno` (fora do git) e as prévias em
-`tmp/previa-zeca-m2/`. O Zeca só aparece depois de `bin/pet subir` e
-`bin/pet skin-aprovar zeca`, que só aprova a skin da folha de contato vista
-(decisões 0026 e 0029); sem aprovação, a produção fica conectada e escondida
-(`tela: sem_personagem`). Aprovar e revogar trocam na tela na hora, e o
-config é relido a cada aprovação (`zeca-contorno` sem reiniciar). A pilha de
-dev (`PET_DEBUG=1`) mostra a skin xadrez `_teste`, ou o personagem aprovado
-com `PET_DEBUG_PERSONAGEM=1`. Formato, arte e aprovação em `docs/SKINS.md`.
-**Pendente:** a conferência na tela da arte revista (nitidez, foto
-mascarada, reaprovação com o pet na tela) e a medição de custo com o
-personagem: a sessão ficou bloqueada. Com a tela acesa e desbloqueada, rode
-`scripts/verificar-ao-vivo.sh --personagem` e `scripts/medir-custo.sh
---personagem` (aprovam só para o teste e revogam no fim).
+**Rumo (2026-10-03, decisões 0035–0039):** lançamento open source para Linux,
+macOS e Windows, com o app **bichinho** (o personagem continua Zeca). O PLANO
+ganhou o M8 (multiplataforma) e o M9 (publicação). Antes do M4 entram, na
+branch `m3b-portabilidade`, a costura de plataforma (T8.0), o hook nativo com
+o nome novo (T8.1) e o tamanho do Zeca no config (TP.2). No M4, o clique no
+Zeca leva ao terminal da sessão pelo foreign-toplevel, nunca pelo socket de
+comandos. A pesquisa está em `docs/pesquisa/09-multiplataforma.md`.
 
-**M3 (hooks → reação) na branch `m3-hooks`, rebaseada sobre a `m2-zeca`**
-(publicada, sem PR nem merge; a pilha é `m1-overlay` ← `m2-zeca` ←
-`m3-hooks`): fio v1 validado no `/v1/evento`, plugin `bichinho` (13 hooks
-async → `avisar.sh`), cérebro mínimo (T0 `nod`, T1 `done_small`, `bye`
-quando o Claude sai) e `bin/pet testar`. Na integração (decisão 0030) um
-`/v1/comando` só serve as reações (`tocar`, `esconder`, `mostrar`) e as
-aprovações (`aprovar_skin`, `revogar_skin`); as reações tocam pelos estados
-do `skin.json` com as reservas do catálogo: no Zeca, o aceno é a tag
-composta `nod` (levanta e senta) e o pulinho e o tchau são o pio; na
-`_teste`, o aceno cai no `wave`. O `nod` é nativo obrigatório do MVP, e o
-config relido a cada aprovação vale também para o cérebro. Gate ao vivo
-refeito com o Zeca (decisões 0021 e 0030). O plugin **não** está
-instalado: até o merge na `main`, só por sessão, com `claude --plugin-dir
-~/Documents/claude-pet/plugin`; depois do merge, pela worktree estável
-(README). Sem personagem aprovado a produção reage só no `/v1/estado`
-(`ultima_reacao`, `turnos`). A revisão adversarial da integração (decisões
-0031–0034) prendeu os hooks no 127.0.0.1 (sem curlrc, proxy nem `~/.jq`),
-ensinou o cérebro a esperar o Stop que chega depois do prompt seguinte e a
-reabrir o turno quando outro Stop hook segura o Claude, fez o `tocar` dizer
-o que tocou e refez o gate com um turno de Write. **Pendente:** no Zeca o
-aceno (`nod`: levanta e senta) é um pedaço da rajada do repouso
-(`stand_look_sit`), e dá para confundir os dois; mudar pede o Renan (muda o
-`skin.json`, a impressão e a aprovação). As reações com o Zeca ainda não
-foram vistas na tela: a sessão estava bloqueada nos dois gates.
+**Pendentes desde o M2 e o M3** (pedem a tela acesa e desbloqueada, ou o
+Renan): a conferência na tela da arte revista e das reações com o Zeca, a
+medição de custo com o personagem (`scripts/verificar-ao-vivo.sh
+--personagem` e `scripts/medir-custo.sh --personagem`, que aprovam só para o
+teste e revogam no fim), e o aceno (`nod`, levanta e senta), que é um pedaço
+da rajada do repouso (`stand_look_sit`) e dá para confundir: mudar pede uma
+folha de contato nova e a reaprovação do Renan.
 
 ## Comandos
 
@@ -138,6 +112,10 @@ Fora dele, use `~/.cargo/bin/cargo`.
   em `docs/`; o xtask recusa gravar arte de pack em outra pasta do repo. Só
   `arte/zeca/` (acessórios, âncoras, trajetórias) é nossa e vai para o git.
   A skin `_teste` nunca vira personagem.
+- **Nome do personagem:** é o Zeca, um papagaio malandro com visual próprio.
+  Nunca o chame nem o descreva como personagem de terceiros, e nunca cite
+  nome, estúdio ou família de um, em código, docs, balões, commits ou PRs. O
+  `bin/pet verificar` reprova se aparecer (decisão 0035).
 - **Personagem só com aprovação:** o Zeca aparece só com a impressão
   digital aprovada pelo Renan (`bin/pet skin-aprovar`, decisões 0026 e 0029).
   Nunca aprove por ele: aprovação de teste se revoga no fim (os scripts ao
@@ -225,6 +203,10 @@ Fora dele, use `~/.cargo/bin/cargo`.
   `(decisão 0007)` quando fizer sentido, terminando com
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - Um PR por marco (`mN-tema`), revisado pelo Renan; corpo do PR termina com
-  `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
+  `🤖 Generated with [Claude Code](https://claude.com/claude-code)`. O merge
+  é com merge commit, nunca squash: os hashes do PROGRESS continuam valendo
+  (decisão 0037). Linha nova do PROGRESS nasce com "—" no commit.
+- DECISIONS só cresce (decisões novas no fim, em ordem numérica); a única
+  reescrita permitida foi a da decisão 0035.
 - Nunca commitar `.env`, `config/claude-pet.toml`, `skins-locais/*`,
   `tmp/`, `target/`.
