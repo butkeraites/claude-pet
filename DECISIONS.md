@@ -2596,3 +2596,79 @@ a tarde inteira.
 **Por quê:** o pet só pode andar com o botão apertado em cima dele; um
 "não sei onde o botão subiu" vira um pouso no lugar, e o seguir o foco leva
 o pet ao monitor certo.
+
+## 0064 — Revisão da verificação do M4: scripts que não mexem no que é do Renan, o orçamento das peças novas em teste e a troca depois do merge pelo clone (2026-10-04)
+
+**Problema:** as revisões do M4 acharam falhas na verificação e nas docs
+(T4.11).
+- **`scripts/e2e-monitor.sh`:** o `trap restaurar EXIT INT TERM` não saía no
+  Ctrl+C (o bash voltava ao meio do script e seguia trocando o foco); um
+  output criado cujo nome só aparecesse depois dos 3 s da descoberta nunca
+  era removido; o consentimento era só a flag `--autorizo`, que qualquer
+  agente passa; e o dispatch era o antigo (`focusmonitor`), que o config em
+  Lua do Hyprland 0.56 pode não aceitar (o Omarchy tenta o `hl.dsp` antes).
+- **`scripts/verificar-m4.sh`:** os avisos de sessões reais eram conferidos
+  uma vez, no começo: um Stop real no meio faria o segundo clique focar o
+  terminal do Renan e dar o aviso dele como visto. Os dois `foot` abriam na
+  mesma área de trabalho (o PLANO pede áreas diferentes, o que exercita a
+  troca de área do `activate`), e o clique de verdade, com o mouse, nunca
+  ia a um aviso pendente. O checklist do HDMI, da tampa fechada e da
+  suspensão que o PLANO pede não existia.
+- **Docs:** a decisão 0058 dizia que a troca depois do merge roda "na
+  worktree estável, `bin/pet subir` e `bin/pet instalar-host`"; um
+  `bin/pet subir` de lá monta o `./config` da worktree, que não tem o
+  `config/bichinho.toml` (fora do git), e o Zeca voltaria ao tamanho normal
+  (D=8 no eDP-1, no lugar do pequeno com D=6). O README já dizia certo. O
+  PROGRESS do T4.11 dizia que a produção final rodava o `ae21321` (rodava o
+  `854bb44`), o CLAUDE.md ainda falava da `main` em `v0.3.0` e do plugin no
+  `avisar.sh`, e a decisão 0054 dizia que um `term` vazio é ausente e uma
+  chave desconhecida some sem rastro, mas o código punha o `term` nos
+  descartados quando o objeto não tinha nenhum id conhecido.
+- **O orçamento de commits das peças novas** (decisão 0005) só estava nas
+  decisões: o balão em dois commits, o selo "zZ" e o coração parados, o
+  poof a ~17 quadros por segundo, o arraste parando ao soltar.
+
+**Escolha (revisão do T4.11):**
+- **`e2e-monitor.sh`:** `trap restaurar EXIT` e `trap 'exit 130' INT TERM`
+  (sai, e o EXIT restaura uma vez); o restaurar remove o output pelo nome ou,
+  sem nome, pelo diff com a lista de antes, só os `HEADLESS-` (um monitor de
+  verdade ligado no meio nunca entra); além do `--autorizo`, o Renan digita
+  «sim» no terminal (`/dev/tty`; sem terminal, recusa); o foco pelo
+  `hl.dsp.focus` com o `focusmonitor` de reserva. Continua nunca rodado sem
+  ele.
+- **`verificar-m4.sh`:** confere os avisos reais antes de cada clique (com
+  um, NÃO VERIFICADO e nenhum clique); confere o `ext_idle_notifier_v1` e o
+  `desktop.ocioso` (decisão 0062); no `--manual`, o clique de verdade com um
+  aviso pendente levando a um `foot` que o Renan manda para outra área de
+  trabalho pelo teclado (o script confere a janela e a área ativas pelo
+  `hyprctl -j`, só leitura, e que o aviso saiu) e o checklist do HDMI (ligar
+  e desligar com o Zeca nele), da tampa fechada e da suspensão, com as
+  respostas do Renan no resumo.
+- **A troca depois do merge** (corrige a 0058; é a do README), com o clone
+  em `~/Documents/claude-pet`:
+  1. `git -C ~/Documents/claude-pet switch main && git -C ~/Documents/claude-pet pull`;
+  2. `git -C ~/.local/share/claude-pet/estavel checkout --detach main`;
+  3. `bin/pet subir` **no clone** (o `config/bichinho.toml` do Renan fica
+     montado; nunca na worktree estável);
+  4. `bin/pet instalar-host` e `bichinho versao` (o commit da worktree
+     estável).
+  O plugin continua 0.2.0, com o mesmo `hooks.json`: nada de `claude plugin
+  marketplace update`, `claude plugin update` nem `/reload-plugins`. O hook
+  novo manda o `term`; o antigo segue funcionando com o pet novo.
+- **O `term` sem id conhecido** (vazio, ou só com chaves de um hook mais
+  novo) é ausente, sem ir para os descartados: o código agora diz o que a
+  0054 dizia. Um id ruim continua derrubando o campo.
+- **Testes do orçamento** no Motor, com o compositor mostrando cada quadro na
+  hora (o pior caso) e um Motor de controle: o balão custa 2 quadros; a
+  soneca, só 1 a mais que o bocejo sozinho em 31 min (o selo aparece no
+  primeiro quadro do bocejo, fica parado e some num quadro); o coração, 1 ou
+  2 a mais que a risadinha sozinha (mediu 1); os dois poofs, quadros a 60 ms
+  (nunca abaixo dos 34 ms dos 30 por segundo); o arraste, no máximo um
+  quadro por movimento do ponteiro, e depois do pouso só o repouso, abaixo
+  de 2 commits por segundo, sem nada do arraste armado.
+- PROGRESS do T4.11 com o `854bb44` e o CLAUDE.md com o estado de agora.
+
+**Por quê:** um script de verificação não pode mexer no que é do Renan sem
+ele (o monitor, o foco, os avisos de verdade), e a troca depois do merge
+tem de manter o config dele; e uma promessa de orçamento que não tem teste
+é só uma frase.

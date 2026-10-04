@@ -19,12 +19,17 @@ O plano completo, com marcos M0–M9 e como verificar cada um, está em
 
 ## Estado do repositório
 
-**Na `main` (tags `v0.1.0`–`v0.3.0`):** M0 (fundação), M1 (overlay nítido e
+**Na `main` (tags `v0.1.0`–`v0.3.1`):** M0 (fundação), M1 (overlay nítido e
 barato; portão fechado com a tela acesa, decisão 0005), M2 (o Zeca, aprovado
-pelo Renan pela folha de contato, decisões 0023–0029) e M3 (hooks → reação:
+pelo Renan pela folha de contato, decisões 0023–0029), M3 (hooks → reação:
 plugin `bichinho`, cérebro mínimo com `nod`, `done_small` e `bye`, `bin/pet
-testar`, decisões 0019–0022 e 0030–0034). O andamento por tarefa está no
-`PROGRESS.md`.
+testar`, decisões 0019–0022 e 0030–0034) e a preparação multiplataforma
+(PR #4, `v0.3.1`, decisões 0035–0046): a costura de plataforma (T8.0: o
+Motor e os traits no `pet-core`, o Wayland em `pet-wayland`), o hook nativo
+`bichinho avisar` em exec form (T8.1) e o tamanho do Zeca no config (TP.2,
+`aparencia.tamanho`). O plugin instalado é o 0.2.0 (exec form), da worktree
+estável na `main`, com o `~/.local/bin/bichinho` dela. O andamento por
+tarefa está no `PROGRESS.md`.
 
 O Zeca só aparece com a skin da imagem aprovada (`bin/pet skin-aprovar`, que
 só aprova a skin da folha de contato vista; decisões 0026 e 0029). Sem
@@ -34,26 +39,23 @@ aprovação. A pilha de dev (`PET_DEBUG=1`) mostra a skin xadrez `_teste`, ou o
 personagem aprovado com `PET_DEBUG_PERSONAGEM=1`. Formato, arte e aprovação
 em `docs/SKINS.md`.
 
-**Rumo (2026-10-03, decisões 0035–0042; revisão em 2026-10-04, decisões 0043–0046):** lançamento open source para
-Linux, macOS e Windows, com o app **bichinho** (o personagem continua Zeca).
-O PLANO ganhou o M8 (multiplataforma) e o M9 (publicação). Antes do M4,
-na branch `m3b-portabilidade`: a costura de plataforma (T8.0: o Motor e os
-traits no `pet-core`, o Wayland em `pet-wayland`), o hook nativo `bichinho
-avisar` em exec form com o nome novo (T8.1; o plugin instalado continua no
-`avisar.sh` até a troca do README) e o tamanho do Zeca no config (TP.2,
-`aparencia.tamanho`). No M4, o clique no Zeca leva ao terminal da sessão pelo
-foreign-toplevel, nunca pelo socket de comandos. A pesquisa está em
+**Rumo (2026-10-03, decisões 0035–0042):** lançamento open source para
+Linux, macOS e Windows, com o app **bichinho** (o personagem continua Zeca);
+o PLANO tem o M8 (multiplataforma) e o M9 (publicação). A pesquisa está em
 `docs/pesquisa/09-multiplataforma.md`.
 
-**Na branch `m4-arrastar-seguir` (T4.1–T4.11, decisões 0047–0058):** o M4
-— arrastar com posições salvas por monitor, seguir o monitor ativo pelo
-socket2 com o poof, a fonte monogram e o balão mínimo, a proteção de tela e
-a soneca, os ids de terminal no fio v1 (`term`) com a janela de cada sessão
-casada pelo anel de ativações, o foco pelo foreign-toplevel com o mapeamento
-do Hyprland e os avisos com o clique em ciclo. A produção roda a branch; a
-conferência na tela (`scripts/verificar-m4.sh` e `--manual`) e o
-`scripts/e2e-monitor.sh --autorizo` ficaram pendentes (sessão bloqueada; o
-e2e pede o consentimento do Renan a cada vez).
+**Na branch `m4-arrastar-seguir` (T4.1–T4.11, decisões 0047–0058; revisão
+em 2026-10-04, decisões 0059–0064):** o M4 — arrastar com posições salvas
+por monitor, seguir o monitor ativo pelo socket2 com o poof, a fonte
+monogram e o balão mínimo, a proteção de tela e a soneca, os ids de terminal
+no fio v1 (`term`) com a janela de cada sessão casada pelo anel de
+ativações, o foco pelo foreign-toplevel com o mapeamento do Hyprland, a
+presença do Renan pelo `ext_idle_notifier_v1` e os avisos com o clique em
+ciclo. A produção roda a branch; a conferência na tela
+(`scripts/verificar-m4.sh` e `--manual`, com o checklist do HDMI, da tampa e
+da suspensão) e o `scripts/e2e-monitor.sh --autorizo` ficaram pendentes
+(sessão bloqueada; o e2e pede o Renan digitando «sim» a cada vez). A troca
+depois do merge (o plugin não muda) está no README e na decisão 0064.
 
 **Pendentes** (pedem a tela acesa e desbloqueada, ou o Renan): a
 conferência na tela do M4 (acima), a da arte revista, das reações com o
@@ -84,8 +86,8 @@ Fora dele, use `~/.cargo/bin/cargo`.
 | `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build` | modo desenvolvimento (sem restart, debug, skin `_teste`) |
 | `bin/pet foto` | foto do pet (grim no monitor inteiro); em debug, só os pixels opacos do pet sobre fundo neutro |
 | `scripts/verificar-ao-vivo.sh` | verificação do M1 na tela de verdade; termina com a produção de pé |
-| `scripts/verificar-m4.sh [--manual]` | verificação do M4 contra a produção: o desktop no `/v1/estado`, a janela ativa igual à do Hyprland (`hyprctl -j`, só leitura) e, desbloqueado, dois `foot` com título-canário e sessões de teste para o clique levar a cada um; `--manual` guia o Renan no arraste, no restart, na proteção de tela e no clique com o mouse |
-| `scripts/e2e-monitor.sh --autorizo` | o pet segue um monitor headless criado e removido no Hyprland: **só com o consentimento do Renan, a cada vez** |
+| `scripts/verificar-m4.sh [--manual]` | verificação do M4 contra a produção: o desktop no `/v1/estado` (os protocolos do clique e o da presença), a janela ativa igual à do Hyprland (`hyprctl -j`, só leitura) e, desbloqueado, dois `foot` com título-canário e sessões de teste para o clique levar a cada um (recusa se uma sessão real tem aviso, conferido antes de cada clique); `--manual` guia o Renan no arraste, no restart, na proteção de tela, no clique com o mouse (também com o `foot` noutra área de trabalho) e no checklist do HDMI, da tampa e da suspensão |
+| `scripts/e2e-monitor.sh --autorizo` | o pet segue um monitor headless criado e removido no Hyprland: **só com o consentimento do Renan, a cada vez** (ele digita «sim» no terminal; sem terminal, recusa) |
 | `cargo xtask globais [interface …]` | lista os globais do Wayland e confere os que o clique pede (só lê o registro) |
 | `scripts/medir-custo.sh` | CPU do Hyprland, GPU e commits/s: escondido × parado, com e sem carga de repintura, e estresse |
 | `cargo xtask skin-teste` / `nitidez` / `fantasma` / `carga` | gera a skin xadrez; compara captura e quadro esperado; acha pixel velho e fantasma; repintura invisível para medir custo |

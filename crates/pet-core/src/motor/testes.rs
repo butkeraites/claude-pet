@@ -2069,3 +2069,172 @@ fn o_cursor_volta_a_pegar_quando_o_aperto_desiste() {
     motor.vencer(&mut janela, 100 + arraste::SEM_PONTEIRO_MS);
     assert_eq!(janela.cursor, Some(Cursor::Pegar));
 }
+
+// --- o orçamento de commits das peças do M4 (decisões 0005 e 0064) -----------
+
+/// Simula o laço com o compositor mostrando cada quadro na hora (o melhor
+/// caso para gastar commits): vence os prazos do Motor de `de` até `ate` e
+/// devolve a hora de cada quadro enviado.
+fn quadros_entre(motor: &mut Motor, janela: &mut Falsa, de: u64, ate: u64) -> Vec<u64> {
+    let mut horas = Vec::new();
+    let mut t = de;
+    for _ in 0..1_000_000 {
+        let Some(prazo) = motor.proximo_prazo().filter(|&p| p <= ate) else {
+            return horas;
+        };
+        t = prazo.max(t);
+        janela.mostrou();
+        let antes = janela.quadros();
+        if motor.prazo_do_cerebro().is_some_and(|p| p <= t) {
+            motor.tique(em(t));
+        }
+        motor.vencer(janela, t);
+        horas.extend(std::iter::repeat_n(t, janela.quadros() - antes));
+    }
+    panic!("um milhão de prazos até {ate}: o laço giraria");
+}
+
+/// Dois Motores ligados e assentados até 1 s, com o compositor mostrando
+/// tudo: um para a peça, outro de controle.
+fn dois_ligados() -> ((Motor, Falsa), (Motor, Falsa)) {
+    let (mut a, mut ja) = ligado();
+    let (mut b, mut jb) = ligado();
+    ja.mostrou();
+    jb.mostrou();
+    quadros_entre(&mut a, &mut ja, 0, 1_000);
+    quadros_entre(&mut b, &mut jb, 0, 1_000);
+    ja.mostrou();
+    jb.mostrou();
+    ((a, ja), (b, jb))
+}
+
+#[test]
+fn o_balao_custa_dois_quadros() {
+    let ((mut a, mut ja), (mut b, mut jb)) = dois_ligados();
+    let antes = ja.quadros();
+    a.mostrar_balao(Some(&mut ja), vec!["oi".into()], 1_000);
+    let com = ja.quadros() - antes + quadros_entre(&mut a, &mut ja, 1_000, 60_000).len();
+    let sem = quadros_entre(&mut b, &mut jb, 1_000, 60_000).len();
+    assert_eq!(com, sem + 2, "aparecer e sumir (decisão 0052)");
+}
+
+#[test]
+fn o_selo_zz_parado_nao_custa_nada_na_soneca_e_um_quadro_no_fim() {
+    // A soneca contra só o bocejo, no mesmo instante: o selo aparece no
+    // primeiro quadro do bocejo, fica parado 30 min e some num quadro.
+    use crate::plataforma::EventoPonteiro;
+    let ((mut a, mut ja), (mut b, mut jb)) = dois_ligados();
+    let (x, y) = meio_do_corpo(&ja);
+    let antes_a = ja.quadros();
+    for evento in [
+        EventoPonteiro::Apertou {
+            botao: Botao::Direito,
+            x,
+            y,
+        },
+        EventoPonteiro::Soltou {
+            botao: Botao::Direito,
+            x,
+            y,
+        },
+    ] {
+        ponteiro(&mut a, &mut ja, evento, 1_000);
+    }
+    assert!(a.soneca(1_000).is_some());
+    let antes_b = jb.quadros();
+    b.tocar(Some(&mut jb), BOCEJO, 1_000);
+    let fim = 1_000 + SONECA_MS + 60_000;
+    let com = ja.quadros() - antes_a + quadros_entre(&mut a, &mut ja, 1_000, fim).len();
+    let sem = jb.quadros() - antes_b + quadros_entre(&mut b, &mut jb, 1_000, fim).len();
+    assert_eq!(com, sem + 1, "só o quadro de sumir (decisão 0053)");
+}
+
+#[test]
+fn o_coracao_custa_no_maximo_dois_quadros() {
+    // O clique que foca o terminal contra só a risadinha, no mesmo instante.
+    let ((mut a, mut ja), (mut b, mut jb)) = dois_ligados();
+    a.acertar_relogio(em(0));
+    ligar_desktop(&mut a, 0);
+    ocioso(&mut a, false, 0);
+    ativou(&mut a, Some("f00d01"), 100);
+    prompt_em(&mut a, "sessao-a", "api", 200);
+    pronto_em(&mut a, "sessao-a", "api", 300);
+    ativou(&mut a, Some("f00d03"), 900);
+    ja.desktop.janelas = alcas(&["f00d01"]);
+    let antes_a = ja.quadros();
+    assert!(matches!(
+        a.clicar(&mut ja, Botao::Esquerdo, 1_000),
+        Clicou::Focou { .. }
+    ));
+    ativou(&mut a, Some("f00d01"), 1_010);
+    let antes_b = jb.quadros();
+    b.tocar(Some(&mut jb), RISADINHA, 1_000);
+    let com = ja.quadros() - antes_a + quadros_entre(&mut a, &mut ja, 1_000, 60_000).len();
+    let sem = jb.quadros() - antes_b + quadros_entre(&mut b, &mut jb, 1_000, 60_000).len();
+    assert!(
+        (sem + 1..=sem + 2).contains(&com),
+        "o coração: {com} contra {sem} (decisão 0057)"
+    );
+}
+
+#[test]
+fn o_poof_fica_abaixo_de_30_quadros_por_segundo() {
+    let (mut motor, mut janela) = ligado();
+    janela.mostrou();
+    quadros_entre(&mut motor, &mut janela, 0, 1_000);
+    foco(&mut motor, &mut janela, "HDMI-A-1", 1_000);
+    let saida = quadros_entre(&mut motor, &mut janela, 1_000, 1_540);
+    assert_eq!(saida.len(), poof::PASSOS as usize, "{saida:?}");
+    saiu(&mut motor, &mut janela, 1_600);
+    janela.pronta = Some(hdmi());
+    janela.mostrou();
+    let antes = janela.quadros();
+    motor.evento_overlay(&mut janela, EventoOverlay::Pronta, 1_700);
+    let mut chegada = vec![1_700; janela.quadros() - antes];
+    chegada.extend(quadros_entre(&mut motor, &mut janela, 1_700, 2_000));
+    for horas in [&saida, &chegada] {
+        for par in horas.windows(2) {
+            assert!(
+                par[1] - par[0] >= animador::DURACAO_MIN_MS,
+                "mais de 30 quadros por segundo: {horas:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn o_arraste_faz_commits_no_ritmo_do_ponteiro_e_para_ao_soltar() {
+    let (mut motor, mut janela) = ligado();
+    janela.mostrou();
+    quadros_entre(&mut motor, &mut janela, 0, 1_000);
+    let (x, y) = meio_do_corpo(&janela);
+    let antes = janela.quadros();
+    ponteiro(&mut motor, &mut janela, apertou(x, y), 1_000);
+    // 50 movimentos a ~60 Hz, cada quadro mostrado antes do próximo.
+    for i in 1..=50 {
+        janela.mostrou();
+        ponteiro(
+            &mut motor,
+            &mut janela,
+            moveu(x - 10 * i, y),
+            1_000 + 16 * i as u64,
+        );
+    }
+    janela.mostrou();
+    ponteiro(&mut motor, &mut janela, soltou(x - 500, y), 1_900);
+    assert!(
+        janela.quadros() - antes <= 51 + 1,
+        "no máximo um quadro por movimento: {}",
+        janela.quadros() - antes
+    );
+    // Depois do pouso, só o repouso: até 2 commits por segundo em média.
+    let depois = quadros_entre(&mut motor, &mut janela, 1_900, 61_900);
+    let pouso = depois.iter().filter(|&&t| t < 3_900).count();
+    let repouso = depois.len() - pouso;
+    assert!(pouso <= 5, "o pouso: {pouso} quadros");
+    assert!(
+        repouso as u64 <= 58 * animador::COMMITS_POR_S_PARADO,
+        "{repouso} quadros em 58 s"
+    );
+    assert!(motor.arraste.prazo().is_none(), "nada do arraste armado");
+}

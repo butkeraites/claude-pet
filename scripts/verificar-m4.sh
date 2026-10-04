@@ -20,16 +20,21 @@
 #      lista das sessões. Depois, o canário: o título nunca aparece no log do
 #      pet, no /v1/estado nem no /v1/debug/eventos. Os dois `foot` fecham no
 #      fim, até numa falha;
-#   4. `--manual` (com o Renan, que mexe no mouse): arrastar numa área de
-#      trabalho cheia e numa vazia, a posição depois de um restart, a
+#   4. `--manual` (com o Renan, que mexe no mouse e no teclado): arrastar numa
+#      área de trabalho cheia e numa vazia, a posição depois de um restart, a
 #      proteção de tela (`omarchy-launch-screensaver force`) escondendo o pet
-#      e ele voltando, e o clique de verdade (esquerdo: o balão; direito: a
-#      soneca e o selo zZ).
+#      e ele voltando, o clique de verdade (esquerdo: o balão; direito: a
+#      soneca e o selo zZ), o clique de verdade com um aviso pendente levando
+#      a um `foot` que o Renan mandou para OUTRA área de trabalho (o
+#      `activate` do foreign-toplevel trocando de área de trabalho; o script
+#      não faz dispatch nenhum), e o checklist do HDMI, da tampa fechada e da
+#      suspensão (o Renan responde s/n; decisão 0064).
 #
 # Com a sessão bloqueada ou a tela apagada, o 3 e o 4 saem NÃO VERIFICADOS
 # (contam como falha) e nenhuma janela é aberta. Com avisos de sessões reais
-# pendentes o 3 também: o clique iria a eles primeiro (as reais vêm antes
-# das de teste).
+# pendentes o 3 também, conferido de novo antes de cada clique: o clique
+# iria a eles primeiro (as reais vêm antes das de teste), focaria o terminal
+# do Renan e daria o aviso dele como visto.
 #
 # Do Hyprland, só consultas de leitura (`hyprctl -j`): nunca `dispatch` nem
 # `keyword`. O `foot` abre na área de trabalho de agora. Nada fica em disco
@@ -128,6 +133,14 @@ if jq -e '(.desktop.protocolos | map(split(" ")[0])) as $p
 else
   falhou "focar janelas: protocolos «$PROTOCOLOS», foca_janelas=$(jq -r .desktop.foca_janelas <<<"$E")"
 fi
+# O Renan no teclado e no mouse (decisão 0062): o protocolo ligado e o
+# `ocioso` como booleano.
+if jq -e '(.desktop.protocolos | map(split(" ")[0]) | index("ext_idle_notifier_v1")) != null
+    and (.desktop.ocioso | type) == "boolean"' <<<"$E" >/dev/null; then
+  passou "presença: ext_idle_notifier_v1 ligado (ocioso=$(jq -r .desktop.ocioso <<<"$E"))"
+else
+  falhou "presença: protocolos «$PROTOCOLOS», ocioso=$(jq -r .desktop.ocioso <<<"$E")"
+fi
 # Só endereços: hexadecimal nas janelas do anel, na ativa e nas das sessões,
 # e o anel só com as chaves de sempre.
 if jq -e '
@@ -160,23 +173,34 @@ else
 fi
 
 # --- 3. o clique leva ao terminal ------------------------------------------------
+# Avisos de sessões reais pendentes: o clique iria a eles primeiro.
+reais() { estado | jq '[.sessoes[] | select(.teste == false and .aviso != null)] | length'; }
 REAIS="$(jq '[.sessoes[] | select(.teste == false and .aviso != null)] | length' <<<"$E")"
 declare -a FOOTS=()
 SID_A=""
 SID_B=""
+SID_M=""
 fechar() {
   for pid in "${FOOTS[@]}"; do
     kill "$pid" 2>/dev/null || true
   done
   FOOTS=()
   # As sessões de teste saem caladas (o motivo `clear` não dá tchau).
-  for sid in "$SID_A" "$SID_B"; do
+  for sid in "$SID_A" "$SID_B" "$SID_M"; do
     [ -n "$sid" ] && hook "$sid" m4 SessionEnd '{"reason":"clear"}' 2>/dev/null
   done
   SID_A=""
   SID_B=""
+  SID_M=""
 }
 trap fechar EXIT
+
+# clicar: o `bin/pet clique`, só se nenhuma sessão real tem aviso agora (um
+# que chegou no meio do teste viria antes das de teste).
+clicar() {
+  [ "$(reais)" = 0 ] || return 1
+  "$RAIZ/bin/pet" clique
+}
 
 # hook <sid> <proj> <evento> [json a mais]: um evento de TESTE no fio v1, com
 # o `ts` de agora (o que casa a janela ativa).
@@ -246,21 +270,33 @@ clique_leva_ao_terminal() {
     falhou "avisos: A=$(aviso_de "$SID_A"), B=$(aviso_de "$SID_B") (esperado esperando e pronto)"
   fi
   # Com B em foco, o primeiro clique vai a A (a mais urgente).
-  r="$("$RAIZ/bin/pet" clique)"
+  if ! r="$(clicar)"; then
+    falhou "1º clique: NÃO VERIFICADO — um aviso de sessão real apareceu no meio: o clique iria a ele"
+    fechar
+    return
+  fi
   if [ "$(jq -r .acao <<<"$r")" = focou ] && [ "$(jq -r .janela <<<"$r")" = "$ea" ] &&
     esperar 2 ativa_e "$ea" && esperar 2 sem_aviso "$SID_A"; then
     passou "1º clique: foco no foot de A (esperando você), e o aviso de A saiu"
   else
     falhou "1º clique: $(jq -c . <<<"$r"); ativa=$(ativa_endereco), aviso de A=$(aviso_de "$SID_A")"
   fi
-  r="$("$RAIZ/bin/pet" clique)"
+  if ! r="$(clicar)"; then
+    falhou "2º clique: NÃO VERIFICADO — um aviso de sessão real apareceu no meio: o clique iria a ele"
+    fechar
+    return
+  fi
   if [ "$(jq -r .acao <<<"$r")" = focou ] && [ "$(jq -r .janela <<<"$r")" = "$eb" ] &&
     esperar 2 ativa_e "$eb" && esperar 2 sem_aviso "$SID_B"; then
     passou "2º clique: foco no foot de B (pronto), e o aviso de B saiu"
   else
     falhou "2º clique: $(jq -c . <<<"$r"); ativa=$(ativa_endereco), aviso de B=$(aviso_de "$SID_B")"
   fi
-  r="$("$RAIZ/bin/pet" clique)"
+  if ! r="$(clicar)"; then
+    falhou "3º clique: NÃO VERIFICADO — um aviso de sessão real apareceu no meio: o clique iria a ele"
+    fechar
+    return
+  fi
   if [ "$(jq -r .acao <<<"$r")" = lista ] && [ "$(campo '.balao | length')" -ge 2 ]; then
     passou "3º clique, sem aviso: o balão com as $(jq -r .sessoes <<<"$r") sessões"
   else
@@ -348,11 +384,16 @@ manual() {
   else
     falhou "o pet não voltou depois da proteção de tela"
   fi
-  pausa "Clique com o botão ESQUERDO no Zeca (sem arrastar)."
-  if [ "$(campo '.balao | length')" -ge 1 ]; then
-    passou "clique esquerdo de verdade: o balão ($(campo_c .balao))"
+  if [ "$(reais)" != 0 ]; then
+    falhou "clique esquerdo de verdade: NÃO VERIFICADO — há aviso de sessão real pendente (o clique iria a ele)"
   else
-    falhou "clique esquerdo de verdade: nenhum balão"
+    pausa "Clique com o botão ESQUERDO no Zeca (sem arrastar)."
+    if [ "$(campo '.balao | length')" -ge 1 ]; then
+      passou "clique esquerdo de verdade: o balão ($(campo_c .balao))"
+    else
+      falhou "clique esquerdo de verdade: nenhum balão"
+    fi
+    clique_noutra_area
   fi
   pausa "Clique com o botão DIREITO no Zeca."
   if [ "$(campo .soneca_restante_s)" != null ]; then
@@ -368,14 +409,93 @@ manual() {
   fi
 }
 
+# O clique de verdade, com o mouse, com um aviso pendente: o foot de uma
+# sessão de teste numa OUTRA área de trabalho (o Renan o manda para lá pelo
+# teclado; o script não faz dispatch), e o clique no Zeca tem de levar até
+# ele, trocando de área de trabalho, e tirar o aviso.
+area_ativa() { hyprctl -j activeworkspace 2>/dev/null | jq -r '.id'; }
+area_da_janela() {
+  hyprctl -j clients 2>/dev/null | jq -r --arg a "0x$1" '.[] | select(.address == $a) | .workspace.id'
+}
+clique_noutra_area() {
+  local segredo em aqui wa
+  segredo="SEGREDO-M4-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
+  SID_M="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')-m4-m"
+  aqui="$(area_ativa)"
+  if ! abrir_foot "$segredo-M"; then
+    falhou "clique noutra área de trabalho: o foot não ficou em foco em 5 s"
+    return
+  fi
+  em="$(ativa_endereco)"
+  sleep 1.5
+  hook "$SID_M" m4-m SessionStart '{"src":"startup"}'
+  hook "$SID_M" m4-m UserPromptSubmit
+  sleep 0.3
+  if [ "$(sessao "$SID_M" | jq -r '.janela.endereco // empty')" != "$em" ]; then
+    falhou "clique noutra área de trabalho: a sessão de teste não casou com o foot"
+    fechar
+    return
+  fi
+  pausa "Mande o foot que acabou de abrir para OUTRA área de trabalho (Super+Shift+número) e volte para esta (Super+$aqui), sem fechar o foot."
+  wa="$(area_da_janela "$em")"
+  if [ -z "$wa" ] || [ "$wa" = "$(area_ativa)" ]; then
+    falhou "clique noutra área de trabalho: o foot não está noutra área (a dele: ${wa:-?}, a de agora: $(area_ativa))"
+    fechar
+    return
+  fi
+  hook "$SID_M" m4-m PermissionRequest '{"tool":"Bash"}'
+  sleep 0.3
+  if [ "$(reais)" != 0 ]; then
+    falhou "clique noutra área de trabalho: NÃO VERIFICADO — um aviso de sessão real apareceu no meio"
+    fechar
+    return
+  fi
+  pausa "Clique com o botão ESQUERDO no Zeca: ele tem de levar você ao foot, na área de trabalho $wa."
+  if esperar 3 ativa_e "$em" && [ "$(area_ativa)" = "$wa" ] && esperar 3 sem_aviso "$SID_M"; then
+    passou "clique de verdade com o mouse: foco no foot da área de trabalho $wa pelo activate, e o aviso saiu"
+  else
+    falhou "clique de verdade com o mouse: ativa=$(ativa_endereco) (esperado $em), área $(area_ativa) (esperado $wa), aviso=$(aviso_de "$SID_M")"
+  fi
+  fechar
+}
+
+# O checklist do HDMI, da tampa e da suspensão (PLANO, M4): o Renan faz e
+# responde; o resumo guarda a resposta.
+pergunta() {
+  local resposta
+  printf '\n  %s\n  [s = deu certo, n = não deu, Enter = pular] ' "$2"
+  read -r resposta
+  case "$resposta" in
+    s | S) passou "$1" ;;
+    n | N) falhou "$1" ;;
+    *) nota "$1: pulado (pendente)" ;;
+  esac
+}
+checklist() {
+  pergunta "HDMI ligado: o Zeca segue o foco para ele" \
+    "Ligue o HDMI e leve o mouse para ele: o Zeca some num poof e aparece lá?"
+  pergunta "HDMI desligado com o Zeca nele: ele volta ao eDP-1" \
+    "Com o Zeca no HDMI, desligue o cabo: ele volta ao eDP-1 sozinho, sem ficar sumido?"
+  pergunta "tampa fechada com o HDMI (clamshell)" \
+    "Com o HDMI ligado, feche a tampa e abra de novo: o Zeca fica num monitor que está aceso?"
+  pergunta "suspensão" \
+    "Suspenda pelo menu do Omarchy e volte: o Zeca volta sozinho em poucos segundos?"
+  if [ "$(campo .tela)" = ativa ] && [ "$(campo .visivel)" = true ]; then
+    passou "depois do checklist: o pet de pé e na tela ($(campo .monitor))"
+  else
+    falhou "depois do checklist: tela=$(campo .tela), visivel=$(campo .visivel)"
+  fi
+}
+
 if [ "$MANUAL" = 1 ]; then
   if [ "$LIVRE" = true ]; then
     manual
+    checklist
   else
     falhou "manual: NÃO VERIFICADO — $MOTIVO"
   fi
 else
-  nota "arrastar, a posição depois do restart, a proteção de tela e o clique com o mouse: scripts/verificar-m4.sh --manual, com o Renan"
+  nota "arrastar, a posição depois do restart, a proteção de tela, o clique com o mouse (também com o foot noutra área de trabalho) e o checklist do HDMI, da tampa e da suspensão: scripts/verificar-m4.sh --manual, com o Renan"
 fi
 
 resumo

@@ -248,7 +248,14 @@ pub fn ler(corpo: &[u8]) -> Result<Lido, ErroEvento> {
     let ent = validar("ent", bruto.ent, &mut d, |v| texto(v, eh_origem));
     let dnd = validar("dnd", bruto.dnd, &mut d, Value::as_bool);
     let teste = validar("teste", bruto.teste, &mut d, Value::as_bool);
-    let term = validar("term", bruto.term, &mut d, terminal);
+    // Um objeto sem nenhum id conhecido (vazio, ou só com as chaves de um
+    // hook mais novo) é ausente, sem rastro (decisões 0054 e 0064).
+    let term = match bruto.term {
+        Some(Value::Object(o)) if !o.keys().any(|k| CHAVES_DE_TERMINAL.contains(&k.as_str())) => {
+            None
+        }
+        outro => validar("term", outro, &mut d, terminal),
+    };
 
     Ok(Lido {
         evento: Evento {
@@ -280,9 +287,12 @@ pub fn ler(corpo: &[u8]) -> Result<Lido, ErroEvento> {
     })
 }
 
+/// As chaves do `term` que o pet conhece.
+const CHAVES_DE_TERMINAL: [&str; 3] = ["tmux", "kitty", "wezterm"];
+
 /// `term`: um objeto com os ids conhecidos, todos válidos (um ruim derruba o
 /// campo inteiro); chave desconhecida é ignorada (um hook mais novo não
-/// derruba o pet). Vazio é ausente.
+/// derruba o pet). Sem id conhecido, quem chama o trata como ausente.
 fn terminal(v: &Value) -> Option<Terminal> {
     let objeto = v.as_object()?;
     let mut t = Terminal::default();
@@ -480,9 +490,16 @@ mod testes {
             assert_eq!(lido.evento.term, None, "{ruim}");
             assert_eq!(lido.descartados, vec!["term"], "{ruim}");
         }
-        let vazio = term("{}");
-        assert_eq!(vazio.evento.term, None);
-        assert!(vazio.descartados.contains(&"term"), "vazio cai");
+        // Vazio, ou só com chaves de um hook mais novo: ausente, sem rastro.
+        for sem_id in ["{}", r#"{"novo_terminal":"7"}"#] {
+            let lido = term(sem_id);
+            assert_eq!(lido.evento.term, None, "{sem_id}");
+            assert!(
+                lido.descartados.is_empty(),
+                "{sem_id}: {:?}",
+                lido.descartados
+            );
+        }
         let texto = format!("{:?}", term(r#"{"tmux":"%1","x":"SEGREDO"}"#));
         assert!(!texto.contains("SEGREDO"), "{texto}");
     }

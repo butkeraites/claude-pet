@@ -229,9 +229,12 @@ ela, tudo funciona.
 **Conferir na tela:** `scripts/verificar-m4.sh` (com a sessão desbloqueada:
 abre dois `foot`, casa uma sessão de teste com cada um e confere que o
 clique leva a cada um) e `scripts/verificar-m4.sh --manual` (arrastar, a
-posição depois de reiniciar, a proteção de tela e o clique com o mouse).
+posição depois de reiniciar, a proteção de tela, o clique com o mouse,
+também levando a um `foot` que você mandou para outra área de trabalho, e o
+checklist do HDMI, da tampa fechada e da suspensão).
 `scripts/e2e-monitor.sh --autorizo` cria um monitor de mentira para conferir
-a troca de monitor: mexe no Hyprland, então só com o seu consentimento.
+a troca de monitor: mexe no Hyprland, então só com o seu consentimento (ele
+pede que você digite «sim» no terminal).
 
 ## Desenvolvimento
 

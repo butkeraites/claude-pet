@@ -5,10 +5,12 @@
 # remove o output e confere que o pet ficou bem.
 #
 # MEXE NO HYPRLAND DO RENAN: cria e remove um monitor e troca o monitor em
-# foco (`hyprctl output create|remove` e `hyprctl dispatch focusmonitor`).
-# Por isso só roda com `--autorizo`, e só com o consentimento dele A CADA
-# VEZ. Um `trap` sempre restaura: remove o output criado e devolve o foco ao
-# monitor de antes, até numa falha ou num Ctrl+C.
+# foco (`hyprctl output create|remove` e o dispatch de foco do monitor). Por
+# isso só roda com `--autorizo` E com o Renan digitando «sim» no terminal (um
+# `--autorizo` passado por um script ou por um agente sem terminal não
+# basta), A CADA VEZ. Um `trap` sempre restaura: remove o output criado
+# (até um que apareceu depois do prazo de descobrir o nome) e devolve o foco
+# ao monitor de antes, numa falha, num Ctrl+C ou num SIGTERM (decisão 0064).
 #
 # O daemon continua sem o socket de comandos (decisão 0006): quem fala com
 # ele aqui é este script do host, com o consentimento do Renan.
@@ -27,6 +29,19 @@ uso: scripts/e2e-monitor.sh --autorizo
 Cria e remove um monitor headless no Hyprland e troca o foco entre monitores.
 Só com o consentimento do Renan, a cada vez.
 TEXTO
+  exit 2
+fi
+
+# O consentimento é do Renan, no teclado, agora.
+if ! { exec 3</dev/tty; } 2>/dev/null; then
+  echo "sem terminal: este script só roda com o Renan confirmando no teclado" >&2
+  exit 2
+fi
+printf 'Este script cria e remove um monitor headless no Hyprland e troca o foco entre\nmonitores. O Renan autorizou, agora? Digite «sim» para seguir: ' >/dev/tty
+read -r RESPOSTA <&3 || RESPOSTA=""
+exec 3<&-
+if [ "$RESPOSTA" != sim ]; then
+  echo "sem o consentimento: nada foi feito" >&2
   exit 2
 fi
 
@@ -55,6 +70,13 @@ esperar() {
 
 nomes() { hyprctl -j monitors all | jq -r '.[].name' | sort; }
 focado() { hyprctl -j monitors | jq -r '.[] | select(.focused) | .name' | head -n1; }
+# Foca um monitor. Com o config em Lua (Hyprland 0.56) o dispatch é o do
+# `hl.dsp`; o antigo fica de reserva (o mesmo jeito do
+# omarchy-launch-screensaver).
+focar_monitor() {
+  hyprctl dispatch "hl.dsp.focus({ monitor = \"$1\" })" >/dev/null 2>&1 ||
+    hyprctl dispatch focusmonitor "$1" >/dev/null 2>&1
+}
 # A camada do pet viva (pid > 0) no monitor.
 camada_em() {
   [ "$(hyprctl -j layers | jq --arg m "$1" \
@@ -78,19 +100,29 @@ fi
 ANTES_FOCO="$(focado)"
 ANTES="$(nomes)"
 NOVO=""
+# Os outputs headless que apareceram desde o começo (o que este script criou,
+# mesmo se o nome não foi descoberto a tempo); um monitor de verdade que o
+# Renan ligar no meio nunca entra.
+headless_novos() { comm -13 <(printf '%s\n' "$ANTES") <(nomes) | grep '^HEADLESS-' || true; }
 restaurar() {
-  if [ -n "$NOVO" ]; then
-    hyprctl output remove "$NOVO" >/dev/null 2>&1 || echo "✗ NÃO consegui remover o output $NOVO: hyprctl output remove $NOVO" >&2
-    NOVO=""
-  fi
-  [ -n "$ANTES_FOCO" ] && hyprctl dispatch focusmonitor "$ANTES_FOCO" >/dev/null 2>&1
+  local criados="$NOVO"
+  [ -z "$criados" ] && criados="$(headless_novos)"
+  for nome in $criados; do
+    hyprctl output remove "$nome" >/dev/null 2>&1 ||
+      echo "✗ NÃO consegui remover o output $nome: hyprctl output remove $nome" >&2
+  done
+  NOVO=""
+  [ -n "$ANTES_FOCO" ] && focar_monitor "$ANTES_FOCO"
 }
-trap restaurar EXIT INT TERM
+# O EXIT restaura uma vez só; o Ctrl+C e o SIGTERM saem (e o EXIT restaura),
+# em vez de voltar ao meio do script.
+trap restaurar EXIT
+trap 'exit 130' INT TERM
 
 echo "▸ criando um output headless"
 hyprctl output create headless >/dev/null
 for _ in $(seq 1 30); do
-  NOVO="$(comm -13 <(printf '%s\n' "$ANTES") <(nomes) | head -n1)"
+  NOVO="$(headless_novos | head -n1)"
   [ -n "$NOVO" ] && break
   sleep 0.1
 done
@@ -100,14 +132,14 @@ if [ -z "$NOVO" ]; then
 fi
 echo "  output novo: $NOVO"
 
-hyprctl dispatch focusmonitor "$NOVO" >/dev/null
+focar_monitor "$NOVO"
 if esperar "$PRAZO_S" pet_em "$NOVO"; then
   passou "focar $NOVO: o pet foi para lá (camada viva, /v1/estado.monitor=$NOVO)"
 else
   falhou "focar $NOVO: o pet ficou em $(campo .monitor) (visivel=$(campo .visivel))"
 fi
 
-hyprctl dispatch focusmonitor "$ANTES_FOCO" >/dev/null
+focar_monitor "$ANTES_FOCO"
 if esperar "$PRAZO_S" pet_em "$ANTES_FOCO"; then
   passou "voltar a $ANTES_FOCO: o pet voltou"
 else
