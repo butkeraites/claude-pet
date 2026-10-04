@@ -710,3 +710,244 @@ fn arrastar_com_quadro_em_voo_adia_e_o_redesenhar_leva_a_posicao_de_agora() {
     let antes = 1706; // a célula padrão do _teste no eDP-1
     assert_eq!(sx, antes - 80, "a posição do último movimento");
 }
+
+// --- seguir o monitor ativo (decisão 0051) ----------------------------------
+
+fn hdmi() -> Monitor {
+    Monitor {
+        nome: Some("HDMI-A-1".into()),
+        descricao: Some("Dell Inc. DELL U2720Q 7LN4 (HDMI-A-1)".into()),
+        logico: (2560, 1440),
+        escala: 1.5,
+        origem: Some((0, -1440)),
+        area_util: None,
+    }
+}
+
+fn em(ms: u64) -> Agora {
+    Agora {
+        parede_ms: PAREDE + ms,
+        mono_ms: ms,
+    }
+}
+
+fn foco(motor: &mut Motor, janela: &mut Falsa, nome: &str, ms: u64) {
+    motor.evento_desktop(
+        Some(janela),
+        &crate::plataforma::EventoDesktop::MonitorEmFoco(nome.into()),
+        em(ms),
+    );
+}
+
+fn tem_sprite(janela: &Falsa) -> bool {
+    janela
+        .cena
+        .as_ref()
+        .is_some_and(|c| c.iter().any(|e| matches!(e, Elemento::Sprite { .. })))
+}
+
+/// A janela de mentira termina de sair (o quadro transparente foi mostrado).
+fn saiu(motor: &mut Motor, janela: &mut Falsa, ms: u64) {
+    janela.fase = None;
+    motor.evento_overlay(janela, EventoOverlay::Saiu, ms);
+}
+
+#[test]
+fn segue_o_monitor_em_foco_com_debounce_e_poof_na_saida_e_na_chegada() {
+    let (mut motor, mut janela) = ligado();
+    janela.mostrou();
+    foco(&mut motor, &mut janela, "HDMI-A-1", 1_000);
+    motor.vencer(&mut janela, 1_299);
+    assert_eq!(motor.painel(Some(&janela), 1_299).viagem, None, "debounce");
+    motor.vencer(&mut janela, 1_300);
+    assert_eq!(motor.painel(Some(&janela), 1_300).viagem, Some("poof"));
+    assert!(tem_sprite(&janela), "no primeiro passo o pet ainda está");
+    assert!(janela.cena.as_ref().unwrap().len() > 1, "e a nuvem");
+    janela.mostrou();
+    motor.vencer(&mut janela, 1_360);
+    assert!(!tem_sprite(&janela), "o pet some no segundo passo");
+    janela.mostrou();
+    motor.vencer(&mut janela, 1_540);
+    assert_eq!(janela.pedidos.last().unwrap(), "apagar com _teste");
+    assert_eq!(motor.painel(Some(&janela), 1_540).viagem, Some("saindo"));
+    saiu(&mut motor, &mut janela, 1_600);
+    assert_eq!(
+        janela.pedidos.last().unwrap(),
+        "criar",
+        "nasce no monitor em foco"
+    );
+    assert_eq!(motor.painel(Some(&janela), 1_600).viagem, Some("chegando"));
+    janela.pronta = Some(hdmi());
+    motor.evento_overlay(&mut janela, EventoOverlay::Pronta, 1_700);
+    let p = motor.painel(Some(&janela), 1_700);
+    assert_eq!(p.viagem, Some("entrando"));
+    assert_eq!(p.monitor.as_deref(), Some("HDMI-A-1"));
+    assert_eq!(p.d, Some(8), "o D do monitor novo");
+    assert!(!tem_sprite(&janela), "a nuvem antes do pet");
+    janela.mostrou();
+    motor.vencer(&mut janela, 1_760);
+    assert!(tem_sprite(&janela), "o pet aparece no segundo passo");
+    janela.mostrou();
+    motor.vencer(&mut janela, 1_700 + 240);
+    assert_eq!(motor.painel(Some(&janela), 1_940).viagem, None);
+    assert_eq!(janela.cena.as_ref().unwrap().len(), 1, "só o pet");
+    // Já está no monitor em foco: conferir de novo não viaja.
+    motor.vencer(&mut janela, 5_000);
+    assert_eq!(motor.painel(Some(&janela), 5_000).viagem, None);
+}
+
+#[test]
+fn rajada_de_foco_que_volta_ao_mesmo_monitor_nao_viaja() {
+    let (mut motor, mut janela) = ligado();
+    janela.mostrou();
+    // A proteção de tela do Omarchy foca cada monitor em sequência.
+    foco(&mut motor, &mut janela, "HDMI-A-1", 0);
+    foco(&mut motor, &mut janela, "eDP-1", 120);
+    motor.vencer(&mut janela, 300);
+    assert_eq!(
+        motor.painel(Some(&janela), 300).viagem,
+        None,
+        "ainda no debounce"
+    );
+    motor.vencer(&mut janela, 420);
+    assert_eq!(
+        motor.painel(Some(&janela), 420).viagem,
+        None,
+        "voltou ao mesmo"
+    );
+    assert!(!janela.pedidos.iter().any(|p| p.starts_with("apagar")));
+}
+
+#[test]
+fn arrastando_congela_e_solto_dentro_confere_o_foco() {
+    let (mut motor, mut janela) = ligado();
+    janela.mostrou();
+    let (x, y) = meio_do_corpo(&janela);
+    ponteiro(&mut motor, &mut janela, apertou(x, y), 0);
+    ponteiro(&mut motor, &mut janela, moveu(x - 60, y), 10);
+    foco(&mut motor, &mut janela, "HDMI-A-1", 20);
+    motor.vencer(&mut janela, 400);
+    assert_eq!(
+        motor.painel(Some(&janela), 400).viagem,
+        None,
+        "congelado no arraste"
+    );
+    janela.mostrou();
+    ponteiro(&mut motor, &mut janela, soltou(x - 60, y), 500);
+    motor.vencer(&mut janela, 500);
+    assert_eq!(
+        motor.painel(Some(&janela), 500).viagem,
+        Some("poof"),
+        "solto, segue o foco"
+    );
+}
+
+#[test]
+fn solto_fora_do_monitor_pousa_no_monitor_debaixo_do_ponteiro() {
+    let (mut motor, mut janela) = ligado();
+    janela.pronta = Some(Monitor {
+        origem: Some((640, 0)),
+        ..edp()
+    });
+    motor.evento_overlay(&mut janela, EventoOverlay::Pronta, 0);
+    janela.mostrou();
+    let (x, y) = meio_do_corpo(&janela);
+    ponteiro(&mut motor, &mut janela, apertou(x, y), 10);
+    ponteiro(&mut motor, &mut janela, moveu(x - 30, y - 600), 20);
+    // Solto acima do eDP-1 (y negativo no palco): o HDMI fica em cima.
+    let (sx, sy) = (900, -300);
+    janela.mostrou();
+    ponteiro(&mut motor, &mut janela, soltou(sx, sy), 30);
+    assert!(!motor.arrastando());
+    assert_eq!(motor.painel(Some(&janela), 30).viagem, Some("poof"));
+    janela.mostrou();
+    motor.vencer(&mut janela, 30 + 240);
+    saiu(&mut motor, &mut janela, 300);
+    janela.pronta = Some(hdmi());
+    motor.evento_overlay(&mut janela, EventoOverlay::Pronta, 400);
+    let p = motor.painel(Some(&janela), 400);
+    assert_eq!(p.reacao.as_deref(), Some(SOLTO), "pousa lá");
+    // O ponto solto no desktop: (640 + 900/1,5, 0 − 300/1,5) = (1240, −200)
+    // lógicos; no HDMI (origem (0, −1440)): (1240, 1240) lógicos = (1860,
+    // 1860) no palco. A célula fica com a pegada debaixo dele.
+    let palco = motor.palco.unwrap();
+    let pegada = (x - 1706, y - 951);
+    assert_eq!((palco.x + pegada.0, palco.y + pegada.1), (1860, 1860));
+    // E a posição ficou guardada para o monitor novo.
+    assert!(
+        motor
+            .posicoes()
+            .de("descricao:Dell Inc. DELL U2720Q 7LN4")
+            .is_some()
+    );
+}
+
+#[test]
+fn mais_de_3_viagens_em_20_s_viram_rapidas_e_escondido_nao_viaja() {
+    let (mut motor, mut janela) = ligado();
+    janela.mostrou();
+    let mut t = 0;
+    let monitores = [hdmi(), edp(), hdmi(), edp()];
+    for (i, monitor) in monitores.iter().enumerate() {
+        foco(&mut motor, &mut janela, monitor.nome.as_deref().unwrap(), t);
+        t += 2_000;
+        janela.mostrou();
+        motor.vencer(&mut janela, t);
+        let viagem = motor.painel(Some(&janela), t).viagem;
+        if i < 3 {
+            assert_eq!(viagem, Some("poof"), "viagem {i}");
+            janela.mostrou();
+            t += 240;
+            motor.vencer(&mut janela, t);
+        } else {
+            assert_eq!(viagem, Some("saindo"), "a quarta em 20 s: sem poof");
+        }
+        saiu(&mut motor, &mut janela, t);
+        janela.pronta = Some(monitor.clone());
+        motor.evento_overlay(&mut janela, EventoOverlay::Pronta, t);
+        janela.mostrou();
+        t += 240;
+        motor.vencer(&mut janela, t);
+        assert_eq!(motor.painel(Some(&janela), t).viagem, None);
+    }
+    // Escondido, o foco muda e nada acontece (ele nasce no monitor em foco
+    // quando voltar).
+    motor.definir_visivel(false);
+    motor.aplicar_visibilidade(&mut janela, t);
+    foco(&mut motor, &mut janela, "HDMI-A-1", t);
+    motor.vencer(&mut janela, t + 300);
+    assert_eq!(motor.painel(Some(&janela), t + 300).viagem, None);
+}
+
+#[test]
+fn esconder_no_meio_da_viagem_desiste_e_a_janela_fechada_espera_a_nova() {
+    let (mut motor, mut janela) = ligado();
+    janela.mostrou();
+    foco(&mut motor, &mut janela, "HDMI-A-1", 0);
+    motor.vencer(&mut janela, 300);
+    janela.mostrou();
+    motor.vencer(&mut janela, 540);
+    assert_eq!(motor.painel(Some(&janela), 540).viagem, Some("saindo"));
+    motor.definir_visivel(false);
+    motor.aplicar_visibilidade(&mut janela, 560);
+    saiu(&mut motor, &mut janela, 600);
+    assert_eq!(motor.painel(Some(&janela), 600).viagem, None, "desistiu");
+    assert_ne!(
+        janela.pedidos.last().unwrap(),
+        "criar",
+        "escondido: não recria"
+    );
+    // A janela fecha no meio de uma viagem (o monitor saiu): espera a nova.
+    let (mut motor, mut janela) = ligado();
+    janela.mostrou();
+    foco(&mut motor, &mut janela, "HDMI-A-1", 0);
+    motor.vencer(&mut janela, 300);
+    janela.fase = None;
+    motor.evento_overlay(&mut janela, EventoOverlay::Sumiu, 320);
+    assert_eq!(motor.painel(Some(&janela), 320).viagem, Some("chegando"));
+    motor.evento_overlay(&mut janela, EventoOverlay::Recriar, 570);
+    assert_eq!(janela.pedidos.last().unwrap(), "criar");
+    janela.pronta = Some(hdmi());
+    motor.evento_overlay(&mut janela, EventoOverlay::Pronta, 600);
+    assert_eq!(motor.painel(Some(&janela), 600).viagem, Some("entrando"));
+}

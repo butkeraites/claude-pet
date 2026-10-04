@@ -26,8 +26,10 @@ pub mod arraste;
 mod desktop;
 pub mod janelas;
 mod pet;
+mod poof;
 pub mod posicoes;
 mod ritmo;
+pub mod viagem;
 
 use std::rc::Rc;
 
@@ -49,7 +51,10 @@ pub use arraste::{Arraste, Gesto};
 pub use desktop::{EstadoDesktop, PainelDesktop};
 pub use pet::{Palco, Pet};
 pub use posicoes::{Fracao, Posicoes};
+pub use viagem::{Pouso, Seguir};
+
 pub use ritmo::{Commits, Estresse, JANELA_COMMITS_MS};
+use viagem::{Decisao, Fase as FaseViagem};
 
 /// Confetes do teste de estresse, sempre com a mesma semente: medições
 /// repetidas veem as mesmas trajetórias.
@@ -93,6 +98,9 @@ pub struct Painel {
     pub reacao: Option<String>,
     /// O pet está sendo arrastado.
     pub arrastando: bool,
+    /// A fase da viagem para o monitor em foco (`poof`, `saindo`,
+    /// `chegando`, `entrando`), se houver uma.
+    pub viagem: Option<&'static str>,
     /// O desktop: a fonte dos eventos, o monitor em foco, a janela ativa (só
     /// o endereço) e o que a conexão sabe fazer.
     pub desktop: PainelDesktop,
@@ -158,6 +166,8 @@ pub struct Motor {
     posicoes_novas: bool,
     /// A chave do monitor do palco de agora.
     chave_do_monitor: Option<String>,
+    /// Seguir o monitor ativo (decisão 0051).
+    seguir: Seguir,
 }
 
 impl Motor {
@@ -177,6 +187,7 @@ impl Motor {
             posicoes: Posicoes::default(),
             posicoes_novas: false,
             chave_do_monitor: None,
+            seguir: Seguir::default(),
         }
     }
 
@@ -308,6 +319,7 @@ impl Motor {
         self.pet = self.skin.clone().map(|skin| Pet::novo(skin, agora_ms));
         self.palco = None;
         self.arraste.cancelar();
+        self.seguir.terminar();
         self.estresse = None;
         self.commits = Commits::default();
         self.proximo_quadro = None;
@@ -318,13 +330,22 @@ impl Motor {
         self.pet = None;
         self.palco = None;
         self.arraste.cancelar();
+        self.seguir.terminar();
         self.estresse = None;
         self.commits = Commits::default();
         self.proximo_quadro = None;
     }
 
-    /// Leva a janela à visibilidade pedida.
+    /// Leva a janela à visibilidade pedida. Numa viagem para outro monitor,
+    /// quem cria a janela nova é a viagem; esconder no meio desiste dela.
     pub fn aplicar_visibilidade(&mut self, ov: &mut dyn Overlay, agora_ms: u64) {
+        match self.seguir.fase() {
+            Some(FaseViagem::Entrando { .. }) | None => {}
+            Some(_) if self.quer_mostrar() => return,
+            Some(_) => {
+                self.seguir.terminar();
+            }
+        }
         let passo = passo_de_visibilidade(ov.fase(), self.quer_mostrar());
         self.aplicar_passo(ov, passo, agora_ms);
     }
@@ -448,8 +469,14 @@ impl Motor {
                 if self.pet.is_some()
                     && let Some(monitor) = ov.pronta()
                 {
-                    self.montar_palco(&monitor);
-                    self.desenhar(ov, agora_ms, false);
+                    if self.seguir.fase() == Some(FaseViagem::Chegando) {
+                        self.chegar(ov, &monitor, agora_ms);
+                    } else {
+                        self.montar_palco(&monitor);
+                        self.desenhar(ov, agora_ms, false);
+                        // A janela pode ter nascido longe do monitor em foco.
+                        self.seguir.conferir_em(agora_ms);
+                    }
                 }
             }
             EventoOverlay::Redesenhar => self.desenhar(ov, agora_ms, false),
@@ -457,6 +484,11 @@ impl Motor {
                 self.largar_o_arraste(agora_ms);
                 self.proximo_quadro = None;
                 self.palco = None;
+                // O compositor fechou a janela no meio da viagem (o monitor
+                // saiu): a nova vem com o `Recriar`.
+                if self.seguir.em_viagem() {
+                    self.seguir.mudar_fase(FaseViagem::Chegando);
+                }
             }
             EventoOverlay::Recriar => {
                 if self.quer_mostrar() && ov.fase() == Fase::Ausente {
@@ -465,9 +497,129 @@ impl Motor {
                 }
             }
             EventoOverlay::Ponteiro(ponteiro) => self.ponteiro(punho, ponteiro, agora_ms),
-            // O painel é publicado depois de cada lote de eventos.
-            EventoOverlay::Saiu => {}
+            // A janela velha morreu no meio da viagem: a nova nasce no
+            // monitor em foco (output NULL).
+            EventoOverlay::Saiu => {
+                if self.seguir.fase() == Some(FaseViagem::Saindo) {
+                    if self.quer_mostrar() && ov.fase() == Fase::Ausente {
+                        ov.criar();
+                        self.palco = None;
+                        self.seguir.mudar_fase(FaseViagem::Chegando);
+                    } else {
+                        self.seguir.terminar();
+                    }
+                }
+            }
         }
+    }
+
+    // --- seguir o monitor ativo (decisão 0051) -------------------------------
+
+    /// Começa a viagem para o monitor em foco: o poof de saída (se o pet está
+    /// desenhado e a viagem não é rápida) ou a saída direta.
+    fn comecar_viagem(&mut self, ov: &mut dyn Overlay, pouso: Option<Pouso>, agora_ms: u64) {
+        self.largar_o_arraste(agora_ms);
+        let desenhado = ov.fase() == (Fase::Viva { conteudo: true }) && self.palco.is_some();
+        let rapida = self.seguir.comecar(agora_ms, pouso, desenhado);
+        info!(
+            "indo para o monitor em foco ({}){}",
+            self.seguir.alvo.as_deref().unwrap_or("?"),
+            if rapida { ", sem poof" } else { "" }
+        );
+        if rapida {
+            self.sair_para_viajar(ov, agora_ms);
+        } else {
+            self.desenhar(ov, agora_ms, true);
+        }
+    }
+
+    /// O poof de saída acabou (ou não houve): quadro transparente e a janela
+    /// morre; sem nada desenhado, morre já e a nova nasce em seguida.
+    fn sair_para_viajar(&mut self, ov: &mut dyn Overlay, agora_ms: u64) {
+        self.seguir.mudar_fase(FaseViagem::Saindo);
+        let passo = passo_de_visibilidade(ov.fase(), false);
+        self.aplicar_passo(ov, passo, agora_ms);
+        if ov.fase() == Fase::Ausente {
+            if self.quer_mostrar() {
+                ov.criar();
+                self.palco = None;
+                self.seguir.mudar_fase(FaseViagem::Chegando);
+            } else {
+                self.seguir.terminar();
+            }
+        }
+    }
+
+    /// A janela nova ficou pronta: o palco na posição salva daquele monitor
+    /// (ou no ponto onde o pet foi solto) e o poof de chegada.
+    fn chegar(&mut self, ov: &mut dyn Overlay, monitor: &Monitor, agora_ms: u64) {
+        self.montar_palco(monitor);
+        let viagem = self.seguir.viagem;
+        if let Some(pouso) = viagem.and_then(|v| v.pouso)
+            && let Some(origem) = monitor.origem
+        {
+            let e = monitor.escala;
+            let x = ((pouso.global.0 - pouso.pegada.0 - origem.0 as f64) * e).round() as i32;
+            let y = ((pouso.global.1 - pouso.pegada.1 - origem.1 as f64) * e).round() as i32;
+            self.mover_para((x, y));
+            if let Some(pet) = self.pet.as_mut() {
+                pet.tocar(SOLTO, agora_ms);
+            }
+            self.guardar_posicao();
+        }
+        if viagem.is_none_or(|v| v.rapida) {
+            self.seguir.terminar();
+            self.seguir.conferir_em(agora_ms);
+        } else {
+            self.seguir.mudar_fase(FaseViagem::Entrando {
+                inicio_ms: agora_ms,
+            });
+        }
+        self.desenhar(ov, agora_ms, false);
+    }
+
+    /// Os prazos da viagem: o fim dos poofs e a hora de conferir o foco.
+    fn vencer_viagem(&mut self, ov: &mut dyn Overlay, agora_ms: u64) {
+        match self.seguir.fase() {
+            Some(FaseViagem::Poof { inicio_ms }) if agora_ms >= inicio_ms + poof::DURACAO_MS => {
+                self.sair_para_viajar(ov, agora_ms);
+            }
+            Some(FaseViagem::Entrando { inicio_ms })
+                if agora_ms >= inicio_ms + poof::DURACAO_MS =>
+            {
+                self.seguir.terminar();
+                self.desenhar(ov, agora_ms, false);
+                self.seguir.conferir_em(agora_ms);
+            }
+            _ => {}
+        }
+        let monitor = ov.pronta().and_then(|m| m.nome);
+        let livre = self.quer_mostrar()
+            && !self.arraste.segurando()
+            && matches!(ov.fase(), Fase::Viva { .. });
+        if self.seguir.decidir(agora_ms, monitor.as_deref(), livre) == Decisao::Viajar {
+            self.comecar_viagem(ov, None, agora_ms);
+        }
+    }
+
+    /// O pouso no monitor onde o botão subiu, se ele subiu fora deste: o
+    /// ponto no desktop (lógico) e a pegada, pela origem do monitor.
+    fn pouso_fora(&self, ov: &dyn Overlay, x: i32, y: i32, pegada: (i32, i32)) -> Option<Pouso> {
+        let palco = self.palco?;
+        let fora = x < 0 || y < 0 || x >= palco.tela.0 || y >= palco.tela.1;
+        if !fora {
+            return None;
+        }
+        let monitor = ov.pronta()?;
+        let origem = monitor.origem?;
+        let e = monitor.escala;
+        Some(Pouso {
+            global: (
+                origem.0 as f64 + x as f64 / e,
+                origem.1 as f64 + y as f64 / e,
+            ),
+            pegada: (pegada.0 as f64 / e, pegada.1 as f64 / e),
+        })
     }
 
     // --- arrastar e clicar (decisão 0048) ------------------------------------
@@ -510,9 +662,26 @@ impl Motor {
                     self.desenhar(punho.janela(), agora_ms, false);
                 }
             }
-            Gesto::Soltou { celula, .. } => {
+            Gesto::Soltou {
+                x,
+                y,
+                celula,
+                pegada,
+            } => {
                 self.mover_para(celula);
-                self.pousar(punho.janela(), agora_ms);
+                let ov = punho.janela();
+                match self.pouso_fora(ov, x, y, pegada) {
+                    // Solto fora do monitor: vai já para o monitor debaixo do
+                    // ponteiro (o compositor já o focou), e pousa lá.
+                    Some(pouso) => {
+                        ov.cursor(Cursor::Pegar);
+                        if let Some(pet) = self.pet.as_mut() {
+                            pet.largar(agora_ms);
+                        }
+                        self.comecar_viagem(ov, Some(pouso), agora_ms);
+                    }
+                    None => self.pousar(ov, agora_ms),
+                }
             }
             Gesto::Cancelou => self.pousar(punho.janela(), agora_ms),
             Gesto::Clique(botao) => {
@@ -557,6 +726,8 @@ impl Motor {
         }
         self.guardar_posicao();
         self.desenhar(ov, agora_ms, false);
+        // O foco pode ter mudado de monitor durante o arraste.
+        self.seguir.conferir_em(agora_ms);
     }
 
     /// Esconder, a janela fechada ou o fim da conexão largam o arraste sem
@@ -592,6 +763,9 @@ impl Motor {
         evento: &EventoDesktop,
         agora: Agora,
     ) -> bool {
+        if let EventoDesktop::MonitorEmFoco(nome) = evento {
+            self.seguir.foco(nome.clone(), agora.mono_ms);
+        }
         self.desktop.aplicar(evento, agora.parede_ms)
     }
 
@@ -619,6 +793,28 @@ impl Motor {
             return;
         }
         let (mut cena, mut proxima) = pet.cena(&palco, agora_ms);
+        // O poof da viagem (decisão 0051): a nuvem em volta do corpo, e o pet
+        // some na saída e aparece na chegada.
+        let poof = match self.seguir.fase() {
+            Some(FaseViagem::Poof { inicio_ms }) => Some((inicio_ms, false)),
+            Some(FaseViagem::Entrando { inicio_ms }) => Some((inicio_ms, true)),
+            _ => None,
+        };
+        if let Some((inicio_ms, entrando)) = poof {
+            match poof::passo(inicio_ms, agora_ms) {
+                Some((passo, prazo)) => {
+                    if !poof::mostra_o_pet(passo, entrando) {
+                        cena.clear();
+                    }
+                    if let Some(corpo) = pet.toque_no_palco(&palco) {
+                        cena.extend(poof::nuvem(corpo, palco.d, passo, entrando));
+                    }
+                    proxima = Some(proxima.map_or(prazo, |p| p.min(prazo)));
+                }
+                None if !entrando => cena.clear(),
+                None => {}
+            }
+        }
         if self.estresse.as_ref().is_some_and(|e| agora_ms >= e.fim_ms) {
             self.estresse = None;
             info!("debug: estresse acabou");
@@ -669,19 +865,21 @@ impl Motor {
     }
 
     /// Os prazos do Motor que vencem com a conexão: o arraste (segurar e o
-    /// fail-safe) e a animação.
+    /// fail-safe), a viagem para o monitor em foco e a animação.
     pub fn vencer(&mut self, punho: &mut dyn Punho, agora_ms: u64) {
         let gesto = self.arraste.vencer(agora_ms);
         self.aplicar_gesto(punho, gesto, agora_ms);
+        self.vencer_viagem(punho.janela(), agora_ms);
         self.vencer_animacao(punho.janela(), agora_ms);
     }
 
-    /// O próximo prazo do Motor (cérebro, animação ou arraste).
+    /// O próximo prazo do Motor (cérebro, animação, arraste ou viagem).
     pub fn proximo_prazo(&self) -> Option<u64> {
         [
             self.cerebro.proximo_prazo(),
             self.proximo_quadro,
             self.arraste.prazo(),
+            self.seguir.prazo(),
         ]
         .into_iter()
         .flatten()
@@ -839,6 +1037,7 @@ impl Motor {
                 .and_then(|pet| pet.reacao(agora_ms))
                 .map(str::to_owned),
             arrastando: self.arraste.arrastando(),
+            viagem: self.seguir.fase().map(FaseViagem::nome),
             desktop: painel_desktop,
         }
     }

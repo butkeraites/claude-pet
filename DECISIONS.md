@@ -1967,3 +1967,46 @@ disco.
 traduzir na hora e só para ids e booleanos é o que a regra de ouro exige; e
 casar o prompt com a janela pela hora, num anel em que um buraco é
 "não sei" e não "a de antes", evita mandar o Renan para a janela errada.
+
+## 0051 — Seguir o monitor ativo: debounce, intervalo entre viagens, o poof procedural e o pouso entre monitores (2026-10-04)
+
+**Problema:** o Zeca tem de ficar sempre no monitor em foco (PLANO, "Seguir o
+monitor ativo"). A camada OVERLAY é de um monitor só e não pode atravessar
+para o outro; o foco pisca em rajadas (a proteção de tela do Omarchy foca
+cada monitor em sequência; o mouse cruzando a borda); e o pet pode ser
+arrastado e solto em outro monitor.
+**Escolha (T4.5):**
+- **Quando ir** (`pet_core::motor::viagem`, puro): o `focusedmonv2` vira
+  `MonitorEmFoco` (nunca o FALLBACK); só o último vale, depois de 300 ms
+  parado. Não viaja arrastando (confere de novo ao soltar), nem com o pet
+  escondido (ao voltar, a camada nasce no monitor em foco), nem sem a camada
+  pronta (confere quando ela ficar), nem a menos de 1,5 s da viagem anterior
+  (adia até lá). A quarta viagem em 20 s é rápida: sem poof. O
+  `configreloaded` nem é lido; o FALLBACK e a camada sem casa continuam como
+  no M1.
+- **A viagem:** o poof de saída (4 passos de 60 ms; o pet some no segundo),
+  o quadro transparente e a destruição da camada, a camada nova com output
+  NULL (o compositor a põe no monitor em foco), o palco na posição salva
+  daquele monitor e o poof de chegada (o pet aparece no segundo passo). A
+  animação em curso continua no monitor novo. Esconder no meio desiste da
+  viagem; a janela fechada pelo compositor no meio (o monitor saiu) espera o
+  `Recriar` de sempre e chega do mesmo jeito.
+- **O poof** é procedural (a receita do catálogo para `poof_in`/`poof_out`):
+  oito bloquinhos de D em volta do corpo, branco gelo e cinza, abrindo na
+  saída e fechando na chegada, ≈ 17 quadros por segundo por 240 ms (dentro
+  da rajada de até 30). As partículas de verdade são do M6.
+- **Soltar entre monitores:** o botão subindo fora do palco (a pegada
+  implícita manda as coordenadas além da borda) vira um pouso: o ponto no
+  desktop (a origem do monitor do `xdg_output` mais o ponto em pixels
+  lógicos) e a pegada. A viagem começa na hora (sem debounce nem
+  intervalo); na chegada, a célula fica com a pegada debaixo do ponto
+  solto, presa à área útil, o pet toca o pouso e a posição fica guardada
+  para o monitor novo. Sem a origem do monitor, cai na posição salva.
+- **Mudança de layout:** um `wl_output`/`xdg_output` que muda faz a camada
+  conferir de novo onde está (a origem nova vale para o próximo pouso).
+- O `/v1/estado.viagem` mostra a fase (`poof`, `saindo`, `chegando`,
+  `entrando`).
+**Por quê:** o debounce e o intervalo seguram as rajadas sem deixar o pet
+para trás; o poof esconde o salto entre camadas (uma camada não atravessa
+monitores); e o pouso pelo ponto do desktop faz o arraste entre monitores
+terminar onde o Renan soltou.

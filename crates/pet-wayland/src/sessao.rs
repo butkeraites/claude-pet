@@ -735,8 +735,13 @@ impl OutputHandler for Sessao {
         }
     }
 
+    /// Um monitor mudou de posição, tamanho ou descrição (o layout mudou):
+    /// a camada confere de novo onde está. O tamanho novo vem também por um
+    /// `configure`; a posição só por aqui (as janelas pequenas do M8 e o
+    /// pouso de um arraste entre monitores usam a origem).
     fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, saida: wl_output::WlOutput) {
         depurar!("monitor mudou: {}", descrever_saida(&self.saidas, &saida));
+        self.tentar_aprontar();
     }
 
     fn output_destroyed(

@@ -37,11 +37,12 @@ pub enum Gesto {
     Moveu,
     /// Soltou o arraste com o ponteiro em (x, y) do palco (fora dele, se
     /// soltou em outro monitor); a célula vai para `celula` (antes de prender
-    /// na área).
+    /// na área). `pegada`: onde o ponteiro pegou o pet, relativo à célula.
     Soltou {
         x: i32,
         y: i32,
         celula: (i32, i32),
+        pegada: (i32, i32),
     },
     /// Apertou e soltou sem arrastar.
     Clique(Botao),
@@ -189,8 +190,14 @@ impl Arraste {
                     }
                     Estado::Arrastando { .. } if botao == Botao::Esquerdo => {
                         let celula = self.alvo(d).unwrap_or(celula);
+                        let pegada = self.pegada().unwrap_or_default();
                         self.estado = Estado::Livre;
-                        Gesto::Soltou { x, y, celula }
+                        Gesto::Soltou {
+                            x,
+                            y,
+                            celula,
+                            pegada,
+                        }
                     }
                     _ => Gesto::Nada,
                 }
@@ -398,7 +405,8 @@ mod testes {
             Gesto::Soltou {
                 x: 1690,
                 y: 1000,
-                celula: (CELULA.0 - 108, CELULA.1 - 48)
+                celula: (CELULA.0 - 108, CELULA.1 - 48),
+                pegada: (100, 100),
             },
             "o soltar leva a célula até o ponto onde soltou"
         );
@@ -433,7 +441,8 @@ mod testes {
             Gesto::Soltou {
                 x: 1800,
                 y: 1050,
-                celula: CELULA
+                celula: CELULA,
+                pegada: (100, 100),
             }
         );
     }
