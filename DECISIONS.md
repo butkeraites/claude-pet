@@ -1005,3 +1005,74 @@ metadados vão.
 o 127.0.0.1. Com o pet desligado continua custando uma conexão recusada. Um
 tipo de tarefa desconhecido vale para o M5 o mesmo que o texto dele (quem
 decide se é agente é a lista), e a lista não deixa conteúdo passar.
+
+## 0032 — Revisão do cérebro: Stop depois do prompt seguinte, continuação de um Stop segurado e estado só por evento aplicado (2026-10-03)
+
+**Problema:** a revisão adversarial da integração (lente do cérebro)
+reproduziu num daemon de debug duas ordens reais de hooks async que o
+cérebro errava. Para uma delas, a decisão 0020 dizia o contrário.
+- **Stop depois do prompt seguinte.** Um prompt na fila, ou o aviso de uma
+  tarefa em segundo plano entregue quando a sessão para, entra milissegundos
+  depois do Stop, e os dois hooks chegam trocados (do hook ao pet são 25 a
+  82 ms, decisão 0021). O `UserPromptSubmit` do p2 fechava o p1 na hora como
+  `substituido`, sem festa, e o Stop do p1 caía como `stop_repetido`.
+- **Stop segurado por outro plugin** (`stop_hook_active`; o ralph-loop, o
+  hookify e outros do marketplace oficial ligam Stop hooks). A 0020 dizia
+  que a acomodação de 0,8 s cobria esse caso, e não cobre. O PreToolUse só
+  está ligado para AskUserQuestion e ExitPlanMode, então o primeiro evento
+  da continuação é o PostToolUse da ferramenta, segundos depois. O primeiro
+  Stop comemorava em 0,8 s, as ferramentas da continuação caíam como
+  `turno_fechado` e o Stop final (`sha`) como `stop_repetido`. Um T0 que
+  virava T1 nunca pulava, e o registro ficava errado. Nesta máquina nada
+  segura o Stop hoje: dos plugins instalados, só o superpowers tem hooks, e
+  só o SessionStart.
+- Um evento ignorado mudava o estado da sessão: um prompt ou uma ferramenta
+  atrasados deixavam a sessão `pensando` ou `trabalhando` sem turno aberto
+  até o próximo evento, ou por 12 h.
+- `Turno.arquivos` crescia sem teto com `arq` sempre novo. A 0022 dizia que
+  `ignorados` era o último mapa que crescia com dado de fora, e não era.
+- O `receber` vencia os prazos na hora do processamento. Com o laço parado
+  (handshake do Wayland, troca de personagem), uma acomodação podia vencer
+  antes do evento da fila que a cancelaria.
+
+**Escolha:**
+- **Turno trocado.** Um turno novo que começa sem o Stop do aberto não fecha
+  o anterior na hora: o anterior espera 0,8 s (`ACOMODACAO_MS`). Se o Stop
+  dele chega, comemora na hora, porque o turno novo já começou. Eventos
+  atrasados dele contam nele, sem fechar o turno novo. Sem Stop, fecha
+  `substituido` com a hora da troca, como antes. `StopFailure` e ferramenta
+  interrompida fecham o turno do próprio `prompt_id`; antes fechavam o
+  aberto, qualquer que fosse.
+- **Turno comemorado.** O último turno fechado por um Stop guarda os
+  contadores. Um evento de trabalho da thread principal com o mesmo
+  `prompt_id` e `ts` depois do Stop reabre o turno (`continuacoes` + 1). O
+  próximo Stop acomoda de novo e reclassifica, e só reage se o nível subir
+  (T0 → T1: `done_small`). O turno tem um registro só, trocado pelo novo
+  (com `sha`), e `reacao` passa a ser a última reação do turno. Um prompt
+  novo encerra essa chance. É a regra "Stop com sha" do plano, no tamanho
+  do M3; o M5 funde nos níveis T2 e T3.
+- **Estado só por evento aplicado.** Evento ignorado (`turno_fechado`,
+  `prompt_repetido`, `stop_repetido`), atrasado (antes do Stop pendente) ou
+  do turno trocado não mexe no estado da sessão.
+- **Teto de 1024 arquivos lembrados por turno.** Passado o teto, cada `arq`
+  novo só soma, contando por cima. Os contadores somam saturando.
+- **Relógio da chegada.** O ingress carimba também o `Instant` da chegada,
+  e o laço passa ao cérebro a hora em que cada evento chegou. O calloop
+  0.14 despacha o canal antes dos timers vencidos, então um laço parado não
+  vence uma acomodação que um evento da fila cancela.
+- **Testes:** 7 cenários novos na tabela (Stop depois do prompt seguinte,
+  Stop do trocado fora da espera, eventos atrasados do trocado,
+  stop-bloqueado subindo e sem subir de nível, evento atrasado depois da
+  festa), 3 testes de registro e estado, um do teto de arquivos, um do
+  relógio da chegada e um de ponta a ponta no daemon com as duas ordens. A
+  tabela nova reprova o cérebro antigo.
+
+**Por quê:** o turno é o `prompt_id` ("até o próximo prompt", diz o d.ts), e
+o Stop e o prompt seguinte são dois hooks async correndo um contra o outro.
+Esperar 0,8 s pelo Stop do trocado não custa nada: o Esc continua sem festa,
+só 0,8 s depois. Reabrir em vez de ignorar mantém o registro certo para o M5
+e põe o pulinho no fim de verdade; reagir só se o nível subir evita festa
+dupla. Isto corrige a 0020: a acomodação cobre hooks fora de ordem dentro de
+0,8 s, e o Stop segurado é coberto pela reabertura. Corrige também a 0022: o
+teto dos arquivos fecha o último mapa do cérebro que crescia com dado de
+fora.

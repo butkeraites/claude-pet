@@ -95,6 +95,70 @@ fn rapido_acena_pequeno_pula_e_fim_da_sessao_da_tchau() {
     assert!(!log.contains(SID), "o log só tem o sid curto: {log}");
 }
 
+fn agora_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+}
+
+#[test]
+fn stop_atrasado_e_continuacao_de_stop_bloqueado() {
+    // Hooks async chegam fora de ordem (decisão 0032). O Stop do p1 que chega
+    // depois do prompt do p2 ainda comemora o p1; e a continuação de um Stop
+    // segurado por outro plugin reabre o turno, com o pulinho no Stop final.
+    let d = Daemon::subir(false);
+    let t = agora_ms();
+    mandar(
+        &d,
+        evento("UserPromptSubmit", json!({"turno": "p1", "ts": t - 6_000})),
+    );
+    mandar(
+        &d,
+        evento(
+            "PostToolUse",
+            json!({"turno": "p1", "tool": "Edit", "arq": "0123456789ab", "ts": t - 5_000}),
+        ),
+    );
+    mandar(
+        &d,
+        evento("UserPromptSubmit", json!({"turno": "p2", "ts": t - 2_997})),
+    );
+    mandar(&d, evento("Stop", json!({"turno": "p1", "ts": t - 3_000})));
+    let estado = d.esperar_estado("pulinho do p1", |e| reacao(e) == Some("done_small"));
+    assert_eq!(estado["turnos"][0]["turno8"], "p1");
+    assert_eq!(estado["turnos"][0]["fim"], "stop");
+    assert_eq!(estado["sessoes"][0]["estado"], "pensando", "o p2 segue");
+
+    mandar(&d, evento("Stop", json!({"turno": "p2", "ts": t - 2_000})));
+    d.esperar_estado("aceno do p2", |e| reacao(e) == Some("nod"));
+    mandar(
+        &d,
+        evento(
+            "PostToolUse",
+            json!({"turno": "p2", "tool": "Bash", "dur": 300, "ts": agora_ms()}),
+        ),
+    );
+    mandar(
+        &d,
+        evento(
+            "Stop",
+            json!({"turno": "p2", "sha": true, "ts": agora_ms() + 1}),
+        ),
+    );
+    let estado = d.esperar_estado("pulinho do p2", |e| {
+        reacao(e) == Some("done_small")
+            && e["ultima_reacao"]["nivel"] == "T1"
+            && e["turnos"][0]["turno8"] == "p2"
+            && e["turnos"][0]["continuacoes"] == 1
+    });
+    let turnos = estado["turnos"].as_array().unwrap();
+    assert_eq!(turnos.len(), 2, "um registro por turno: {estado:#}");
+    assert_eq!(turnos[0]["sha"], true);
+    assert_eq!(turnos[0]["trabalho"], 1);
+    assert_eq!(estado["cerebro"]["ignorados"], json!({}));
+}
+
 #[test]
 fn origem_de_fora_ignorada_e_teste_isolado() {
     let d = Daemon::subir(false);

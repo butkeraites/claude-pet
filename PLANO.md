@@ -706,7 +706,7 @@ claude-pet/
 - selos;
 - escalada L1–L4 com presença;
 - dedupe de aviso;
-- Stop com `sha`;
+- Stop com `sha` (o M3 já reabre o turno na continuação e só reage se o nível subir, decisão 0032; falta fundir nos níveis T2/T3);
 - DND;
 - modo discreto;
 - cenários dourados com relógio falso;

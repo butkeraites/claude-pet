@@ -1,8 +1,10 @@
-//! Cérebro mínimo (M3, decisão 0020): eventos do Claude Code → reações.
+//! Cérebro mínimo (M3, decisões 0020 e 0032): eventos do Claude Code →
+//! reações.
 //!
 //! Puro: o relógio vem de fora ([`Agora`]) e nada aqui faz I/O. O daemon
-//! entrega cada evento validado ([`crate::evento`]), chama [`Cerebro::tique`]
-//! no [`Cerebro::proximo_prazo`] e toca as [`Reacao`]s que voltam.
+//! entrega cada evento validado ([`crate::evento`]) com a hora em que ele
+//! chegou, chama [`Cerebro::tique`] no [`Cerebro::proximo_prazo`] e toca as
+//! [`Reacao`]s que voltam.
 //!
 //! **Sessões** por `sid`. Só contam as de origem permitida
 //! (`sessoes.origens`, padrão `["cli"]`): `claude -p`, SDK e IDE ficam de
@@ -15,17 +17,32 @@
 //! **Turnos** por `turno` (`prompt_id`). O `UserPromptSubmit` abre o turno
 //! (t0); as ferramentas da thread principal contam como trabalho (Edit,
 //! Write, MultiEdit, NotebookEdit, Bash) ou outras, com os arquivos únicos
-//! (`arq`) e a soma do tempo de ferramenta (`dur`). Ferramentas de um
-//! subagente contam para o turno em que ele nasceu, mas não mudam o estado
-//! da sessão. Evento de um turno que ninguém abriu (o pet reiniciou no meio)
-//! abre um turno implícito.
+//! (`arq`, no máximo [`ARQUIVOS_POR_TURNO`] lembrados) e a soma do tempo de
+//! ferramenta (`dur`). Ferramentas de um subagente contam para o turno em
+//! que ele nasceu, mas não mudam o estado da sessão. Evento de um turno que
+//! ninguém abriu (o pet reiniciou no meio) abre um turno implícito.
 //!
-//! **Stop** inicia uma acomodação de 0,8 s: hooks async chegam fora de
-//! ordem, e um PostToolUse atrasado (com `ts` anterior ao Stop) ainda conta.
-//! Só um evento de trabalho da thread principal da mesma sessão com `ts`
-//! **posterior** ao Stop cancela a acomodação (um Stop hook de outro plugin
-//! segurou o Claude). Um prompt novo encerra a acomodação na hora. Dedupe
-//! por `(sid, turno)`: um Stop repetido não comemora de novo.
+//! Os hooks são async e chegam fora de ordem. Além do turno aberto, cada
+//! sessão guarda dois turnos que ainda podem receber eventos:
+//!
+//! - **Stop** inicia uma acomodação de 0,8 s: um PostToolUse atrasado (com
+//!   `ts` anterior ao Stop) ainda conta, e só um evento de trabalho da
+//!   thread principal com `ts` **posterior** ao Stop a cancela. Um prompt
+//!   novo encerra a acomodação na hora. Dedupe por `(sid, turno)`.
+//! - **Trocado:** um turno novo começou sem o Stop do anterior. Ou foi Esc
+//!   (o Stop nunca vem), ou os dois hooks chegaram trocados (um prompt na
+//!   fila entra logo depois do Stop). O anterior espera 0,8 s: se o Stop
+//!   dele chega, comemora; senão fecha sem festa. Eventos atrasados dele
+//!   contam nele, sem mexer no turno novo.
+//! - **Comemorado:** o último turno fechado por um Stop. Um Stop hook de
+//!   outro plugin pode segurar o Claude, e aí a continuação chega segundos
+//!   depois da festa, com o mesmo `prompt_id`. Um evento de trabalho da
+//!   thread principal com `ts` posterior ao Stop reabre o turno, e o Stop
+//!   seguinte (com `sha`) só reage se o nível subir. Um prompt novo encerra
+//!   essa chance.
+//!
+//! O estado da sessão só muda com evento aplicado a um turno vivo: evento
+//! ignorado, atrasado ou do turno trocado não mexe nele.
 //!
 //! **Nível**: T0 (nenhuma ferramenta de trabalho, nenhum subagente, nenhum
 //! arquivo editado) → `nod`, o aceno discreto; o resto → T1, `done_small`,
@@ -40,7 +57,8 @@ use serde::Serialize;
 use crate::config::{Config, ModoCelebracao};
 use crate::evento::{self, Evento};
 
-/// Acomodação depois de um Stop.
+/// Acomodação depois de um Stop, e espera pelo Stop atrasado de um turno
+/// trocado.
 pub const ACOMODACAO_MS: u64 = 800;
 /// O `ts` do hook só vale se estiver a até isto da hora de chegada.
 pub const JANELA_TS_MS: u64 = 6 * 60 * 60 * 1000;
@@ -51,6 +69,10 @@ pub const VIDA_TESTE_MS: u64 = 60_000;
 pub const VIDA_SESSAO_MS: u64 = 12 * 60 * 60 * 1000;
 /// Turnos fechados no `/v1/estado.turnos`.
 pub const TURNOS_GUARDADOS: usize = 20;
+/// Arquivos diferentes lembrados por turno. Passou disso, cada arquivo novo
+/// só soma num contador: um processo local mandando `arq` sempre novo não
+/// cresce a memória.
+pub const ARQUIVOS_POR_TURNO: usize = 1024;
 /// Turnos fechados lembrados por sessão, para o dedupe do Stop.
 const FECHADOS_POR_SESSAO: usize = 32;
 /// Subagentes lembrados por sessão (para atribuir ferramentas ao turno).
@@ -110,8 +132,8 @@ impl ConfigCerebro {
     }
 }
 
-/// Nível da festa de um turno.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+/// Nível da festa de um turno (T0 < T1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum Nivel {
     T0,
     T1,
@@ -144,7 +166,8 @@ pub enum Fim {
     Ocioso,
     /// Erro de API (StopFailure): sem festa.
     Falhou,
-    /// Um turno novo começou sem Stop neste (Esc no meio da resposta).
+    /// Um turno novo começou e o Stop deste não chegou na espera (Esc no
+    /// meio da resposta): sem festa.
     Substituido,
     /// A sessão acabou.
     SessaoEncerrada,
@@ -183,9 +206,17 @@ pub struct RegistroTurno {
     pub bg: Option<u64>,
     /// O Stop veio com `stop_hook_active`.
     pub sha: bool,
+    /// Quantas vezes o turno reabriu depois de um Stop (um Stop hook de
+    /// outro plugin segurou o Claude). O registro é um só por turno.
+    pub continuacoes: u32,
     pub fim: Fim,
     pub nivel: Option<Nivel>,
+    /// A última reação tocada por este turno.
     pub reacao: Option<&'static str>,
+    /// (teste, sid, turno) inteiros, para trocar o registro de um turno que
+    /// reabriu; nunca vai para o `/v1/estado`.
+    #[serde(skip)]
+    chave: (bool, String, Option<String>),
 }
 
 /// Estado de uma sessão para o `/v1/estado.sessoes`.
@@ -246,6 +277,14 @@ struct StopPendente {
     bg: Option<u64>,
 }
 
+/// A festa de um turno que fechou por um Stop: um turno que reabre a leva
+/// junto, para só reagir de novo se o nível subir.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Festa {
+    nivel: Nivel,
+    reacao: Option<&'static str>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Turno {
     id: Option<String>,
@@ -257,9 +296,15 @@ struct Turno {
     subagentes: u32,
     falhas: u32,
     de_agentes: u32,
+    /// Até [`ARQUIVOS_POR_TURNO`].
     arquivos: BTreeSet<String>,
+    /// Arquivos novos que chegaram com o conjunto cheio.
+    arquivos_a_mais: u32,
     dur_ms: u64,
     stop: Option<StopPendente>,
+    /// Já fechou por um Stop e reabriu: a festa de então.
+    festa: Option<Festa>,
+    continuacoes: u32,
 }
 
 impl Turno {
@@ -275,14 +320,23 @@ impl Turno {
             falhas: 0,
             de_agentes: 0,
             arquivos: BTreeSet::new(),
+            arquivos_a_mais: 0,
             dur_ms: 0,
             stop: None,
+            festa: None,
+            continuacoes: 0,
         }
+    }
+
+    fn arquivos(&self) -> u32 {
+        u32::try_from(self.arquivos.len())
+            .unwrap_or(u32::MAX)
+            .saturating_add(self.arquivos_a_mais)
     }
 
     /// T0 sem ferramenta de trabalho, sem subagente e sem arquivo editado.
     fn nivel(&self) -> Nivel {
-        if self.trabalho == 0 && self.subagentes == 0 && self.arquivos.is_empty() {
+        if self.trabalho == 0 && self.subagentes == 0 && self.arquivos() == 0 {
             Nivel::T0
         } else {
             Nivel::T1
@@ -295,20 +349,36 @@ impl Turno {
             .as_deref()
             .is_some_and(|t| FERRAMENTAS_DE_TRABALHO.contains(&t));
         if trabalho {
-            self.trabalho += 1;
+            self.trabalho = self.trabalho.saturating_add(1);
         } else {
-            self.outras += 1;
+            self.outras = self.outras.saturating_add(1);
         }
         if falhou {
-            self.falhas += 1;
+            self.falhas = self.falhas.saturating_add(1);
         }
         if ev.agente {
-            self.de_agentes += 1;
+            self.de_agentes = self.de_agentes.saturating_add(1);
         }
-        if !falhou && let Some(arq) = &ev.arq {
-            self.arquivos.insert(arq.clone());
+        if !falhou
+            && let Some(arq) = &ev.arq
+            && !self.arquivos.contains(arq)
+        {
+            if self.arquivos.len() < ARQUIVOS_POR_TURNO {
+                self.arquivos.insert(arq.clone());
+            } else {
+                self.arquivos_a_mais = self.arquivos_a_mais.saturating_add(1);
+            }
         }
         self.dur_ms = self.dur_ms.saturating_add(ev.dur.unwrap_or(0));
+    }
+}
+
+/// A reação de um nível, segundo o modo de celebração.
+fn reacao_do_nivel(nivel: Nivel, modo: ModoCelebracao) -> Option<&'static str> {
+    match (nivel, modo) {
+        (_, ModoCelebracao::Desligada) => None,
+        (_, ModoCelebracao::Discreta) | (Nivel::T0, _) => Some(ACENO),
+        (Nivel::T1, _) => Some(PULINHO),
     }
 }
 
@@ -316,6 +386,39 @@ impl Turno {
 struct Fechamento {
     registro: RegistroTurno,
     reacao: Option<Reacao>,
+    /// O turno tinha reaberto: o registro troca o que ele já tinha.
+    substitui: bool,
+}
+
+/// Um turno trocado por um turno novo sem ter visto o próprio Stop.
+#[derive(Debug, Clone)]
+struct Trocado {
+    turno: Turno,
+    /// Hora (parede) do evento que abriu o turno novo: o fim deste, se o
+    /// Stop não vier.
+    troca_ms: u64,
+    /// Fim da espera pelo Stop (monotônico).
+    prazo_mono: u64,
+}
+
+/// O último turno fechado por um Stop, que uma continuação pode reabrir.
+#[derive(Debug, Clone)]
+struct Comemorado {
+    turno: Turno,
+    /// Hora (parede) do Stop.
+    stop_ms: u64,
+}
+
+/// De que turno é um evento.
+enum Alvo {
+    /// O turno aberto (ou o comemorado, que acabou de reabrir).
+    Aberto,
+    /// O turno trocado, à espera do Stop.
+    Trocado,
+    /// Um turno que já fechou.
+    Fechado,
+    /// Nenhum: o evento abre um turno.
+    Novo,
 }
 
 #[derive(Debug, Clone)]
@@ -326,6 +429,8 @@ struct Sessao {
     ent: Option<String>,
     estado: EstadoSessao,
     turno: Option<Turno>,
+    trocado: Option<Trocado>,
+    comemorado: Option<Comemorado>,
     /// Turnos já fechados (o `prompt_id`), mais novo no fim.
     fechados: VecDeque<String>,
     /// Subagente → turno em que nasceu.
@@ -345,6 +450,8 @@ impl Sessao {
             ent: None,
             estado: EstadoSessao::Parada,
             turno: None,
+            trocado: None,
+            comemorado: None,
             fechados: VecDeque::new(),
             agentes: VecDeque::new(),
             ultimo_mono: agora.mono_ms,
@@ -357,7 +464,129 @@ impl Sessao {
         self.fechados.iter().any(|t| t == turno)
     }
 
-    /// Fecha o turno aberto. Só `Fim::Stop` comemora (segundo o modo).
+    fn lembrar_fechado(&mut self, turno: &str) {
+        if self.fechado(turno) {
+            return;
+        }
+        if self.fechados.len() == FECHADOS_POR_SESSAO {
+            self.fechados.pop_front();
+        }
+        self.fechados.push_back(turno.to_owned());
+    }
+
+    /// De que turno é um evento da thread principal com `id` e hora `t`. Um
+    /// evento de trabalho (`continua`) com hora depois do Stop do turno
+    /// comemorado reabre esse turno.
+    fn alvo(&mut self, id: Option<&str>, t: u64, continua: bool) -> Alvo {
+        if let Some(id) = id
+            && self
+                .trocado
+                .as_ref()
+                .is_some_and(|x| x.turno.id.as_deref() == Some(id))
+        {
+            return Alvo::Trocado;
+        }
+        if let Some(aberto) = &self.turno
+            && (id.is_none() || aberto.id.as_deref() == id)
+        {
+            return Alvo::Aberto;
+        }
+        let Some(id) = id else {
+            return Alvo::Novo;
+        };
+        if continua
+            && self.turno.is_none()
+            && self
+                .comemorado
+                .as_ref()
+                .is_some_and(|c| c.turno.id.as_deref() == Some(id) && t > c.stop_ms)
+        {
+            self.reabrir();
+            return Alvo::Aberto;
+        }
+        if self.fechado(id) {
+            Alvo::Fechado
+        } else {
+            Alvo::Novo
+        }
+    }
+
+    /// Uma continuação: o turno comemorado volta a ser o aberto, com os
+    /// contadores e a festa de antes.
+    fn reabrir(&mut self) {
+        let Some(Comemorado { mut turno, .. }) = self.comemorado.take() else {
+            return;
+        };
+        if let Some(id) = &turno.id {
+            self.fechados.retain(|f| f != id);
+        }
+        turno.continuacoes = turno.continuacoes.saturating_add(1);
+        self.turno = Some(turno);
+    }
+
+    /// Abre um turno implícito (o evento é de um turno que ninguém abriu; o
+    /// `UserPromptSubmit` o assume em seguida): o aberto acaba
+    /// ([`Self::encerrar_aberto`]) e o comemorado não reabre mais.
+    fn abrir(
+        &mut self,
+        id: Option<&str>,
+        t: u64,
+        agora: Agora,
+        modo: ModoCelebracao,
+        fechamentos: &mut Vec<Fechamento>,
+    ) -> &mut Turno {
+        self.encerrar_aberto(t, agora, modo, fechamentos);
+        self.comemorado = None;
+        self.turno
+            .insert(Turno::novo(id.map(str::to_owned), t, true, None))
+    }
+
+    /// Um turno novo vai começar: o aberto acaba. Com Stop pendente comemora
+    /// na hora (fim = hora do Stop); sem Stop vira o trocado e espera o Stop
+    /// atrasado por [`ACOMODACAO_MS`] (um trocado de antes fecha sem festa).
+    fn encerrar_aberto(
+        &mut self,
+        t: u64,
+        agora: Agora,
+        modo: ModoCelebracao,
+        fechamentos: &mut Vec<Fechamento>,
+    ) {
+        let Some(aberto) = self.turno.take() else {
+            return;
+        };
+        if let Some(stop) = aberto.stop {
+            fechamentos.push(self.fechar_turno(aberto, Fim::Stop, stop.ts_ms, agora, modo, true));
+            return;
+        }
+        if let Some(velho) = self.trocado.take() {
+            fechamentos.push(self.fechar_trocado(velho, agora, modo));
+        }
+        self.trocado = Some(Trocado {
+            turno: aberto,
+            troca_ms: t,
+            prazo_mono: agora.mono_ms + ACOMODACAO_MS,
+        });
+    }
+
+    /// O Stop do trocado não chegou na espera: fecha sem festa, com a hora
+    /// da troca.
+    fn fechar_trocado(
+        &mut self,
+        trocado: Trocado,
+        agora: Agora,
+        modo: ModoCelebracao,
+    ) -> Fechamento {
+        self.fechar_turno(
+            trocado.turno,
+            Fim::Substituido,
+            trocado.troca_ms,
+            agora,
+            modo,
+            false,
+        )
+    }
+
+    /// Fecha o turno aberto.
     fn fechar(
         &mut self,
         fim: Fim,
@@ -366,107 +595,97 @@ impl Sessao {
         modo: ModoCelebracao,
     ) -> Option<Fechamento> {
         let turno = self.turno.take()?;
+        Some(self.fechar_turno(turno, fim, fim_ms, agora, modo, true))
+    }
+
+    /// Fecha um turno. Só `Fim::Stop` comemora: na primeira vez, pelo nível
+    /// e pelo modo; num turno que reabriu, só se o nível subiu, e o registro
+    /// troca o de antes. Fechado por um Stop, o turno fica comemorado se
+    /// `reabrivel` (o trocado não: já há um turno novo depois dele).
+    fn fechar_turno(
+        &mut self,
+        mut turno: Turno,
+        fim: Fim,
+        fim_ms: u64,
+        agora: Agora,
+        modo: ModoCelebracao,
+        reabrivel: bool,
+    ) -> Fechamento {
         if let Some(id) = &turno.id {
-            if self.fechados.len() == FECHADOS_POR_SESSAO {
-                self.fechados.pop_front();
-            }
-            self.fechados.push_back(id.clone());
+            self.lembrar_fechado(id);
         }
-        let nivel = (fim == Fim::Stop).then(|| turno.nivel());
-        let nome = match (nivel, modo) {
-            (None, _) | (Some(_), ModoCelebracao::Desligada) => None,
-            (Some(_), ModoCelebracao::Discreta) | (Some(Nivel::T0), _) => Some(ACENO),
-            (Some(Nivel::T1), _) => Some(PULINHO),
+        let nivel_agora = (fim == Fim::Stop).then(|| turno.nivel());
+        let antes = turno.festa;
+        let subiu = match (nivel_agora, antes) {
+            (Some(_), None) => true,
+            (Some(nivel), Some(festa)) => nivel > festa.nivel,
+            (None, _) => false,
         };
+        let nome = nivel_agora
+            .filter(|_| subiu)
+            .and_then(|nivel| reacao_do_nivel(nivel, modo));
         let reacao = nome.map(|nome| Reacao {
             nome,
             sid8: evento::curto(&self.sid),
             proj: self.proj.clone(),
             ts: agora.parede_ms,
-            nivel,
+            nivel: nivel_agora,
             teste: self.teste,
         });
-        self.contadores.turnos += 1;
+        let nivel = nivel_agora.max(antes.map(|festa| festa.nivel));
+        let reacao_do_turno = nome.or(antes.and_then(|festa| festa.reacao));
+        if antes.is_none() {
+            self.contadores.turnos += 1;
+        }
         if reacao.is_some() {
             self.contadores.reacoes += 1;
         }
-        let stop = turno.stop;
-        Some(Fechamento {
-            registro: RegistroTurno {
-                sid8: evento::curto(&self.sid),
-                turno8: turno.id.as_deref().map(evento::curto),
-                proj: self.proj.clone(),
-                teste: self.teste,
-                implicito: turno.implicito,
-                src: turno.src,
-                t0_ms: turno.t0_ms,
-                fim_ms,
-                relogio_ms: fim_ms.saturating_sub(turno.t0_ms),
-                trabalho: turno.trabalho,
-                outras: turno.outras,
-                arquivos: turno.arquivos.len() as u32,
-                subagentes: turno.subagentes,
-                falhas: turno.falhas,
-                de_agentes: turno.de_agentes,
-                dur_ms: turno.dur_ms,
-                bg: stop.and_then(|s| s.bg),
-                sha: stop.is_some_and(|s| s.sha),
-                fim,
+        let stop = turno.stop.take();
+        let registro = RegistroTurno {
+            sid8: evento::curto(&self.sid),
+            turno8: turno.id.as_deref().map(evento::curto),
+            proj: self.proj.clone(),
+            teste: self.teste,
+            implicito: turno.implicito,
+            src: turno.src.clone(),
+            t0_ms: turno.t0_ms,
+            fim_ms,
+            relogio_ms: fim_ms.saturating_sub(turno.t0_ms),
+            trabalho: turno.trabalho,
+            outras: turno.outras,
+            arquivos: turno.arquivos(),
+            subagentes: turno.subagentes,
+            falhas: turno.falhas,
+            de_agentes: turno.de_agentes,
+            dur_ms: turno.dur_ms,
+            bg: stop.and_then(|s| s.bg),
+            sha: stop.is_some_and(|s| s.sha),
+            continuacoes: turno.continuacoes,
+            fim,
+            nivel,
+            reacao: reacao_do_turno,
+            chave: (self.teste, self.sid.clone(), turno.id.clone()),
+        };
+        if fim == Fim::Stop && reabrivel {
+            turno.festa = nivel.map(|nivel| Festa {
                 nivel,
-                reacao: nome,
-            },
-            reacao,
-        })
-    }
-
-    /// O turno de um evento da thread principal com `turno` (ou sem), abrindo
-    /// um implícito se preciso. Um id novo encerra o turno aberto: com Stop
-    /// pendente comemora na hora; sem Stop foi abandonado (Esc).
-    /// `None`: o evento é de um turno já fechado.
-    fn turno_de(
-        &mut self,
-        id: Option<&str>,
-        t: u64,
-        agora: Agora,
-        modo: ModoCelebracao,
-        fechamentos: &mut Vec<Fechamento>,
-    ) -> Option<&mut Turno> {
-        let mesmo = match (&self.turno, id) {
-            (Some(_), None) => true,
-            (Some(aberto), Some(id)) => aberto.id.as_deref() == Some(id),
-            (None, _) => false,
-        };
-        if !mesmo {
-            if id.is_some_and(|id| self.fechado(id)) {
-                return None;
-            }
-            self.encerrar_aberto(t, agora, modo, fechamentos);
-            self.turno = Some(Turno::novo(id.map(str::to_owned), t, true, None));
+                reacao: reacao_do_turno,
+            });
+            self.comemorado = Some(Comemorado {
+                turno,
+                stop_ms: fim_ms,
+            });
         }
-        self.turno.as_mut()
-    }
-
-    /// Um turno novo vai começar: o aberto acaba. Com Stop pendente comemora
-    /// na hora (fim = hora do Stop); sem Stop foi abandonado (Esc).
-    fn encerrar_aberto(
-        &mut self,
-        t: u64,
-        agora: Agora,
-        modo: ModoCelebracao,
-        fechamentos: &mut Vec<Fechamento>,
-    ) {
-        let Some(aberto) = &self.turno else {
-            return;
-        };
-        let (fim, fim_ms) = match aberto.stop {
-            Some(stop) => (Fim::Stop, stop.ts_ms),
-            None => (Fim::Substituido, t),
-        };
-        fechamentos.extend(self.fechar(fim, fim_ms, agora, modo));
+        Fechamento {
+            registro,
+            reacao,
+            substitui: antes.is_some(),
+        }
     }
 
     /// Turno de uma ferramenta de subagente: o turno em que ele nasceu, se
-    /// ainda estiver aberto; senão o do próprio evento; senão o aberto.
+    /// ainda estiver aberto ou trocado; senão o do próprio evento; senão o
+    /// aberto.
     fn turno_do_agente(&mut self, aid: Option<&str>, id: Option<&str>) -> Option<&mut Turno> {
         let nascimento = aid.and_then(|aid| {
             self.agentes
@@ -478,12 +697,17 @@ impl Sessao {
             Some(t) => t,
             None => id.map(str::to_owned),
         };
-        let aberto = self.turno.as_mut()?;
-        match (&alvo, &aberto.id) {
-            (None, _) => Some(aberto),
-            (Some(a), Some(b)) if a == b => Some(aberto),
-            _ => None,
+        let Some(alvo) = alvo else {
+            return self.turno.as_mut();
+        };
+        let eh_dele = |turno: &Turno| turno.id.as_deref() == Some(alvo.as_str());
+        if self.turno.as_ref().is_some_and(eh_dele) {
+            return self.turno.as_mut();
         }
+        self.trocado
+            .as_mut()
+            .map(|x| &mut x.turno)
+            .filter(|turno| eh_dele(turno))
     }
 
     fn lembrar_agente(&mut self, aid: &str, turno: Option<String>) {
@@ -517,8 +741,8 @@ pub fn hora_do_evento(ts: Option<u64>, recebido_ms: u64) -> u64 {
     }
 }
 
-/// Eventos que mostram o turno andando (cancelam a acomodação quando vêm
-/// depois do Stop).
+/// Eventos que mostram o turno andando: cancelam a acomodação quando vêm
+/// depois do Stop e reabrem o turno comemorado.
 fn continua_o_turno(e: &str) -> bool {
     matches!(
         e,
@@ -568,9 +792,13 @@ impl Cerebro {
         *self.ignorados.entry(motivo).or_default() += 1;
     }
 
-    /// Guarda os turnos fechados e devolve as reações deles.
+    /// Guarda os turnos fechados e devolve as reações deles. O registro de
+    /// um turno que reabriu troca o de antes: um registro por turno.
     fn registrar(&mut self, fechamentos: Vec<Fechamento>, reacoes: &mut Vec<Reacao>) {
         for f in fechamentos {
+            if f.substitui {
+                self.turnos.retain(|r| r.chave != f.registro.chave);
+            }
             if self.turnos.len() == TURNOS_GUARDADOS {
                 self.turnos.pop_front();
             }
@@ -586,8 +814,11 @@ impl Cerebro {
         reacoes.push(reacao);
     }
 
-    /// Um evento validado. Devolve as reações para tocar agora (inclusive
-    /// as de prazos que venceram antes dele).
+    /// Um evento validado, com a hora em que chegou ao daemon (`agora`: o
+    /// relógio da chegada, não o do processamento, para um laço atrasado não
+    /// vencer uma acomodação que o próprio evento cancelaria). Devolve as
+    /// reações para tocar agora (inclusive as de prazos que venceram antes
+    /// dele).
     pub fn receber(&mut self, ev: &Evento, recebido_ms: u64, agora: Agora) -> Vec<Reacao> {
         let mut reacoes = self.tique(agora);
         let origem = ev.ent.as_deref().unwrap_or("desconhecida");
@@ -630,13 +861,11 @@ impl Cerebro {
         }
         let id = ev.turno.as_deref();
 
-        // Um evento de trabalho da thread principal depois do Stop: o turno
-        // continua (outro Stop hook segurou o Claude). O SubagentStart vem
-        // com o `agent_id` do subagente que nasce, mas quem o lança é a
-        // thread principal.
-        let da_principal = !ev.agente || ev.e == "SubagentStart";
-        if da_principal
-            && continua_o_turno(&ev.e)
+        // Um evento de trabalho da thread principal: o SubagentStart vem com
+        // o `agent_id` do subagente que nasce, mas quem o lança é a thread
+        // principal. Depois do Stop, ele mostra que o turno continua.
+        let continua = (!ev.agente || ev.e == "SubagentStart") && continua_o_turno(&ev.e);
+        if continua
             && let Some(turno) = sessao.turno.as_mut()
             && let Some(stop) = turno.stop
             && t > stop.ts_ms
@@ -652,23 +881,36 @@ impl Cerebro {
                 }
             }
             "UserPromptSubmit" => {
-                if id.is_none() {
-                    // Sem `prompt_id` não há como casar: sempre um turno novo.
-                    sessao.encerrar_aberto(t, agora, modo, &mut fechamentos);
-                    sessao.turno = Some(Turno::novo(None, t, true, None));
-                }
-                match sessao.turno_de(id, t, agora, modo, &mut fechamentos) {
-                    // Aberto agora, ou por um evento que chegou antes do
-                    // prompt (hooks async fora de ordem): é o turno dele.
-                    Some(turno) if turno.implicito => {
+                // Sem `prompt_id` não há como casar: sempre um turno novo.
+                let alvo = match id {
+                    None => Alvo::Novo,
+                    Some(_) => sessao.alvo(id, t, false),
+                };
+                match alvo {
+                    Alvo::Novo => {
+                        let turno = sessao.abrir(id, t, agora, modo, &mut fechamentos);
                         turno.implicito = false;
-                        turno.t0_ms = turno.t0_ms.min(t);
                         turno.src.clone_from(&ev.src);
+                        sessao.estado = EstadoSessao::Pensando;
                     }
-                    Some(_) => ignorado = Some("prompt_repetido"),
-                    None => ignorado = Some("turno_fechado"),
+                    // Aberto por um evento que chegou antes do prompt (hooks
+                    // async fora de ordem): é o turno dele.
+                    Alvo::Aberto => match sessao.turno.as_mut() {
+                        Some(turno) if turno.implicito => {
+                            turno.implicito = false;
+                            turno.t0_ms = turno.t0_ms.min(t);
+                            turno.src.clone_from(&ev.src);
+                            let andou =
+                                turno.trabalho > 0 || turno.outras > 0 || turno.subagentes > 0;
+                            if !andou && turno.stop.is_none() {
+                                sessao.estado = EstadoSessao::Pensando;
+                            }
+                        }
+                        _ => ignorado = Some("prompt_repetido"),
+                    },
+                    Alvo::Trocado => ignorado = Some("prompt_repetido"),
+                    Alvo::Fechado => ignorado = Some("turno_fechado"),
                 }
-                sessao.estado = EstadoSessao::Pensando;
             }
             "PostToolUse" | "PostToolUseFailure" => {
                 sessao.contadores.ferramentas += 1;
@@ -679,36 +921,88 @@ impl Cerebro {
                         None => ignorado = Some("ferramenta_de_agente_fora_do_turno"),
                     }
                 } else {
-                    match sessao.turno_de(id, t, agora, modo, &mut fechamentos) {
-                        Some(turno) => turno.contar_ferramenta(ev, falhou),
-                        None => ignorado = Some("turno_fechado"),
-                    }
-                    sessao.estado = EstadoSessao::Trabalhando;
-                    if falhou && ev.intr {
-                        fechamentos.extend(sessao.fechar(Fim::Interrompido, t, agora, modo));
-                        sessao.estado = EstadoSessao::Parada;
+                    let interrompeu = falhou && ev.intr;
+                    match sessao.alvo(id, t, continua) {
+                        Alvo::Trocado => {
+                            if let Some(trocado) = sessao.trocado.as_mut() {
+                                trocado.turno.contar_ferramenta(ev, falhou);
+                            }
+                            if interrompeu && let Some(trocado) = sessao.trocado.take() {
+                                let turno = trocado.turno;
+                                fechamentos.push(sessao.fechar_turno(
+                                    turno,
+                                    Fim::Interrompido,
+                                    t,
+                                    agora,
+                                    modo,
+                                    false,
+                                ));
+                            }
+                        }
+                        Alvo::Fechado => ignorado = Some("turno_fechado"),
+                        alvo => {
+                            if matches!(alvo, Alvo::Novo) {
+                                sessao.abrir(id, t, agora, modo, &mut fechamentos);
+                            }
+                            if let Some(turno) = sessao.turno.as_mut() {
+                                turno.contar_ferramenta(ev, falhou);
+                                // Atrasado (antes do Stop pendente): conta,
+                                // mas a sessão segue parada.
+                                if turno.stop.is_none() {
+                                    sessao.estado = EstadoSessao::Trabalhando;
+                                }
+                            }
+                            if interrompeu {
+                                fechamentos.extend(sessao.fechar(
+                                    Fim::Interrompido,
+                                    t,
+                                    agora,
+                                    modo,
+                                ));
+                                sessao.estado = EstadoSessao::Parada;
+                            }
+                        }
                     }
                 }
             }
-            "SubagentStart" => match sessao.turno_de(id, t, agora, modo, &mut fechamentos) {
-                Some(turno) => {
-                    turno.subagentes += 1;
-                    let nascimento = turno.id.clone();
-                    if let Some(aid) = &ev.aid {
+            "SubagentStart" => match sessao.alvo(id, t, continua) {
+                Alvo::Trocado => {
+                    let nascimento = sessao.trocado.as_mut().map(|trocado| {
+                        trocado.turno.subagentes = trocado.turno.subagentes.saturating_add(1);
+                        trocado.turno.id.clone()
+                    });
+                    if let (Some(nascimento), Some(aid)) = (nascimento, &ev.aid) {
                         sessao.lembrar_agente(aid, nascimento);
                     }
                 }
-                None => ignorado = Some("turno_fechado"),
+                Alvo::Fechado => ignorado = Some("turno_fechado"),
+                alvo => {
+                    if matches!(alvo, Alvo::Novo) {
+                        sessao.abrir(id, t, agora, modo, &mut fechamentos);
+                    }
+                    let nascimento = sessao.turno.as_mut().map(|turno| {
+                        turno.subagentes = turno.subagentes.saturating_add(1);
+                        turno.id.clone()
+                    });
+                    if let (Some(nascimento), Some(aid)) = (nascimento, &ev.aid) {
+                        sessao.lembrar_agente(aid, nascimento);
+                    }
+                }
             },
             "PreToolUse" | "PermissionRequest" => {
                 if !ev.agente {
-                    if sessao
-                        .turno_de(id, t, agora, modo, &mut fechamentos)
-                        .is_none()
-                    {
-                        ignorado = Some("turno_fechado");
+                    match sessao.alvo(id, t, continua) {
+                        Alvo::Fechado => ignorado = Some("turno_fechado"),
+                        Alvo::Trocado => {}
+                        alvo => {
+                            if matches!(alvo, Alvo::Novo) {
+                                sessao.abrir(id, t, agora, modo, &mut fechamentos);
+                            }
+                            if sessao.turno.as_ref().is_some_and(|t| t.stop.is_none()) {
+                                sessao.estado = EstadoSessao::Esperando;
+                            }
+                        }
                     }
-                    sessao.estado = EstadoSessao::Esperando;
                 }
             }
             "Notification" => match ev.nt.as_deref() {
@@ -731,27 +1025,66 @@ impl Cerebro {
                     EstadoSessao::Parada
                 };
             }
-            "Stop" => {
-                if id.is_some_and(|id| sessao.fechado(id)) {
-                    ignorado = Some("stop_repetido");
-                } else {
-                    match sessao.turno_de(id, t, agora, modo, &mut fechamentos) {
-                        Some(turno) if turno.stop.is_some() => ignorado = Some("stop_repetido"),
-                        Some(turno) => {
+            "Stop" => match sessao.alvo(id, t, false) {
+                // O Stop atrasado do turno trocado: comemora na hora (o turno
+                // novo já começou).
+                Alvo::Trocado => {
+                    if let Some(trocado) = sessao.trocado.take() {
+                        let mut turno = trocado.turno;
+                        turno.stop = Some(StopPendente {
+                            ts_ms: t,
+                            prazo_mono: agora.mono_ms,
+                            sha: ev.sha,
+                            bg: ev.bg,
+                        });
+                        fechamentos.push(sessao.fechar_turno(
+                            turno,
+                            Fim::Stop,
+                            t,
+                            agora,
+                            modo,
+                            false,
+                        ));
+                    }
+                }
+                Alvo::Fechado => ignorado = Some("stop_repetido"),
+                alvo => {
+                    if matches!(alvo, Alvo::Novo) {
+                        sessao.abrir(id, t, agora, modo, &mut fechamentos);
+                    }
+                    if let Some(turno) = sessao.turno.as_mut() {
+                        if turno.stop.is_some() {
+                            ignorado = Some("stop_repetido");
+                        } else {
                             turno.stop = Some(StopPendente {
                                 ts_ms: t,
                                 prazo_mono: agora.mono_ms + ACOMODACAO_MS,
                                 sha: ev.sha,
                                 bg: ev.bg,
                             });
+                            sessao.estado = EstadoSessao::Parada;
                         }
-                        None => ignorado = Some("stop_repetido"),
                     }
-                    sessao.estado = EstadoSessao::Parada;
                 }
-            }
+            },
             "StopFailure" => {
-                fechamentos.extend(sessao.fechar(Fim::Falhou, t, agora, modo));
+                match sessao.alvo(id, t, false) {
+                    Alvo::Trocado => {
+                        if let Some(trocado) = sessao.trocado.take() {
+                            let turno = trocado.turno;
+                            fechamentos.push(sessao.fechar_turno(
+                                turno,
+                                Fim::Falhou,
+                                t,
+                                agora,
+                                modo,
+                                false,
+                            ));
+                        }
+                    }
+                    Alvo::Aberto => fechamentos.extend(sessao.fechar(Fim::Falhou, t, agora, modo)),
+                    Alvo::Fechado | Alvo::Novo => {}
+                }
                 sessao.estado = EstadoSessao::Erro;
             }
             _ => ignorado = Some("evento_desconhecido"),
@@ -782,7 +1115,7 @@ impl Cerebro {
         }
     }
 
-    /// `SessionEnd`: a sessão sai com o turno dela, sem festa. Tchau só se
+    /// `SessionEnd`: a sessão sai com os turnos dela, sem festa. Tchau só se
     /// o processo está saindo (`sai`: não é `/clear` nem retomada) e não
     /// sobrou nenhuma sessão do mesmo tipo.
     fn encerrar(
@@ -797,8 +1130,13 @@ impl Cerebro {
             self.ignorar("fim_de_sessao_desconhecida");
             return;
         };
-        let fechamento = sessao.fechar(Fim::SessaoEncerrada, t, agora, self.config.modo);
-        self.registrar(fechamento.into_iter().collect(), reacoes);
+        let modo = self.config.modo;
+        let mut fechamentos = Vec::new();
+        if let Some(trocado) = sessao.trocado.take() {
+            fechamentos.push(sessao.fechar_trocado(trocado, agora, modo));
+        }
+        fechamentos.extend(sessao.fechar(Fim::SessaoEncerrada, t, agora, modo));
+        self.registrar(fechamentos, reacoes);
         let sobrou = self.sessoes.keys().any(|(teste, _)| *teste == chave.0);
         if sai && !sobrou && self.config.modo != ModoCelebracao::Desligada {
             let reacao = Reacao {
@@ -813,13 +1151,22 @@ impl Cerebro {
         }
     }
 
-    /// Prazos vencidos: acomodações que terminaram (comemoram) e sessões que
-    /// expiraram (somem caladas).
+    /// Prazos vencidos: trocados cujo Stop não veio (fecham sem festa),
+    /// acomodações que terminaram (comemoram) e sessões que expiraram (somem
+    /// caladas).
     pub fn tique(&mut self, agora: Agora) -> Vec<Reacao> {
         let mut reacoes = Vec::new();
         let modo = self.config.modo;
         let mut fechamentos = Vec::new();
         for sessao in self.sessoes.values_mut() {
+            if sessao
+                .trocado
+                .as_ref()
+                .is_some_and(|x| agora.mono_ms >= x.prazo_mono)
+                && let Some(trocado) = sessao.trocado.take()
+            {
+                fechamentos.push(sessao.fechar_trocado(trocado, agora, modo));
+            }
             let vencida = sessao
                 .turno
                 .as_ref()
@@ -861,7 +1208,8 @@ impl Cerebro {
                     VIDA_SESSAO_MS
                 };
                 let acomodacao = s.turno.as_ref().and_then(|t| t.stop).map(|p| p.prazo_mono);
-                [Some(s.ultimo_mono + vida), acomodacao]
+                let trocado = s.trocado.as_ref().map(|x| x.prazo_mono);
+                [Some(s.ultimo_mono + vida), acomodacao, trocado]
             })
             .flatten()
             .min()
@@ -1204,11 +1552,331 @@ mod testes {
                 ],
                 vec![(1_800, ACENO), (3_000, TCHAU)],
             ),
+            (
+                // Prompt na fila (ou aviso de tarefa) entra logo depois do
+                // Stop, e os dois hooks async chegam trocados.
+                "Stop que chega depois do prompt seguinte ainda comemora",
+                vec![
+                    chega(0, prompt("p1")),
+                    chega(1_000, edit("p1", "aaaaaaaaaaaa")),
+                    chega(5_003, prompt("p2")),
+                    atrasado(5_010, 5_000, stop("p1")),
+                    chega(9_000, stop("p2")),
+                    Ate(12_000),
+                ],
+                vec![(5_010, PULINHO), (9_800, ACENO)],
+            ),
+            (
+                "Stop do turno trocado depois da espera não comemora",
+                vec![
+                    chega(0, prompt("p1")),
+                    chega(1_000, edit("p1", "aaaaaaaaaaaa")),
+                    chega(5_000, prompt("p2")),
+                    atrasado(5_900, 4_990, stop("p1")),
+                    Ate(9_000),
+                ],
+                vec![],
+            ),
+            (
+                "evento atrasado do turno trocado conta nele e não fecha o novo",
+                vec![
+                    chega(0, prompt("p1")),
+                    chega(2_000, prompt("p2")),
+                    atrasado(2_050, 1_500, edit("p1", "bbbbbbbbbbbb")),
+                    atrasado(2_100, 1_900, stop("p1")),
+                    chega(5_000, stop("p2")),
+                    Ate(8_000),
+                ],
+                vec![(2_100, PULINHO), (5_800, ACENO)],
+            ),
+            (
+                // Um Stop hook de outro plugin segura o Claude: a continuação
+                // chega segundos depois da festa, com o mesmo `prompt_id`.
+                "stop-bloqueado: a continuação reabre o turno e o Stop final sobe de nível",
+                vec![
+                    chega(0, prompt("q1")),
+                    chega(1_000, stop("q1")),
+                    Ate(2_000),
+                    chega(3_000, edit("q1", "cccccccccccc")),
+                    chega(3_500, ferramenta("q1", "Bash", None, 900)),
+                    chega(
+                        6_000,
+                        Evento {
+                            sha: true,
+                            ..stop("q1")
+                        },
+                    ),
+                    Ate(8_000),
+                ],
+                vec![(1_800, ACENO), (6_800, PULINHO)],
+            ),
+            (
+                "stop-bloqueado sem subir de nível não comemora de novo",
+                vec![
+                    chega(0, prompt("q1")),
+                    chega(500, edit("q1", "dddddddddddd")),
+                    chega(1_000, stop("q1")),
+                    Ate(2_000),
+                    chega(3_000, ferramenta("q1", "Bash", None, 50)),
+                    chega(
+                        5_000,
+                        Evento {
+                            sha: true,
+                            ..stop("q1")
+                        },
+                    ),
+                    Ate(7_000),
+                ],
+                vec![(1_800, PULINHO)],
+            ),
+            (
+                "evento atrasado (ts antes do Stop) depois da festa não reabre",
+                vec![
+                    chega(0, prompt("q1")),
+                    chega(1_000, stop("q1")),
+                    Ate(2_000),
+                    atrasado(2_500, 900, ferramenta("q1", "Bash", None, 5)),
+                    Ate(6_000),
+                ],
+                vec![(1_800, ACENO)],
+            ),
         ];
         for (nome, roteiro, esperado) in casos {
             let mut c = novo();
             assert_eq!(rodar(&mut c, roteiro), esperado, "{nome}");
         }
+    }
+
+    /// O registro do turno `turno` (há um só por turno).
+    fn registro<'a>(r: &'a Resumo, turno: &str) -> &'a RegistroTurno {
+        let achados: Vec<_> = r
+            .turnos
+            .iter()
+            .filter(|t| t.turno8.as_deref() == Some(turno))
+            .collect();
+        assert_eq!(achados.len(), 1, "um registro por turno: {:?}", r.turnos);
+        achados[0]
+    }
+
+    #[test]
+    fn stop_atrasado_comemora_o_turno_trocado_com_os_componentes_dele() {
+        let mut c = novo();
+        let saida = rodar(
+            &mut c,
+            vec![
+                chega(0, prompt("p1")),
+                chega(2_000, prompt("p2")),
+                atrasado(2_050, 1_500, edit_teste("p1")),
+                atrasado(2_100, 1_900, stop("p1")),
+                Ate(2_200),
+            ],
+        );
+        assert_eq!(saida, vec![(2_100, PULINHO)]);
+        let r = c.resumo();
+        let p1 = registro(&r, "p1");
+        assert_eq!(
+            (p1.fim, p1.nivel, p1.trabalho),
+            (Fim::Stop, Some(Nivel::T1), 1)
+        );
+        assert_eq!(p1.fim_ms, BASE + 1_900, "fim = hora do Stop");
+        assert!(r.ignorados.is_empty(), "{:?}", r.ignorados);
+        // O p2 segue aberto e pensando, intocado pelos eventos do p1.
+        assert_eq!(r.sessoes[0].estado, EstadoSessao::Pensando);
+        assert!(r.sessoes[0].turno_aberto);
+        // Sem Stop, o trocado fecha sem festa depois da espera, com a hora do
+        // prompt que o trocou.
+        let mut c = novo();
+        let saida = rodar(
+            &mut c,
+            vec![
+                chega(0, prompt("p1")),
+                chega(5_000, prompt("p2")),
+                Ate(5_799),
+            ],
+        );
+        assert!(saida.is_empty());
+        assert!(c.resumo().turnos.is_empty(), "ainda esperando o Stop");
+        assert_eq!(c.proximo_prazo(), Some(5_000 + ACOMODACAO_MS));
+        rodar(&mut c, vec![Ate(5_800)]);
+        let r = c.resumo();
+        let p1 = registro(&r, "p1");
+        assert_eq!(
+            (p1.fim, p1.fim_ms, p1.reacao),
+            (Fim::Substituido, BASE + 5_000, None)
+        );
+    }
+
+    #[test]
+    fn stop_bloqueado_reabre_e_fica_num_registro_so() {
+        let mut c = novo();
+        let saida = rodar(
+            &mut c,
+            vec![
+                chega(0, prompt("q1")),
+                chega(1_000, stop("q1")),
+                Ate(2_000),
+                chega(3_000, edit_teste("q1")),
+            ],
+        );
+        assert_eq!(saida, vec![(1_800, ACENO)]);
+        let r = c.resumo();
+        assert!(r.sessoes[0].turno_aberto, "a continuação reabriu o turno");
+        assert_eq!(r.sessoes[0].estado, EstadoSessao::Trabalhando);
+        let saida = rodar(
+            &mut c,
+            vec![
+                chega(
+                    6_000,
+                    Evento {
+                        sha: true,
+                        ..stop("q1")
+                    },
+                ),
+                Ate(8_000),
+            ],
+        );
+        assert_eq!(saida, vec![(6_800, PULINHO)]);
+        let r = c.resumo();
+        assert_eq!(r.turnos.len(), 1, "{:?}", r.turnos);
+        let q1 = registro(&r, "q1");
+        assert_eq!(
+            (q1.fim, q1.nivel, q1.reacao, q1.sha, q1.continuacoes),
+            (Fim::Stop, Some(Nivel::T1), Some(PULINHO), true, 1)
+        );
+        assert_eq!((q1.trabalho, q1.arquivos, q1.fim_ms), (1, 1, BASE + 6_000));
+        assert!(r.ignorados.is_empty(), "{:?}", r.ignorados);
+        let s = &r.sessoes[0];
+        assert_eq!((s.contadores.turnos, s.contadores.reacoes), (1, 2));
+        assert_eq!(s.estado, EstadoSessao::Parada);
+
+        // Continuação que acaba sem Stop (Esc, `idle_prompt`): o registro
+        // fica com a festa de antes.
+        let mut c = novo();
+        let ocioso = Evento {
+            nt: Some("idle_prompt".into()),
+            ..ev("Notification")
+        };
+        let saida = rodar(
+            &mut c,
+            vec![
+                chega(0, prompt("q1")),
+                chega(1_000, stop("q1")),
+                Ate(2_000),
+                chega(3_000, ferramenta("q1", "Read", None, 5)),
+                chega(63_000, ocioso),
+            ],
+        );
+        assert_eq!(saida, vec![(1_800, ACENO)]);
+        let r = c.resumo();
+        let q1 = registro(&r, "q1");
+        assert_eq!(
+            (q1.fim, q1.nivel, q1.reacao, q1.continuacoes, q1.outras),
+            (Fim::Ocioso, Some(Nivel::T0), Some(ACENO), 1, 1)
+        );
+        assert_eq!(r.sessoes[0].estado, EstadoSessao::Parada);
+        // Um prompt novo encerra a chance de continuação.
+        let mut c = novo();
+        rodar(
+            &mut c,
+            vec![
+                chega(0, prompt("q1")),
+                chega(1_000, stop("q1")),
+                Ate(2_000),
+                chega(3_000, prompt("q2")),
+                chega(3_500, ferramenta("q1", "Bash", None, 5)),
+            ],
+        );
+        let r = c.resumo();
+        assert_eq!(r.ignorados["turno_fechado"], 1);
+        assert_eq!(registro(&r, "q1").continuacoes, 0);
+    }
+
+    #[test]
+    fn evento_ignorado_nao_mexe_no_estado() {
+        let mut c = novo();
+        let estado = |c: &Cerebro| {
+            (
+                c.resumo().sessoes[0].estado,
+                c.resumo().sessoes[0].turno_aberto,
+            )
+        };
+        rodar(
+            &mut c,
+            vec![chega(0, prompt("r1")), chega(1_000, stop("r1")), Ate(2_000)],
+        );
+        assert_eq!(estado(&c), (EstadoSessao::Parada, false));
+        // Prompt atrasado de um turno já fechado.
+        rodar(&mut c, vec![atrasado(2_500, 10, prompt("r1"))]);
+        assert_eq!(estado(&c), (EstadoSessao::Parada, false));
+        // Ferramenta e pergunta atrasadas (ts antes do Stop) depois da festa.
+        let pergunta = Evento {
+            turno: Some("r1".into()),
+            tool: Some("AskUserQuestion".into()),
+            ..ev("PreToolUse")
+        };
+        rodar(
+            &mut c,
+            vec![
+                atrasado(2_600, 900, ferramenta("r1", "Bash", None, 5)),
+                atrasado(2_700, 950, pergunta),
+            ],
+        );
+        assert_eq!(estado(&c), (EstadoSessao::Parada, false));
+        // Stop repetido também não.
+        rodar(&mut c, vec![chega(2_800, stop("r1"))]);
+        assert_eq!(estado(&c), (EstadoSessao::Parada, false));
+        let r = c.resumo();
+        assert_eq!(r.ignorados["turno_fechado"], 3);
+        assert_eq!(r.ignorados["stop_repetido"], 1);
+        // Ferramenta atrasada durante a acomodação: conta no turno, mas a
+        // sessão continua parada (o Stop já disse que acabou).
+        let mut c = novo();
+        rodar(
+            &mut c,
+            vec![
+                chega(0, prompt("r2")),
+                chega(1_000, stop("r2")),
+                atrasado(1_100, 800, ferramenta("r2", "Bash", None, 5)),
+            ],
+        );
+        let r = c.resumo();
+        assert_eq!(r.sessoes[0].estado, EstadoSessao::Parada);
+        assert!(r.sessoes[0].acomodando);
+        rodar(&mut c, vec![Ate(3_000)]);
+        assert_eq!(registro(&c.resumo(), "r2").trabalho, 1);
+    }
+
+    #[test]
+    fn arquivos_por_turno_tem_teto() {
+        let mut c = novo();
+        c.receber(&prompt("p1"), BASE, em(0));
+        let total = ARQUIVOS_POR_TURNO + 500;
+        for i in 0..total {
+            let arq = format!("{i:012x}");
+            c.receber(&ferramenta("p1", "Edit", Some(&arq), 1), BASE + 1, em(1));
+        }
+        // Repetido não conta de novo (antes do teto).
+        c.receber(
+            &ferramenta("p1", "Edit", Some(&format!("{:012x}", 0)), 1),
+            BASE + 1,
+            em(1),
+        );
+        let lembrados = c
+            .sessoes
+            .values()
+            .next()
+            .unwrap()
+            .turno
+            .as_ref()
+            .unwrap()
+            .arquivos
+            .len();
+        assert_eq!(lembrados, ARQUIVOS_POR_TURNO, "memória limitada");
+        c.receber(&stop("p1"), BASE + 2, em(2));
+        assert_eq!(c.tique(em(2 + ACOMODACAO_MS))[0].nome, PULINHO);
+        let r = c.resumo();
+        assert_eq!(registro(&r, "p1").arquivos as usize, total);
+        assert_eq!(registro(&r, "p1").trabalho as usize, total + 1);
     }
 
     #[test]

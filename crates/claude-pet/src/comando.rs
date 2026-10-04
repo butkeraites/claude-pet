@@ -6,6 +6,7 @@
 //! personagem do M2) e as rotas de debug.
 
 use std::sync::mpsc::SyncSender;
+use std::time::Instant;
 
 use pet_core::evento::Evento;
 use pet_core::geometria::Ret;
@@ -33,13 +34,16 @@ pub struct QuadroEsperado {
     pub rgba: Vec<u8>,
 }
 
-/// Um evento de hook já validado e a hora em que o ingress o recebeu (ms
-/// desde 1970, relógio do host): vale como hora do evento quando o `ts`
-/// dele falta ou não é plausível.
+/// Um evento de hook já validado e a hora em que o ingress o recebeu: em ms
+/// desde 1970 (relógio do host), que vale como hora do evento quando o `ts`
+/// dele falta ou não é plausível, e no relógio monotônico, para o cérebro
+/// contar os prazos a partir da chegada mesmo se o laço demorar a
+/// processar (decisão 0032).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Recebido {
     pub evento: Evento,
     pub recebido_ms: u64,
+    pub chegada: Instant,
 }
 
 #[derive(Debug)]

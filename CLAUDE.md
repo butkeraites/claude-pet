@@ -107,8 +107,9 @@ Fora dele, use `~/.cargo/bin/cargo`.
 - Eventos do Claude Code chegam por `POST 127.0.0.1:27380/v1/evento`
   vindos do plugin `bichinho` (hooks async → `plugin/scripts/avisar.sh`),
   são validados campo a campo (`pet_core::evento`, decisão 0019) e vão
-  pelo canal do calloop para o cérebro (`pet_core::cerebro`, decisão
-  0020), que mora no laço principal e funciona mesmo sem compositor.
+  pelo canal do calloop para o cérebro (`pet_core::cerebro`, decisões
+  0020 e 0032), que mora no laço principal, conta os prazos da chegada de
+  cada evento e funciona mesmo sem compositor.
 - Comandos chegam por `POST /v1/comando`, sempre `{"cmd", "arg"}`: as
   reações (`tocar`, `esconder`, `mostrar`; 204) e as aprovações
   (`aprovar_skin`, `revogar_skin`; 200 depois de o laço trocar o
@@ -150,6 +151,10 @@ Fora dele, use `~/.cargo/bin/cargo`.
   drene sempre, numa thread só para isso.
 - `idle_prompt` se repete a cada ~60 s; nunca trate como aviso novo.
 - O Stop não chega quando o usuário aperta Esc no meio da resposta.
+- Hooks async chegam fora de ordem: o Stop pode chegar depois do prompt
+  seguinte, e um Stop hook de outro plugin manda a continuação segundos
+  depois da festa, com o mesmo `prompt_id`. O cérebro espera 0,8 s pelo
+  Stop do turno trocado e reabre o turno comemorado (decisão 0032).
 - `hyprctl output create headless` não aceita nome: descubra o nome novo
   por diff em `hyprctl -j monitors`.
 - Arquivo de dev do compose **nunca** se chama `compose.override.yml`

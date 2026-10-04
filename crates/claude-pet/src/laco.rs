@@ -11,8 +11,9 @@
 //! - o **pipe de sinais** (SIGTERM/SIGINT) para encerrar sem atraso;
 //! - o **canal de comandos** das outras threads: eventos dos hooks,
 //!   `/v1/comando` e rotas de debug;
-//! - o **prazo do cérebro** (acomodação do Stop, sessões que expiram), um
-//!   timer só, rearmado depois de cada evento.
+//! - o **prazo do cérebro** (acomodação do Stop, espera pelo Stop de um
+//!   turno trocado, sessões que expiram), um timer só, rearmado depois de
+//!   cada evento.
 //!
 //! O cérebro ([`Cerebro`]) mora aqui, no laço, e funciona com ou sem
 //! compositor: sem tela, as reações só ficam no `/v1/estado`.
@@ -92,6 +93,22 @@ pub struct Laco {
 
 /// Quem está na tela: (id, impressão digital, origem).
 type NaTela = Option<(String, Option<String>, Option<Origem>)>;
+
+/// O relógio do cérebro para um evento: a hora em que o ingress o recebeu
+/// (parede e monotônico desde `inicio`), não a hora do processamento. Se o
+/// laço ficou parado (o handshake do Wayland, uma troca de personagem), os
+/// eventos da fila entram na hora em que chegaram: o calloop despacha o
+/// canal antes dos timers vencidos, e uma acomodação que um desses eventos
+/// cancela não vence antes dele (decisão 0032).
+fn relogio_da_chegada(inicio: Instant, recebido: &Recebido) -> Agora {
+    Agora {
+        parede_ms: recebido.recebido_ms,
+        mono_ms: recebido
+            .chegada
+            .saturating_duration_since(inicio)
+            .as_millis() as u64,
+    }
+}
 
 /// A escolha nova é exatamente o personagem que já está na tela (aprovar de
 /// novo a mesma skin, revogar a de outro id): nada a trocar.
@@ -311,8 +328,9 @@ impl Laco {
         }
     }
 
-    /// Um evento do Claude Code vai para o cérebro. No log só vão o nome do
-    /// evento e o começo do id da sessão (decisão 0019).
+    /// Um evento do Claude Code vai para o cérebro, no relógio da chegada
+    /// ([`relogio_da_chegada`]). No log só vão o nome do evento e o começo do
+    /// id da sessão (decisão 0019).
     fn evento(&mut self, recebido: Recebido) {
         let ev = &recebido.evento;
         depurar!(
@@ -320,7 +338,7 @@ impl Laco {
             ev.e,
             ev.sid.as_deref().map_or_else(|| "?".into(), evento::curto)
         );
-        let agora = self.agora();
+        let agora = relogio_da_chegada(self.inicio, &recebido);
         let reacoes = self.cerebro.receber(ev, recebido.recebido_ms, agora);
         self.depois_do_cerebro(reacoes);
     }
@@ -553,6 +571,33 @@ impl Laco {
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    #[test]
+    fn cerebro_conta_os_prazos_da_chegada_do_evento() {
+        let inicio = Instant::now();
+        let recebido = |chegada: Instant| Recebido {
+            evento: pet_core::evento::Evento {
+                e: "Stop".into(),
+                ..Default::default()
+            },
+            recebido_ms: 1_790_000_000_000,
+            chegada,
+        };
+        let agora = relogio_da_chegada(inicio, &recebido(inicio + Duration::from_millis(1_234)));
+        assert_eq!(
+            agora,
+            Agora {
+                parede_ms: 1_790_000_000_000,
+                mono_ms: 1_234
+            },
+            "a hora da chegada, mesmo processado bem depois"
+        );
+        // Chegou antes de o laço existir (o ingress sobe primeiro): zero.
+        let cedo = inicio
+            .checked_sub(Duration::from_millis(5))
+            .unwrap_or(inicio);
+        assert_eq!(relogio_da_chegada(inicio, &recebido(cedo)).mono_ms, 0);
+    }
 
     #[test]
     fn so_troca_a_tela_quando_muda_quem_esta_nela() {

@@ -34,7 +34,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use pet_core::evento::{self, Lido};
 use pet_core::skin::codificar_png;
@@ -308,11 +308,13 @@ fn receber_evento(req: &Requisicao, ctx: &Contexto) -> (u16, String) {
         ctx.comp.evento_recusado();
         return (503, erro_json("laço principal indisponível"));
     };
+    let chegada = Instant::now();
     let recebido_ms = agora_desde_1970_ms();
     let registro = registro_de_debug(&lido, recebido_ms);
     let recebido = Recebido {
         evento: lido.evento,
         recebido_ms,
+        chegada,
     };
     match canal.try_send(Comando::Evento(Box::new(recebido))) {
         Ok(()) => {
