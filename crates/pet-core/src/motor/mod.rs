@@ -24,6 +24,7 @@
 
 pub mod arraste;
 mod desktop;
+pub mod janelas;
 mod pet;
 pub mod posicoes;
 mod ritmo;
@@ -589,9 +590,9 @@ impl Motor {
         &mut self,
         _ov: Option<&mut dyn Overlay>,
         evento: &EventoDesktop,
-        _agora: Agora,
+        agora: Agora,
     ) -> bool {
-        self.desktop.aplicar(evento)
+        self.desktop.aplicar(evento, agora.parede_ms)
     }
 
     /// O que os eventos do desktop contaram.

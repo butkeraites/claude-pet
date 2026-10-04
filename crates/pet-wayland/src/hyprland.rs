@@ -10,8 +10,8 @@
 //! 2. lê o `hyprland.lock` (linha 2 = nome do socket Wayland);
 //! 3. só aceita a instância se `connect()` funcionar no `.socket2.sock` **e**
 //!    no `wayland-N`. Pastas velhas de um Hyprland que caiu recusam a conexão
-//!    e são puladas. O `.socket2.sock` é aberto e fechado na hora: é o único
-//!    toque no IPC do Hyprland até o M4, e o `.socket.sock` (que executa
+//!    e são puladas. O `.socket2.sock` da prova é aberto e fechado na hora;
+//!    quem lê dele é o [`eventos::Leitor`] (M4). O `.socket.sock` (que executa
 //!    comandos no host) nunca é aberto (decisão 0006).
 //!
 //! Enquanto a assinatura espera o backoff ([`Reconexao`]), nenhuma conexão é
@@ -35,6 +35,8 @@ use std::time::Duration;
 
 use crate::conexao::conectar_unix;
 
+pub mod eventos;
+
 /// Nome do output que o Hyprland cria quando não sobra nenhum monitor de
 /// verdade: nunca é casa do pet.
 pub const RESERVA: &str = "FALLBACK";
@@ -53,6 +55,9 @@ pub struct Instancia {
     pub nome_wayland: String,
     /// Conexão já aberta no socket Wayland (a da prova vira a de verdade).
     pub wayland: UnixStream,
+    /// O socket de eventos (`.socket2.sock`) desta instância: o
+    /// [`eventos::Leitor`] lê dele.
+    pub eventos: std::path::PathBuf,
 }
 
 /// Por que ainda não há compositor.
@@ -183,6 +188,7 @@ pub fn procurar(
                     assinatura,
                     nome_wayland,
                     wayland,
+                    eventos,
                 });
             }
             Err(e) => {

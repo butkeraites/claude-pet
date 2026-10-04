@@ -4,6 +4,7 @@
 
 use serde::Serialize;
 
+use super::janelas::{Anel, PainelTroca};
 use crate::plataforma::{Alca, CapDesktop, EventoDesktop, InfoDesktop};
 
 /// O estado do desktop como os eventos contaram.
@@ -15,11 +16,15 @@ pub struct EstadoDesktop {
     pub monitor_em_foco: Option<String>,
     pub janela_ativa: Option<Alca>,
     pub olhando_claude: bool,
+    /// As últimas trocas de janela ativa (decisão 0050).
+    pub anel: Anel,
 }
 
 impl EstadoDesktop {
-    /// Aplica um evento ao que se sabe. Devolve se algo mudou.
-    pub fn aplicar(&mut self, evento: &EventoDesktop) -> bool {
+    /// Aplica um evento ao que se sabe; `parede_ms` é a hora de agora (ms
+    /// desde 1970), para marcar um buraco no anel quando a fonte cai.
+    /// Devolve se algo mudou.
+    pub fn aplicar(&mut self, evento: &EventoDesktop, parede_ms: u64) -> bool {
         let antes = self.clone();
         match evento {
             EventoDesktop::Ligado(ligado) => {
@@ -28,12 +33,22 @@ impl EstadoDesktop {
                     // O que vier depois de voltar é o que vale; o que se
                     // sabia pode ter mudado no meio.
                     self.olhando_claude = false;
+                    self.anel.buraco(parede_ms);
                 }
             }
             EventoDesktop::MonitorEmFoco(nome) => self.monitor_em_foco = Some(nome.clone()),
-            EventoDesktop::JanelaAtiva { janela, .. } => self.janela_ativa = janela.clone(),
-            EventoDesktop::JanelaInicial { janela, .. } => {
-                if self.janela_ativa.is_none() {
+            EventoDesktop::JanelaAtiva {
+                janela,
+                parede_ms: quando,
+            } => {
+                self.janela_ativa = janela.clone();
+                self.anel.ativou(janela.clone(), *quando);
+            }
+            EventoDesktop::JanelaInicial {
+                janela,
+                parede_ms: quando,
+            } => {
+                if self.anel.semente(janela.clone(), *quando) || self.janela_ativa.is_none() {
                     self.janela_ativa = Some(janela.clone());
                 }
             }
@@ -63,6 +78,7 @@ impl EstadoDesktop {
             foca_janelas: capacidades.foca_janela,
             protocolos: info.protocolos,
             janelas: info.janelas,
+            anel: self.anel.painel(),
         }
     }
 }
@@ -83,6 +99,8 @@ pub struct PainelDesktop {
     pub protocolos: Vec<String>,
     /// Janelas que ela sabe focar.
     pub janelas: usize,
+    /// As últimas trocas de janela ativa: o endereço e a hora, nada mais.
+    pub anel: Vec<PainelTroca>,
 }
 
 impl Default for PainelDesktop {
@@ -98,42 +116,48 @@ mod testes {
     #[test]
     fn eventos_mudam_o_que_se_sabe_e_dizem_se_mudou() {
         let mut d = EstadoDesktop::default();
-        assert_eq!(
-            d.painel(CapDesktop::default(), InfoDesktop::default())
-                .eventos,
-            "sem"
-        );
-        assert!(d.aplicar(&EventoDesktop::Ligado(true)));
-        assert!(d.aplicar(&EventoDesktop::MonitorEmFoco("eDP-1".into())));
+        let vazio = || (CapDesktop::default(), InfoDesktop::default());
+        let (c, i) = vazio();
+        assert_eq!(d.painel(c, i).eventos, "sem");
+        assert!(d.aplicar(&EventoDesktop::Ligado(true), 0));
+        assert!(d.aplicar(&EventoDesktop::MonitorEmFoco("eDP-1".into()), 0));
         assert!(
-            !d.aplicar(&EventoDesktop::MonitorEmFoco("eDP-1".into())),
+            !d.aplicar(&EventoDesktop::MonitorEmFoco("eDP-1".into()), 0),
             "o mesmo"
         );
         let a = Alca("5bbf4e6128f0".into());
-        assert!(d.aplicar(&EventoDesktop::JanelaAtiva {
+        let ativa = EventoDesktop::JanelaAtiva {
             janela: Some(a.clone()),
             parede_ms: 10,
-        }));
+        };
+        assert!(d.aplicar(&ativa, 10));
+        assert!(!d.aplicar(&ativa, 11), "repetida: nada muda, nem o anel");
         // A semente só vale se nada mais novo chegou.
-        assert!(!d.aplicar(&EventoDesktop::JanelaInicial {
+        let semente = EventoDesktop::JanelaInicial {
             janela: Alca("outra".into()),
             parede_ms: 5,
-        }));
-        assert!(d.aplicar(&EventoDesktop::OlhandoClaude(true)));
-        let p = d.painel(CapDesktop::default(), InfoDesktop::default());
+        };
+        assert!(!d.aplicar(&semente, 12));
+        assert!(d.aplicar(&EventoDesktop::OlhandoClaude(true), 13));
+        let (c, i) = vazio();
+        let p = d.painel(c, i);
         assert_eq!(p.eventos, "ligado");
         assert_eq!(p.janela_ativa.as_deref(), Some("5bbf4e6128f0"));
         assert!(p.olhando_claude);
+        assert_eq!(p.anel.len(), 1);
+        assert_eq!(p.anel[0].janela.as_deref(), Some("5bbf4e6128f0"));
         // A janela ativa fechou: nenhuma.
-        assert!(d.aplicar(&EventoDesktop::JanelaFechou(a)));
+        assert!(d.aplicar(&EventoDesktop::JanelaFechou(a), 20));
         assert_eq!(d.janela_ativa, None);
-        // A fonte caiu: a presença deixa de valer.
-        assert!(d.aplicar(&EventoDesktop::Ligado(false)));
+        // A fonte caiu: a presença deixa de valer e o anel ganha um buraco.
+        assert!(d.aplicar(&EventoDesktop::Ligado(false), 30));
         assert!(!d.olhando_claude);
-        assert_eq!(
-            d.painel(CapDesktop::default(), InfoDesktop::default())
-                .eventos,
-            "caiu"
-        );
+        let (c, i) = vazio();
+        let p = d.painel(c, i);
+        assert_eq!(p.eventos, "caiu");
+        assert_eq!(p.anel[0].tipo, super::super::janelas::Tipo::Buraco);
+        // Num buraco, a semente entra (o foreign-toplevel diz a ativa).
+        assert!(d.aplicar(&semente, 40));
+        assert_eq!(d.janela_ativa, Some(Alca("outra".into())));
     }
 }

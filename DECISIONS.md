@@ -1910,3 +1910,60 @@ dock o conector muda (`DP-3` vira `DP-5`), a escala e o tamanho
 **Por quê:** a fração dos pés é o que o olho percebe como "o mesmo lugar" em
 monitores de tamanhos diferentes, e a descrição é o que identifica o
 monitor físico. Gravar só ao soltar não custa nada parado.
+
+## 0050 — O leitor do socket2: uma thread que só lê, só ids e booleanos, e o anel de ativações (2026-10-04)
+
+**Problema:** seguir o monitor ativo, esconder durante a proteção de tela e
+achar o terminal de uma sessão pedem os eventos do Hyprland
+(`.socket2.sock`, decisão 0006). O Hyprland desconecta um cliente com 64
+eventos acumulados, e o spinner do Claude Code no título do terminal gera
+~4 eventos por segundo; as linhas trazem títulos de janela e classes, que
+nunca podem chegar ao log, ao `/v1/estado`, ao `/v1/debug/eventos` nem ao
+disco.
+**Escolha (T4.4):**
+- **Uma thread só para ler** (`pet_wayland::hyprland::eventos::Leitor`):
+  drena sempre, traduz cada linha na hora e entrega ao laço por uma caixa
+  própria (1024 vagas, acordando o laço por um `Ping`; uma caixa cheia
+  conta o evento como perdido, nunca segura a leitura). Cai a ligação, ela
+  conta (`Ligado(false)`), espera o backoff (1 s dobrando até 30 s; 60 s de
+  ligação zeram) e liga de novo. Parar desbloqueia a leitura (`shutdown`) e
+  a espera (condição), na hora.
+- **O que sai de uma linha:** o nome do monitor em foco (`focusedmonv2`; o
+  FALLBACK nunca), o endereço da janela ativa (`activewindowv2`, carimbado
+  com a hora de parede em que a linha foi lida), o booleano "o título da
+  janela em foco começa com ✳, ◐ ou ◑" (`activewindow`: só os 4 primeiros
+  bytes do título são olhados, e só o booleano sai), o endereço de uma janela
+  que abriu com o booleano "é a proteção de tela do Omarchy" (`openwindow`)
+  e o de uma que fechou (`closewindow`), e "um monitor entrou ou saiu". Nomes
+  e endereços passam por regras (`[A-Za-z0-9._-]`, hexadecimal); o resto
+  (títulos, classes, áreas de trabalho, `windowtitle`, …) nem é
+  interpretado. As repetições (o `activewindow` reenviado a cada troca de
+  título) não acordam o laço. Linhas de mais de 4 KiB são puladas sem serem
+  guardadas. Do log, só "ligado", "caiu" e o atraso.
+- **Ciclo de vida:** o leitor nasce quando a descoberta acha a instância
+  (antes do handshake do Wayland: com a conexão Wayland em backoff, os
+  eventos já chegam) e morre quando não há mais Hyprland; uma instância nova
+  troca o leitor. O laço esvazia a caixa do desktop antes da dos hooks: uma
+  troca de janela que veio antes de um prompt entra no anel antes dele.
+- **O anel de ativações** (`pet_core::motor::janelas::Anel`, no Motor): até
+  128 trocas de janela ativa, só o endereço e a hora de parede; a fonte caiu,
+  um buraco (até a próxima troca, nada se sabe); a semente do
+  foreign-toplevel (T4.9) só entra com o anel vazio ou num buraco. A busca
+  pela hora (`Anel::em`) diz a janela, ou dúvida se a troca para ela foi há
+  menos de 1 s (a primeira troca do anel, ou a primeira depois de um buraco,
+  não tem dúvida: não se sabe o que havia antes), ou nenhuma, ou
+  desconhecida. O `/v1/estado.desktop.anel` mostra as 8 últimas trocas
+  (endereço, hora e tipo).
+- **O canário** (`tests/socket2.rs`): o daemon de verdade com uma instância
+  de mentira do Hyprland (`hyprland.lock`, um socket2 que manda
+  `activewindow>>firefox,SEGREDO-T`, um `openwindow` e um `windowtitlev2` com
+  segredos depois das linhas úteis e uma sentinela no fim, e um Wayland que
+  desliga na hora): nada com `segredo` nem `firefox` no `/v1/estado`, no
+  `/v1/debug/eventos` nem no log com `PET_LOG=debug`, e o `.socket.sock` da
+  instância nunca recebe conexão. Duas versões erradas de propósito
+  reprovaram: a linha crua no log de debug e a classe do `openwindow` saindo
+  como monitor em foco.
+**Por quê:** ler numa thread que nunca espera é o que o Hyprland exige;
+traduzir na hora e só para ids e booleanos é o que a regra de ouro exige; e
+casar o prompt com a janela pela hora, num anel em que um buraco é
+"não sei" e não "a de antes", evita mandar o Renan para a janela errada.
