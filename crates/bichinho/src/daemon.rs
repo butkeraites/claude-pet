@@ -22,6 +22,9 @@ use crate::estado::Compartilhado;
 use crate::ingress;
 
 pub fn rodar() -> ExitCode {
+    // Antes de tudo (o leitor do socket2 e a conexão Wayland trazem títulos
+    // de janela para a memória): nenhum core dump (decisão 0061).
+    crate::privacidade::sem_core_dump();
     let ambiente = match Ambiente::ler(|nome| std::env::var(nome).ok()) {
         Ok(a) => a,
         Err(motivo) => {

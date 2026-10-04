@@ -19,15 +19,18 @@
 //!
 //! Ambiente: `PET_PORTA` (porta do pet, padrão 27380), `PET_TESTE=1` (evento
 //! sintético do `bin/pet testar`: o pet o isola das sessões reais e o
-//! esquece em 60 s), `CLAUDE_CODE_ENTRYPOINT` (posto pelo Claude Code) e
-//! `XDG_STATE_HOME`/`HOME` (onde o Omarchy guarda o "não perturbe").
+//! esquece em 60 s), `CLAUDE_CODE_ENTRYPOINT` (posto pelo Claude Code),
+//! `XDG_STATE_HOME`/`HOME` (onde o Omarchy guarda o "não perturbe") e os ids
+//! de terminal `TMUX_PANE`, `KITTY_WINDOW_ID` e `WEZTERM_PANE` (só no
+//! `SessionStart` e no `UserPromptSubmit`, e só se passam no validador do pet;
+//! decisão 0054).
 
 use std::io::{BufReader, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::process::ExitCode;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use pet_core::aviso::{self, Contexto};
+use pet_core::aviso::{self, Contexto, IdsDoAmbiente};
 
 /// Com o pet desligado, a conexão é recusada na hora; isto é para uma porta
 /// que não responde.
@@ -49,7 +52,9 @@ const LIMITE_DND: u64 = 16 * 1024 * 1024;
 pub fn rodar(mut argumentos: impl Iterator<Item = String>) -> ExitCode {
     // Pânico sai 0, calado: o gancho padrão imprimiria no stderr.
     std::panic::set_hook(Box::new(|_| std::process::exit(0)));
-    sem_core_dump();
+    // No Linux o hook não deixa core dump: um aborto (falta de memória, por
+    // exemplo) levaria a entrada (o prompt) para o `systemd-coredump`.
+    crate::privacidade::sem_core_dump();
     let _ = std::thread::Builder::new().name("prazo".into()).spawn(|| {
         std::thread::sleep(PRAZO_TOTAL);
         std::process::exit(0);
@@ -66,12 +71,20 @@ pub fn rodar(mut argumentos: impl Iterator<Item = String>) -> ExitCode {
     let porta = aviso::porta(std::env::var("PET_PORTA").ok().as_deref());
     let teste = std::env::var("PET_TESTE").ok().as_deref() == Some("1");
     let ent = std::env::var("CLAUDE_CODE_ENTRYPOINT").ok();
+    let tmux = std::env::var("TMUX_PANE").ok();
+    let kitty = std::env::var("KITTY_WINDOW_ID").ok();
+    let wezterm = std::env::var("WEZTERM_PANE").ok();
     let contexto = Contexto {
         evento: &evento,
         ts,
         ent: ent.as_deref(),
         dnd: nao_perturbe(),
         teste,
+        terminal: IdsDoAmbiente {
+            tmux: tmux.as_deref(),
+            kitty: kitty.as_deref(),
+            wezterm: wezterm.as_deref(),
+        },
     };
     // O JSON do hook passa por este processo em fluxo: só os campos da
     // lista branca ficam na memória, e o hook segue assim que o objeto
@@ -81,18 +94,6 @@ pub fn rodar(mut argumentos: impl Iterator<Item = String>) -> ExitCode {
     let _ = enviar(porta, &corpo);
     ExitCode::SUCCESS
 }
-
-/// No Linux o hook não deixa core dump: um aborto (falta de memória, por
-/// exemplo) levaria a entrada (o prompt) para o `systemd-coredump`. Sem
-/// `unsafe`: o `prctl` pelo invólucro seguro do `rustix`.
-#[cfg(target_os = "linux")]
-fn sem_core_dump() {
-    use rustix::process::{DumpableBehavior, set_dumpable_behavior};
-    let _ = set_dumpable_behavior(DumpableBehavior::NotDumpable);
-}
-
-#[cfg(not(target_os = "linux"))]
-fn sem_core_dump() {}
 
 /// O "não perturbe" do Omarchy (só existe no Linux), em
 /// `${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/notifications.json`. Só o

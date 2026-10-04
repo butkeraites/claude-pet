@@ -20,8 +20,22 @@ O código deste repositório é MIT (`LICENSE`). Abaixo, o que vem de fora.
   (MIT). Só coordenadas e cores da paleta do pack; nenhum pixel do pack.
 - `skins/_teste/` — skin xadrez de QA gerada por `cargo xtask skin-teste`;
   MIT.
+- `assets/fonte/monogram/` — **monogram**, a fonte de pixel dos balões, de
+  Vinícius Menézio (datagoblin): https://datagoblin.itch.io/monogram, em
+  domínio público pela **CC0 1.0** (o texto da licença em
+  `assets/fonte/monogram/CC0-1.0.txt`, os créditos originais em
+  `credits.txt` e a origem em `LICENCA.md`). O repositório guarda só o JSON
+  de bitmaps do pacote; `cargo xtask fonte` o assa em
+  `crates/pet-core/src/fonte/glifos.rs`, que vai dentro do binário (decisão
+  0052). Obrigado, datagoblin!
 
-## A incluir quando chegarem
+## Protocolos
 
-- **monogram** (fonte bitmap dos balões), por datagoblin — CC0 —
-  https://datagoblin.itch.io/monogram (M2/M6).
+- `crates/pet-wayland/protocolos/hyprland-toplevel-mapping-v1.xml` — o
+  protocolo `hyprland_toplevel_mapping_v1`, do hyprland-protocols
+  (https://github.com/hyprwm/hyprland-protocols, commit 9830bfb5 de
+  2025-04-01): Copyright © 2025 WhySoBad, **BSD-3-Clause** (o aviso de
+  copyright e a licença estão no próprio XML, que vai sem mudança nenhuma).
+  O código de cliente sai dele pelo `wayland-scanner` (decisão 0056) e vai
+  dentro do binário: quem distribuir o binário leva junto este aviso e o
+  texto da licença que está no XML.

@@ -13,14 +13,24 @@
 //! prazos dela (destruir depois de esconder, reservas de escala e de `enter`,
 //! recriar depois de um `closed`) vencem pelo [`Overlay::vencer`], no relógio
 //! do laço.
+//!
+//! A mesma sessão é o [`Desktop`] do Wayland (decisão 0043): a janela e a
+//! ligação com o desktop usam a mesma conexão e o mesmo `wl_seat`, e nascem e
+//! morrem juntas a cada reconexão. Juntas, são o [`Punho`] que o laço entrega
+//! ao núcleo. Focar uma janela é o `zwlr_foreign_toplevel_handle_v1.activate`
+//! do handle que o `hyprland_toplevel_mapping_manager_v1` ligou ao endereço
+//! dela (decisões 0039 e 0056; [`crate::toplevel`]).
 
+use std::ffi::OsStr;
 use std::os::unix::net::UnixStream;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use pet_core::cena::Elemento;
 use pet_core::geometria::{self, Ret};
+use pet_core::motor::OCIOSO_MS;
 use pet_core::plataforma::{
-    Botao, CapOverlay, Desenho, EventoOverlay, EventoPonteiro, Fase, InfoOverlay, Monitor, Overlay,
+    Alca, Botao, CapDesktop, CapOverlay, Cursor, Desenho, Desktop, ErroFoco, EventoDesktop,
+    EventoOverlay, EventoPonteiro, Fase, InfoDesktop, InfoOverlay, Monitor, Overlay, Punho,
     UltimoQuadro,
 };
 use pet_core::skin::Skin;
@@ -32,8 +42,15 @@ use smithay_client_toolkit::reexports::client::globals::{GlobalList, registry_qu
 use smithay_client_toolkit::reexports::client::protocol::{
     wl_output, wl_pointer, wl_seat, wl_surface,
 };
+use smithay_client_toolkit::reexports::client::backend::ObjectId;
 use smithay_client_toolkit::reexports::client::{
-    Connection, Dispatch, EventQueue, QueueHandle, delegate_noop,
+    Connection, Dispatch, EventQueue, Proxy, QueueHandle, delegate_noop, event_created_child,
+};
+use smithay_client_toolkit::reexports::protocols_wlr::foreign_toplevel::v1::client::zwlr_foreign_toplevel_handle_v1::{
+    self, ZwlrForeignToplevelHandleV1,
+};
+use smithay_client_toolkit::reexports::protocols_wlr::foreign_toplevel::v1::client::zwlr_foreign_toplevel_manager_v1::{
+    self, ZwlrForeignToplevelManagerV1,
 };
 use smithay_client_toolkit::reexports::protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
 use smithay_client_toolkit::reexports::protocols::wp::fractional_scale::v1::client::wp_fractional_scale_v1::{
@@ -42,6 +59,10 @@ use smithay_client_toolkit::reexports::protocols::wp::fractional_scale::v1::clie
 use smithay_client_toolkit::reexports::protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::{
     Shape, WpCursorShapeDeviceV1,
 };
+use smithay_client_toolkit::reexports::protocols::ext::idle_notify::v1::client::ext_idle_notification_v1::{
+    self, ExtIdleNotificationV1,
+};
+use smithay_client_toolkit::reexports::protocols::ext::idle_notify::v1::client::ext_idle_notifier_v1::ExtIdleNotifierV1;
 use smithay_client_toolkit::reexports::protocols::wp::viewporter::client::wp_viewport::WpViewport;
 use smithay_client_toolkit::reexports::protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
 use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
@@ -56,9 +77,38 @@ use smithay_client_toolkit::shell::wlr_layer::{
 use smithay_client_toolkit::shm::{Shm, ShmHandler};
 use smithay_client_toolkit::{delegate_registry, registry_handlers};
 
+use crate::hyprland::mapeamento::{
+    self,
+    protocolo::hyprland_toplevel_mapping_manager_v1::{self, HyprlandToplevelMappingManagerV1},
+    protocolo::hyprland_toplevel_window_mapping_handle_v1::{
+        self, HyprlandToplevelWindowMappingHandleV1,
+    },
+};
 use crate::saida;
 use crate::sincronia;
 use crate::superficie::{self, OrigemEscala, Prazo, Superficie};
+use crate::toplevel::{self, Janelas};
+
+/// Os dois protocolos que focam janelas (decisão 0056).
+const FOREIGN_TOPLEVEL: &str = "zwlr_foreign_toplevel_manager_v1";
+const MAPEAMENTO: &str = "hyprland_toplevel_mapping_manager_v1";
+/// O que diz se o Renan está no teclado e no mouse (decisão 0062).
+const OCIOSIDADE: &str = "ext_idle_notifier_v1";
+
+/// O `WAYLAND_DEBUG` ligado para clientes: o backend do wayland-client
+/// imprime toda mensagem no stderr, com os argumentos — os títulos das
+/// janelas do foreign-toplevel iriam para o log. Com ele, o foreign-toplevel
+/// fica desligado (a regra de ouro dos títulos).
+fn wayland_debug(valor: Option<&OsStr>) -> bool {
+    matches!(valor, Some(v) if v == "1" || v == "client")
+}
+
+/// Hora de parede em ms desde 1970 (o relógio do `ts` dos hooks).
+fn agora_parede_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
+}
 
 /// Globais sem os quais não há camada para desenhar.
 const OBRIGATORIOS: &[&str] = &[
@@ -170,6 +220,22 @@ pub struct Sessao {
     ponteiro: Option<wl_pointer::WlPointer>,
     cursores: Option<CursorShapeManager>,
     forma_do_cursor: Option<WpCursorShapeDeviceV1>,
+    /// O serial do último `enter` do ponteiro na camada: o cursor-shape só
+    /// aceita trocar o cursor com ele.
+    serial_enter: Option<u32>,
+    /// O foreign-toplevel e o mapeamento do Hyprland (decisão 0056), se o
+    /// compositor oferece.
+    toplevels: Option<ZwlrForeignToplevelManagerV1>,
+    mapeador: Option<HyprlandToplevelMappingManagerV1>,
+    /// As janelas que o compositor anunciou (sem título nem app id).
+    janelas: Janelas<ObjectId, ZwlrForeignToplevelHandleV1>,
+    /// O `ext_idle_notifier_v1` e a notificação do `wl_seat` desta conexão
+    /// (decisão 0062): o Renan longe do teclado e do mouse, e de volta.
+    ociosidade: Option<ExtIdleNotifierV1>,
+    notificacao: Option<ExtIdleNotificationV1>,
+    /// O que o desktop desta conexão conta ao Motor (a semente da janela
+    /// ativa).
+    eventos_desktop: Vec<EventoDesktop>,
 }
 
 /// Resultado do handshake: a conexão, a fila e o estado que ela despacha.
@@ -215,7 +281,54 @@ pub fn conectar(fluxo: UnixStream, inicio: Instant) -> Result<Conexao, String> {
         .ok();
     let assentos = SeatState::new(&globais, &qh);
     let cursores = CursorShapeManager::bind(&globais, &qh).ok();
-    let sessao = Sessao {
+    // Focar janelas (decisão 0056): o foreign-toplevel genérico e o
+    // mapeamento do Hyprland para os endereços das janelas.
+    let depurando = wayland_debug(std::env::var_os("WAYLAND_DEBUG").as_deref());
+    let toplevels = if depurando {
+        None
+    } else {
+        globais
+            .bind::<ZwlrForeignToplevelManagerV1, _, _>(&qh, 1..=3, ())
+            .ok()
+    };
+    let mapeador = globais
+        .bind::<HyprlandToplevelMappingManagerV1, _, _>(&qh, 1..=1, ())
+        .ok();
+    let ociosidade = globais.bind::<ExtIdleNotifierV1, _, _>(&qh, 1..=2, ()).ok();
+    match &ociosidade {
+        Some(o) => info!(
+            "o Renan no teclado e no mouse: {OCIOSIDADE} v{} ligado",
+            o.version()
+        ),
+        None => aviso!(
+            "o compositor não oferece {OCIOSIDADE}: o pronto não sai pelo foco do terminal, só pelo \
+             clique ou pelo prompt seguinte"
+        ),
+    }
+    match (&toplevels, &mapeador) {
+        (Some(t), Some(m)) => info!(
+            "focar janelas: {FOREIGN_TOPLEVEL} v{} e {MAPEAMENTO} v{} ligados",
+            t.version(),
+            m.version()
+        ),
+        _ if depurando => aviso!(
+            "WAYLAND_DEBUG ligado: o {FOREIGN_TOPLEVEL} fica desligado (o wayland-client \
+             imprimiria os títulos das janelas no log) e o clique no pet cai no balão"
+        ),
+        _ => aviso!(
+            "o compositor não oferece {}: o clique no pet não foca janelas (cai no balão)",
+            [
+                (FOREIGN_TOPLEVEL, toplevels.is_none()),
+                (MAPEAMENTO, mapeador.is_none())
+            ]
+            .iter()
+            .filter(|(_, falta)| *falta)
+            .map(|(nome, _)| *nome)
+            .collect::<Vec<_>>()
+            .join(" nem ")
+        ),
+    }
+    let mut sessao = Sessao {
         registro: RegistryState::new(&globais),
         saidas: OutputState::new(&globais, &qh),
         compositor,
@@ -233,7 +346,15 @@ pub fn conectar(fluxo: UnixStream, inicio: Instant) -> Result<Conexao, String> {
         ponteiro: None,
         cursores,
         forma_do_cursor: None,
+        serial_enter: None,
+        toplevels,
+        mapeador,
+        janelas: Janelas::default(),
+        ociosidade,
+        notificacao: None,
+        eventos_desktop: Vec::new(),
     };
+    sessao.contar_ociosidade();
     Ok(Conexao {
         conexao,
         fila,
@@ -335,6 +456,29 @@ impl Sessao {
             superficie.escala_preferida(escala_120);
             self.tentar_aprontar();
         }
+    }
+
+    /// Pede ao compositor para contar quando o Renan para de mexer no
+    /// teclado e no mouse por [`OCIOSO_MS`] e quando volta, no `wl_seat` desta
+    /// conexão (decisão 0062). Na versão 2 só a entrada conta: um vídeo que
+    /// segura a tela acesa não é o Renan ali. A notificação nasce "não
+    /// ocioso", e o Motor conta a presença daqui.
+    fn contar_ociosidade(&mut self) {
+        if self.notificacao.is_some() {
+            return;
+        }
+        let (Some(notificador), Some(assento)) = (&self.ociosidade, self.assentos.seats().next())
+        else {
+            return;
+        };
+        let prazo = OCIOSO_MS as u32;
+        let notificacao = if notificador.version() >= 2 {
+            notificador.get_input_idle_notification(prazo, &assento, &self.qh, ())
+        } else {
+            notificador.get_idle_notification(prazo, &assento, &self.qh, ())
+        };
+        self.notificacao = Some(notificacao);
+        self.eventos_desktop.push(EventoDesktop::Ocioso(false));
     }
 
     fn executar(&mut self, agendado: Agendado) {
@@ -474,6 +618,21 @@ impl Overlay for Sessao {
         }
     }
 
+    /// `grab` e `grabbing` do cursor-shape-v1, com o serial do último
+    /// `enter` (sem ele, ou sem o protocolo, o cursor fica como está).
+    fn cursor(&mut self, cursor: Cursor) {
+        let (Some(forma), Some(serial)) = (&self.forma_do_cursor, self.serial_enter) else {
+            return;
+        };
+        forma.set_shape(
+            serial,
+            match cursor {
+                Cursor::Pegar => Shape::Grab,
+                Cursor::Agarrar => Shape::Grabbing,
+            },
+        );
+    }
+
     fn info(&self) -> InfoOverlay {
         let superficie = self.superficie.as_ref();
         let pronta = superficie.and_then(Superficie::pronta);
@@ -530,6 +689,224 @@ impl Overlay for Sessao {
             Ok(()) => depurar!("o compositor processou o quadro transparente e a destruição"),
             Err(e) => aviso!("saindo sem confirmação do compositor: {e}"),
         }
+    }
+}
+
+/// O desktop do Wayland nesta conexão (decisões 0043 e 0056): foca uma
+/// janela pelo endereço com o `activate` do foreign-toplevel, no `wl_seat`
+/// desta conexão. O monitor em foco e as trocas de janela vêm do socket2 (o
+/// leitor do adaptador do Hyprland), não daqui.
+impl Desktop for Sessao {
+    fn capacidades(&self) -> CapDesktop {
+        let mapeia = self.toplevels.is_some() && self.mapeador.is_some();
+        CapDesktop {
+            segue_foco: false,
+            janela_ativa: mapeia,
+            foca_janela: mapeia && self.assentos.seats().next().is_some(),
+            nao_perturbe: false,
+        }
+    }
+
+    fn focar(&mut self, alvo: &Alca) -> Result<(), ErroFoco> {
+        if self.toplevels.is_none() || self.mapeador.is_none() {
+            return Err(ErroFoco::NaoSuportado);
+        }
+        let Some(assento) = self.assentos.seats().next() else {
+            return Err(ErroFoco::NaoSuportado);
+        };
+        let Some(handle) = self.janelas.achar(&alvo.0) else {
+            return Err(ErroFoco::JanelaSumiu);
+        };
+        handle.activate(&assento);
+        if let Err(e) = self.conexao.flush() {
+            aviso!("focar a janela {}: {e}", alvo.0);
+        }
+        info!("focando a janela {} (foreign-toplevel)", alvo.0);
+        Ok(())
+    }
+
+    fn eventos(&mut self) -> Vec<EventoDesktop> {
+        std::mem::take(&mut self.eventos_desktop)
+    }
+
+    fn info(&self) -> InfoDesktop {
+        let mut protocolos = Vec::new();
+        if let Some(t) = &self.toplevels {
+            protocolos.push(format!("{FOREIGN_TOPLEVEL} v{}", t.version()));
+        }
+        if let Some(m) = &self.mapeador {
+            protocolos.push(format!("{MAPEAMENTO} v{}", m.version()));
+        }
+        if let (Some(o), Some(_)) = (&self.ociosidade, &self.notificacao) {
+            protocolos.push(format!("{OCIOSIDADE} v{}", o.version()));
+        }
+        InfoDesktop {
+            protocolos,
+            janelas: self.janelas.com_endereco(),
+        }
+    }
+
+    /// A janela que o foreign-toplevel diz estar ativa agora.
+    fn janela_ativa(&self) -> Option<Alca> {
+        self.janelas.ativa().map(|a| Alca(a.to_owned()))
+    }
+}
+
+/// As janelas que o compositor anuncia: cada uma é mapeada para o endereço
+/// dela no Hyprland assim que chega.
+impl Dispatch<ZwlrForeignToplevelManagerV1, ()> for Sessao {
+    fn event(
+        sessao: &mut Self,
+        _: &ZwlrForeignToplevelManagerV1,
+        evento: zwlr_foreign_toplevel_manager_v1::Event,
+        _: &(),
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        match evento {
+            zwlr_foreign_toplevel_manager_v1::Event::Toplevel { toplevel } => {
+                if let Some(mapeador) = &sessao.mapeador {
+                    mapeador.get_window_for_toplevel_wlr(&toplevel, qh, toplevel.id());
+                }
+                sessao.janelas.nova(toplevel.id(), toplevel);
+            }
+            zwlr_foreign_toplevel_manager_v1::Event::Finished => {
+                aviso!("o compositor parou o {FOREIGN_TOPLEVEL}: o clique não foca janelas");
+                sessao.toplevels = None;
+            }
+            _ => {}
+        }
+    }
+
+    event_created_child!(Sessao, ZwlrForeignToplevelManagerV1, [
+        zwlr_foreign_toplevel_manager_v1::EVT_TOPLEVEL_OPCODE => (ZwlrForeignToplevelHandleV1, ())
+    ]);
+}
+
+/// Um evento de uma janela do foreign-toplevel: só o "ativa" e o "fechou"
+/// interessam. O título e o app id chegam aqui e são jogados fora, sem ser
+/// guardados em lugar nenhum (decisões 0056 e 0061). Devolve `true` se a
+/// janela fechou (o handle tem de ser destruído).
+fn evento_do_toplevel<I: std::hash::Hash + Eq + Clone, H>(
+    janelas: &mut Janelas<I, H>,
+    eventos: &mut Vec<EventoDesktop>,
+    id: &I,
+    evento: zwlr_foreign_toplevel_handle_v1::Event,
+    parede_ms: u64,
+) -> bool {
+    match evento {
+        zwlr_foreign_toplevel_handle_v1::Event::State { state } => {
+            let ativa = toplevel::tem_ativa(&state);
+            if let Some(evento) = janelas.estado(id, ativa, parede_ms) {
+                eventos.push(evento);
+            }
+            false
+        }
+        zwlr_foreign_toplevel_handle_v1::Event::Closed => {
+            janelas.fechou(id);
+            true
+        }
+        _ => false,
+    }
+}
+
+impl Dispatch<ZwlrForeignToplevelHandleV1, ()> for Sessao {
+    fn event(
+        sessao: &mut Self,
+        handle: &ZwlrForeignToplevelHandleV1,
+        evento: zwlr_foreign_toplevel_handle_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        let fechou = evento_do_toplevel(
+            &mut sessao.janelas,
+            &mut sessao.eventos_desktop,
+            &handle.id(),
+            evento,
+            agora_parede_ms(),
+        );
+        if fechou {
+            handle.destroy();
+        }
+    }
+}
+
+/// O Renan parou de mexer no teclado e no mouse, ou voltou (decisão 0062).
+impl Dispatch<ExtIdleNotificationV1, ()> for Sessao {
+    fn event(
+        sessao: &mut Self,
+        _: &ExtIdleNotificationV1,
+        evento: ext_idle_notification_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match evento {
+            ext_idle_notification_v1::Event::Idled => {
+                sessao.eventos_desktop.push(EventoDesktop::Ocioso(true));
+            }
+            ext_idle_notification_v1::Event::Resumed => {
+                sessao.eventos_desktop.push(EventoDesktop::Ocioso(false));
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<HyprlandToplevelMappingManagerV1, ()> for Sessao {
+    fn event(
+        _: &mut Self,
+        _: &HyprlandToplevelMappingManagerV1,
+        evento: hyprland_toplevel_mapping_manager_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match evento {}
+    }
+}
+
+/// O endereço de uma janela (o `dono` é o handle do foreign-toplevel).
+impl Dispatch<HyprlandToplevelWindowMappingHandleV1, ObjectId> for Sessao {
+    fn event(
+        sessao: &mut Self,
+        mapeado: &HyprlandToplevelWindowMappingHandleV1,
+        evento: hyprland_toplevel_window_mapping_handle_v1::Event,
+        dono: &ObjectId,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let hyprland_toplevel_window_mapping_handle_v1::Event::WindowAddress {
+            address_hi,
+            address,
+        } = evento
+        {
+            let endereco = mapeamento::endereco(address_hi, address);
+            if let Some(evento) = sessao.janelas.endereco(dono, endereco, agora_parede_ms()) {
+                sessao.eventos_desktop.push(evento);
+            }
+        }
+        mapeado.destroy();
+    }
+}
+
+/// A janela e o desktop da mesma conexão (decisão 0043).
+impl Punho for Sessao {
+    fn janela(&mut self) -> &mut dyn Overlay {
+        self
+    }
+
+    fn desktop(&mut self) -> &mut dyn Desktop {
+        self
+    }
+
+    fn ver_janela(&self) -> &dyn Overlay {
+        self
+    }
+
+    fn ver_desktop(&self) -> &dyn Desktop {
+        self
     }
 }
 
@@ -680,8 +1057,13 @@ impl OutputHandler for Sessao {
         }
     }
 
+    /// Um monitor mudou de posição, tamanho ou descrição (o layout mudou):
+    /// a camada confere de novo onde está. O tamanho novo vem também por um
+    /// `configure`; a posição só por aqui (as janelas pequenas do M8 e o
+    /// pouso de um arraste entre monitores usam a origem).
     fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, saida: wl_output::WlOutput) {
         depurar!("monitor mudou: {}", descrever_saida(&self.saidas, &saida));
+        self.tentar_aprontar();
     }
 
     fn output_destroyed(
@@ -709,8 +1091,10 @@ impl Dispatch<WpFractionalScaleV1, ()> for Sessao {
     }
 }
 
-// Sem eventos: o gerente da escala fracionária, o viewporter e o viewport.
+// Sem eventos: o gerente da escala fracionária, o viewporter, o viewport e
+// o notificador da ociosidade.
 delegate_noop!(Sessao: WpFractionalScaleManagerV1);
+delegate_noop!(Sessao: ExtIdleNotifierV1);
 delegate_noop!(Sessao: WpViewporter);
 delegate_noop!(Sessao: WpViewport);
 
@@ -729,7 +1113,10 @@ impl SeatHandler for Sessao {
         &mut self.assentos
     }
 
-    fn new_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
+    fn new_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {
+        // Um assento que chegou depois do registro: a ociosidade conta nele.
+        self.contar_ociosidade();
+    }
 
     fn new_capability(
         &mut self,
@@ -798,12 +1185,18 @@ impl PointerHandler for Sessao {
             let y = (evento.position.1 * escala).round() as i32;
             let ponteiro = match &evento.kind {
                 PointerEventKind::Enter { serial } => {
+                    self.serial_enter = Some(*serial);
                     if let Some(forma) = &self.forma_do_cursor {
                         forma.set_shape(*serial, Shape::Grab);
                     }
                     EventoPonteiro::Entrou { x, y }
                 }
-                PointerEventKind::Leave { .. } => EventoPonteiro::Saiu,
+                PointerEventKind::Leave { .. } => {
+                    // Fora da camada, o cursor não é mais do pet: nenhum
+                    // `set_shape` até o próximo `enter` (decisão 0063).
+                    self.serial_enter = None;
+                    EventoPonteiro::Saiu
+                }
                 PointerEventKind::Motion { .. } => EventoPonteiro::Moveu { x, y },
                 PointerEventKind::Press { button, .. } => EventoPonteiro::Apertou {
                     botao: botao(*button),
@@ -921,6 +1314,62 @@ mod testes {
                 EventoOverlay::Ponteiro(EventoPonteiro::Moveu { x: 61, y: 2 }),
             ]
         );
+    }
+
+    #[test]
+    fn wayland_debug_de_cliente_desliga_o_foreign_toplevel() {
+        assert!(wayland_debug(Some(OsStr::new("1"))));
+        assert!(wayland_debug(Some(OsStr::new("client"))));
+        assert!(!wayland_debug(Some(OsStr::new("server"))));
+        assert!(!wayland_debug(Some(OsStr::new("0"))));
+        assert!(!wayland_debug(None));
+    }
+
+    #[test]
+    fn titulo_e_app_id_do_toplevel_nao_ficam_em_lugar_nenhum() {
+        use zwlr_foreign_toplevel_handle_v1::Event;
+        let mut janelas: Janelas<u32, &str> = Janelas::default();
+        let mut eventos = Vec::new();
+        janelas.nova(1, "h1");
+        let ativa: Vec<u8> = toplevel::ESTADO_ATIVA.to_ne_bytes().to_vec();
+        for evento in [
+            Event::Title {
+                title: "SEGREDO-titulo da janela".into(),
+            },
+            Event::AppId {
+                app_id: "SEGREDO-app-id".into(),
+            },
+            Event::State { state: ativa },
+            Event::Done,
+        ] {
+            assert!(!evento_do_toplevel(
+                &mut janelas,
+                &mut eventos,
+                &1,
+                evento,
+                10
+            ));
+        }
+        if let Some(semente) = janelas.endereco(&1, "5bbf4e6128f0".into(), 20) {
+            eventos.push(semente);
+        }
+        assert_eq!(
+            eventos,
+            vec![EventoDesktop::JanelaInicial {
+                janela: Alca("5bbf4e6128f0".into()),
+                parede_ms: 20
+            }]
+        );
+        let rastro = format!("{janelas:?} {eventos:?}");
+        assert!(!rastro.contains("SEGREDO"), "{rastro}");
+        assert!(evento_do_toplevel(
+            &mut janelas,
+            &mut eventos,
+            &1,
+            Event::Closed,
+            30
+        ));
+        assert_eq!(janelas.com_endereco(), 0);
     }
 
     #[test]

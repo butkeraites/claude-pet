@@ -13,6 +13,11 @@
 //! - o **pipe de sinais** (SIGTERM/SIGINT) para encerrar sem atraso;
 //! - a **caixa** ([`Caixa`]) das outras threads: eventos dos hooks,
 //!   `/v1/comando` e rotas de debug, acordando o laço por um `Ping`;
+//! - a **caixa do desktop**: os eventos do socket2 do Hyprland, lidos numa
+//!   thread só para isso ([`Leitor`], decisão 0050), que nasce com a
+//!   instância do Hyprland achada pela descoberta e morre com ela. Ela é
+//!   esvaziada antes da caixa dos hooks: a troca de janela que veio antes
+//!   de um prompt entra no anel antes dele;
 //! - um **prazo** só, o mais próximo entre os do Motor (cérebro e animação)
 //!   e os da janela, rearmado depois de cada lote.
 //!
@@ -28,8 +33,9 @@ use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use pet_core::config::ConfigEfetiva;
-use pet_core::plataforma::{Caixa, Despertador, Overlay};
+use pet_core::plataforma::{Caixa, Despertador, EventoDesktop, Punho};
 use pet_wayland::conexao::{self, Reconexao};
+use pet_wayland::hyprland::eventos::Leitor;
 use pet_wayland::hyprland::{self, Espera};
 use pet_wayland::sessao::Sessao;
 use signal_hook::consts::{SIGINT, SIGTERM};
@@ -54,6 +60,9 @@ pub const INTERVALO_DESCOBERTA: Duration = Duration::from_secs(2);
 /// Quantos comandos o laço tira da caixa de uma vez (o resto vem no próximo
 /// toque do `Ping`).
 const LOTE_DA_CAIXA: usize = 4 * comando::CAPACIDADE;
+/// Eventos do desktop esperando o laço (o leitor só manda as mudanças: uma
+/// troca de janela, de monitor ou de presença).
+const CAPACIDADE_DESKTOP: usize = 1024;
 
 /// O `Ping` do calloop acorda o laço quando chega algo na caixa.
 struct Acordar(Ping);
@@ -80,6 +89,15 @@ pub fn rodar(
         }
     };
     let (caixa, recebe) = Caixa::nova(comando::CAPACIDADE, Arc::new(Acordar(sino)));
+    let (sino_do_desktop, fonte_do_desktop) = match ping::make_ping() {
+        Ok(par) => par,
+        Err(e) => {
+            erro!("não consegui criar o despertador dos eventos do desktop: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let (caixa_do_desktop, recebe_do_desktop) =
+        Caixa::nova(CAPACIDADE_DESKTOP, Arc::new(Acordar(sino_do_desktop)));
     if let Err(e) = daemon::iniciar_entrada(&ambiente, &comp, ouvinte, caixa) {
         erro!("{e}");
         return ExitCode::FAILURE;
@@ -104,13 +122,24 @@ pub fn rodar(
         &config,
         Instant::now(),
     );
-    let mut laco = Laco::novo(nucleo, eventos.handle(), base.clone(), curto, recebe);
+    let mut laco = Laco::novo(
+        nucleo,
+        eventos.handle(),
+        base.clone(),
+        curto,
+        recebe,
+        (caixa_do_desktop, recebe_do_desktop),
+    );
     if let Err(e) = laco.instalar_sinais() {
         erro!("não consegui tratar SIGTERM/SIGINT: {e}");
         return ExitCode::FAILURE;
     }
     if let Err(e) = laco.instalar_caixa(fonte_do_sino) {
         erro!("não consegui ligar a caixa de comandos: {e}");
+        return ExitCode::FAILURE;
+    }
+    if let Err(e) = laco.instalar_desktop(fonte_do_desktop) {
+        erro!("não consegui ligar a caixa dos eventos do desktop: {e}");
         return ExitCode::FAILURE;
     }
     laco.armar_batimento();
@@ -158,6 +187,11 @@ pub struct Laco {
     /// Última razão de espera registrada no log (só loga quando muda).
     ultima_espera: Option<String>,
     caixa: mpsc::Receiver<Comando>,
+    /// Os eventos do desktop e a caixa que o leitor recebe.
+    desktop: mpsc::Receiver<EventoDesktop>,
+    caixa_do_desktop: Caixa<EventoDesktop>,
+    /// O leitor do socket2 da instância achada (assinatura e leitor).
+    leitor: Option<(String, Leitor)>,
     pub parar: bool,
 }
 
@@ -176,6 +210,7 @@ impl Laco {
         base: PathBuf,
         curto: PathBuf,
         caixa: mpsc::Receiver<Comando>,
+        (caixa_do_desktop, desktop): (Caixa<EventoDesktop>, mpsc::Receiver<EventoDesktop>),
     ) -> Laco {
         Laco {
             nucleo,
@@ -189,6 +224,9 @@ impl Laco {
             prazo: None,
             ultima_espera: None,
             caixa,
+            desktop,
+            caixa_do_desktop,
+            leitor: None,
             parar: false,
         }
     }
@@ -212,10 +250,10 @@ impl Laco {
         let janela = self
             .viva
             .as_mut()
-            .map(|viva| &mut viva.sessao as &mut dyn Overlay);
+            .map(|viva| &mut viva.sessao as &mut dyn Punho);
         let mudou = self.nucleo.eventos_da_janela(janela);
         if publicar_sempre || mudou {
-            let janela = self.viva.as_ref().map(|viva| &viva.sessao as &dyn Overlay);
+            let janela = self.viva.as_ref().map(|viva| &viva.sessao as &dyn Punho);
             self.nucleo.publicar(janela);
         }
         self.armar_prazo();
@@ -253,7 +291,59 @@ impl Laco {
             .map_err(|e| e.to_string())
     }
 
+    /// Os eventos do desktop (o socket2), na ordem em que chegaram.
+    fn instalar_desktop(&mut self, fonte: PingSource) -> Result<(), String> {
+        self.handle
+            .insert_source(fonte, |_, _, laco| {
+                laco.esvaziar_desktop();
+                laco.assentar();
+            })
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
+    fn esvaziar_desktop(&mut self) {
+        for _ in 0..CAPACIDADE_DESKTOP {
+            let Ok(evento) = self.desktop.try_recv() else {
+                return;
+            };
+            let punho = self
+                .viva
+                .as_mut()
+                .map(|viva| &mut viva.sessao as &mut dyn Punho);
+            self.nucleo.evento_desktop(&evento, punho);
+        }
+    }
+
+    /// O leitor do socket2 da instância `assinatura`: o mesmo se ela não
+    /// mudou; um novo (e o velho parado) se mudou.
+    fn garantir_leitor(&mut self, assinatura: &str, eventos: &std::path::Path) {
+        if self.leitor.as_ref().is_some_and(|(a, _)| a == assinatura) {
+            return;
+        }
+        self.parar_leitor();
+        match Leitor::iniciar(
+            eventos.to_owned(),
+            self.curto.clone(),
+            format!("eventos-{assinatura}"),
+            self.caixa_do_desktop.clone(),
+        ) {
+            Ok(leitor) => self.leitor = Some((assinatura.to_owned(), leitor)),
+            Err(e) => aviso!("não consegui iniciar o leitor dos eventos do Hyprland: {e}"),
+        }
+    }
+
+    /// Para o leitor do socket2 (não há instância do Hyprland).
+    fn parar_leitor(&mut self) {
+        if let Some((_, mut leitor)) = self.leitor.take() {
+            leitor.parar();
+        }
+    }
+
     fn esvaziar_caixa(&mut self) {
+        // As trocas de janela que chegaram antes entram no anel antes dos
+        // eventos dos hooks (o prompt é casado com a janela ativa na hora).
+        self.esvaziar_desktop();
         for _ in 0..LOTE_DA_CAIXA {
             let Ok(comando) = self.caixa.try_recv() else {
                 return;
@@ -261,7 +351,7 @@ impl Laco {
             let janela = self
                 .viva
                 .as_mut()
-                .map(|viva| &mut viva.sessao as &mut dyn Overlay);
+                .map(|viva| &mut viva.sessao as &mut dyn Punho);
             self.nucleo.comando(comando, janela);
         }
     }
@@ -273,7 +363,7 @@ impl Laco {
     /// antes: chegaram antes do prazo, e um deles pode cancelar uma
     /// acomodação (decisão 0032).
     fn armar_prazo(&mut self) {
-        let janela = self.viva.as_ref().map(|viva| &viva.sessao as &dyn Overlay);
+        let janela = self.viva.as_ref().map(|viva| &viva.sessao as &dyn Punho);
         let proximo = self.nucleo.proximo_prazo(janela);
         if proximo.is_some() && proximo == self.prazo.as_ref().map(|(armado, _)| *armado) {
             return;
@@ -294,7 +384,7 @@ impl Laco {
                 let janela = laco
                     .viva
                     .as_mut()
-                    .map(|viva| &mut viva.sessao as &mut dyn Overlay);
+                    .map(|viva| &mut viva.sessao as &mut dyn Punho);
                 laco.nucleo.vencer(janela);
                 laco.assentar();
                 TimeoutAction::Drop
@@ -319,7 +409,7 @@ impl Laco {
         match self.handle.insert_source(timer, |_, _, laco| {
             laco.nucleo.comp.bater();
             if laco.viva.is_some() {
-                let janela = laco.viva.as_ref().map(|viva| &viva.sessao as &dyn Overlay);
+                let janela = laco.viva.as_ref().map(|viva| &viva.sessao as &dyn Punho);
                 laco.nucleo.publicar(janela);
             }
             TimeoutAction::ToDuration(BATIMENTO)
@@ -364,6 +454,9 @@ impl Laco {
         let instancia = match hyprland::procurar(&self.base, &self.curto, em_espera) {
             Ok(instancia) => instancia,
             Err(espera) => {
+                if matches!(espera, Espera::SemRuntime | Espera::SemHyprland) {
+                    self.parar_leitor();
+                }
                 self.registrar_espera(espera.descrever());
                 return Some(match espera {
                     Espera::Recuo { restante } => {
@@ -373,6 +466,9 @@ impl Laco {
                 });
             }
         };
+        // O socket2 da instância é lido desde já, mesmo se a conexão Wayland
+        // falhar e tiver de esperar o backoff.
+        self.garantir_leitor(&instancia.assinatura, &instancia.eventos);
         let assinatura = instancia.assinatura;
         let nome_wayland = instancia.nome_wayland;
         let conexao = match pet_wayland::conectar(instancia.wayland, self.nucleo.inicio()) {

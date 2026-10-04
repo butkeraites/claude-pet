@@ -49,6 +49,18 @@
 //! o pulinho. T2/T3, correntes de tarefas em segundo plano, escalada e
 //! presença são do M5; por isso cada turno guarda os componentes inteiros
 //! em [`RegistroTurno`] (o `/v1/estado.turnos`), para a pontuação do M5.
+//!
+//! **Avisos** (M4, decisão 0057): cada sessão tem um espaço de aviso, o que
+//! ela pede ao Renan — esperando você (uma permissão, uma pergunta, o
+//! plano), erro (o turno acabou num erro da API) ou pronto (o Claude
+//! terminou o turno). O clique no pet vai ao mais urgente
+//! ([`Cerebro::pendencias`]); visto ([`Cerebro::ver`]), o aviso sai. Mudar de
+//! estado resolve o aviso de antes, e entrar em "esperando você" ou em erro
+//! abre um; o pronto abre quando a acomodação do Stop termina (a festa) e
+//! um prompt novo o resolve. O `idle_prompt` nunca abre nem resolve aviso, e
+//! um evento atrasado (mais velho que o estado de agora) não mexe nele. O
+//! pronto e o erro somem sozinhos em [`VIDA_AVISO_MS`]; o "esperando você"
+//! só sai com um evento da própria sessão ou visto.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -69,6 +81,8 @@ pub const VIDA_TESTE_MS: u64 = 60_000;
 pub const VIDA_SESSAO_MS: u64 = 12 * 60 * 60 * 1000;
 /// Turnos fechados no `/v1/estado.turnos`.
 pub const TURNOS_GUARDADOS: usize = 20;
+/// O pronto e o erro somem sozinhos depois disto (decisão 0057).
+pub const VIDA_AVISO_MS: u64 = 2 * 60 * 60 * 1000;
 /// Arquivos diferentes lembrados por turno. Passou disso, cada arquivo novo
 /// só soma num contador: um processo local mandando `arq` sempre novo não
 /// cresce a memória.
@@ -231,6 +245,51 @@ pub enum EstadoSessao {
     Erro,
 }
 
+/// O que uma sessão pede ao Renan (decisão 0057), do menos ao mais urgente:
+/// o clique no pet vai ao mais urgente primeiro.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TipoAviso {
+    /// O Claude terminou o turno (o Stop, depois da acomodação).
+    Pronto,
+    /// O turno acabou num erro da API (o StopFailure).
+    Erro,
+    /// O Claude precisa de você: uma permissão, uma pergunta, o plano.
+    Esperando,
+}
+
+impl TipoAviso {
+    /// Em palavras, para o balão.
+    pub fn nome(self) -> &'static str {
+        match self {
+            TipoAviso::Pronto => "pronto",
+            TipoAviso::Erro => "erro",
+            TipoAviso::Esperando => "esperando você",
+        }
+    }
+}
+
+/// O aviso de uma sessão.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Aviso {
+    pub tipo: TipoAviso,
+    /// Desde quando (ms desde 1970).
+    pub desde_ms: u64,
+    /// Desde quando no relógio monotônico (os prazos).
+    #[serde(skip)]
+    pub desde_mono: u64,
+}
+
+/// Uma sessão com aviso, para o clique (decisão 0057).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pendencia {
+    /// (teste, sid) inteiros, como a chave das sessões.
+    pub chave: (bool, String),
+    pub sid8: String,
+    pub proj: Option<String>,
+    pub aviso: Aviso,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Contadores {
     pub eventos: u64,
@@ -247,11 +306,25 @@ pub struct ResumoSessao {
     pub ent: Option<String>,
     pub teste: bool,
     pub estado: EstadoSessao,
+    /// Desde quando a sessão está nesse estado (ms desde 1970): o "há
+    /// quanto tempo" do balão das sessões (M4).
+    pub estado_desde_ms: u64,
     pub turno_aberto: bool,
     pub acomodando: bool,
     /// Hora do último evento (ms desde 1970).
     pub ultimo_evento_ms: u64,
     pub contadores: Contadores,
+    /// O que a sessão pede ao Renan, se pede (decisão 0057).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aviso: Option<Aviso>,
+    /// A janela do terminal da sessão, como o Motor a casou (decisão 0055);
+    /// o cérebro não sabe de janelas e deixa vazio.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub janela: Option<crate::motor::janelas::ResumoJanela>,
+    /// (teste, sid) inteiros, para o Motor casar a janela; nunca vai para o
+    /// `/v1/estado`.
+    #[serde(skip)]
+    pub chave: (bool, String),
 }
 
 /// O que o cérebro publica no `/v1/estado`.
@@ -428,6 +501,8 @@ struct Sessao {
     proj: Option<String>,
     ent: Option<String>,
     estado: EstadoSessao,
+    /// Hora (parede) do evento que pôs a sessão no estado de agora.
+    estado_desde: u64,
     turno: Option<Turno>,
     trocado: Option<Trocado>,
     comemorado: Option<Comemorado>,
@@ -439,6 +514,8 @@ struct Sessao {
     /// Hora do último evento (parede), para o `/v1/estado`.
     ultimo_parede: u64,
     contadores: Contadores,
+    /// O espaço de aviso da sessão (decisão 0057).
+    aviso: Option<Aviso>,
 }
 
 impl Sessao {
@@ -449,6 +526,7 @@ impl Sessao {
             proj: None,
             ent: None,
             estado: EstadoSessao::Parada,
+            estado_desde: agora.parede_ms,
             turno: None,
             trocado: None,
             comemorado: None,
@@ -457,6 +535,7 @@ impl Sessao {
             ultimo_mono: agora.mono_ms,
             ultimo_parede: agora.parede_ms,
             contadores: Contadores::default(),
+            aviso: None,
         }
     }
 
@@ -741,6 +820,12 @@ pub fn hora_do_evento(ts: Option<u64>, recebido_ms: u64) -> u64 {
     }
 }
 
+/// Quando um aviso some sozinho: o pronto e o erro em [`VIDA_AVISO_MS`]; o
+/// "esperando você", nunca (só um evento da sessão ou visto).
+fn prazo_do_aviso(aviso: Aviso) -> Option<u64> {
+    (aviso.tipo != TipoAviso::Esperando).then_some(aviso.desde_mono + VIDA_AVISO_MS)
+}
+
 /// Eventos que mostram o turno andando: cancelam a acomodação quando vêm
 /// depois do Stop e reabrem o turno comemorado.
 fn continua_o_turno(e: &str) -> bool {
@@ -860,6 +945,8 @@ impl Cerebro {
             sessao.ent.clone_from(&ev.ent);
         }
         let id = ev.turno.as_deref();
+        let estado_antes = sessao.estado;
+        let desde_antes = sessao.estado_desde;
 
         // Um evento de trabalho da thread principal: o SubagentStart vem com
         // o `agent_id` do subagente que nasce, mas quem o lança é a thread
@@ -1089,6 +1176,27 @@ impl Cerebro {
             }
             _ => ignorado = Some("evento_desconhecido"),
         }
+        if sessao.estado != estado_antes {
+            sessao.estado_desde = t;
+            // Os avisos (decisão 0057): mudar de estado resolve o de antes, e
+            // entrar em "esperando você" ou em erro abre um. O `idle_prompt`
+            // (repete a cada ~60 s) nunca abre nem resolve; um evento
+            // atrasado, mais velho que o estado de antes (a permissão que ele
+            // pede já foi respondida), não mexe no aviso.
+            let ocioso = ev.e == "Notification" && ev.nt.as_deref() == Some("idle_prompt");
+            if !ocioso && t >= desde_antes {
+                let tipo = match sessao.estado {
+                    EstadoSessao::Esperando => Some(TipoAviso::Esperando),
+                    EstadoSessao::Erro => Some(TipoAviso::Erro),
+                    _ => None,
+                };
+                sessao.aviso = tipo.map(|tipo| Aviso {
+                    tipo,
+                    desde_ms: t,
+                    desde_mono: agora.mono_ms,
+                });
+            }
+        }
         if let Some(motivo) = ignorado {
             self.ignorar(motivo);
         }
@@ -1179,6 +1287,20 @@ impl Cerebro {
                     .and_then(|t| t.stop)
                     .map_or(agora.parede_ms, |s| s.ts_ms);
                 fechamentos.extend(sessao.fechar(Fim::Stop, fim_ms, agora, modo));
+                // O Claude terminou e o turno é do Renan: o pronto, com ou
+                // sem festa (decisão 0057).
+                sessao.aviso = Some(Aviso {
+                    tipo: TipoAviso::Pronto,
+                    desde_ms: fim_ms,
+                    desde_mono: agora.mono_ms,
+                });
+            }
+            if sessao
+                .aviso
+                .and_then(prazo_do_aviso)
+                .is_some_and(|prazo| agora.mono_ms >= prazo)
+            {
+                sessao.aviso = None;
             }
         }
         self.registrar(fechamentos, &mut reacoes);
@@ -1197,6 +1319,11 @@ impl Cerebro {
         reacoes
     }
 
+    /// O cérebro acompanha a sessão (teste, sid).
+    pub fn tem_sessao(&self, chave: &(bool, String)) -> bool {
+        self.sessoes.contains_key(chave)
+    }
+
     /// Quando chamar [`Self::tique`] de novo (relógio monotônico).
     pub fn proximo_prazo(&self) -> Option<u64> {
         self.sessoes
@@ -1209,10 +1336,47 @@ impl Cerebro {
                 };
                 let acomodacao = s.turno.as_ref().and_then(|t| t.stop).map(|p| p.prazo_mono);
                 let trocado = s.trocado.as_ref().map(|x| x.prazo_mono);
-                [Some(s.ultimo_mono + vida), acomodacao, trocado]
+                let aviso = s.aviso.and_then(prazo_do_aviso);
+                [Some(s.ultimo_mono + vida), acomodacao, trocado, aviso]
             })
             .flatten()
             .min()
+    }
+
+    /// As sessões com aviso, da mais urgente para a menos (decisão 0057):
+    /// esperando você > erro > pronto; no mesmo tipo, as reais antes das de
+    /// teste e a que espera há mais tempo primeiro.
+    pub fn pendencias(&self) -> Vec<Pendencia> {
+        let mut lista: Vec<Pendencia> = self
+            .sessoes
+            .iter()
+            .filter_map(|(chave, s)| {
+                s.aviso.map(|aviso| Pendencia {
+                    chave: chave.clone(),
+                    sid8: evento::curto(&s.sid),
+                    proj: s.proj.clone(),
+                    aviso,
+                })
+            })
+            .collect();
+        lista.sort_by(|a, b| {
+            b.aviso
+                .tipo
+                .cmp(&a.aviso.tipo)
+                .then(a.chave.0.cmp(&b.chave.0))
+                .then(a.aviso.desde_ms.cmp(&b.aviso.desde_ms))
+                .then(a.chave.1.cmp(&b.chave.1))
+        });
+        lista
+    }
+
+    /// O Renan viu o aviso da sessão (o clique que focou o terminal dela, ou
+    /// o terminal em foco): ele sai. Devolve o tipo, se havia um.
+    pub fn ver(&mut self, chave: &(bool, String)) -> Option<TipoAviso> {
+        self.sessoes
+            .get_mut(chave)
+            .and_then(|s| s.aviso.take())
+            .map(|a| a.tipo)
     }
 
     pub fn resumo(&self) -> Resumo {
@@ -1226,10 +1390,14 @@ impl Cerebro {
                     ent: s.ent.clone(),
                     teste: s.teste,
                     estado: s.estado,
+                    estado_desde_ms: s.estado_desde,
                     turno_aberto: s.turno.is_some(),
                     acomodando: s.turno.as_ref().is_some_and(|t| t.stop.is_some()),
                     ultimo_evento_ms: s.ultimo_parede,
                     contadores: s.contadores.clone(),
+                    aviso: s.aviso,
+                    janela: None,
+                    chave: (s.teste, s.sid.clone()),
                 })
                 .collect(),
             ultima_reacao: self.ultima_reacao.clone(),
@@ -2286,6 +2454,10 @@ mod testes {
         assert_eq!(c.proximo_prazo(), Some(1_000 + ACOMODACAO_MS));
         assert!(c.tique(em(1_799)).is_empty());
         assert_eq!(c.tique(em(1_800))[0].nome, ACENO);
+        // O pronto some em 2 h (decisão 0057); a sessão, em 12 h.
+        assert_eq!(c.proximo_prazo(), Some(1_800 + VIDA_AVISO_MS));
+        assert!(c.tique(em(1_800 + VIDA_AVISO_MS)).is_empty());
+        assert!(c.pendencias().is_empty());
         assert_eq!(c.proximo_prazo(), Some(1_000 + VIDA_SESSAO_MS));
         // Real sem eventos por 12 h some calada.
         assert!(c.tique(em(1_000 + VIDA_SESSAO_MS)).is_empty());
@@ -2336,5 +2508,207 @@ mod testes {
         );
         assert!(saida.is_empty(), "{saida:?}");
         assert_eq!(c.resumo().sessoes.len(), 1);
+    }
+
+    // --- avisos (decisão 0057) ----------------------------------------------
+
+    fn aviso_de(c: &Cerebro) -> Option<TipoAviso> {
+        c.resumo()
+            .sessoes
+            .first()
+            .and_then(|s| s.aviso)
+            .map(|a| a.tipo)
+    }
+
+    fn permissao(turno: &str) -> Evento {
+        Evento {
+            turno: Some(turno.into()),
+            tool: Some("Bash".into()),
+            ..ev("PermissionRequest")
+        }
+    }
+
+    fn notificacao(nt: &str) -> Evento {
+        Evento {
+            nt: Some(nt.into()),
+            ..ev("Notification")
+        }
+    }
+
+    fn falhou(turno: &str) -> Evento {
+        Evento {
+            turno: Some(turno.into()),
+            ..ev("StopFailure")
+        }
+    }
+
+    #[test]
+    fn avisos_abrem_e_se_resolvem_com_o_estado() {
+        let mut c = novo();
+        rodar(
+            &mut c,
+            vec![chega(0, prompt("p1")), chega(1_000, permissao("p1"))],
+        );
+        assert_eq!(aviso_de(&c), Some(TipoAviso::Esperando));
+        let desde = c.resumo().sessoes[0].aviso.unwrap().desde_ms;
+        assert_eq!(desde, BASE + 1_000);
+        // A notificação do mesmo diálogo só refina: o aviso é o mesmo.
+        rodar(&mut c, vec![chega(1_200, notificacao("permission_prompt"))]);
+        assert_eq!(c.resumo().sessoes[0].aviso.unwrap().desde_ms, desde);
+        // A ferramenta rodou: resolvido.
+        rodar(
+            &mut c,
+            vec![chega(5_000, ferramenta("p1", "Bash", None, 10))],
+        );
+        assert_eq!(aviso_de(&c), None);
+        // O Stop: o pronto só quando a acomodação acaba (com a festa).
+        let saida = rodar(&mut c, vec![chega(9_000, stop("p1")), Ate(9_799)]);
+        assert!(saida.is_empty());
+        assert_eq!(aviso_de(&c), None, "acomodando");
+        assert_eq!(rodar(&mut c, vec![Ate(9_800)]), vec![(9_800, PULINHO)]);
+        let aviso = c.resumo().sessoes[0].aviso.unwrap();
+        assert_eq!(
+            (aviso.tipo, aviso.desde_ms),
+            (TipoAviso::Pronto, BASE + 9_000),
+            "desde o Stop"
+        );
+        // Um prompt novo resolve.
+        rodar(&mut c, vec![chega(80_000, prompt("p2"))]);
+        assert_eq!(aviso_de(&c), None);
+        // Erro da API: o erro; o prompt seguinte resolve.
+        rodar(&mut c, vec![chega(90_000, falhou("p2"))]);
+        assert_eq!(aviso_de(&c), Some(TipoAviso::Erro));
+        rodar(&mut c, vec![chega(95_000, prompt("p3"))]);
+        assert_eq!(aviso_de(&c), None);
+        // O idle_prompt fecha o turno (sem Stop) e para a sessão, mas não
+        // resolve o "esperando você".
+        rodar(
+            &mut c,
+            vec![
+                chega(96_000, permissao("p3")),
+                chega(160_000, notificacao("idle_prompt")),
+            ],
+        );
+        assert_eq!(c.resumo().sessoes[0].estado, EstadoSessao::Parada);
+        assert_eq!(aviso_de(&c), Some(TipoAviso::Esperando));
+        // O fim da sessão leva o aviso junto.
+        rodar(&mut c, vec![chega(170_000, ev("SessionEnd"))]);
+        assert!(c.pendencias().is_empty());
+    }
+
+    #[test]
+    fn evento_atrasado_nao_mexe_no_aviso_e_a_continuacao_tira_o_pronto() {
+        let mut c = novo();
+        // Uma permissão que chega depois da ferramenta que ela liberou (hooks
+        // async fora de ordem): o estado muda (M3), o aviso não abre.
+        rodar(
+            &mut c,
+            vec![
+                chega(0, prompt("p1")),
+                chega(5_000, ferramenta("p1", "Bash", None, 10)),
+                atrasado(5_100, 4_000, permissao("p1")),
+            ],
+        );
+        assert_eq!(aviso_de(&c), None);
+        // O pronto; um Stop hook de outro plugin segura o Claude e a
+        // continuação reabre o turno: o pronto sai, e volta no Stop seguinte.
+        rodar(
+            &mut c,
+            vec![
+                chega(6_000, ferramenta("p1", "Edit", Some("aaaaaaaaaaaa"), 10)),
+                chega(7_000, stop("p1")),
+                Ate(8_000),
+            ],
+        );
+        assert_eq!(aviso_de(&c), Some(TipoAviso::Pronto));
+        rodar(
+            &mut c,
+            vec![chega(12_000, ferramenta("p1", "Bash", None, 10))],
+        );
+        assert_eq!(aviso_de(&c), None, "trabalhando de novo");
+        rodar(&mut c, vec![chega(15_000, stop("p1")), Ate(16_000)]);
+        assert_eq!(aviso_de(&c), Some(TipoAviso::Pronto));
+        // Uma permissão atrasada (de antes do Stop) não tira o pronto.
+        rodar(&mut c, vec![atrasado(16_500, 14_000, permissao("p1"))]);
+        assert_eq!(aviso_de(&c), Some(TipoAviso::Pronto));
+    }
+
+    #[test]
+    fn o_pronto_e_o_erro_somem_em_2_h_e_o_esperando_fica() {
+        let mut c = novo();
+        rodar(
+            &mut c,
+            vec![chega(0, prompt("p1")), chega(100, stop("p1")), Ate(900)],
+        );
+        assert_eq!(aviso_de(&c), Some(TipoAviso::Pronto));
+        assert_eq!(c.proximo_prazo(), Some(900 + VIDA_AVISO_MS));
+        rodar(&mut c, vec![Ate(900 + VIDA_AVISO_MS - 1)]);
+        assert_eq!(aviso_de(&c), Some(TipoAviso::Pronto));
+        rodar(&mut c, vec![Ate(900 + VIDA_AVISO_MS)]);
+        assert_eq!(aviso_de(&c), None, "2 h depois");
+        let mut c = novo();
+        rodar(
+            &mut c,
+            vec![chega(0, prompt("p1")), chega(100, permissao("p1"))],
+        );
+        assert_eq!(c.proximo_prazo(), Some(100 + VIDA_SESSAO_MS));
+        rodar(&mut c, vec![Ate(VIDA_AVISO_MS + 1_000)]);
+        assert_eq!(aviso_de(&c), Some(TipoAviso::Esperando));
+    }
+
+    #[test]
+    fn pendencias_do_mais_urgente_ao_menos_urgente() {
+        let mut c = novo();
+        let de = |sid: &str, e: Evento| Evento {
+            sid: Some(sid.into()),
+            ..e
+        };
+        let teste = |e: Evento| Evento { teste: true, ..e };
+        rodar(
+            &mut c,
+            vec![
+                chega(0, de("a", prompt("pa"))),
+                chega(100, de("a", stop("pa"))),
+                chega(1_000, de("b", prompt("pb"))),
+                chega(1_100, de("b", stop("pb"))),
+                chega(2_000, de("c", prompt("pc"))),
+                chega(2_100, de("c", falhou("pc"))),
+                chega(3_000, teste(de("t", prompt("pt")))),
+                chega(3_100, teste(de("t", permissao("pt")))),
+                chega(4_000, de("d", prompt("pd"))),
+                chega(4_100, de("d", permissao("pd"))),
+                Ate(10_000),
+            ],
+        );
+        let ordem: Vec<(String, TipoAviso)> = c
+            .pendencias()
+            .into_iter()
+            .map(|p| (p.chave.1, p.aviso.tipo))
+            .collect();
+        let esperado: Vec<(String, TipoAviso)> = [
+            ("d", TipoAviso::Esperando),
+            ("t", TipoAviso::Esperando),
+            ("c", TipoAviso::Erro),
+            ("a", TipoAviso::Pronto),
+            ("b", TipoAviso::Pronto),
+        ]
+        .into_iter()
+        .map(|(s, t)| (s.to_owned(), t))
+        .collect();
+        assert_eq!(
+            ordem, esperado,
+            "a real antes da de teste; a mais velha primeiro"
+        );
+        assert_eq!(c.pendencias()[0].proj.as_deref(), Some("meu-projeto"));
+        assert_eq!(c.ver(&(false, "d".into())), Some(TipoAviso::Esperando));
+        assert_eq!(c.ver(&(false, "d".into())), None, "visto uma vez só");
+        assert_eq!(c.pendencias()[0].chave.1, "t");
+        // Visto, o "esperando você" do mesmo diálogo não volta com a
+        // notificação dele.
+        rodar(
+            &mut c,
+            vec![chega(11_000, de("d", notificacao("permission_prompt")))],
+        );
+        assert!(c.pendencias().iter().all(|p| p.chave.1 != "d"));
     }
 }

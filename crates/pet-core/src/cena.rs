@@ -5,6 +5,7 @@
 //! limpá-la e desenhar, em ordem, todo elemento que a cruza; assim regiões
 //! sobrepostas e elementos sobrepostos sempre terminam corretos.
 
+use crate::fonte;
 use crate::geometria::Ret;
 use crate::raster::{self, Alvo};
 use crate::skin::Skin;
@@ -21,6 +22,16 @@ pub enum Elemento {
     },
     /// Um retângulo de cor sólida (BGRA pré-multiplicado): confete, efeitos.
     Bloco { ret: Ret, cor: [u8; 4] },
+    /// Um caractere da fonte dos balões ([`crate::fonte`]) com o canto em
+    /// (x, y), cada pixel da fonte num bloco `d`×`d`, na cor `cor` (BGRA
+    /// pré-multiplicado).
+    Glifo {
+        c: char,
+        x: i32,
+        y: i32,
+        d: i32,
+        cor: [u8; 4],
+    },
 }
 
 impl Elemento {
@@ -35,6 +46,9 @@ impl Elemento {
                 espelhar,
             } => raster::limites_do_quadro(skin, quadro, x, y, d, espelhar),
             Elemento::Bloco { ret, .. } => ret,
+            Elemento::Glifo { x, y, d, .. } => {
+                Ret::novo(x, y, fonte::LARGURA_MAX * d, fonte::ALTURA * d)
+            }
         }
     }
 
@@ -48,6 +62,32 @@ impl Elemento {
                 espelhar,
             } => raster::desenhar_quadro(alvo, skin, quadro, x, y, d, espelhar, recorte),
             Elemento::Bloco { ret, cor } => raster::preencher(alvo, ret, cor, recorte),
+            Elemento::Glifo { c, x, y, d, cor } => desenhar_glifo(alvo, c, x, y, d, cor, recorte),
+        }
+    }
+}
+
+/// Um caractere da fonte em blocos `d`×`d`: cada trecho seguido de pixels
+/// acesos numa linha vira um retângulo só.
+fn desenhar_glifo(alvo: &mut Alvo, c: char, x: i32, y: i32, d: i32, cor: [u8; 4], recorte: Ret) {
+    for (linha, bits) in fonte::glifo(c).iter().enumerate() {
+        let mut coluna = 0;
+        while coluna < fonte::LARGURA_MAX {
+            if bits & (1 << coluna) == 0 {
+                coluna += 1;
+                continue;
+            }
+            let inicio = coluna;
+            while coluna < fonte::LARGURA_MAX && bits & (1 << coluna) != 0 {
+                coluna += 1;
+            }
+            let ret = Ret::novo(
+                x + inicio * d,
+                y + linha as i32 * d,
+                (coluna - inicio) * d,
+                d,
+            );
+            raster::preencher(alvo, ret, cor, recorte);
         }
     }
 }
@@ -107,6 +147,13 @@ pub fn rgba_do_sprite(skin: &Skin, sprite: &Elemento, area: Ret) -> Vec<u8> {
             },
             Elemento::Bloco { ret, cor } => Elemento::Bloco {
                 ret: ret.deslocado(-area.x, -area.y),
+                cor,
+            },
+            Elemento::Glifo { c, x, y, d, cor } => Elemento::Glifo {
+                c,
+                x: x - area.x,
+                y: y - area.y,
+                d,
                 cor,
             },
         };
@@ -192,6 +239,38 @@ mod testes {
         assert_eq!(alvo.pixel(0, 0), [0; 4]);
         assert_eq!(alvo.pixel(10, 0), [9, 9, 9, 255]);
         assert_eq!(alvo.pixel(11, 0), skin.folha.bgra_em(0, 0));
+    }
+
+    #[test]
+    fn glifo_em_blocos_inteiros_e_so_onde_a_fonte_acende() {
+        let skin = skin_minima();
+        let mut dados = vec![0u8; 30 * 40 * 4];
+        let mut alvo = Alvo::novo(&mut dados, 30, 40);
+        let cor = [9, 8, 7, 255];
+        let a = Elemento::Glifo {
+            c: 'a',
+            x: 1,
+            y: 2,
+            d: 3,
+            cor,
+        };
+        assert_eq!(a.limites(&skin), Ret::novo(1, 2, 24, 36));
+        let tudo = alvo.limites();
+        a.desenhar(&mut alvo, &skin, tudo);
+        // O 'a' da monogram: a linha 5 é 30 (colunas 1 a 4); a 6 é 17
+        // (colunas 0 e 4).
+        let px = |alvo: &Alvo, col: i32, lin: i32| alvo.pixel(1 + col * 3, 2 + lin * 3);
+        assert_eq!(px(&alvo, 1, 5), cor);
+        assert_eq!(px(&alvo, 0, 5), [0; 4]);
+        assert_eq!(px(&alvo, 0, 6), cor);
+        assert_eq!(px(&alvo, 1, 6), [0; 4], "o miolo fica vazio");
+        // Cada pixel da fonte é um bloco 3×3 uniforme.
+        let canto = (1 + 3 * 3, 2 + 5 * 3);
+        for dy in 0..3 {
+            for dx in 0..3 {
+                assert_eq!(alvo.pixel(canto.0 + dx, canto.1 + dy), cor);
+            }
+        }
     }
 
     #[test]

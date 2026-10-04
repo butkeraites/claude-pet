@@ -29,6 +29,7 @@ mod ingress;
 mod laco;
 mod nucleo;
 mod personagem;
+mod privacidade;
 mod sem_janela;
 mod vigia;
 

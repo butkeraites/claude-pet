@@ -29,6 +29,11 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     pids_limit: 64
+    # Sem core dump: o daemon tem títulos de janela na memória (decisão
+    # 0061). O próprio daemon já tira o `dumpable`; o limite em 0 faz o
+    # systemd-coredump do host recusar de novo.
+    ulimits:
+      core: {soft: 0, hard: 0}
     mem_limit: 128m
     cpus: 0.5
     stop_grace_period: 5s

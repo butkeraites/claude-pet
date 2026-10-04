@@ -18,6 +18,7 @@ pub mod confete;
 pub mod config;
 pub mod estados;
 pub mod evento;
+pub mod fonte;
 pub mod geometria;
 pub mod motor;
 pub mod plataforma;

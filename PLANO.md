@@ -238,6 +238,8 @@ Assim o fade de saída do Hyprland não deixa um quadro fantasma.
   4. ao receber `enter`, a posição salva daquele monitor ou o padrão (canto inferior direito, com 8–16 px de margem);
   5. `poof_in`.
 - A animação em curso continua no monitor novo.
+- Uma camada com output NULL cai no monitor em foco: se nenhum foco novo chegou desde que ela foi pedida, o monitor onde caiu **é** o monitor em foco e vira o alvo (um foco que se perdeu nunca faz o pet viajar sem fim; decisão 0059).
+- Sem a conexão Wayland o socket2 continua lido: todo prazo do Motor vence também sem janela (decisão 0059).
 
 **Tela cheia e proteção de tela:**
 - O padrão é mostrar por cima da tela cheia, como foi pedido; `aparencia.tela_cheia = esconder` é opcional.
@@ -249,7 +251,7 @@ Assim o fade de saída do Hyprland não deixa um quadro fantasma.
 
 **Arrastar:**
 - O arraste começa depois de 4 px ou de 250 ms segurando. Só então a região de input cresce para a superfície inteira, para o arraste funcionar até numa área de trabalho vazia.
-- A região volta ao tamanho do corpo ao soltar, depois de 5 s sem eventos de ponteiro, em `closed`, ao esconder e antes de qualquer re-home.
+- A região volta ao tamanho do corpo ao soltar, depois de 5 s sem eventos de ponteiro, num `leave` no meio do arraste (a pegada perdida: o pet pousa onde está; decisão 0063), em `closed`, ao esconder e antes de qualquer re-home.
 - Solto fora do monitor: re-home imediato para o monitor sob o ponteiro.
 - O cursor fica `grab` ao passar por cima e `grabbing` enquanto segura (cursor-shape-v1).
 
@@ -698,25 +700,25 @@ A beta pública mínima é T8.0–T8.5 mais T9.0–T9.4.
 
 Atualizado em 2026-10-03 (decisões 0038 e 0039). O M4 nasce em cima da costura do T8.0: a máquina de arrastar e clicar, as pendências e o balão moram no Motor (`pet_core::motor`), com relógio falso nos testes; o backend Wayland só traduz ponteiro, monitores e janelas (`pet_core::plataforma`).
 
-**Tarefas:**
-- máquina de arrastar/clicar (limiares, região de input com fail-safe, cursores);
-- leitor do socket2 com reconexão:
+**Tarefas** (IDs na ordem dos commits: T4.1 → T4.11; a costura primeiro, a verificação ao vivo e a produção refeita no fim):
+- **T4.2** máquina de arrastar/clicar (limiares, região de input com fail-safe, cursores);
+- **T4.4** leitor do socket2 com reconexão:
   - guarda só nome do evento, monitor, endereço da janela e o primeiro glifo do título;
   - nunca registra o payload em log;
-- seguir o foco (debounce, congelar no arraste, intervalo entre viagens, poof, `closed`, mudança de layout, FALLBACK);
-- soltar entre monitores;
-- posições salvas por descrição do monitor;
-- esconder durante a proteção de tela;
-- botão direito para soneca;
-- **clicar no Zeca leva à janela do terminal da sessão do Claude que terminou ou que precisa de você** (decisão 0039):
-  - **identidade de janela por sessão:** o leitor do socket2 guarda um anel com as últimas ativações (`activewindowv2`: endereço da janela e a hora em que o evento chegou, nunca o título). O `ts` do `UserPromptSubmit` (e do `SessionStart`) de cada sessão escolhe no anel a janela que estava ativa quando o Renan mandou o prompt: é o terminal daquela sessão. O hook pode mandar também, num campo novo e opcional do fio v1 (validado no `pet_core::evento` e com decisão própria), os ids de terminal que ele vê no próprio ambiente (`TMUX_PANE`, `KITTY_WINDOW_ID`, `WEZTERM_PANE`; só ids, nunca títulos). Eles só separam sessões dentro de um mesmo terminal (painéis do tmux, abas): no Docker o daemon roda em outro espaço de PIDs, e nem o socket2 nem o foreign-toplevel trazem PID, então uma cadeia de PIDs não leva a uma janela sem o `hyprctl clients`, que é o socket de comandos (decisão 0043). Quando o anel tem dúvida (dois terminais trocados em menos de 1 s), o clique cai no balão com a lista;
-  - **focar sem o socket de comandos:** `zwlr_foreign_toplevel_manager_v1` + `hyprland_toplevel_mapping_manager_v1` (que liga cada handle de toplevel ao endereço de janela do Hyprland, o mesmo do `activewindowv2`) e `zwlr_foreign_toplevel_handle_v1.activate(seat)`. O daemon continua sem abrir o `.socket.sock` e sem chamar `hyprctl` (decisão 0006). Conferir na 0.56.2 que os dois protocolos aparecem no registro; se faltar algum, o clique cai no balão;
-  - **pendências em ciclo:** com vários avisos (precisa de você, erro, pronto), o primeiro clique vai ao mais urgente, pela prioridade do cérebro (esperando você > erro > pronto), e cada clique seguinte vai ao próximo. O clique que foca a janela de uma sessão marca o aviso dela como visto; o foco sem clique segue as regras de sempre (o pronto some depois de ~10 s com o terminal da sessão em foco; o "esperando você" só sai com um evento da própria sessão ou um clique);
-  - **clique sem pendência:** um balão com a lista das sessões abertas (nome da pasta do projeto, estado — pensando, trabalhando, esperando você, pronto, parado — e há quanto tempo), que some sozinho. Pede o **balão mínimo e a fonte de pixel** (monogram, CC0), puxados do M6; o M6 só acrescenta pop, datilografia e as frases;
-  - **sem como focar** (a janela fechou, a sessão não tem identidade, o compositor não oferece os protocolos): o balão diz isso e mostra a lista;
+- **T4.5** seguir o foco (debounce, congelar no arraste, intervalo entre viagens, poof, `closed`, mudança de layout, FALLBACK);
+- **T4.5** soltar entre monitores;
+- **T4.3** posições salvas por descrição do monitor;
+- **T4.7** esconder durante a proteção de tela;
+- **T4.7** botão direito para soneca;
+- **T4.8–T4.10** **clicar no Zeca leva à janela do terminal da sessão do Claude que terminou ou que precisa de você** (decisão 0039):
+  - **T4.8** **identidade de janela por sessão:** o leitor do socket2 guarda um anel com as últimas ativações (`activewindowv2`: endereço da janela e a hora em que o evento chegou, nunca o título). O `ts` do `UserPromptSubmit` (e do `SessionStart`) de cada sessão escolhe no anel a janela que estava ativa quando o Renan mandou o prompt: é o terminal daquela sessão (o `SessionStart` só preenche uma janela que ainda não é certa, o de compactação e o prompt de sistema nunca casam, e um hook atrasado não desfaz um casamento mais novo; decisão 0060). O hook pode mandar também, num campo novo e opcional do fio v1 (validado no `pet_core::evento` e com decisão própria), os ids de terminal que ele vê no próprio ambiente (`TMUX_PANE`, `KITTY_WINDOW_ID`, `WEZTERM_PANE`; só ids, nunca títulos). Eles só separam sessões dentro de um mesmo terminal (painéis do tmux, abas): no Docker o daemon roda em outro espaço de PIDs, e nem o socket2 nem o foreign-toplevel trazem PID, então uma cadeia de PIDs não leva a uma janela sem o `hyprctl clients`, que é o socket de comandos (decisão 0043). Quando o anel tem dúvida (dois terminais trocados em menos de 1 s), o clique cai no balão com a lista;
+  - **T4.9** **focar sem o socket de comandos:** `zwlr_foreign_toplevel_manager_v1` + `hyprland_toplevel_mapping_manager_v1` (que liga cada handle de toplevel ao endereço de janela do Hyprland, o mesmo do `activewindowv2`) e `zwlr_foreign_toplevel_handle_v1.activate(seat)`. O daemon continua sem abrir o `.socket.sock` e sem chamar `hyprctl` (decisão 0006). Conferir na 0.56.2 que os dois protocolos aparecem no registro; se faltar algum, o clique cai no balão;
+  - **T4.10** **pendências em ciclo:** com vários avisos (precisa de você, erro, pronto), o primeiro clique vai ao mais urgente, pela prioridade do cérebro (esperando você > erro > pronto), e cada clique seguinte vai ao próximo. O clique que foca a janela de uma sessão marca o aviso dela como visto; o foco sem clique segue as regras de sempre (o pronto some depois de ~10 s com o terminal da sessão em foco e o Renan no teclado ou no mouse, pelo `ext_idle_notifier_v1`; bloqueado ou longe, fica; decisão 0062; o "esperando você" só sai com um evento da própria sessão ou um clique); um clique mais de 15 s depois do anterior recomeça do mais urgente;
+  - **T4.10** **clique sem pendência** (o balão mínimo e a fonte na **T4.6**): um balão com a lista das sessões abertas (nome da pasta do projeto, estado — pensando, trabalhando, esperando você, pronto, parado — e há quanto tempo), que some sozinho. Pede o **balão mínimo e a fonte de pixel** (monogram, CC0), puxados do M6; o M6 só acrescenta pop, datilografia e as frases;
+  - **T4.10** **sem como focar** (a janela fechou, a sessão não tem identidade, o compositor não oferece os protocolos): o balão diz isso e mostra a lista;
 - **tamanho:** `aparencia.tamanho` (`pequeno`, `normal`, `grande`) chega antes, no TP.2; no M4 o arraste, as posições salvas e o balão usam o D que o tamanho escolhido dá em cada monitor.
-- **o que a costura ganha no M4** (decisão 0043): o `EventoDesktop` e o `Motor::evento_desktop` (monitor em foco, anel de ativações, "não perturbe"); o `Overlay::cursor` (pegar e agarrar no arraste); um punho por conexão (janela e desktop juntos) no `Nucleo`, no lugar do `Option<&mut dyn Overlay>`. O `Desktop` do Wayland usa a mesma conexão e o mesmo `wl_seat` da `Sessao`, recriados a cada reconexão: o `zwlr_foreign_toplevel_manager_v1` (genérico, serve ao Sway, ao labwc e aos outros wlroots) fica no `pet-wayland`, e o `hyprland_toplevel_mapping_manager_v1` com o socket2 é a extensão do Hyprland.
-- Propor a regra opcional do Hyprland **pela skill omarchy e com seu consentimento**:
+- **T4.1** **o que a costura ganha no M4** (decisão 0043): o `EventoDesktop` e o `Motor::evento_desktop` (monitor em foco, anel de ativações, "não perturbe"); o `Overlay::cursor` (pegar e agarrar no arraste); um punho por conexão (janela e desktop juntos) no `Nucleo`, no lugar do `Option<&mut dyn Overlay>`. O `Desktop` do Wayland usa a mesma conexão e o mesmo `wl_seat` da `Sessao`, recriados a cada reconexão: o `zwlr_foreign_toplevel_manager_v1` (genérico, serve ao Sway, ao labwc e aos outros wlroots) fica no `pet-wayland`, e o `hyprland_toplevel_mapping_manager_v1` com o socket2 é a extensão do Hyprland.
+- **T4.11** a verificação ao vivo (abaixo), com `scripts/e2e-monitor.sh --autorizo` escrito e rodado só com seu consentimento, e a produção refeita; propor a regra opcional do Hyprland **pela skill omarchy e com seu consentimento**:
   ```lua
   hl.layer_rule({ name = "bichinho", match = { namespace = "^bichinho$" }, order = 1, no_anim = true })
   ```

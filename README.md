@@ -16,16 +16,21 @@ Pode ser arrastado com o mouse para qualquer lugar e sempre aparece no
 monitor que está em foco. Sem som.
 
 > **Estado:** em construção. Na `main`: o overlay nítido no Hyprland (M1),
-> o Zeca com aprovação do personagem (M2) e hooks → reação (M3). Em
-> andamento: a costura para Windows e macOS e o hook nativo (M8, antes do
-> M4); o destino é um lançamento open source para Linux, macOS e Windows.
-> O repositório de desenvolvimento ainda se chama `claude-pet`. Veja
-> `PLANO.md` para os marcos e `PROGRESS.md` para o andamento.
+> o Zeca com aprovação do personagem (M2), hooks → reação (M3) e a costura
+> para Windows e macOS com o hook nativo (parte do M8). Na branch
+> `m4-arrastar-seguir`: arrastar, seguir o monitor ativo e o clique que leva
+> ao terminal (M4), com a conferência na tela ainda pendente. O destino é um
+> lançamento open source para Linux, macOS e Windows. O repositório de
+> desenvolvimento ainda se chama `claude-pet`. Veja `PLANO.md` para os
+> marcos e `PROGRESS.md` para o andamento.
 
 ## Requisitos
 
 - Linux com **Hyprland** (testado no Omarchy, Hyprland 0.56) — a camada
-  usa `wlr-layer-shell` e os eventos do Hyprland para seguir o monitor.
+  usa `wlr-layer-shell`, os eventos do Hyprland para seguir o monitor e o
+  `zwlr_foreign_toplevel_manager_v1` com o
+  `hyprland_toplevel_mapping_manager_v1` para o clique levar ao terminal
+  (`cargo xtask globais` confere se o compositor oferece os dois).
 - **Docker** com Compose, e o serviço `docker` habilitado no boot
   (`sudo systemctl enable docker.service`).
 - `~/.local/bin` no PATH que o Claude Code vê (o hook é o binário
@@ -141,6 +146,13 @@ imagem que não seja do commit da worktree estável. Até atualizar, o plugin
 instalado continua no `avisar.sh` da cópia dele, que fala com o mesmo pet:
 nada fica surdo no meio da troca.
 
+No M4 o plugin não muda (continua 0.2.0): o `bin/pet subir` e o
+`bin/pet instalar-host` bastam, rodados no clone (nunca na worktree
+estável, que não tem o seu `config/bichinho.toml`: o Zeca voltaria ao
+tamanho normal; decisão 0064). O binário novo do hook passa a mandar os ids
+de terminal (`term`, decisão 0054); o antigo continua funcionando com o pet
+novo, sem eles.
+
 **Para testar uma mudança**, carregue o plugin e o binário da branch só
 numa sessão (o `~/.local/bin` continua com o da worktree estável):
 
@@ -164,6 +176,67 @@ comando nem chamar subagente) ganha o aceno, ele levantando e sentando; uma
 resposta com trabalho ganha o pulinho, um pio; e fechar o Claude, um pio de
 tchau. Sem personagem aprovado, as reações ficam só em `bin/pet estado`
 (`ultima_reacao` e `turnos`).
+
+### Arrastar, seguir e clicar
+
+- **Arrastar:** segure o Zeca e leve-o para onde quiser (4 pixels ou um
+  quarto de segundo segurando já é arraste). Solto noutro monitor, ele fica
+  lá (numa área de trabalho vazia o Hyprland pode largar o arraste na borda;
+  aí ele pousa ali e segue o foco para o outro monitor). A posição fica guardada por monitor (pela descrição dele, que não muda
+  quando o dock troca o nome da porta) e volta depois de reiniciar.
+- **Seguir o monitor ativo:** quando o foco muda de monitor, ele some com
+  um "poof" e reaparece no outro, na posição guardada daquele monitor.
+- **Clique esquerdo:** com algo pendente — o Claude esperando você (uma
+  permissão, uma pergunta, um plano), um erro da API ou uma resposta pronta
+  —, ele dá uma risadinha com um coração e leva você à janela do terminal
+  daquela sessão, do mais urgente para o menos urgente; cada clique passa
+  para o próximo. Sem nada pendente, um balão com as sessões abertas (a
+  pasta do projeto, o estado e há quanto tempo). Quando não dá para levar
+  (a sessão começou antes de o pet subir, a janela fechou), o balão diz por
+  quê. Uma resposta pronta também sai sozinha depois de uns 10 s com o
+  terminal dela em foco e você mexendo no teclado ou no mouse (longe, com a
+  sessão bloqueada ou a tela apagada, ela fica até o clique ou o próximo
+  prompt). Cliques seguidos passam de um aviso ao próximo; um clique mais
+  de 15 s depois do anterior volta ao mais urgente.
+- **Clique direito:** soneca de 30 minutos, com um "zZ" e só reações
+  pequenas; outro clique direito acorda.
+- **Proteção de tela** do Omarchy: o Zeca se esconde e volta quando ela
+  fecha.
+
+`bin/pet clique` (ou `bin/pet clique direito`) clica no pet como o mouse e
+diz o que ele fez.
+
+**Como ele acha o terminal**, sem ler títulos de janela: o pet guarda as
+últimas trocas de janela ativa que o Hyprland conta (só o endereço da janela
+e a hora) e casa cada prompt com a janela que estava ativa quando ele saiu;
+o foco vai pelo protocolo Wayland de gerenciar janelas, na mesma conexão da
+camada do pet. O pet nunca abre o socket de comandos do Hyprland nem roda
+`hyprctl`, e nenhum título de janela vai para o log, o `/v1/estado` ou o
+disco. Duas sessões no mesmo terminal (painéis do tmux, abas do kitty ou do
+WezTerm) caem na mesma janela; o hook manda os ids de terminal que vê no
+ambiente para separá-las no futuro.
+
+**Regra opcional do Hyprland** (proposta, não aplicada: só pela skill
+`omarchy` e com o seu consentimento; detalhes em
+`docs/pesquisa/03-hyprland.md`):
+
+```lua
+hl.layer_rule({ name = "bichinho", match = { namespace = "^bichinho$" }, order = 1, no_anim = true })
+```
+
+`order = 1` deixa o Zeca abaixo dos popups do Omarchy (polkit, menus,
+toasts), e `no_anim` tira o fade de ~180 ms em cada troca de monitor. Sem
+ela, tudo funciona.
+
+**Conferir na tela:** `scripts/verificar-m4.sh` (com a sessão desbloqueada:
+abre dois `foot`, casa uma sessão de teste com cada um e confere que o
+clique leva a cada um) e `scripts/verificar-m4.sh --manual` (arrastar, a
+posição depois de reiniciar, a proteção de tela, o clique com o mouse,
+também levando a um `foot` que você mandou para outra área de trabalho, e o
+checklist do HDMI, da tampa fechada e da suspensão).
+`scripts/e2e-monitor.sh --autorizo` cria um monitor de mentira para conferir
+a troca de monitor: mexe no Hyprland, então só com o seu consentimento (ele
+pede que você digite «sim» no terminal).
 
 ## Desenvolvimento
 

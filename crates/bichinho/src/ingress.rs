@@ -23,7 +23,12 @@
 //!   - `aprovar_skin` com `{"id", "sha256"}` aprova o conteúdo exato da skin
 //!     da imagem e guarda a cópia em `/state`; `revogar_skin` com o id apaga
 //!     a aprovação (M2, decisão 0026). Uma por vez; a resposta (200, JSON)
-//!     sai depois de o laço principal escolher o personagem de novo.
+//!     sai depois de o laço principal escolher o personagem de novo;
+//!   - `clique` com `"esquerdo"` (o padrão, sem arg) ou `"direito"` clica no
+//!     pet como o ponteiro (M4, decisão 0057): espera o laço (até 2 s) e
+//!     responde 200 com o que ele fez (`focou` o terminal da sessão do
+//!     aviso, `balao` com o porquê de não focar, `lista` das sessões,
+//!     `soneca`). Fora do cadeado das aprovações, como as reações.
 //!
 //! Com `PET_DEBUG=1` existem também as rotas `/v1/debug/*` (mesmas
 //! checagens): `eventos` (os últimos 200 eventos, já validados), `quadro`
@@ -40,13 +45,13 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use pet_core::evento::{self, Lido};
-use pet_core::plataforma::Caixa;
+use pet_core::plataforma::{Botao, Caixa};
 use pet_core::skin::codificar_png;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::aprovacao;
-use crate::comando::{Comando, QuadroEsperado, Recebido, Tocou};
+use crate::comando::{Clicou, Comando, QuadroEsperado, Recebido, Tocou};
 use crate::estado::Compartilhado;
 use crate::personagem::Onde;
 
@@ -388,11 +393,24 @@ fn receber_comando(req: &Requisicao, ctx: &Contexto) -> (u16, String) {
         ("aprovar_skin" | "revogar_skin", None) => {
             return (400, erro_json("falta o arg"));
         }
+        ("clique", None) => return clicar(Botao::Esquerdo, ctx),
+        ("clique", Some(Value::String(botao))) if botao == "esquerdo" => {
+            return clicar(Botao::Esquerdo, ctx);
+        }
+        ("clique", Some(Value::String(botao))) if botao == "direito" => {
+            return clicar(Botao::Direito, ctx);
+        }
+        ("clique", Some(_)) => {
+            return (
+                400,
+                erro_json(r#"clique leva arg "esquerdo" (o padrão) ou "direito""#),
+            );
+        }
         _ => {
             return (
                 400,
                 erro_json(
-                    "cmd desconhecido: use tocar, esconder, mostrar, aprovar_skin ou revogar_skin",
+                    "cmd desconhecido: use tocar, esconder, mostrar, clique, aprovar_skin ou revogar_skin",
                 ),
             );
         }
@@ -441,6 +459,52 @@ fn tocar(reacao: String, ctx: &Contexto) -> (u16, String) {
             )),
         ),
         Err(_) => (503, erro_json("o laço principal não respondeu")),
+    }
+}
+
+/// `clique [esquerdo|direito]` (decisão 0057): o laço principal clica no pet
+/// como o ponteiro e conta o que fez. Não passa pelo cadeado das aprovações.
+fn clicar(botao: Botao, ctx: &Contexto) -> (u16, String) {
+    let Some(canal) = &ctx.comandos else {
+        return (503, erro_json("laço principal indisponível"));
+    };
+    let (resposta, espera) = mpsc::sync_channel(1);
+    if canal.tentar(Comando::Clique { botao, resposta }).is_err() {
+        return (503, erro_json("laço principal ocupado"));
+    }
+    let nome = if botao == Botao::Direito {
+        "direito"
+    } else {
+        "esquerdo"
+    };
+    match espera.recv_timeout(ESPERA_LACO) {
+        Ok(clicou) => (200, json_do_clique(nome, &clicou).to_string()),
+        Err(_) => (503, erro_json("o laço principal não respondeu")),
+    }
+}
+
+/// A resposta do `clique`: só metadados (o id curto da sessão, o tipo do
+/// aviso, o endereço da janela), como o `/v1/estado`.
+fn json_do_clique(botao: &str, clicou: &Clicou) -> Value {
+    match clicou {
+        Clicou::Focou {
+            sid8,
+            aviso,
+            janela,
+            confirmado,
+        } => json!({"botao": botao, "acao": "focou", "sessao": sid8, "aviso": aviso,
+                    "janela": janela, "confirmado": confirmado}),
+        Clicou::NaoFocou {
+            sid8,
+            aviso,
+            motivo,
+        } => json!({"botao": botao, "acao": "balao", "sessao": sid8, "aviso": aviso,
+                    "motivo": motivo}),
+        Clicou::Lista { sessoes } => json!({"botao": botao, "acao": "lista", "sessoes": sessoes}),
+        Clicou::Soneca { cochilando } => {
+            json!({"botao": botao, "acao": "soneca", "cochilando": cochilando})
+        }
+        Clicou::Nada { motivo } => json!({"botao": botao, "acao": "nada", "motivo": motivo}),
     }
 }
 
@@ -844,6 +908,10 @@ mod testes {
             (r#"{"cmd":"tocar","arg":"nod","x":1}"#, 400),
             (r#"["tocar","nod"]"#, 400),
             ("lixo", 400),
+            (r#"{"cmd":"clique"}"#, 200),
+            (r#"{"cmd":"clique","arg":"direito"}"#, 200),
+            (r#"{"cmd":"clique","arg":"meio"}"#, 400),
+            (r#"{"cmd":"clique","arg":1}"#, 400),
         ] {
             let (obtido, resposta) = rotear(&post_json("/v1/comando", corpo), &ctx);
             assert_eq!(obtido, status, "{corpo}: {resposta}");
@@ -853,8 +921,71 @@ mod testes {
         drop(ctx);
         assert_eq!(
             laco.join().unwrap(),
-            vec!["Tocar(nod)", "Esconder", "Mostrar"]
+            vec![
+                "Tocar(nod)",
+                "Esconder",
+                "Mostrar",
+                "Clique(Esquerdo)",
+                "Clique(Direito)"
+            ]
         );
+    }
+
+    #[test]
+    fn clique_responde_o_que_o_laco_fez() {
+        use pet_core::cerebro::TipoAviso;
+        for (clicou, trecho) in [
+            (
+                Clicou::Focou {
+                    sid8: "0123abcd".into(),
+                    aviso: TipoAviso::Esperando,
+                    janela: "5bbf4e6128f0".into(),
+                    confirmado: false,
+                },
+                r#""acao":"focou","aviso":"esperando","botao":"esquerdo","confirmado":false,"janela":"5bbf4e6128f0","sessao":"0123abcd""#,
+            ),
+            (
+                Clicou::NaoFocou {
+                    sid8: "0123abcd".into(),
+                    aviso: TipoAviso::Pronto,
+                    motivo: "a janela dela fechou",
+                },
+                r#""acao":"balao","aviso":"pronto","botao":"esquerdo","motivo":"a janela dela fechou""#,
+            ),
+            (
+                Clicou::Lista { sessoes: 2 },
+                r#""acao":"lista","botao":"esquerdo","sessoes":2"#,
+            ),
+            (
+                Clicou::Nada {
+                    motivo: "sem compositor",
+                },
+                r#""acao":"nada","botao":"esquerdo","motivo":"sem compositor""#,
+            ),
+        ] {
+            let (canal, recebe) = caixa(4);
+            let laco = thread::spawn(move || {
+                let Ok(Comando::Clique { botao, resposta }) = recebe.recv() else {
+                    panic!("esperava o clique");
+                };
+                resposta.try_send(clicou).unwrap();
+                botao
+            });
+            let ctx = Contexto {
+                comandos: Some(canal),
+                ..contexto()
+            };
+            let (status, corpo) = rotear(&post_json("/v1/comando", r#"{"cmd":"clique"}"#), &ctx);
+            assert_eq!(status, 200, "{corpo}");
+            assert!(corpo.contains(trecho), "{corpo}");
+            assert_eq!(laco.join().unwrap(), Botao::Esquerdo);
+        }
+        // Sem laço, 503.
+        let (status, _) = rotear(
+            &post_json("/v1/comando", r#"{"cmd":"clique"}"#),
+            &contexto(),
+        );
+        assert_eq!(status, 503);
     }
 
     #[test]
@@ -1018,6 +1149,7 @@ mod testes {
             "tocar",
             "esconder",
             "mostrar",
+            "clique",
             "aprovar_skin",
             "revogar_skin",
         ] {
@@ -1114,6 +1246,10 @@ mod testes {
                     Comando::Tocar { reacao, resposta } => {
                         vistos.push(format!("Tocar({reacao})"));
                         let _ = resposta.try_send(tocou.clone());
+                    }
+                    Comando::Clique { botao, resposta } => {
+                        vistos.push(format!("Clique({botao:?})"));
+                        let _ = resposta.try_send(Clicou::Lista { sessoes: 0 });
                     }
                     outro => vistos.push(format!("{outro:?}")),
                 }

@@ -32,8 +32,9 @@ use sha2::{Digest, Sha256};
 
 use crate::aprovacao::hex;
 use crate::evento::{
-    MAX_CONTAGEM, MAX_DURACAO_MS, MAX_FERRAMENTA, MAX_TAREFAS, eh_enum, eh_hash_de_arquivo, eh_id,
-    eh_nome_de_evento, eh_origem, eh_projeto, eh_token,
+    MAX_CONTAGEM, MAX_DURACAO_MS, MAX_FERRAMENTA, MAX_TAREFAS, Terminal, eh_enum,
+    eh_hash_de_arquivo, eh_id, eh_nome_de_evento, eh_numero_de_terminal, eh_origem, eh_painel_tmux,
+    eh_projeto, eh_token,
 };
 
 /// Porta do pet quando `PET_PORTA` falta ou não serve (decisão 0008).
@@ -59,7 +60,8 @@ pub const TIPOS_DE_TAREFA: [&str; 10] = [
 ];
 
 /// O que o hook sabe fora do JSON: o evento (o argumento), a hora, a origem
-/// (`CLAUDE_CODE_ENTRYPOINT`), o "não perturbe" e se é teste (`PET_TESTE=1`).
+/// (`CLAUDE_CODE_ENTRYPOINT`), o "não perturbe", se é teste (`PET_TESTE=1`)
+/// e os ids de terminal do ambiente (decisão 0054).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Contexto<'a> {
     pub evento: &'a str,
@@ -68,6 +70,40 @@ pub struct Contexto<'a> {
     pub ent: Option<&'a str>,
     pub dnd: bool,
     pub teste: bool,
+    pub terminal: IdsDoAmbiente<'a>,
+}
+
+/// Os ids de terminal como o ambiente do hook os tem (`TMUX_PANE`,
+/// `KITTY_WINDOW_ID`, `WEZTERM_PANE`), antes de validar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct IdsDoAmbiente<'a> {
+    pub tmux: Option<&'a str>,
+    pub kitty: Option<&'a str>,
+    pub wezterm: Option<&'a str>,
+}
+
+/// Os eventos que levam os ids de terminal: o começo da sessão e cada
+/// prompt (é quando a janela do terminal da sessão é casada; decisão 0054).
+pub const EVENTOS_COM_TERMINAL: [&str; 2] = ["SessionStart", "UserPromptSubmit"];
+
+/// Os ids de terminal válidos do ambiente (cada um pelo validador do pet;
+/// um que não passa fica de fora sozinho), só nos eventos que os levam.
+pub fn terminal(evento: &str, ids: &IdsDoAmbiente) -> Option<Terminal> {
+    if !EVENTOS_COM_TERMINAL.contains(&evento) {
+        return None;
+    }
+    let t = Terminal {
+        tmux: ids.tmux.filter(|v| eh_painel_tmux(v)).map(str::to_owned),
+        kitty: ids
+            .kitty
+            .filter(|v| eh_numero_de_terminal(v))
+            .map(str::to_owned),
+        wezterm: ids
+            .wezterm
+            .filter(|v| eh_numero_de_terminal(v))
+            .map(str::to_owned),
+    };
+    (!t.vazio()).then_some(t)
 }
 
 /// O corpo do fio v1, na ordem do `avisar.sh`.
@@ -116,6 +152,8 @@ pub struct Fio {
     pub dnd: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub teste: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub term: Option<Terminal>,
 }
 
 /// O mínimo, quando a entrada não é um objeto JSON: `{"v":1,"e":"<Evento>"}`
@@ -649,6 +687,7 @@ pub fn montar(lido: &Lido, ctx: &Contexto, arq: Option<&str>) -> Fio {
         ent: ctx.ent.filter(|o| eh_origem(o)).map(str::to_owned),
         dnd: ctx.dnd,
         teste: ctx.teste.then_some(true),
+        term: terminal(e, &ctx.terminal),
     }
 }
 
@@ -688,7 +727,53 @@ mod testes {
             ent: Some("cli"),
             dnd: false,
             teste: false,
+            terminal: IdsDoAmbiente::default(),
         }
+    }
+
+    #[test]
+    fn ids_de_terminal_so_no_inicio_e_no_prompt_e_so_os_validos() {
+        let ids = IdsDoAmbiente {
+            tmux: Some("%3"),
+            kitty: Some("12"),
+            wezterm: Some("4"),
+        };
+        let com = |e: &str, ids: IdsDoAmbiente<'static>| {
+            let c = Contexto {
+                terminal: ids,
+                ..ctx(e)
+            };
+            let texto = corpo(br#"{"session_id":"s1"}"#, &c);
+            let lido = evento::ler(texto.as_bytes()).expect("o pet aceita");
+            assert!(lido.descartados.is_empty(), "{texto}");
+            serde_json::from_str::<Value>(&texto).unwrap()
+        };
+        for e in EVENTOS_COM_TERMINAL {
+            assert_eq!(
+                com(e, ids)["term"],
+                json!({"tmux": "%3", "kitty": "12", "wezterm": "4"}),
+                "{e}"
+            );
+        }
+        for e in ["Stop", "PostToolUse", "Notification", "SessionEnd"] {
+            assert!(
+                com(e, ids).get("term").is_none(),
+                "{e}: só no começo e no prompt"
+            );
+        }
+        let ruins = IdsDoAmbiente {
+            tmux: Some("%3; SEGREDO"),
+            kitty: Some("SEGREDO-janela"),
+            wezterm: Some("4"),
+        };
+        let v = com("UserPromptSubmit", ruins);
+        assert_eq!(v["term"], json!({"wezterm": "4"}), "o ruim cai sozinho");
+        assert!(!v.to_string().to_lowercase().contains("segredo"));
+        let nenhum = IdsDoAmbiente {
+            tmux: Some(""),
+            ..IdsDoAmbiente::default()
+        };
+        assert!(com("SessionStart", nenhum).get("term").is_none());
     }
 
     fn montado(e: &str, entrada: Value) -> Value {

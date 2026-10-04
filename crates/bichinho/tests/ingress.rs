@@ -113,6 +113,24 @@ fn comandos_de_ponta_a_ponta() {
     assert_eq!(d.post_json("/v1/comando", r#"{"cmd":"esconder"}"#).0, 204);
     assert_eq!(d.post_json("/v1/comando", r#"{"cmd":"mostrar"}"#).0, 204);
     assert_eq!(d.post_json("/v1/comando", r#"{"cmd":"voar"}"#).0, 400);
+    // O clique do M4 (decisão 0057): sem compositor, não há janela do pet.
+    let (status, corpo) = d.post_json("/v1/comando", r#"{"cmd":"clique"}"#);
+    assert_eq!(status, 200, "{corpo}");
+    let resposta: serde_json::Value = serde_json::from_str(&corpo).unwrap();
+    assert_eq!(resposta["acao"], "nada");
+    assert_eq!(resposta["botao"], "esquerdo");
+    assert!(
+        resposta["motivo"]
+            .as_str()
+            .unwrap()
+            .contains("sem compositor"),
+        "{corpo}"
+    );
+    assert_eq!(
+        d.post_json("/v1/comando", r#"{"cmd":"clique","arg":"meio"}"#)
+            .0,
+        400
+    );
     // As aprovações do M2 vêm pelo mesmo `/v1/comando` (decisão 0030): o
     // laço escolhe o personagem de novo e a resposta traz o resultado.
     let (status, corpo) = d.post_json("/v1/comando", r#"{"cmd":"revogar_skin","arg":"zeca"}"#);
@@ -147,4 +165,20 @@ fn comandos_de_ponta_a_ponta() {
     let (status, corpo) = producao.post_json("/v1/comando", r#"{"cmd":"tocar","arg":"nod"}"#);
     assert_eq!(status, 409, "{corpo}");
     assert!(corpo.contains("sem personagem aprovado"), "{corpo}");
+}
+
+/// O daemon guarda na memória títulos de janela que o compositor manda (as
+/// linhas do socket2 e o foreign-toplevel): um pânico ou o aborto do vigia
+/// nunca pode levá-los ao disco num core dump (decisão 0061). Sem o
+/// `dumpable`, o kernel não faz o core e o `/proc/<pid>` passa a ser do root
+/// (proc(5)).
+#[cfg(target_os = "linux")]
+#[test]
+fn o_daemon_nao_deixa_core_dump() {
+    use std::os::unix::fs::MetadataExt;
+    let d = Daemon::subir(false);
+    let dono = std::fs::metadata(format!("/proc/{}/status", d.pid()))
+        .expect("o /proc do daemon")
+        .uid();
+    assert_eq!(dono, 0, "o daemon continua podendo deixar core dump");
 }

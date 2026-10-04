@@ -33,6 +33,7 @@
 //! | `ent` | `$CLAUDE_CODE_ENTRYPOINT` | `[a-z0-9_-]{1,40}` |
 //! | `dnd` | `~/.local/state/omarchy/notifications.json` | bool |
 //! | `teste` | `PET_TESTE=1` (evento sintético do `bin/pet testar`) | bool |
+//! | `term` | `TMUX_PANE`, `KITTY_WINDOW_ID`, `WEZTERM_PANE` do ambiente do hook, só no `SessionStart` e no `UserPromptSubmit` (decisão 0054) | objeto com `tmux` (`%` e até 10 dígitos), `kitty` e `wezterm` (até 10 dígitos); chave desconhecida é ignorada, valor ruim derruba o campo |
 //!
 //! Token = `[A-Za-z0-9_.:-]`. Toda regra é de byte ASCII, exceto o nome do
 //! projeto, que aceita letras e dígitos Unicode (pastas com acento).
@@ -111,6 +112,29 @@ pub struct Evento {
     pub dnd: bool,
     #[serde(skip_serializing_if = "eh_falso")]
     pub teste: bool,
+    /// Os ids de terminal do ambiente do hook (decisão 0054).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub term: Option<Terminal>,
+}
+
+/// Os ids de terminal que o hook vê no próprio ambiente (decisão 0054): o
+/// painel do tmux, a janela do kitty, o painel do WezTerm. Só números (e o
+/// `%` do tmux), nunca títulos ou caminhos. Eles só separam sessões dentro de
+/// um mesmo terminal; a janela vem do anel de ativações.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct Terminal {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tmux: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kitty: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wezterm: Option<String>,
+}
+
+impl Terminal {
+    pub fn vazio(&self) -> bool {
+        self.tmux.is_none() && self.kitty.is_none() && self.wezterm.is_none()
+    }
 }
 
 fn eh_falso(b: &bool) -> bool {
@@ -176,6 +200,7 @@ struct Bruto {
     ent: Option<Value>,
     dnd: Option<Value>,
     teste: Option<Value>,
+    term: Option<Value>,
 }
 
 /// Lê e valida um corpo de `POST /v1/evento`.
@@ -223,6 +248,14 @@ pub fn ler(corpo: &[u8]) -> Result<Lido, ErroEvento> {
     let ent = validar("ent", bruto.ent, &mut d, |v| texto(v, eh_origem));
     let dnd = validar("dnd", bruto.dnd, &mut d, Value::as_bool);
     let teste = validar("teste", bruto.teste, &mut d, Value::as_bool);
+    // Um objeto sem nenhum id conhecido (vazio, ou só com as chaves de um
+    // hook mais novo) é ausente, sem rastro (decisões 0054 e 0064).
+    let term = match bruto.term {
+        Some(Value::Object(o)) if !o.keys().any(|k| CHAVES_DE_TERMINAL.contains(&k.as_str())) => {
+            None
+        }
+        outro => validar("term", outro, &mut d, terminal),
+    };
 
     Ok(Lido {
         evento: Evento {
@@ -248,9 +281,40 @@ pub fn ler(corpo: &[u8]) -> Result<Lido, ErroEvento> {
             ent,
             dnd: dnd.unwrap_or(false),
             teste: teste.unwrap_or(false),
+            term,
         },
         descartados: d,
     })
+}
+
+/// As chaves do `term` que o pet conhece.
+const CHAVES_DE_TERMINAL: [&str; 3] = ["tmux", "kitty", "wezterm"];
+
+/// `term`: um objeto com os ids conhecidos, todos válidos (um ruim derruba o
+/// campo inteiro); chave desconhecida é ignorada (um hook mais novo não
+/// derruba o pet). Sem id conhecido, quem chama o trata como ausente.
+fn terminal(v: &Value) -> Option<Terminal> {
+    let objeto = v.as_object()?;
+    let mut t = Terminal::default();
+    for (chave, valor) in objeto {
+        match chave.as_str() {
+            "tmux" => t.tmux = Some(texto(valor, eh_painel_tmux)?),
+            "kitty" => t.kitty = Some(texto(valor, eh_numero_de_terminal)?),
+            "wezterm" => t.wezterm = Some(texto(valor, eh_numero_de_terminal)?),
+            _ => {}
+        }
+    }
+    (!t.vazio()).then_some(t)
+}
+
+/// Painel do tmux (`$TMUX_PANE`): `%` e de 1 a 10 dígitos.
+pub fn eh_painel_tmux(s: &str) -> bool {
+    s.strip_prefix('%').is_some_and(eh_numero_de_terminal)
+}
+
+/// Janela do kitty, painel do WezTerm: de 1 a 10 dígitos.
+pub fn eh_numero_de_terminal(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 10 && s.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// Valida um campo opcional presente; se não passa, só o nome fica em
@@ -364,7 +428,8 @@ mod testes {
             "turno":"p-1","agente":true,"aid":"a1","tool":"Edit","nt":"permission_prompt",
             "err":"rate_limit","src":"user","reason":"logout","intr":true,"sha":true,"bg":2,
             "bgt":["subagent","shell"],"bgi":["t1","t2"],"dur":1830,"arq":"3fa2b19c04de",
-            "proj":"agenda-presidencial","ent":"cli","dnd":false,"teste":true}"#,
+            "proj":"agenda-presidencial","ent":"cli","dnd":false,"teste":true,
+            "term":{"tmux":"%3","kitty":"12","wezterm":"0"}}"#,
         );
         assert!(lido.descartados.is_empty(), "{:?}", lido.descartados);
         let e = lido.evento;
@@ -382,6 +447,61 @@ mod testes {
         assert_eq!(e.arq.as_deref(), Some("3fa2b19c04de"));
         assert_eq!(e.proj.as_deref(), Some("agenda-presidencial"));
         assert_eq!(e.ent.as_deref(), Some("cli"));
+        let term = e.term.unwrap();
+        assert_eq!(
+            (
+                term.tmux.as_deref(),
+                term.kitty.as_deref(),
+                term.wezterm.as_deref()
+            ),
+            (Some("%3"), Some("12"), Some("0"))
+        );
+    }
+
+    #[test]
+    fn term_so_com_ids_validos() {
+        let term = |json: &str| {
+            ok(&format!(
+                r#"{{"v":1,"e":"UserPromptSubmit","term":{json}}}"#
+            ))
+        };
+        assert_eq!(
+            term(r#"{"tmux":"%12","novo_terminal":"SEGREDO"}"#)
+                .evento
+                .term,
+            Some(Terminal {
+                tmux: Some("%12".into()),
+                ..Terminal::default()
+            }),
+            "chave desconhecida é ignorada, sem rastro"
+        );
+        for ruim in [
+            r#"{"tmux":"12"}"#,
+            r#"{"tmux":"%"}"#,
+            r#"{"tmux":"%3; SEGREDO"}"#,
+            r#"{"kitty":"SEGREDO-janela"}"#,
+            r#"{"kitty":"12","wezterm":"-1"}"#,
+            r#"{"wezterm":"12345678901"}"#,
+            r#"{"kitty":12}"#,
+            r#""%3""#,
+            r#"["%3"]"#,
+        ] {
+            let lido = term(ruim);
+            assert_eq!(lido.evento.term, None, "{ruim}");
+            assert_eq!(lido.descartados, vec!["term"], "{ruim}");
+        }
+        // Vazio, ou só com chaves de um hook mais novo: ausente, sem rastro.
+        for sem_id in ["{}", r#"{"novo_terminal":"7"}"#] {
+            let lido = term(sem_id);
+            assert_eq!(lido.evento.term, None, "{sem_id}");
+            assert!(
+                lido.descartados.is_empty(),
+                "{sem_id}: {:?}",
+                lido.descartados
+            );
+        }
+        let texto = format!("{:?}", term(r#"{"tmux":"%1","x":"SEGREDO"}"#));
+        assert!(!texto.contains("SEGREDO"), "{texto}");
     }
 
     #[test]

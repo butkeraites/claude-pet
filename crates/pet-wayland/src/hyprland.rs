@@ -10,8 +10,8 @@
 //! 2. lê o `hyprland.lock` (linha 2 = nome do socket Wayland);
 //! 3. só aceita a instância se `connect()` funcionar no `.socket2.sock` **e**
 //!    no `wayland-N`. Pastas velhas de um Hyprland que caiu recusam a conexão
-//!    e são puladas. O `.socket2.sock` é aberto e fechado na hora: é o único
-//!    toque no IPC do Hyprland até o M4, e o `.socket.sock` (que executa
+//!    e são puladas. O `.socket2.sock` da prova é aberto e fechado na hora;
+//!    quem lê dele é o [`eventos::Leitor`] (M4). O `.socket.sock` (que executa
 //!    comandos no host) nunca é aberto (decisão 0006).
 //!
 //! Enquanto a assinatura espera o backoff ([`Reconexao`]), nenhuma conexão é
@@ -20,9 +20,10 @@
 //! **O monitor FALLBACK.** Quando não sobra monitor de verdade, o Hyprland
 //! cria o output `FALLBACK`: nunca é casa do pet.
 //!
-//! **O desktop.** [`Hyprland`] implementa o [`Desktop`]; por enquanto sem
-//! capacidade nenhuma. O M4 traz o leitor do socket2 (monitor e janela
-//! ativos) e o foco pelo foreign-toplevel (decisão 0039).
+//! **O desktop.** O [`Desktop`](pet_core::plataforma::Desktop) do Wayland é a
+//! própria sessão (decisão 0043: a mesma conexão e o mesmo `wl_seat`). O que é
+//! só do Hyprland chega no M4: o leitor do socket2 (monitor e janela ativos)
+//! e o mapeamento dos toplevels para os endereços de janela (decisão 0039).
 //!
 //! [`Reconexao`]: crate::conexao::Reconexao
 
@@ -32,9 +33,10 @@ use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
 
-use pet_core::plataforma::{Alca, CapDesktop, Desktop, ErroFoco};
-
 use crate::conexao::conectar_unix;
+
+pub mod eventos;
+pub mod mapeamento;
 
 /// Nome do output que o Hyprland cria quando não sobra nenhum monitor de
 /// verdade: nunca é casa do pet.
@@ -54,6 +56,9 @@ pub struct Instancia {
     pub nome_wayland: String,
     /// Conexão já aberta no socket Wayland (a da prova vira a de verdade).
     pub wayland: UnixStream,
+    /// O socket de eventos (`.socket2.sock`) desta instância: o
+    /// [`eventos::Leitor`] lê dele.
+    pub eventos: std::path::PathBuf,
 }
 
 /// Por que ainda não há compositor.
@@ -184,6 +189,7 @@ pub fn procurar(
                     assinatura,
                     nome_wayland,
                     wayland,
+                    eventos,
                 });
             }
             Err(e) => {
@@ -192,23 +198,6 @@ pub fn procurar(
         }
     }
     Err(Espera::NenhumaViva { candidatas: total })
-}
-
-/// A ligação com o Hyprland. Por enquanto sem capacidade nenhuma: seguir o
-/// monitor e focar o terminal da sessão chegam no M4, pelo socket de eventos
-/// e pelo foreign-toplevel, nunca pelo socket de comandos (decisões 0006 e
-/// 0039).
-#[derive(Debug, Default)]
-pub struct Hyprland;
-
-impl Desktop for Hyprland {
-    fn capacidades(&self) -> CapDesktop {
-        CapDesktop::default()
-    }
-
-    fn focar(&mut self, _: &Alca) -> Result<(), ErroFoco> {
-        Err(ErroFoco::NaoSuportado)
-    }
 }
 
 #[cfg(test)]
@@ -388,14 +377,7 @@ mod testes {
     }
 
     #[test]
-    fn reserva_e_o_desktop_sem_capacidades() {
+    fn reserva() {
         assert!(eh_reserva("FALLBACK") && !eh_reserva("eDP-1"));
-        let mut h = Hyprland;
-        assert_eq!(h.capacidades(), CapDesktop::default());
-        assert_eq!(
-            h.focar(&Alca("0x55d1".into())),
-            Err(ErroFoco::NaoSuportado),
-            "o foco chega no M4, pelo foreign-toplevel"
-        );
     }
 }

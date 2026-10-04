@@ -1799,3 +1799,876 @@ em memória à toa.
 **Por quê:** uma aprovação é uma troca de personagem, e a tela tem de mudar
 uma vez só, do jeito certo. Uma opção documentada que não faz nada é pior que
 nenhuma.
+
+## 0047 — Costura do M4: o punho por conexão, os eventos do desktop e o cursor (2026-10-04)
+
+**Problema:** o clique do M4 foca a janela de uma sessão pelo desktop e toca a
+risadinha na janela, na mesma volta do laço. O laço só entregava ao núcleo a
+janela (`Option<&mut dyn Overlay>`); o `Desktop` do Hyprland era uma struct à
+parte, sem a conexão Wayland nem o `wl_seat` que o
+`zwlr_foreign_toplevel_handle_v1.activate(seat)` pede; e não havia como os
+eventos do desktop (monitor em foco, janela ativa) chegarem ao Motor, nem
+como o Motor pedir o cursor de agarrar (decisão 0043).
+**Escolha (T4.1):**
+- **`Punho`** (`pet_core::plataforma`): a janela e o desktop de uma conexão,
+  juntos, pedidos um de cada vez (`janela()`, `desktop()`, e `ver_janela()` e
+  `ver_desktop()` para só ler). O `Nucleo` recebe `Option<&mut dyn Punho>` em
+  todo lugar onde recebia a janela; o Motor recebe o punho no
+  `evento_overlay` (o clique vai focar uma janela) e a janela no resto.
+- **`EventoDesktop`** e **`Motor::evento_desktop`**: a fonte dos eventos
+  ligou ou caiu, o monitor em foco, a janela ativa (um id opaco e a hora de
+  parede em que o desktop contou, o mesmo relógio do `ts` dos hooks), a
+  semente da janela ativa na conexão nova, a presença (só o booleano do
+  primeiro glifo do título), uma janela que abriu (com a proteção de tela
+  como booleano) ou fechou, e os monitores. Nenhum evento carrega título,
+  classe ou nome de área de trabalho.
+- **`Desktop::eventos` e `Desktop::info`** (com padrão vazio): os eventos que
+  a própria conexão conta (no Wayland, a semente pelo foreign-toplevel, na
+  T4.9) entram no mesmo lote dos eventos da janela; o `/v1/estado.desktop`
+  mostra a fonte dos eventos (`sem`, `ligado`, `caiu`), o monitor em foco, o
+  endereço da janela ativa, a presença, se a conexão sabe focar janelas, os
+  protocolos ligados para isso e quantas janelas ela conhece.
+- **`Overlay::cursor`** (`Pegar`, `Agarrar`): no Wayland, `grab` e
+  `grabbing` do cursor-shape-v1, com o serial do último `enter`.
+- A **`Sessao`** do Wayland é o `Desktop` e o `Punho` da conexão; a struct
+  `Hyprland` sem capacidade saiu. A janela de mentira ganhou o
+  `DesktopFalso` e virou punho, para os testes do Motor e do núcleo.
+
+Nada muda no que o pet faz: nenhum evento do desktop chega até o leitor do
+socket2 (T4.4), e o cursor continua `grab` no `enter`.
+**Por quê:** a janela e o desktop vivem na mesma conexão no Wayland e no
+mesmo processo de interface no Windows e no macOS; entregá-los juntos, um de
+cada vez, deixa o clique decidir e agir na mesma volta sem duas referências
+mutáveis à mesma sessão. Os eventos do desktop entram no Motor como tipos
+simples, sem nada de conteúdo, e o Motor continua testável com a janela e o
+desktop de mentira.
+
+## 0048 — Arrastar e clicar: limiares, a área de toque no palco inteiro só no arraste e o fail-safe (2026-10-04)
+
+**Problema:** o Zeca tem de poder ser arrastado para qualquer lugar e
+clicado (PLANO, "Seguir o monitor ativo, arrastar, clicar"), sem roubar
+cliques do resto da tela, sem borrar a pixel art e sem ficar preso se o
+compositor perder o ponteiro (numa área de trabalho vazia, a pegada
+implícita do Hyprland pode sumir; pesquisa do Hyprland, seção 3).
+**Escolha (T4.2):**
+- **A máquina do ponteiro** (`pet_core::motor::arraste`, pura, no palco):
+  botão esquerdo apertado no corpo vira arraste quando o ponteiro anda mais
+  de 4 pixels lógicos (6 do dispositivo a 1,5) ou depois de 250 ms
+  segurando; solto antes disso é clique. O direito só clica (e desiste se
+  andar). O do meio não faz nada. Um `leave` com o botão apertado, antes de
+  arrastar, desiste do clique; arrastando, quem decide é o soltar.
+- **A posição:** a célula anda com o ponteiro em múltiplos de D a partir de
+  onde estava quando o arraste começou (o deslocamento da pixel art, decisão
+  0004), e o corpo fica sempre inteiro dentro da área útil (o `Palco` ganhou
+  a `area`); ao soltar, ela vai até o ponto onde o botão subiu.
+- **A área de toque** cresce para o palco inteiro só enquanto arrasta (o
+  arraste segue até numa área de trabalho vazia) e volta ao corpo ao
+  soltar, no fail-safe, ao esconder e quando a janela fecha.
+- **Fail-safe:** 5 s sem evento do ponteiro com o botão apertado soltam o pet
+  onde ele está.
+- **Cursores:** `grabbing` ao apertar, `grab` ao soltar (o `grab` do `enter`
+  continua na própria camada).
+- **Animação:** enquanto arrasta, o estado `dangle` em laço (o voo do Zeca);
+  ao soltar, `land` uma vez. O animador ganhou o estado segurado: uma reação
+  no meio do arraste toca por cima e volta ao laço.
+- **Clique esquerdo:** por enquanto, a risadinha (`giggle`); levar ao
+  terminal da sessão chega na T4.10, e o direito (soneca) na T4.7.
+- **Orçamento:** o arraste pode fazer commit no ritmo do ponteiro, sempre com
+  um quadro em voo por vez (os movimentos com um quadro em voo esperam o
+  frame callback, que desenha a posição de agora), e para ao soltar.
+**Por quê:** os limiares separam clique de arraste do jeito que um
+gerenciador de janelas faz; crescer a área de toque só durante o arraste
+mantém o resto da tela clicável o tempo todo; andar em múltiplos de D mantém
+o bicho nítido e com movimento de pixel art; e o fail-safe impede que uma
+pegada perdida deixe a tela inteira presa ao pet.
+
+## 0049 — Posições salvas por monitor, como fração do palco e pela descrição do monitor (2026-10-04)
+
+**Problema:** o Renan arrasta o Zeca para onde quiser, em cada monitor, e o
+lugar tem de sobreviver ao restart do pet (PLANO, verificação do M4). Numa
+dock o conector muda (`DP-3` vira `DP-5`), a escala e o tamanho
+(`aparencia.tamanho`) podem mudar, e a skin também.
+**Escolha (T4.3):**
+- **O que se guarda:** o ponto dos pés (a âncora `pe` da skin) como fração
+  do palco (pixels do dispositivo do monitor), de 0 a 1 nos dois eixos. Ao
+  voltar, a célula é posta com os pés na fração e o corpo é preso de novo na
+  área útil: outra escala, outro D ou outra skin caem no mesmo lugar
+  relativo.
+- **A chave:** a descrição do monitor (fabricante, modelo e série), sem o
+  conector que o Hyprland põe no fim da descrição do `wl_output`
+  (`… (eDP-1)`); sem descrição, o nome do conector (`nome:eDP-1`). No
+  máximo 32 monitores; o usado há mais tempo sai.
+- **Quando:** guardada ao soltar um arraste (e no fail-safe); aplicada sempre
+  que o palco é montado (a camada ficou pronta, mudou de escala ou de
+  tamanho, trocou de skin). Sem posição salva, o canto inferior direito da
+  área útil, como antes.
+- **Onde:** `/state/posicoes.json` (o volume do pet, o mesmo da aprovação),
+  gravado de uma vez (arquivo temporário e `rename`) pelo núcleo do daemon
+  depois do lote que mudou a posição. Um arquivo que não se lê vira um
+  aviso no log e o canto padrão; uma entrada ruim cai sozinha. O Motor só
+  guarda e entrega o JSON: continua sem I/O.
+**Por quê:** a fração dos pés é o que o olho percebe como "o mesmo lugar" em
+monitores de tamanhos diferentes, e a descrição é o que identifica o
+monitor físico. Gravar só ao soltar não custa nada parado.
+
+## 0050 — O leitor do socket2: uma thread que só lê, só ids e booleanos, e o anel de ativações (2026-10-04)
+
+**Problema:** seguir o monitor ativo, esconder durante a proteção de tela e
+achar o terminal de uma sessão pedem os eventos do Hyprland
+(`.socket2.sock`, decisão 0006). O Hyprland desconecta um cliente com 64
+eventos acumulados, e o spinner do Claude Code no título do terminal gera
+~4 eventos por segundo; as linhas trazem títulos de janela e classes, que
+nunca podem chegar ao log, ao `/v1/estado`, ao `/v1/debug/eventos` nem ao
+disco.
+**Escolha (T4.4):**
+- **Uma thread só para ler** (`pet_wayland::hyprland::eventos::Leitor`):
+  drena sempre, traduz cada linha na hora e entrega ao laço por uma caixa
+  própria (1024 vagas, acordando o laço por um `Ping`; uma caixa cheia
+  conta o evento como perdido, nunca segura a leitura). Cai a ligação, ela
+  conta (`Ligado(false)`), espera o backoff (1 s dobrando até 30 s; 60 s de
+  ligação zeram) e liga de novo. Parar desbloqueia a leitura (`shutdown`) e
+  a espera (condição), na hora.
+- **O que sai de uma linha:** o nome do monitor em foco (`focusedmonv2`; o
+  FALLBACK nunca), o endereço da janela ativa (`activewindowv2`, carimbado
+  com a hora de parede em que a linha foi lida), o booleano "o título da
+  janela em foco começa com ✳, ◐ ou ◑" (`activewindow`: só os 4 primeiros
+  bytes do título são olhados, e só o booleano sai), o endereço de uma janela
+  que abriu com o booleano "é a proteção de tela do Omarchy" (`openwindow`)
+  e o de uma que fechou (`closewindow`), e "um monitor entrou ou saiu". Nomes
+  e endereços passam por regras (`[A-Za-z0-9._-]`, hexadecimal); o resto
+  (títulos, classes, áreas de trabalho, `windowtitle`, …) nem é
+  interpretado. As repetições (o `activewindow` reenviado a cada troca de
+  título) não acordam o laço. Linhas de mais de 4 KiB são puladas sem serem
+  guardadas. Do log, só "ligado", "caiu" e o atraso.
+- **Ciclo de vida:** o leitor nasce quando a descoberta acha a instância
+  (antes do handshake do Wayland: com a conexão Wayland em backoff, os
+  eventos já chegam) e morre quando não há mais Hyprland; uma instância nova
+  troca o leitor. O laço esvazia a caixa do desktop antes da dos hooks: uma
+  troca de janela que veio antes de um prompt entra no anel antes dele.
+- **O anel de ativações** (`pet_core::motor::janelas::Anel`, no Motor): até
+  128 trocas de janela ativa, só o endereço e a hora de parede; a fonte caiu,
+  um buraco (até a próxima troca, nada se sabe); a semente do
+  foreign-toplevel (T4.9) só entra com o anel vazio ou num buraco. A busca
+  pela hora (`Anel::em`) diz a janela, ou dúvida se a troca para ela foi há
+  menos de 1 s (a primeira troca do anel, ou a primeira depois de um buraco,
+  não tem dúvida: não se sabe o que havia antes), ou nenhuma, ou
+  desconhecida. O `/v1/estado.desktop.anel` mostra as 8 últimas trocas
+  (endereço, hora e tipo).
+- **O canário** (`tests/socket2.rs`): o daemon de verdade com uma instância
+  de mentira do Hyprland (`hyprland.lock`, um socket2 que manda
+  `activewindow>>firefox,SEGREDO-T`, um `openwindow` e um `windowtitlev2` com
+  segredos depois das linhas úteis e uma sentinela no fim, e um Wayland que
+  desliga na hora): nada com `segredo` nem `firefox` no `/v1/estado`, no
+  `/v1/debug/eventos` nem no log com `PET_LOG=debug`, e o `.socket.sock` da
+  instância nunca recebe conexão. Duas versões erradas de propósito
+  reprovaram: a linha crua no log de debug e a classe do `openwindow` saindo
+  como monitor em foco.
+**Por quê:** ler numa thread que nunca espera é o que o Hyprland exige;
+traduzir na hora e só para ids e booleanos é o que a regra de ouro exige; e
+casar o prompt com a janela pela hora, num anel em que um buraco é
+"não sei" e não "a de antes", evita mandar o Renan para a janela errada.
+
+## 0051 — Seguir o monitor ativo: debounce, intervalo entre viagens, o poof procedural e o pouso entre monitores (2026-10-04)
+
+**Problema:** o Zeca tem de ficar sempre no monitor em foco (PLANO, "Seguir o
+monitor ativo"). A camada OVERLAY é de um monitor só e não pode atravessar
+para o outro; o foco pisca em rajadas (a proteção de tela do Omarchy foca
+cada monitor em sequência; o mouse cruzando a borda); e o pet pode ser
+arrastado e solto em outro monitor.
+**Escolha (T4.5):**
+- **Quando ir** (`pet_core::motor::viagem`, puro): o `focusedmonv2` vira
+  `MonitorEmFoco` (nunca o FALLBACK); só o último vale, depois de 300 ms
+  parado. Não viaja arrastando (confere de novo ao soltar), nem com o pet
+  escondido (ao voltar, a camada nasce no monitor em foco), nem sem a camada
+  pronta (confere quando ela ficar), nem a menos de 1,5 s da viagem anterior
+  (adia até lá). A quarta viagem em 20 s é rápida: sem poof. O
+  `configreloaded` nem é lido; o FALLBACK e a camada sem casa continuam como
+  no M1.
+- **A viagem:** o poof de saída (4 passos de 60 ms; o pet some no segundo),
+  o quadro transparente e a destruição da camada, a camada nova com output
+  NULL (o compositor a põe no monitor em foco), o palco na posição salva
+  daquele monitor e o poof de chegada (o pet aparece no segundo passo). A
+  animação em curso continua no monitor novo. Esconder no meio desiste da
+  viagem; a janela fechada pelo compositor no meio (o monitor saiu) espera o
+  `Recriar` de sempre e chega do mesmo jeito.
+- **O poof** é procedural (a receita do catálogo para `poof_in`/`poof_out`):
+  oito bloquinhos de D em volta do corpo, branco gelo e cinza, abrindo na
+  saída e fechando na chegada, ≈ 17 quadros por segundo por 240 ms (dentro
+  da rajada de até 30). As partículas de verdade são do M6.
+- **Soltar entre monitores:** o botão subindo fora do palco (a pegada
+  implícita manda as coordenadas além da borda) vira um pouso: o ponto no
+  desktop (a origem do monitor do `xdg_output` mais o ponto em pixels
+  lógicos) e a pegada. A viagem começa na hora (sem debounce nem
+  intervalo); na chegada, a célula fica com a pegada debaixo do ponto
+  solto, presa à área útil, o pet toca o pouso e a posição fica guardada
+  para o monitor novo. Sem a origem do monitor, cai na posição salva.
+- **Mudança de layout:** um `wl_output`/`xdg_output` que muda faz a camada
+  conferir de novo onde está (a origem nova vale para o próximo pouso).
+- O `/v1/estado.viagem` mostra a fase (`poof`, `saindo`, `chegando`,
+  `entrando`).
+**Por quê:** o debounce e o intervalo seguram as rajadas sem deixar o pet
+para trás; o poof esconde o salto entre camadas (uma camada não atravessa
+monitores); e o pouso pelo ponto do desktop faz o arraste entre monitores
+terminar onde o Renan soltou.
+
+## 0052 — A fonte monogram (CC0) assada no core e o balão mínimo (2026-10-04)
+
+**Problema:** o clique sem pendência mostra um balão com as sessões abertas
+(decisão 0039), e o balão precisa de uma fonte de pixel com acento (o PLANO
+escolheu a monogram, CC0, para o M6; o M4 a puxa). A fonte tem de ser livre
+(CC0 ou OFL), com a licença no repositório, nítida como a arte (blocos
+inteiros de pixels do dispositivo) e sem nada baixado em tempo de execução.
+**Escolha (T4.6):**
+- **A monogram**, de Vinícius Menézio (datagoblin), CC0 1.0: baixada do
+  itch.io em 2026-10-04 (`monogram.zip`, sha256 81d05402…). O repositório
+  guarda só o `monogram-bitmap.json` do pacote (390 glifos com o latim
+  completo e os acentos do português; cada um em 12 linhas de bits, o bit 0
+  na coluna da esquerda; avanço de 6), o `credits.txt` original, o texto da
+  CC0 e um `LICENCA.md` com a origem e os sha256. O `NOTICE.md` dá o
+  crédito.
+- **Assada no core:** `cargo xtask fonte` gera
+  `crates/pet-core/src/fonte/glifos.rs` (uma tabela em ordem de código, já no
+  formato do `rustfmt`; `--conferir` só confere); um teste do core compara a
+  tabela com o JSON e um do xtask, o arquivo com o gerado. A fonte vai
+  dentro do binário. Sem o glifo, o do `?`.
+- **O glifo na cena:** `Elemento::Glifo` (o caractere, o canto, o bloco e a
+  cor), desenhado em blocos inteiros, um retângulo por trecho aceso de cada
+  linha; o dano é o retângulo dele, como o de um sprite.
+- **O balão mínimo** (`pet_core::motor::balao`): um quadro creme com borda
+  de tinta e cantos de um pixel cortados, o rabinho de dois pixels
+  apontando para o meio do corpo, o texto na monogram com um pixel da fonte
+  valendo metade do D (para cima; 3 pixels do dispositivo com o Zeca
+  pequeno no eDP-1). Fica em cima do corpo, preso dentro da área útil; sem
+  espaço em cima, embaixo, com o rabinho virado. Até 6 linhas (a sexta vira
+  "+ N") de até 36 caracteres (cortadas com "…"). Some sozinho: 5 s mais 1 s
+  por linha, até 12 s (dois commits: aparecer e sumir). O arraste e a viagem
+  para outro monitor o tiram. O `/v1/estado.balao` mostra as linhas.
+- **O clique esquerdo**, por enquanto: a risadinha e o balão com as sessões
+  abertas, uma por linha ("projeto: estado (há quanto tempo)", as reais
+  antes das de teste, a mais recente primeiro; "nenhuma sessão do Claude
+  aberta" sem nenhuma). O cérebro passou a guardar desde quando cada sessão
+  está no estado (`estado_desde_ms` no `/v1/estado.sessoes`). Levar ao
+  terminal de uma sessão pendente chega na T4.10, e o "pronto" com os avisos.
+**Por quê:** a monogram cobre o português, é de domínio público e foi feita
+para pixel art; assada no binário, não depende de arquivo nem de rede, e o
+teste garante que a tabela é a do pacote. O balão em blocos inteiros fica
+nítido como o Zeca; sumir sozinho mantém o orçamento de commits parado.
+
+## 0053 — Esconder durante a proteção de tela e a soneca do botão direito (2026-10-04)
+
+**Problema:** o PLANO pede que o Zeca se esconda durante a proteção de tela
+do Omarchy (a janela `org.omarchy.screensaver`, uma por monitor, em tela
+cheia; o OVERLAY ficaria por cima dela) e que o botão direito ponha o pet
+para cochilar por 30 min, só com reações pequenas e um selo "zZ".
+**Escolha (T4.7):**
+- **Proteção de tela:** o `openwindow` do socket2 traz a classe só para virar
+  o booleano "é a proteção de tela" (decisão 0050); o `EstadoDesktop` guarda
+  os endereços dessas janelas e o `closewindow` os tira. Com alguma aberta,
+  o `quer_mostrar` do Motor é falso: o pet sai com o quadro transparente e
+  volta (camada nova, no monitor em foco) quando a última fecha. Se a fonte
+  dos eventos cai e volta, a lista recomeça vazia: uma proteção que fechou
+  no meio nunca diria que fechou. O `/v1/estado.desktop.protetor_de_tela`
+  mostra o booleano.
+- **Soneca:** o clique direito começa 30 min de soneca (o bocejo, `yawn`) ou,
+  se o pet já cochila, acorda (o despertar, `wake`; a skin `_teste` não tem
+  e fica na pose). Na soneca, as reações do cérebro ficam pequenas: o
+  pulinho (e o que vier maior no M5) vira o aceno; o tchau continua. O selo
+  "zZ" fica no alto, à direita do corpo, em letras da monogram creme com
+  sombra de tinta (legível no tema escuro e no claro), parado: só um commit
+  para aparecer e um para sumir. A soneca acaba sozinha no prazo. Não
+  persiste num restart (os comandos persistidos `soneca` e `acordar` do
+  `bin/pet` são do M7). O `/v1/estado.soneca_restante_s` mostra quanto
+  falta.
+**Por quê:** a proteção de tela é o Renan longe do computador, e o pet por
+cima dela só gastaria GPU. A soneca é o "me deixa trabalhar" de um clique, e
+o selo diz por que o pet está quieto sem pedir commit nenhum enquanto dura.
+
+## 0054 — Os ids de terminal no fio v1: o campo `term`, só no começo da sessão e em cada prompt (2026-10-04)
+
+**Problema:** a janela de uma sessão vem do anel de ativações (decisão 0043),
+mas duas sessões no mesmo terminal (dois painéis do tmux, duas abas do
+kitty ou do WezTerm) caem na mesma janela, e nada as separa. O PLANO pede um
+campo novo e opcional do fio v1, com decisão própria, com os ids de
+terminal que o hook vê no próprio ambiente — só ids, nunca títulos.
+**Escolha (T4.8):**
+- **O campo:** `term`, um objeto com até três ids: `tmux` (o
+  `$TMUX_PANE`: `%` e de 1 a 10 dígitos), `kitty` (o `$KITTY_WINDOW_ID`) e
+  `wezterm` (o `$WEZTERM_PANE`), esses dois de 1 a 10 dígitos. Opcional
+  como todo campo do fio v1.
+- **No hook** (`bichinho avisar`, `pet_core::aviso::terminal`): só no
+  `SessionStart` e no `UserPromptSubmit` (é quando a janela é casada), e
+  cada id só sai se passar no validador do pet; um ruim cai sozinho, os bons
+  do mesmo evento saem. Nada mais do ambiente sai (`TERM_PROGRAM`, chaves,
+  tokens; os canários já plantavam segredos nele).
+- **No pet** (`pet_core::evento`): um objeto com os ids conhecidos, todos
+  válidos; um ruim derruba o campo inteiro (só o nome `term` vai para os
+  descartados), uma chave desconhecida é ignorada sem rastro (um hook mais
+  novo não derruba o pet) e um objeto vazio é ausente.
+- **O `avisar.sh`** de reserva não manda o `term`: o campo é opcional, e a
+  reserva fica como estava.
+- **Canários** (`tests/hook.rs`): com `TMUX_PANE`, `KITTY_WINDOW_ID` e
+  `WEZTERM_PANE` válidos, `TERM_PROGRAM` e uma chave da API no ambiente, os
+  ids saem no começo e no prompt, nenhum outro evento os leva, nada com
+  `segredo` sai e o pet aceita o corpo inteiro; ids que não são ids (`%7;
+  rm -rf …`, `SEGREDO-janela`) não saem. Duas versões erradas de propósito
+  reprovaram: o `term` em todo evento e o painel do tmux sem validar.
+- **A troca:** o plugin não muda (o `hooks.json` chama o mesmo `bichinho
+  avisar`); o binário novo chega ao PATH pelo `bin/pet instalar-host` depois
+  do merge, como na decisão 0045. Até lá, o hook instalado não manda o
+  `term`, e o pet funciona sem ele.
+**Por quê:** os ids de terminal são números que o terminal põe no ambiente
+de todo processo filho; não dizem o que o Renan faz, só onde. Mandá-los só
+quando a janela é casada mantém o fio pequeno, e o validador nos dois lados
+mantém a regra de que o que o pet descartaria nem sai do host.
+
+## 0055 — A janela de cada sessão: o anel casado com o `ts` do hook, pegajosa e com dúvida (2026-10-04)
+
+**Problema:** o clique no Zeca leva ao terminal da sessão (decisão 0039). No
+Docker o daemon não vê PIDs do host, e o socket2 e o foreign-toplevel não
+trazem PID (decisão 0043): a janela da sessão tem de vir da hora em que o
+Renan mandou o prompt.
+**Escolha (T4.8):**
+- **O casamento** (`pet_core::motor::janelas::Identidades`, no Motor): no
+  `SessionStart` e no `UserPromptSubmit` de uma sessão que o cérebro
+  acompanha, a hora do evento (o `ts` do hook, se plausível; senão a
+  chegada) procura no anel de ativações (decisão 0050) a janela ativa
+  naquela hora. A janela certa vira a da sessão.
+- **Dúvida:** se a troca para aquela janela foi há menos de 1 s, há dúvida
+  (o prompt pode ter saído da janela de antes); sem anel na hora (o pet
+  subiu depois, a fonte caiu) não se sabe; numa área vazia, nenhuma janela.
+- **Pegajosa:** uma janela certa fica até outra certa trocá-la (um
+  `--resume` em outro terminal) ou ela fechar (`closewindow`). Um prompt com
+  dúvida não apaga a janela certa de antes; só sem nenhuma a dúvida é
+  guardada. Os ids de terminal do hook (decisão 0054) ficam junto.
+- **O fim:** a identidade some com a sessão (o `SessionEnd`, ou a sessão que
+  expirou).
+- **No `/v1/estado.sessoes[].janela`:** o endereço (o do `activewindowv2`),
+  a certeza (`certa`, `duvida`, `sem_anel`, `sem_janela`, `fechou`) e os ids
+  de terminal. O clique (T4.10) usa a janela certa; sem ela, o balão diz o
+  porquê.
+- **Conferido no daemon de verdade** (`tests/janela.rs`), com linhas
+  gravadas de um socket2 e eventos de hook com o `ts`: o prompt casa a
+  janela ativa, a troca meio segundo antes deixa dúvida, passado o segundo o
+  prompt seguinte casa, e o `closewindow` tira a janela.
+**Por quê:** o terminal de uma sessão não muda de janela, e quase todo
+prompt sai do teclado na janela ativa; casar pela hora acerta sem ler
+títulos, e guardar a dúvida em vez de chutar evita mandar o Renan para a
+janela errada.
+
+## 0056 — Focar a janela pelo foreign-toplevel e o mapeamento do Hyprland, na conexão e no `wl_seat` da sessão (2026-10-04)
+
+**Problema:** o clique no Zeca foca o terminal de uma sessão sem o socket
+de comandos do Hyprland (decisões 0006 e 0039): pelo
+`zwlr_foreign_toplevel_handle_v1.activate(seat)` do handle certo. O handle
+vem do foreign-toplevel; o endereço da janela (o do `activewindowv2`, que o
+anel guarda) só vem do `hyprland_toplevel_mapping_manager_v1`, que não tem
+crate em Rust. E o `generate_interfaces!` do `wayland-scanner` gera a ponte
+para a libwayland em C, com `unsafe` — proibido fora dos esboços.
+**Escolha (T4.9):**
+- **Conferido nesta máquina** (`cargo xtask globais`, que só lê o registro
+  do Wayland): o Hyprland 0.56.2 anuncia `zwlr_foreign_toplevel_manager_v1`
+  v3 e `hyprland_toplevel_mapping_manager_v1` v1. E o código do Hyprland
+  confere o resto: o `activate` faz `activate(true)` (passa por cima das
+  regras de foco, muda para a área de trabalho da janela e leva o ponteiro);
+  o endereço do mapeamento é o ponteiro da janela, o mesmo
+  `std::format("{:x}", …)` dos eventos do socket2.
+- **O protocolo:** o XML do hyprland-protocols (BSD-3-Clause) vendorado sem
+  mudança em `crates/pet-wayland/protocolos/`; o código de cliente pelo
+  `wayland_scanner::generate_client_code!` (dependência direta do
+  `pet-wayland`, já no `Cargo.lock`); as tabelas das duas interfaces
+  escritas à mão (`c_ptr: None`: o pet usa só o backend em Rust puro), sem
+  `unsafe`, com um teste que as confere contra o XML (pedidos, eventos,
+  argumentos e destrutores).
+- **O foreign-toplevel genérico** (`pet_wayland::toplevel`, serve aos outros
+  wlroots no T8.7): as janelas anunciadas, cada uma com o endereço e se está
+  ativa — nunca o título nem o app id, que chegam e são jogados fora. Cada
+  toplevel novo é mapeado na hora (`get_window_for_toplevel_wlr`), e o
+  handle do mapeamento é destruído depois da resposta. Com o
+  `WAYLAND_DEBUG` de cliente ligado, o wayland-client imprime toda mensagem
+  no stderr, títulos inclusive: aí o foreign-toplevel nem é ligado (aviso no
+  log) e o clique cai no balão.
+- **O desktop da sessão:** a `Sessao` liga os dois protocolos na própria
+  conexão (opcionais: sem algum, o aviso no log e o clique cai no balão);
+  `Desktop::focar(endereço)` acha o handle e faz `activate` no `wl_seat` da
+  mesma conexão (`JanelaSumiu` se o endereço não está mais lá,
+  `NaoSuportado` sem os protocolos ou sem seat). O `/v1/estado.desktop`
+  mostra os protocolos ligados e quantas janelas têm endereço.
+- **A semente:** a janela ativa pelo foreign-toplevel (com endereço) vira
+  `JanelaInicial`; o anel a usa com ele vazio, num buraco ou depois de outra
+  semente, até o socket2 contar uma troca (a primeira semente não tem
+  dúvida; as seguintes são trocas que o foreign-toplevel viu).
+- **Conferido ao vivo** com a sessão bloqueada e a tela apagada, num daemon
+  nativo de rascunho (porta 27399, `/state` de rascunho, skin `_teste`,
+  parado com SIGTERM em seguida): os dois protocolos ligados, a única janela
+  aberta mapeada com o endereço que o `hyprctl -j clients` (só leitura, no
+  host) dá para o `foot`, a semente no anel e o socket2 ligado. Focar de
+  verdade fica pendente: bloqueado, o Hyprland recusa o foco a janelas.
+**Por quê:** o foreign-toplevel é uma ação de alto nível sobre uma janela,
+sem executar nada no host; o mapeamento é o que liga o handle ao endereço
+que o anel conhece. Escrever as tabelas à mão é o preço de não ter `unsafe`,
+e o teste contra o XML garante que elas são as do protocolo.
+
+## 0057 — Os avisos das sessões e o clique que leva ao terminal, em ciclo (2026-10-04)
+
+**Problema:** o clique esquerdo no Zeca leva à janela do terminal da sessão
+que terminou ou que precisa do Renan (decisão 0039): com vários avisos, o
+mais urgente primeiro (esperando você > erro > pronto) e cada clique ao
+próximo; o clique que foca marca o aviso como visto; o pronto some com uns
+10 s do terminal da sessão em foco, e o "esperando você" só com um evento da
+própria sessão ou um clique. Sem pendência, o balão com as sessões; sem como
+focar, o balão diz o porquê e mostra a lista.
+**Escolha (T4.10):**
+- **Os avisos moram no cérebro** (`pet_core::cerebro`): um espaço por
+  sessão, com o tipo e desde quando.
+  - Mudar de estado resolve o aviso de antes; entrar em "esperando você"
+    (o `PermissionRequest`, a pergunta e o plano pelo `PreToolUse`, as
+    notificações que pedem o Renan) ou em erro (o `StopFailure`) abre um.
+  - O pronto abre quando a acomodação do Stop termina (o instante da festa,
+    com ou sem festa: a celebração desligada não tira o aviso), desde a hora
+    do Stop. A continuação de outro plugin, que reabre o turno, o tira; o
+    Stop seguinte o devolve. Um prompt novo o resolve.
+  - Um segundo gatilho do mesmo diálogo (a notificação depois do
+    `PermissionRequest`) não abre outro, nem depois de visto. O
+    `idle_prompt` nunca abre nem resolve: ele fecha o turno e para a
+    sessão, mas a permissão continua na tela. Um evento atrasado, com `ts`
+    mais velho que o estado de agora (a permissão que a ferramenta já
+    usou), não mexe no aviso.
+  - O pronto e o erro somem sozinhos em 2 h; o "esperando você" só com um
+    evento da sessão, visto, ou com a sessão (o `SessionEnd`, as 12 h).
+  - No `/v1/estado.sessoes[].aviso`, o tipo (`esperando`, `erro`, `pronto`)
+    e desde quando; na lista do balão, a sessão parada com o pronto aparece
+    como "pronto".
+- **A ordem** (`Cerebro::pendencias`): o tipo mais urgente; no mesmo tipo,
+  as sessões reais antes das de teste e a que espera há mais tempo primeiro.
+- **O clique esquerdo** (`Motor::clicar`) vai ao aviso da vez: o mais
+  urgente que esta volta do ciclo ainda não visitou (visitados todos,
+  recomeça). Com a janela certa da sessão (decisão 0055), pede o foco ao
+  desktop (`Desktop::focar`, o foreign-toplevel da decisão 0056), com a
+  risadinha e um coração procedural (7 por 6 pixels da fonte, vermelho com
+  borda de tinta, 1,2 s parado: dois commits). O aviso sai quando o desktop
+  conta que a janela ficou ativa (o `activewindowv2` do socket2 ou o
+  `activated` do foreign-toplevel), em até 1,5 s; já ativa, ou sem quem
+  conte as trocas, sai na hora. Sem a confirmação no prazo (bloqueado, o
+  Hyprland recusa o foco sem dizer nada), o aviso fica e o balão diz "não
+  consegui focar a janela dela".
+- **Sem como focar**, o balão traz a sessão com o aviso, o porquê e a lista
+  das sessões, e o ciclo anda do mesmo jeito. Os porquês: da identidade
+  ("não vi a janela dela", "trocou de janela perto do prompt", "nenhuma
+  janela estava ativa", "a janela dela fechou") e do desktop ("aqui eu não
+  sei focar janelas", "a janela dela sumiu", "o sistema recusou o foco").
+  Sem aviso, a risadinha e a lista (decisão 0052).
+- **O foco sem clique:** o pronto e o erro de uma sessão saem com 10 s do
+  terminal dela em foco (contados do aviso ou de quando a janela ficou
+  ativa, o que vier depois), só com a fonte das trocas ligada; o "esperando
+  você" não sai assim.
+- **`/v1/comando` `clique`** (`"esquerdo"`, o padrão, ou `"direito"`) e
+  `bin/pet clique`: clicam no pet como o ponteiro e respondem o que ele fez
+  (`focou`, com o endereço da janela e se o desktop já confirmou; `balao`,
+  com o porquê; `lista`; `soneca`; sem compositor, `nada`). É por onde os
+  scripts ao vivo conferem o clique, sem título nenhum.
+- **Publicar:** um aviso visto fora de um evento do Claude (o clique, a
+  confirmação, o foco) republica o `/v1/estado.sessoes`; apertar e soltar o
+  botão republicam o painel, com o `focando` (o endereço que espera a
+  confirmação). No log, só o endereço, o id curto da sessão e o tipo do
+  aviso; o nome do projeto fica no balão e no `/v1/estado`, como antes.
+**Por quê:** o aviso é o estado da sessão visto pelo lado do Renan, o que
+ele ainda não viu, e o cérebro já sabe o estado. Esperar a confirmação do
+desktop evita marcar como visto um foco que não aconteceu, e a memória da
+volta evita que uma sessão sem janela prenda o clique nela.
+
+## 0058 — A verificação ao vivo do M4, a produção na branch e a regra opcional só proposta (2026-10-04)
+
+**Problema:** o M4 termina com a verificação na tela de verdade e a
+produção refeita da branch (PLANO, M4). Parte dela pede a tela desbloqueada
+ou o Renan com o mouse; o e2e de monitores mexe no Hyprland dele (cria e
+remove um monitor); e a regra opcional do Hyprland só pode ser proposta,
+nunca aplicada sem ele.
+**Escolha (T4.11):**
+- **`scripts/verificar-m4.sh`**, contra a produção que está de pé: o
+  desktop no `/v1/estado` (o socket2 ligado, os dois protocolos do clique,
+  janelas com endereço, o anel e as janelas das sessões só com endereços em
+  hexadecimal), a janela ativa e o monitor em foco iguais aos do Hyprland
+  (`hyprctl -j`, só leitura) e, com a sessão desbloqueada e a tela acesa, o
+  clique de ponta a ponta: dois `foot` com um título-canário
+  (`SEGREDO-M4-…`), uma sessão de teste casada com cada um pelo `ts` do
+  prompt, A pedindo permissão e B pronta; o primeiro `bin/pet clique` tem de
+  levar ao foot de A e o segundo ao de B (o `hyprctl -j activewindow`), e o
+  terceiro mostra a lista; o título nunca aparece no log, no `/v1/estado`
+  nem no `/v1/debug/eventos`. Os `foot` fecham num `trap`. Com a sessão
+  bloqueada ou a tela apagada, sai NÃO VERIFICADO sem abrir janela; com
+  avisos de sessões reais pendentes também (o clique iria a eles primeiro).
+  `--manual` guia o Renan: arrastar numa área cheia e numa vazia, a posição
+  depois de um restart, a proteção de tela e o clique com o mouse.
+- **`scripts/e2e-monitor.sh --autorizo`**: cria um output headless, foca
+  nele, confere o pet lá (a camada viva e o `/v1/estado.monitor`), volta,
+  confere, remove e confere de novo, com um `trap` que remove o output e
+  devolve o foco. É o único script que muda o Hyprland (`hyprctl output` e
+  `dispatch focusmonitor`): escrito, nunca rodado sem o consentimento do
+  Renan, a cada vez.
+- **A regra opcional** (`order = 1` para ficar abaixo dos popups do
+  Omarchy, `no_anim` para tirar o fade de ~180 ms de cada troca de
+  monitor): proposta no README, a aplicar só pela skill `omarchy` e com o
+  consentimento do Renan. Não foi aplicada; sem ela tudo funciona.
+- **A linha da lista de sessões:** o nome do projeto encolhe (até 6
+  caracteres) para o estado e o tempo caberem nos 36 do balão; ao vivo, a
+  linha de uma sessão de teste saiu "m4-vivo (teste): esperando você (0 …".
+- **Conferido ao vivo**, com a sessão bloqueada e a tela apagada, na
+  produção refeita da branch (`bin/pet subir` do commit da T4.10): tela
+  ativa, o Zeca aprovado pelo Renan intacto (sha256 5b843b03…), D=6 (o
+  tamanho pequeno no eDP-1), o socket2 ligado, os dois protocolos ligados
+  com a janela aberta mapeada, a semente no anel e nenhum título no log. O
+  `scripts/verificar-m4.sh` passou no desktop e na janela ativa e deu o
+  clique nos dois `foot` como NÃO VERIFICADO, sem abrir janela. Uma sessão
+  de teste casou com a janela ativa (certa, pela semente), e o
+  `bin/pet clique` focou a janela dela (já ativa: confirmado na hora) pelo
+  `activate` do foreign-toplevel de verdade, sem erro de protocolo nem
+  reconexão; o aviso saiu, o segundo clique mostrou a lista e o direito
+  ligou e desligou a soneca.
+- **Pendente** (pede a tela desbloqueada ou o Renan): o clique nos dois
+  `foot`, o `--manual`, o e2e de monitores e a regra opcional.
+- **A troca depois do merge:** o plugin não muda (0.2.0); na worktree
+  estável, `bin/pet subir` e `bin/pet instalar-host` (o hook novo manda o
+  `term`; o antigo continua funcionando com o pet novo, sem ele).
+**Por quê:** o que dá para provar sem a tela fica provado no daemon de
+verdade e na produção; o que pede a tela fica escrito para rodar com o
+Renan, sem mexer no Hyprland dele nem focar janelas enquanto ele não está.
+
+## 0059 — Revisão do seguir o foco: os prazos do Motor sem conexão e o alvo velho (2026-10-04)
+
+**Problema:** as revisões do M4 acharam dois defeitos no seguir o monitor
+ativo (T4.5).
+- **O laço girava a 100% de CPU sem a conexão Wayland.** O M4 pôs no
+  `Motor::proximo_prazo` prazos que só o `Motor::vencer(punho)` tirava: o
+  debounce do foco, o fim do balão e o da soneca. Sem conexão (o compositor
+  caiu, ou a conexão está no backoff) o `Nucleo::vencer` pulava o Motor, e o
+  laço rearmava o mesmo prazo vencido sem fim. O leitor do socket2 vive
+  desde a descoberta e sobrevive ao backoff (decisão 0050): bastava o mouse
+  cruzar para o outro monitor. Conferido no daemon de verdade com o
+  Hyprland de mentira: 200 tiques de CPU em 2 s (um núcleo inteiro).
+- **O alvo velho fazia o pet viajar sem fim.** O `Seguir.alvo` nunca era
+  corrigido. A camada com output NULL nasce no monitor em foco; se o alvo
+  apontava para outro monitor (um `focusedmonv2` perdido enquanto o socket2
+  reconectava, o Hyprland reiniciado com o eDP-1 em foco depois de uma
+  sessão que terminou no HDMI, o HDMI intermitente), cada chegada decidia
+  viajar de novo: a camada era destruída e recriada a cada 1,5 s, sem poof
+  depois da terceira, até o Renan trocar de monitor. Com um monitor só,
+  nunca.
+
+**Escolha (revisão do T4.5):**
+- **`Motor::vencer_sem_conexao`**: o `Nucleo::vencer` sem conexão vence os
+  mesmos prazos sem desenhar (o arraste, o de conferir o foco, o balão, a
+  soneca, o coração, o foco à espera de confirmação e o quadro). O
+  `desconectou` tira o que só existe na janela (o balão, a viagem e o
+  prazo de seguir); a soneca fica e acaba no prazo dela.
+- **A camada revela o monitor em foco** (`Seguir::pousou`): o `Seguir` conta
+  os focos que o desktop mandou e guarda a conta quando uma camada é pedida
+  (`Motor::criar_janela`, o único lugar que pede). Quando ela fica pronta
+  sem foco novo desde então, o monitor onde ela caiu é o monitor em foco:
+  ele vira o alvo (o log diz quando corrigiu um velho) e o
+  `/v1/estado.desktop.monitor_em_foco` (que antes ficava nulo até a
+  primeira troca). Um foco que chegou depois de a camada ser pedida vale:
+  o pet vai atrás dele.
+- **A conexão nova esquece o alvo** (`Seguir::esquecer` no `conectou`): a
+  camada nova nasce no monitor em foco. A fonte do foco que cai não apaga o
+  alvo: o último foco contado é o melhor palpite (um `focusedmonv2` que
+  chegou logo antes da queda ainda leva o pet), e a camada corrige se ele
+  estiver velho. As revisões pediam apagar; não apagar não deixa laço, e
+  apagar perderia uma viagem certa.
+- **Testes:** no daemon de verdade, o socket2 com `focusedmonv2` e o Wayland
+  no backoff gastam 0 tique em 2 s (eram 200; `tests/socket2.rs`); no Motor
+  em relógio falso, nenhum prazo vencido fica armado sem conexão (o balão,
+  a soneca e o foco do monitor, vencidos um a um como o laço faz), o alvo
+  velho não viaja de novo em 30 s, e o foco que chega depois da camada
+  pedida ainda leva o pet; no `Seguir`, o alvo corrigido e o esquecido.
+
+**Por quê:** todo prazo que o Motor anuncia tem de ter quem o vença em
+qualquer estado da conexão, senão o laço gira; e o compositor, que pôs a
+camada no monitor em foco, sabe mais que um foco antigo que pode ter se
+perdido.
+
+## 0060 — Revisão da janela de cada sessão: o começo só preenche, a compactação nunca casa e o hook atrasado não desfaz (2026-10-04)
+
+**Problema:** as revisões do M4 acharam que a janela de cada sessão (decisão
+0055) podia grudar no lugar errado com certeza.
+- **O `SessionStart` de qualquer origem casava como um prompt**, e uma
+  janela certa sempre trocava a de antes. O Claude Code manda
+  `SessionStart` com `source: compact` depois de uma compactação, que
+  acontece no meio de um turno longo, com o Renan em qualquer janela (o
+  `hooks.json` registra o evento sem filtro, e o hook manda o `src`). O
+  navegador virava o "terminal" da sessão: 10 s com ele em foco davam o
+  pronto como visto sem o Renan ter visto, e o clique "focava" o navegador,
+  já ativo, e marcava o aviso. Só o próximo prompt no terminal consertava.
+  O `SessionStart` de `startup` e `resume` também roda depois de o Claude
+  Code subir (1–3 s), com o Renan podendo já estar noutra janela.
+- **Hooks assíncronos chegam fora de ordem**, e o `observar` aplicava na
+  ordem de chegada: um prompt atrasado desfazia o casamento de um mais novo.
+- **Um prompt que não veio do teclado** (o `source` do `UserPromptSubmit`,
+  que o cérebro já guarda: `user`, `system`) casaria do mesmo jeito.
+
+**Escolha (revisão do T4.8):**
+- **De onde vem a hora** (`motor::janelas::origem`): o `UserPromptSubmit`
+  sem `src` ou com `user` é o prompt do teclado e troca a janela; o
+  `SessionStart` sem `src` ou com `startup`, `resume`, `clear` ou `fork` é
+  o começo e **só preenche** uma janela que ainda não é certa (sem
+  identidade, com dúvida, sem anel, sem janela ou com a janela fechada); a
+  compactação (`compact`), um prompt de sistema e qualquer origem
+  desconhecida **não casam**.
+- **O hook atrasado** (`Identidades::observar`): uma observação com a hora
+  mais velha que a do último casamento da sessão é ignorada, ids de terminal
+  inclusive.
+- O hook continua mandando os ids de terminal no `SessionStart` de toda
+  origem (decisão 0054); o pet só não casa a janela com o da compactação.
+- **Testes:** no Motor, a compactação 30 s depois de o Renan ir ao navegador
+  deixa a sessão no foot e o pronto pendente depois de 10 s com o navegador
+  em foco; o prompt de sistema não casa e o do teclado troca; o prompt
+  atrasado não desfaz o mais novo; o `resume` com o Renan noutra janela não
+  troca a certa, e o começo de uma sessão nova preenche. Na função de origem
+  e nas identidades, as mesmas regras, conferidas por três mutações (a
+  compactação casando, sem a guarda do atrasado, o começo trocando a
+  certa). No daemon de verdade (`tests/janela.rs`), a compactação com a
+  terceira janela ativa há mais de 1 s não troca a janela da sessão.
+
+**Por quê:** o prompt do teclado é o único momento em que a janela ativa
+é, com quase certeza, o terminal da sessão; o resto ou preenche um vazio ou
+fica de fora. Errar com certeza manda o Renan para a janela errada e apaga
+um aviso que ele não viu.
+
+## 0061 — Revisão do socket2 e do foreign-toplevel: o daemon sem core dump, a caixa cheia vira buraco e a semente volta com a fonte (2026-10-04)
+
+**Problema:** as revisões do M4 acharam três falhas no que o daemon lê do
+desktop (T4.4 e T4.9).
+- **Títulos podiam ir ao disco num core dump.** Desde o M4 o daemon tem
+  títulos de janela na memória: as linhas cruas do socket2
+  (`activewindow>>CLASSE,TÍTULO`, `windowtitlev2>>…`) passam pelo buffer do
+  leitor, e o título e o app id de cada janela do foreign-toplevel viram
+  `String` e são jogados fora (os bytes ficam no heap liberado). O release
+  usa `panic = "abort"` e o vigia aborta um laço travado; o `core_pattern`
+  do host é o `systemd-coredump`, o container tinha o core ilimitado e o
+  processo era `dumpable`. O hook já se protegia (decisão 0045); o daemon,
+  não. Isso quebrava a regra de ouro de que título nenhum chega ao disco.
+- **Eventos perdidos eram invisíveis.** Com a caixa do desktop cheia, o
+  evento só era contado; a memória das repetições do leitor seguia com um
+  valor que o laço nunca recebeu. Uma troca perdida para a janela B deixava
+  o anel em A, a próxima `activewindowv2>>B` era filtrada como repetida, e
+  um prompt mandado em B casava com A, com certeza.
+- **Depois de o socket2 voltar, nada ressemeava o anel.** O anel ficava no
+  buraco até o Renan trocar de janela, e os prompts do mesmo terminal davam
+  "não vi a janela dela", embora o foreign-toplevel da conexão soubesse a
+  janela ativa (a semente só saía numa troca de ativação).
+
+**Escolha (revisão do T4.4):**
+- **Sem core dump** (`bichinho::privacidade::sem_core_dump`, o mesmo do
+  hook, agora num lugar só): o `daemon::rodar` tira o `dumpable` antes de
+  tudo, antes do leitor do socket2 e da conexão Wayland. Sem ele o kernel
+  não faz o core, e o `/proc/<pid>` passa a ser do root (proc(5)). Como
+  segunda camada, o compose põe `ulimits: core: 0` (o `systemd-coredump`
+  recusa um processo com o limite abaixo de uma página). Testes no binário
+  de verdade: o `/proc/<pid>/status` do daemon e o do hook (com a entrada
+  ainda aberta) são do root; os dois reprovaram sem a chamada.
+- **A caixa cheia vira buraco** (`eventos::Entrega`): um evento que não
+  coube zera a memória das repetições e marca a perda; antes do próximo
+  evento o leitor manda `Ligado(false)` e `Ligado(true)` (o anel ganha um
+  buraco no lugar das trocas perdidas, e a próxima ativação passa mesmo
+  sendo a mesma janela), com um aviso no log com o total perdido. Um
+  `Ligado(true)` que não coube na ligação conta como perda. Teste com uma
+  caixa de 3 vagas que ninguém esvazia.
+- **A semente volta com a fonte** (`Desktop::janela_ativa`, com padrão
+  vazio): quando o socket2 conta `Ligado(true)`, o núcleo pede à conexão a
+  janela ativa de agora (no Wayland, a janela com `activated` e endereço no
+  foreign-toplevel) e a entrega como `JanelaInicial`, que entra no buraco.
+  Teste no núcleo com o desktop de mentira.
+- **O título do foreign-toplevel conferido** (`sessao::evento_do_toplevel`,
+  a costura pura do `Dispatch`): um teste manda o `title` e o `app_id` com
+  segredo e confere que nada deles fica nas janelas nem nos eventos. Antes,
+  essa garantia era só leitura de código.
+- O `perdidos` não foi para o `/v1/estado` (a revisão sugeriu): o buraco no
+  anel e o aviso no log já mostram a perda, sem mais um caminho do leitor
+  até o painel.
+
+**Por quê:** a memória do daemon tem o que nunca pode ir ao disco, e um
+core dump é disco; e o anel só serve se um "não sei" for marcado como não
+sei, em vez de virar uma certeza velha.
+
+## 0062 — Revisão dos avisos e do clique: o foco só conta com o Renan presente, a volta do ciclo recomeça e cada clique espera a sua confirmação (2026-10-04)
+
+**Problema:** as revisões do M4 acharam três falhas nos avisos e no clique
+(T4.10).
+- **O pronto saía como visto com o Renan longe.** A regra "o pronto e o erro
+  saem com 10 s do terminal em foco" (decisão 0057) não sabia se havia
+  alguém olhando. Bloqueado, ou com a tela apagada, o Hyprland continua
+  contando como ativa a última janela que teve o foco (o `activated` do
+  foreign-toplevel e o `activewindowv2`): conferido na produção, com a
+  sessão bloqueada e o terminal como `desktop.janela_ativa`. Uma tarefa
+  longa que terminava com o Renan longe perdia o aviso 10 s depois. O mesmo
+  deixava o clique do `/v1/comando` "focar" uma janela já ativa com a sessão
+  bloqueada e dar o aviso como visto na hora; a verificação ao vivo do
+  T4.11 passou só por isso.
+- **A memória da volta do ciclo nunca expirava.** Uma sessão que o clique
+  visitou sem conseguir focar ficava "visitada" até todas as outras serem
+  visitadas: um clique horas depois pulava a mais urgente.
+- **Um segundo clique antes da confirmação apagava a do primeiro.** O
+  `focando` era um só: a ativação atrasada da primeira janela não marcava
+  mais o aviso dela.
+
+**Escolha (revisão do T4.10):**
+- **O Renan presente** (`EventoDesktop::Ocioso`, o `desktop.ocioso` no
+  `/v1/estado`): a `Sessao` liga o `ext_idle_notifier_v1` (o Hyprland 0.56.2
+  anuncia a v2; genérico, serve aos outros wlroots no M8) no `wl_seat` da
+  conexão e pede a notificação de entrada (`get_input_idle_notification`
+  na v2, que ignora quem segura a tela acesa, como um vídeo) com
+  `OCIOSO_MS` = 5 s; ela nasce "não ocioso", e o `idled` e o `resumed`
+  viram `Ocioso(true)` e `Ocioso(false)`. A conexão que cai deixa o valor em
+  "não se sabe".
+  - O pronto e o erro só saem pelo foco com o Renan presente: os 10 s contam
+    desde o mais tarde entre o aviso, a janela ficar ativa e o Renan voltar
+    a mexer, e param enquanto ele está longe. Como 5 s é menos que 10 s,
+    quem saiu logo antes do aviso já é dado como longe antes de o prazo
+    vencer. Sem saber se ele está (um desktop sem o protocolo, a conexão
+    caída), o pronto não sai pelo foco: fica até o clique ou o próximo
+    prompt, que já o resolvem.
+  - Uma janela já ativa só conta como vista na hora do clique com o Renan
+    presente. O aperto de verdade no pet conta como presença (o `resumed`
+    pode vir na mesma leva, depois); o clique do `/v1/comando` não, e com a
+    sessão bloqueada espera a confirmação, que não vem, e o balão diz que não
+    focou.
+- **A volta do ciclo recomeça** (`VOLTA_DO_CICLO_MS` = 15 s, o tempo de ler
+  o balão e clicar de novo): um clique mais tarde que isso depois do
+  anterior começa outra volta, do mais urgente.
+- **Cada clique espera a sua confirmação**: o `focando` virou uma lista (até
+  4); uma ativação marca o aviso de todo clique que esperava aquela janela,
+  e só o clique mais novo, sem outro esperando depois dele, mostra o balão
+  quando vence. O `/v1/estado.focando` mostra a janela do mais novo.
+- **Testes** no Motor em relógio falso: o pronto com o Renan longe fica e
+  sai 10 s depois de ele voltar (pausando se ele sair de novo), sem saber se
+  ele está o pronto não sai pelo foco, o clique de script com a sessão
+  bloqueada não vê a janela já ativa e o do mouse vê, um clique um minuto
+  depois volta ao mais urgente, e dois cliques seguidos têm os dois avisos
+  vistos; cada regra conferida por mutação. Ao vivo, num daemon de rascunho
+  sem personagem (porta 27399, parado com SIGTERM): o `ext_idle_notifier_v1
+  v2` ligado, `ocioso` falso na partida e verdadeiro 5 s depois (a sessão
+  bloqueada), e o `/proc/<pid>` do root (decisão 0061).
+- O `hyprland_lock_notifier_v1` (o Hyprland também anuncia) ficou de fora:
+  bloqueado, o Renan já está longe do teclado; ele pediria vendorar mais um
+  XML e escrever mais tabelas à mão.
+
+**Por quê:** "o terminal em foco" só quer dizer "o Renan viu" com ele ali;
+errar para o lado de deixar o aviso custa um clique, e errar para o outro
+apaga o que ele não viu. A volta do ciclo é para cliques seguidos, não para
+a tarde inteira.
+
+## 0063 — Revisão do arraste: a pegada perdida solta o pet e o cursor volta quando o aperto desiste (2026-10-04)
+
+**Problema:** as revisões do M4 acharam duas falhas na máquina do ponteiro
+(T4.2, decisão 0048).
+- **Uma pegada perdida deixava um arraste fantasma.** Um `leave` no meio do
+  arraste era ignorado, e o `enter` e o `motion` seguintes rearmavam o
+  fail-safe e moviam o pet. Sem a pegada implícita (numa área de trabalho
+  vazia, sem nenhuma superfície com o teclado; pesquisa do Hyprland, seção
+  3), cruzar para o outro monitor perde o soltar: quando o ponteiro voltava,
+  o pet grudava nele sem botão nenhum, o laço do voo seguia fazendo commits,
+  a área de toque do palco inteiro capturava o monitor, e o próximo aperto
+  era engolido. Com o mouse andando, o fail-safe nunca vencia — justo o que
+  a decisão 0048 dizia evitar. O pouso entre monitores também não acontecia.
+- **O cursor ficava "agarrando".** Um aperto que acabava sem gesto (o direito
+  que andou e soltou, o fail-safe antes de arrastar) não devolvia o cursor
+  de "pegar".
+
+**Escolha (revisão do T4.2):**
+- **O `leave` no meio do arraste é a pegada perdida**: com a pegada
+  implícita o Hyprland só manda o `leave` depois de soltar, então um
+  `leave` com o arraste de pé quer dizer que o soltar vai para outro lugar.
+  O arraste acaba ali (`Gesto::Cancelou`): o pet pousa onde está, a área de
+  toque volta ao corpo, a posição fica guardada e o foco é conferido (o
+  ponteiro está no outro monitor: o pet vai atrás dele pelo seguir o foco,
+  na posição salva de lá). O pet nunca anda sem um aperto novo.
+- **`Gesto::Desistiu`**: o aperto que acaba sem clique nem arraste devolve o
+  cursor de "pegar".
+- **O cursor depois do `leave`**: a `Sessao` esquece o serial do `enter` no
+  `leave`; um pedido de cursor fora da camada não vai ao compositor (o
+  próximo `enter` põe o "pegar" de novo).
+- **Testes:** na máquina, o `leave` arrastando cancela e o ponteiro que volta
+  sem botão não arrasta; o direito que andou e o fail-safe do direito
+  desistem. No Motor em relógio falso: arrastar, `leave`, `enter` e andar
+  200 pixels deixam o pet onde pousou, sem o voo, com o toque no corpo e
+  nada armado; o cursor volta a "pegar" nos dois casos. As duas mudanças
+  conferidas por mutação.
+
+**Por quê:** o pet só pode andar com o botão apertado em cima dele; um
+"não sei onde o botão subiu" vira um pouso no lugar, e o seguir o foco leva
+o pet ao monitor certo.
+
+## 0064 — Revisão da verificação do M4: scripts que não mexem no que é do Renan, o orçamento das peças novas em teste e a troca depois do merge pelo clone (2026-10-04)
+
+**Problema:** as revisões do M4 acharam falhas na verificação e nas docs
+(T4.11).
+- **`scripts/e2e-monitor.sh`:** o `trap restaurar EXIT INT TERM` não saía no
+  Ctrl+C (o bash voltava ao meio do script e seguia trocando o foco); um
+  output criado cujo nome só aparecesse depois dos 3 s da descoberta nunca
+  era removido; o consentimento era só a flag `--autorizo`, que qualquer
+  agente passa; e o dispatch era o antigo (`focusmonitor`), que o config em
+  Lua do Hyprland 0.56 pode não aceitar (o Omarchy tenta o `hl.dsp` antes).
+- **`scripts/verificar-m4.sh`:** os avisos de sessões reais eram conferidos
+  uma vez, no começo: um Stop real no meio faria o segundo clique focar o
+  terminal do Renan e dar o aviso dele como visto. Os dois `foot` abriam na
+  mesma área de trabalho (o PLANO pede áreas diferentes, o que exercita a
+  troca de área do `activate`), e o clique de verdade, com o mouse, nunca
+  ia a um aviso pendente. O checklist do HDMI, da tampa fechada e da
+  suspensão que o PLANO pede não existia.
+- **Docs:** a decisão 0058 dizia que a troca depois do merge roda "na
+  worktree estável, `bin/pet subir` e `bin/pet instalar-host`"; um
+  `bin/pet subir` de lá monta o `./config` da worktree, que não tem o
+  `config/bichinho.toml` (fora do git), e o Zeca voltaria ao tamanho normal
+  (D=8 no eDP-1, no lugar do pequeno com D=6). O README já dizia certo. O
+  PROGRESS do T4.11 dizia que a produção final rodava o `ae21321` (rodava o
+  `854bb44`), o CLAUDE.md ainda falava da `main` em `v0.3.0` e do plugin no
+  `avisar.sh`, e a decisão 0054 dizia que um `term` vazio é ausente e uma
+  chave desconhecida some sem rastro, mas o código punha o `term` nos
+  descartados quando o objeto não tinha nenhum id conhecido.
+- **O orçamento de commits das peças novas** (decisão 0005) só estava nas
+  decisões: o balão em dois commits, o selo "zZ" e o coração parados, o
+  poof a ~17 quadros por segundo, o arraste parando ao soltar.
+
+**Escolha (revisão do T4.11):**
+- **`e2e-monitor.sh`:** `trap restaurar EXIT` e `trap 'exit 130' INT TERM`
+  (sai, e o EXIT restaura uma vez); o restaurar remove o output pelo nome ou,
+  sem nome, pelo diff com a lista de antes, só os `HEADLESS-` (um monitor de
+  verdade ligado no meio nunca entra); além do `--autorizo`, o Renan digita
+  «sim» no terminal (`/dev/tty`; sem terminal, recusa); o foco pelo
+  `hl.dsp.focus` com o `focusmonitor` de reserva. Continua nunca rodado sem
+  ele.
+- **`verificar-m4.sh`:** confere os avisos reais antes de cada clique (com
+  um, NÃO VERIFICADO e nenhum clique); confere o `ext_idle_notifier_v1` e o
+  `desktop.ocioso` (decisão 0062); no `--manual`, o clique de verdade com um
+  aviso pendente levando a um `foot` que o Renan manda para outra área de
+  trabalho pelo teclado (o script confere a janela e a área ativas pelo
+  `hyprctl -j`, só leitura, e que o aviso saiu) e o checklist do HDMI (ligar
+  e desligar com o Zeca nele), da tampa fechada e da suspensão, com as
+  respostas do Renan no resumo.
+- **A troca depois do merge** (corrige a 0058; é a do README), com o clone
+  em `~/Documents/claude-pet`:
+  1. `git -C ~/Documents/claude-pet switch main && git -C ~/Documents/claude-pet pull`;
+  2. `git -C ~/.local/share/claude-pet/estavel checkout --detach main`;
+  3. `bin/pet subir` **no clone** (o `config/bichinho.toml` do Renan fica
+     montado; nunca na worktree estável);
+  4. `bin/pet instalar-host` e `bichinho versao` (o commit da worktree
+     estável).
+  O plugin continua 0.2.0, com o mesmo `hooks.json`: nada de `claude plugin
+  marketplace update`, `claude plugin update` nem `/reload-plugins`. O hook
+  novo manda o `term`; o antigo segue funcionando com o pet novo.
+- **O `term` sem id conhecido** (vazio, ou só com chaves de um hook mais
+  novo) é ausente, sem ir para os descartados: o código agora diz o que a
+  0054 dizia. Um id ruim continua derrubando o campo.
+- **Testes do orçamento** no Motor, com o compositor mostrando cada quadro na
+  hora (o pior caso) e um Motor de controle: o balão custa 2 quadros; a
+  soneca, só 1 a mais que o bocejo sozinho em 31 min (o selo aparece no
+  primeiro quadro do bocejo, fica parado e some num quadro); o coração, 1 ou
+  2 a mais que a risadinha sozinha (mediu 1); os dois poofs, quadros a 60 ms
+  (nunca abaixo dos 34 ms dos 30 por segundo); o arraste, no máximo um
+  quadro por movimento do ponteiro, e depois do pouso só o repouso, abaixo
+  de 2 commits por segundo, sem nada do arraste armado.
+- PROGRESS do T4.11 com o `854bb44` e o CLAUDE.md com o estado de agora.
+
+**Por quê:** um script de verificação não pode mexer no que é do Renan sem
+ele (o monitor, o foco, os avisos de verdade), e a troca depois do merge
+tem de manter o config dele; e uma promessa de orçamento que não tem teste
+é só uma frase.

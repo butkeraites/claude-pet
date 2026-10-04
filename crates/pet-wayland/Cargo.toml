@@ -13,6 +13,7 @@ pet-core.workspace = true
 smithay-client-toolkit.workspace = true
 wayland-client.workspace = true
 wayland-protocols.workspace = true
+wayland-scanner.workspace = true
 rustix.workspace = true
 
 [lints]

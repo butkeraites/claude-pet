@@ -333,6 +333,73 @@ fn nenhum_segredo_com_log_ligado_e_segredos_no_ambiente() {
     }
 }
 
+#[test]
+fn ids_de_terminal_validos_so_no_inicio_e_no_prompt() {
+    // Decisão 0054: o painel do tmux, a janela do kitty e o painel do
+    // WezTerm vão no `term`, só no SessionStart e no UserPromptSubmit e só se
+    // passam no validador do pet. O resto do ambiente (TERM_PROGRAM, chaves)
+    // nunca sai.
+    let banca = Banca::nova();
+    let captor = Captor::novo(true);
+    for caso in casos() {
+        let nome = caso.nome;
+        let pedido = rodar_e_pegar(
+            &banca,
+            &captor,
+            nome,
+            caso.evento,
+            caso.entrada.to_string().as_bytes(),
+            |c| {
+                c.env("TMUX_PANE", "%7")
+                    .env("KITTY_WINDOW_ID", "3")
+                    .env("WEZTERM_PANE", "11")
+                    .env("TERM_PROGRAM", "SEGREDO-terminal")
+                    .env("ANTHROPIC_API_KEY", "SEGREDO-chave");
+            },
+        );
+        sem_segredo(&format!("{nome}, com ids de terminal"), &pedido.bruto);
+        let corpo = json_do(&pedido, nome);
+        if ["SessionStart", "UserPromptSubmit"].contains(&caso.evento) {
+            assert_eq!(
+                corpo["term"],
+                json!({"tmux": "%7", "kitty": "3", "wezterm": "11"}),
+                "{nome}"
+            );
+        } else {
+            assert!(corpo.get("term").is_none(), "{nome}: {corpo}");
+        }
+        let lido = pet_core::evento::ler(pedido.corpo.as_bytes())
+            .unwrap_or_else(|e| panic!("{nome}: o pet recusaria: {e}"));
+        assert!(
+            lido.descartados.is_empty(),
+            "{nome}: {:?}",
+            lido.descartados
+        );
+    }
+    // Ids que não são ids não saem; os bons do mesmo evento saem.
+    let caso = casos()
+        .into_iter()
+        .find(|c| c.evento == "UserPromptSubmit")
+        .unwrap();
+    let pedido = rodar_e_pegar(
+        &banca,
+        &captor,
+        "ids ruins",
+        caso.evento,
+        caso.entrada.to_string().as_bytes(),
+        |c| {
+            c.env("TMUX_PANE", "%7; rm -rf SEGREDO")
+                .env("KITTY_WINDOW_ID", "SEGREDO-janela")
+                .env("WEZTERM_PANE", "42");
+        },
+    );
+    sem_segredo("ids ruins", &pedido.bruto);
+    assert_eq!(
+        json_do(&pedido, "ids ruins")["term"],
+        json!({"wezterm": "42"})
+    );
+}
+
 /// O JSON de um caso com `ruim` (texto JSON cru) no lugar de um campo de
 /// conteúdo.
 fn com_lixo(evento: &str, campo: &str, ruim: &str) -> Vec<u8> {
@@ -1045,6 +1112,41 @@ fn entrada_que_nunca_fecha_tem_prazo() {
         .unwrap();
     assert!(stdout.is_empty() && stderr.is_empty());
     assert!(captor.nada(), "nada sai de uma entrada pela metade");
+}
+
+/// Com a entrada ainda aberta (o prompt chegando), o hook já tirou o
+/// `dumpable`: um aborto não levaria o prompt ao disco num core dump
+/// (decisões 0045 e 0061). Sem o `dumpable`, o `/proc/<pid>` passa a ser do
+/// root (proc(5)).
+#[cfg(target_os = "linux")]
+#[test]
+fn o_hook_nao_deixa_core_dump() {
+    use std::os::unix::fs::MetadataExt;
+    let banca = Banca::nova();
+    let captor = Captor::novo(true);
+    let mut filho = hook()
+        .args(["avisar", "Stop"])
+        .env_clear()
+        .env("HOME", banca.pasta.join("home"))
+        .env("PET_PORTA", captor.porta.to_string())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = filho.stdin.take().unwrap();
+    stdin.write_all(br#"{"session_id": "s"#).unwrap();
+    let status = format!("/proc/{}/status", filho.id());
+    let dono = || std::fs::metadata(&status).map(|m| m.uid()).ok();
+    // É a primeira coisa que ele faz; a entrada aberta o segura vivo.
+    let limite = Instant::now() + Duration::from_secs(2);
+    while dono() != Some(0) && Instant::now() < limite {
+        thread::sleep(Duration::from_millis(10));
+    }
+    let visto = dono();
+    drop(stdin);
+    let _ = filho.wait();
+    assert_eq!(visto, Some(0), "o hook continua podendo deixar core dump");
 }
 
 #[test]
