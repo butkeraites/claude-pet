@@ -355,8 +355,8 @@ impl Nucleo {
             let reacoes = self.motor.tique(self.agora());
             self.depois_do_cerebro(reacoes, punho(&mut ov));
         }
-        if let Some(ov) = janela(&mut ov) {
-            self.motor.vencer_animacao(ov, agora);
+        if let Some(ov) = punho(&mut ov) {
+            self.motor.vencer(ov, agora);
         }
     }
 

@@ -1842,3 +1842,42 @@ cada vez, deixa o clique decidir e agir na mesma volta sem duas referências
 mutáveis à mesma sessão. Os eventos do desktop entram no Motor como tipos
 simples, sem nada de conteúdo, e o Motor continua testável com a janela e o
 desktop de mentira.
+
+## 0048 — Arrastar e clicar: limiares, a área de toque no palco inteiro só no arraste e o fail-safe (2026-10-04)
+
+**Problema:** o Zeca tem de poder ser arrastado para qualquer lugar e
+clicado (PLANO, "Seguir o monitor ativo, arrastar, clicar"), sem roubar
+cliques do resto da tela, sem borrar a pixel art e sem ficar preso se o
+compositor perder o ponteiro (numa área de trabalho vazia, a pegada
+implícita do Hyprland pode sumir; pesquisa do Hyprland, seção 3).
+**Escolha (T4.2):**
+- **A máquina do ponteiro** (`pet_core::motor::arraste`, pura, no palco):
+  botão esquerdo apertado no corpo vira arraste quando o ponteiro anda mais
+  de 4 pixels lógicos (6 do dispositivo a 1,5) ou depois de 250 ms
+  segurando; solto antes disso é clique. O direito só clica (e desiste se
+  andar). O do meio não faz nada. Um `leave` com o botão apertado, antes de
+  arrastar, desiste do clique; arrastando, quem decide é o soltar.
+- **A posição:** a célula anda com o ponteiro em múltiplos de D a partir de
+  onde estava quando o arraste começou (o deslocamento da pixel art, decisão
+  0004), e o corpo fica sempre inteiro dentro da área útil (o `Palco` ganhou
+  a `area`); ao soltar, ela vai até o ponto onde o botão subiu.
+- **A área de toque** cresce para o palco inteiro só enquanto arrasta (o
+  arraste segue até numa área de trabalho vazia) e volta ao corpo ao
+  soltar, no fail-safe, ao esconder e quando a janela fecha.
+- **Fail-safe:** 5 s sem evento do ponteiro com o botão apertado soltam o pet
+  onde ele está.
+- **Cursores:** `grabbing` ao apertar, `grab` ao soltar (o `grab` do `enter`
+  continua na própria camada).
+- **Animação:** enquanto arrasta, o estado `dangle` em laço (o voo do Zeca);
+  ao soltar, `land` uma vez. O animador ganhou o estado segurado: uma reação
+  no meio do arraste toca por cima e volta ao laço.
+- **Clique esquerdo:** por enquanto, a risadinha (`giggle`); levar ao
+  terminal da sessão chega na T4.10, e o direito (soneca) na T4.7.
+- **Orçamento:** o arraste pode fazer commit no ritmo do ponteiro, sempre com
+  um quadro em voo por vez (os movimentos com um quadro em voo esperam o
+  frame callback, que desenha a posição de agora), e para ao soltar.
+**Por quê:** os limiares separam clique de arraste do jeito que um
+gerenciador de janelas faz; crescer a área de toque só durante o arraste
+mantém o resto da tela clicável o tempo todo; andar em múltiplos de D mantém
+o bicho nítido e com movimento de pixel art; e o fail-safe impede que uma
+pegada perdida deixe a tela inteira presa ao pet.

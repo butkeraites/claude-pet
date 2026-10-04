@@ -1,9 +1,9 @@
 //! O pet na tela: personagem, onde ele fica e que quadro mostra agora.
 //!
 //! Parado (pose fixa com rajadas, para caber no orçamento de commits) no
-//! canto inferior direito, e tocando uma reação de cada vez (M3: o aceno do
-//! T0, o pulinho do T1 e o `tocar`). Arraste e seguir o monitor chegam no
-//! M4.
+//! canto inferior direito (ou onde foi arrastado), tocando uma reação de
+//! cada vez (M3: o aceno do T0, o pulinho do T1 e o `tocar`) e pendurado em
+//! laço enquanto é arrastado (M4).
 
 use std::rc::Rc;
 
@@ -25,6 +25,9 @@ pub struct Palco {
     /// Canto superior esquerdo da célula, no palco.
     pub x: i32,
     pub y: i32,
+    /// A área útil do monitor no palco: o corpo do pet fica sempre dentro
+    /// dela (na posição padrão e no arraste).
+    pub area: Ret,
 }
 
 pub struct Pet {
@@ -44,9 +47,20 @@ impl Pet {
         self.animador.tocar(&self.skin, reacao, agora_ms)
     }
 
-    /// A reação tocando agora, se houver.
+    /// A reação (ou o estado segurado) tocando agora, se houver.
     pub fn reacao(&self, agora_ms: u64) -> Option<&str> {
         self.animador.reacao(agora_ms)
+    }
+
+    /// Segura um estado em laço (o `dangle` enquanto arrasta); `false` se a
+    /// skin não sabe tocá-lo.
+    pub fn segurar(&mut self, estado: &str, agora_ms: u64) -> bool {
+        self.animador.segurar(&self.skin, estado, agora_ms)
+    }
+
+    /// Larga o estado segurado.
+    pub fn largar(&mut self, agora_ms: u64) {
+        self.animador.largar(&self.skin, agora_ms);
     }
 
     pub fn skin(&self) -> &Skin {
@@ -58,14 +72,22 @@ impl Pet {
     pub fn palco(&self, monitor: &Monitor, tamanho: Tamanho) -> Palco {
         let escala = monitor.escala;
         let d = geometria::calcular_d_com(monitor.logico.1, escala, self.skin.corpo_px, tamanho);
-        let (x, y) = geometria::posicao_padrao(monitor.area_util(), escala, d, &self.skin.ancoras);
+        let area = monitor.area_util();
+        let (x, y) = geometria::posicao_padrao(area, escala, d, &self.skin.ancoras);
         Palco {
             tela: monitor.buffer(),
             escala,
             d,
             x,
             y,
+            area,
         }
+    }
+
+    /// A célula em (x, y), presa para o corpo ficar inteiro dentro da área
+    /// útil do palco.
+    pub fn prender(&self, palco: &Palco, x: i32, y: i32) -> (i32, i32) {
+        geometria::prender(x, y, palco.area, palco.d, &self.skin.ancoras, false)
     }
 
     /// A célula do sprite em pixels do monitor, recortada à tela: o

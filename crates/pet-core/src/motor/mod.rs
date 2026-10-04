@@ -17,7 +17,12 @@
 //!
 //! O que é do sistema (pixels no buffer, quadro em voo, região de input,
 //! prazos internos da janela) fica atrás do trait [`Overlay`].
+//!
+//! Desde o M4, o Motor também arrasta e clica ([`arraste`], decisão 0048):
+//! o ponteiro chega no palco, o pet anda em múltiplos de D e a área de toque
+//! cresce para o palco inteiro só enquanto arrasta.
 
+pub mod arraste;
 mod desktop;
 mod pet;
 mod ritmo;
@@ -33,11 +38,12 @@ use crate::confete::{Chuva, Grade};
 use crate::evento::Evento;
 use crate::geometria::{Ret, Tamanho};
 use crate::plataforma::{
-    Desenho, EventoDesktop, EventoOverlay, Fase, Monitor, Overlay, Passo, Punho,
-    passo_de_visibilidade,
+    Botao, Cursor, Desenho, EventoDesktop, EventoOverlay, EventoPonteiro, Fase, Monitor, Overlay,
+    Passo, Punho, passo_de_visibilidade,
 };
 use crate::skin::Skin;
 
+pub use arraste::{Arraste, Gesto};
 pub use desktop::{EstadoDesktop, PainelDesktop};
 pub use pet::{Palco, Pet};
 pub use ritmo::{Commits, Estresse, JANELA_COMMITS_MS};
@@ -48,6 +54,12 @@ pub const CONFETES: usize = 40;
 pub const SEMENTE_CONFETE: u64 = 7;
 /// Lado de cada confete, em pixels de arte.
 pub const LADO_CONFETE: i32 = 3;
+/// O estado que o pet toca em laço enquanto é arrastado.
+pub const ARRASTADO: &str = "dangle";
+/// O estado que ele toca ao ser solto.
+pub const SOLTO: &str = "land";
+/// A risadinha do clique.
+pub const RISADINHA: &str = "giggle";
 
 /// O que o pet publica para o `/v1/estado` (o laço publica; a entrada HTTP
 /// só lê).
@@ -76,6 +88,8 @@ pub struct Painel {
     pub shm_bytes: usize,
     /// A reação tocando na tela agora (`nod`, `done_small`, …).
     pub reacao: Option<String>,
+    /// O pet está sendo arrastado.
+    pub arrastando: bool,
     /// O desktop: a fonte dos eventos, o monitor em foco, a janela ativa (só
     /// o endereço) e o que a conexão sabe fazer.
     pub desktop: PainelDesktop,
@@ -133,6 +147,8 @@ pub struct Motor {
     tamanho: Tamanho,
     /// O que os eventos do desktop contaram (decisão 0043).
     desktop: EstadoDesktop,
+    /// Arrastar e clicar (decisão 0048).
+    arraste: Arraste,
 }
 
 impl Motor {
@@ -148,6 +164,7 @@ impl Motor {
             proximo_quadro: None,
             tamanho: Tamanho::Normal,
             desktop: EstadoDesktop::default(),
+            arraste: Arraste::default(),
         }
     }
 
@@ -240,6 +257,7 @@ impl Motor {
     pub fn conectou(&mut self, agora_ms: u64) {
         self.pet = self.skin.clone().map(|skin| Pet::novo(skin, agora_ms));
         self.palco = None;
+        self.arraste.cancelar();
         self.estresse = None;
         self.commits = Commits::default();
         self.proximo_quadro = None;
@@ -249,6 +267,7 @@ impl Motor {
     pub fn desconectou(&mut self) {
         self.pet = None;
         self.palco = None;
+        self.arraste.cancelar();
         self.estresse = None;
         self.commits = Commits::default();
         self.proximo_quadro = None;
@@ -275,6 +294,7 @@ impl Motor {
                 self.desenhar(ov, agora_ms, true);
             }
             Passo::ApagarEDestruir => {
+                self.largar_o_arraste(agora_ms);
                 self.proximo_quadro = None;
                 self.estresse = None;
                 let commit = match &self.pet {
@@ -289,6 +309,7 @@ impl Motor {
                 }
             }
             Passo::Destruir => {
+                self.largar_o_arraste(agora_ms);
                 self.proximo_quadro = None;
                 self.estresse = None;
                 ov.destruir();
@@ -373,6 +394,7 @@ impl Motor {
             }
             EventoOverlay::Redesenhar => self.desenhar(ov, agora_ms, false),
             EventoOverlay::Sumiu => {
+                self.largar_o_arraste(agora_ms);
                 self.proximo_quadro = None;
                 self.palco = None;
             }
@@ -382,10 +404,120 @@ impl Motor {
                     self.palco = None;
                 }
             }
-            // O painel é publicado depois de cada lote de eventos. O
-            // ponteiro chega no M4 (arrastar e clicar; [`Motor::acerta_o_pet`]).
-            EventoOverlay::Saiu | EventoOverlay::Ponteiro(_) => {}
+            EventoOverlay::Ponteiro(ponteiro) => self.ponteiro(punho, ponteiro, agora_ms),
+            // O painel é publicado depois de cada lote de eventos.
+            EventoOverlay::Saiu => {}
         }
+    }
+
+    // --- arrastar e clicar (decisão 0048) ------------------------------------
+
+    /// Um evento do ponteiro, no palco.
+    fn ponteiro(&mut self, punho: &mut dyn Punho, evento: EventoPonteiro, agora_ms: u64) {
+        let (Some(palco), true) = (self.palco, self.pet.is_some()) else {
+            self.arraste.cancelar();
+            return;
+        };
+        let no_corpo = match evento {
+            EventoPonteiro::Apertou { x, y, .. } => self.acerta_o_pet(x, y),
+            _ => false,
+        };
+        let limiar = (arraste::LIMIAR_LOGICO * palco.escala).round() as i32;
+        let gesto = self.arraste.ponteiro(
+            evento,
+            agora_ms,
+            (palco.x, palco.y),
+            no_corpo,
+            limiar,
+            palco.d,
+        );
+        self.aplicar_gesto(punho, gesto, agora_ms);
+    }
+
+    fn aplicar_gesto(&mut self, punho: &mut dyn Punho, gesto: Gesto, agora_ms: u64) {
+        match gesto {
+            Gesto::Nada => {}
+            Gesto::Apertou => punho.janela().cursor(Cursor::Agarrar),
+            Gesto::Comecou => {
+                if let Some(pet) = self.pet.as_mut() {
+                    pet.segurar(ARRASTADO, agora_ms);
+                }
+                self.ir_para_o_alvo();
+                self.desenhar(punho.janela(), agora_ms, false);
+            }
+            Gesto::Moveu => {
+                if self.ir_para_o_alvo() {
+                    self.desenhar(punho.janela(), agora_ms, false);
+                }
+            }
+            Gesto::Soltou { celula, .. } => {
+                self.mover_para(celula);
+                self.pousar(punho.janela(), agora_ms);
+            }
+            Gesto::Cancelou => self.pousar(punho.janela(), agora_ms),
+            Gesto::Clique(botao) => {
+                punho.janela().cursor(Cursor::Pegar);
+                self.clique(punho, botao, agora_ms);
+            }
+        }
+    }
+
+    /// Leva a célula ao alvo do arraste (preso na área útil). `true` se ela
+    /// mudou de lugar.
+    fn ir_para_o_alvo(&mut self) -> bool {
+        let Some(d) = self.palco.map(|p| p.d) else {
+            return false;
+        };
+        match self.arraste.alvo(d) {
+            Some(alvo) => self.mover_para(alvo),
+            None => false,
+        }
+    }
+
+    /// Põe a célula em `celula` (presa na área útil). `true` se mudou.
+    fn mover_para(&mut self, celula: (i32, i32)) -> bool {
+        let (Some(palco), Some(pet)) = (self.palco.as_mut(), self.pet.as_ref()) else {
+            return false;
+        };
+        let (x, y) = pet.prender(palco, celula.0, celula.1);
+        let mudou = (x, y) != (palco.x, palco.y);
+        palco.x = x;
+        palco.y = y;
+        mudou
+    }
+
+    /// O arraste acabou (soltou ou o fail-safe): o cursor volta, o pet larga
+    /// o laço, pousa e a área de toque volta ao corpo.
+    fn pousar(&mut self, ov: &mut dyn Overlay, agora_ms: u64) {
+        ov.cursor(Cursor::Pegar);
+        if let Some(pet) = self.pet.as_mut() {
+            pet.largar(agora_ms);
+            pet.tocar(SOLTO, agora_ms);
+        }
+        self.desenhar(ov, agora_ms, false);
+    }
+
+    /// Esconder, a janela fechada ou o fim da conexão largam o arraste sem
+    /// desenhar (a área de toque volta ao corpo no próximo quadro).
+    fn largar_o_arraste(&mut self, agora_ms: u64) {
+        if self.arraste.cancelar()
+            && let Some(pet) = self.pet.as_mut()
+        {
+            pet.largar(agora_ms);
+        }
+    }
+
+    /// Um clique no pet: o esquerdo dá a risadinha (no M4 ele também leva ao
+    /// terminal de uma sessão, T4.10); o direito, a soneca (T4.7).
+    fn clique(&mut self, punho: &mut dyn Punho, botao: Botao, agora_ms: u64) {
+        if botao == Botao::Esquerdo {
+            self.tocar(Some(punho.janela()), RISADINHA, agora_ms);
+        }
+    }
+
+    /// O pet está sendo arrastado.
+    pub fn arrastando(&self) -> bool {
+        self.arraste.arrastando()
     }
 
     // --- desktop -------------------------------------------------------------
@@ -435,7 +567,14 @@ impl Motor {
             let prazo = estresse.proximo_prazo();
             proxima = Some(proxima.map_or(prazo, |p| p.min(prazo)));
         }
-        let toque = pet.toque_no_palco(&palco);
+        // Arrastando, a área de toque é o palco inteiro: o arraste continua
+        // até numa área de trabalho vazia, onde o compositor pode perder a
+        // pegada implícita. Ao soltar, volta ao corpo.
+        let toque = if self.arraste.arrastando() {
+            Some(Ret::novo(0, 0, palco.tela.0, palco.tela.1))
+        } else {
+            pet.toque_no_palco(&palco)
+        };
         match ov.desenhar(&cena, pet.skin(), toque, forcar) {
             Ok(Desenho::Enviado { retangulos, area }) => {
                 self.commits.contar(agora_ms);
@@ -467,12 +606,24 @@ impl Motor {
         }
     }
 
-    /// O próximo prazo do Motor (cérebro ou animação).
+    /// Os prazos do Motor que vencem com a conexão: o arraste (segurar e o
+    /// fail-safe) e a animação.
+    pub fn vencer(&mut self, punho: &mut dyn Punho, agora_ms: u64) {
+        let gesto = self.arraste.vencer(agora_ms);
+        self.aplicar_gesto(punho, gesto, agora_ms);
+        self.vencer_animacao(punho.janela(), agora_ms);
+    }
+
+    /// O próximo prazo do Motor (cérebro, animação ou arraste).
     pub fn proximo_prazo(&self) -> Option<u64> {
-        [self.cerebro.proximo_prazo(), self.proximo_quadro]
-            .into_iter()
-            .flatten()
-            .min()
+        [
+            self.cerebro.proximo_prazo(),
+            self.proximo_quadro,
+            self.arraste.prazo(),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
     }
 
     // --- reações -------------------------------------------------------------
@@ -625,6 +776,7 @@ impl Motor {
                 .as_ref()
                 .and_then(|pet| pet.reacao(agora_ms))
                 .map(str::to_owned),
+            arrastando: self.arraste.arrastando(),
             desktop: painel_desktop,
         }
     }

@@ -225,6 +225,7 @@ impl Compartilhado {
             "commits_total": painel.commits_total,
             "shm_bytes": painel.shm_bytes,
             "reacao": painel.reacao,
+            "arrastando": painel.arrastando,
             "desktop": painel.desktop,
             "eventos": self.eventos_json(),
             "sessoes": do_cerebro("sessoes", json!([])),

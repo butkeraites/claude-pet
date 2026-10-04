@@ -516,3 +516,197 @@ fn a_janela_falsa_e_um_punho_com_o_desktop_junto() {
         Err(ErroFoco::NaoSuportado)
     );
 }
+
+// --- arrastar e clicar (decisão 0048) ---------------------------------------
+
+fn ponteiro(motor: &mut Motor, janela: &mut Falsa, ev: crate::plataforma::EventoPonteiro, t: u64) {
+    motor.evento_overlay(janela, EventoOverlay::Ponteiro(ev), t);
+}
+
+fn apertou(x: i32, y: i32) -> crate::plataforma::EventoPonteiro {
+    crate::plataforma::EventoPonteiro::Apertou {
+        botao: crate::plataforma::Botao::Esquerdo,
+        x,
+        y,
+    }
+}
+
+fn soltou(x: i32, y: i32) -> crate::plataforma::EventoPonteiro {
+    crate::plataforma::EventoPonteiro::Soltou {
+        botao: crate::plataforma::Botao::Esquerdo,
+        x,
+        y,
+    }
+}
+
+fn moveu(x: i32, y: i32) -> crate::plataforma::EventoPonteiro {
+    crate::plataforma::EventoPonteiro::Moveu { x, y }
+}
+
+/// O meio do corpo do pet, no palco.
+fn meio_do_corpo(janela: &Falsa) -> (i32, i32) {
+    let t = janela.toque.expect("toque no corpo");
+    (t.x + t.w / 2, t.y + t.h / 2)
+}
+
+#[test]
+fn arrastar_pendura_o_pet_cresce_o_toque_e_solta_com_pouso() {
+    use crate::plataforma::Cursor;
+    let (mut motor, mut janela) = ligado();
+    janela.mostrou();
+    let corpo = janela.toque.unwrap();
+    let (x, y) = meio_do_corpo(&janela);
+    let antes = motor.painel(Some(&janela), 0).sprite_disp.unwrap();
+    ponteiro(&mut motor, &mut janela, apertou(x, y), 1_000);
+    assert_eq!(janela.cursor, Some(Cursor::Agarrar));
+    assert_eq!(janela.toque, Some(corpo), "apertar não cresce o toque");
+    // 5 pixels (menos de 4 lógicos a 1,5 = 6): ainda não arrasta.
+    ponteiro(&mut motor, &mut janela, moveu(x - 5, y), 1_010);
+    assert!(!motor.arrastando());
+    // 100 pixels para a esquerda e 52 para cima: arrasta, em múltiplos de D
+    // (5 no _teste): −100 → −100, −52 → −50.
+    ponteiro(&mut motor, &mut janela, moveu(x - 100, y - 52), 1_020);
+    assert!(motor.arrastando());
+    assert_eq!(
+        janela.toque,
+        Some(Ret::novo(0, 0, 1920, 1200)),
+        "o palco inteiro enquanto arrasta"
+    );
+    let p = motor.painel(Some(&janela), 1_020);
+    assert!(p.arrastando);
+    assert_eq!(p.reacao.as_deref(), Some(ARRASTADO));
+    let agora = p.sprite_disp.unwrap();
+    assert_eq!((agora.x, agora.y), (antes.x - 100, antes.y - 50));
+    // Bem além da borda direita: o corpo fica inteiro no palco.
+    ponteiro(&mut motor, &mut janela, moveu(x + 5_000, y), 1_030);
+    janela.mostrou();
+    motor.evento_overlay(&mut janela, EventoOverlay::Redesenhar, 1_031);
+    let toque = motor_toque(&motor);
+    assert_eq!(toque.direita(), 1920, "preso na borda");
+    // Solta: o cursor volta, o toque volta ao corpo, pousa.
+    ponteiro(&mut motor, &mut janela, soltou(x - 300, y - 200), 1_100);
+    assert!(!motor.arrastando());
+    assert_eq!(janela.cursor, Some(Cursor::Pegar));
+    let p = motor.painel(Some(&janela), 1_100);
+    assert_eq!(p.reacao.as_deref(), Some(SOLTO), "o pouso");
+    let sprite = p.sprite_disp.unwrap();
+    assert_eq!((sprite.x, sprite.y), (antes.x - 300, antes.y - 200));
+    let toque = janela.toque.unwrap();
+    assert_eq!(
+        (toque.w, toque.h),
+        (corpo.w, corpo.h),
+        "toque de novo só no corpo"
+    );
+}
+
+/// A área de toque do pet como o Motor a calcula agora (no palco).
+fn motor_toque(motor: &Motor) -> Ret {
+    let (Some(pet), Some(palco)) = (motor.pet.as_ref(), motor.palco.as_ref()) else {
+        panic!("sem pet");
+    };
+    pet.toque_no_palco(palco).unwrap()
+}
+
+#[test]
+fn segurar_250_ms_arrasta_no_lugar_e_o_fail_safe_solta() {
+    let (mut motor, mut janela) = ligado();
+    janela.mostrou();
+    let (x, y) = meio_do_corpo(&janela);
+    ponteiro(&mut motor, &mut janela, apertou(x, y), 2_000);
+    assert_eq!(motor.proximo_prazo().map(|p| p.min(2_250)), Some(2_250));
+    motor.vencer(&mut janela, 2_250);
+    assert!(motor.arrastando(), "segurou: arrasta no lugar");
+    assert_eq!(janela.toque, Some(Ret::novo(0, 0, 1920, 1200)));
+    // 5 s sem evento do ponteiro desde o aperto (perdeu a pegada): solta
+    // onde está.
+    janela.mostrou();
+    motor.vencer(&mut janela, 2_000 + 4_999);
+    assert!(motor.arrastando());
+    motor.vencer(&mut janela, 2_000 + 5_000);
+    assert!(!motor.arrastando());
+    assert_ne!(
+        janela.toque,
+        Some(Ret::novo(0, 0, 1920, 1200)),
+        "toque de volta ao corpo"
+    );
+}
+
+#[test]
+fn clique_esquerdo_da_risadinha_e_o_do_lado_atravessa() {
+    let (mut motor, mut janela) = ligado();
+    janela.mostrou();
+    let (x, y) = meio_do_corpo(&janela);
+    ponteiro(&mut motor, &mut janela, apertou(x, y), 3_000);
+    ponteiro(&mut motor, &mut janela, soltou(x + 2, y + 1), 3_080);
+    assert_eq!(
+        motor.painel(Some(&janela), 3_080).reacao.as_deref(),
+        Some(RISADINHA)
+    );
+    // Um aperto fora do corpo (a região chegaria só no corpo; aqui o Motor
+    // confere de novo) não é do pet.
+    let corpo = janela.toque.unwrap();
+    ponteiro(
+        &mut motor,
+        &mut janela,
+        apertou(corpo.x - 1, corpo.y),
+        4_000,
+    );
+    ponteiro(
+        &mut motor,
+        &mut janela,
+        moveu(corpo.x - 200, corpo.y),
+        4_010,
+    );
+    assert!(!motor.arrastando());
+}
+
+#[test]
+fn esconder_e_a_janela_fechada_largam_o_arraste() {
+    let (mut motor, mut janela) = ligado();
+    janela.mostrou();
+    let (x, y) = meio_do_corpo(&janela);
+    ponteiro(&mut motor, &mut janela, apertou(x, y), 0);
+    ponteiro(&mut motor, &mut janela, moveu(x - 50, y), 10);
+    assert!(motor.arrastando());
+    motor.definir_visivel(false);
+    motor.aplicar_visibilidade(&mut janela, 20);
+    assert!(!motor.arrastando(), "esconder larga");
+    assert_eq!(motor.painel(Some(&janela), 20).reacao, None);
+    motor.definir_visivel(true);
+    motor.aplicar_visibilidade(&mut janela, 30);
+    janela.mostrou();
+    ponteiro(&mut motor, &mut janela, apertou(x - 50, y), 40);
+    ponteiro(&mut motor, &mut janela, moveu(x - 150, y), 50);
+    assert!(motor.arrastando());
+    janela.fase = None;
+    motor.evento_overlay(&mut janela, EventoOverlay::Sumiu, 60);
+    assert!(!motor.arrastando(), "janela fechada larga");
+    // Sem palco, o ponteiro não faz nada.
+    ponteiro(&mut motor, &mut janela, apertou(x, y), 70);
+    assert!(motor.proximo_prazo().is_none_or(|p| p > 70 + 1_000));
+}
+
+#[test]
+fn arrastar_com_quadro_em_voo_adia_e_o_redesenhar_leva_a_posicao_de_agora() {
+    let (mut motor, mut janela) = ligado();
+    janela.mostrou();
+    let (x, y) = meio_do_corpo(&janela);
+    ponteiro(&mut motor, &mut janela, apertou(x, y), 0);
+    ponteiro(&mut motor, &mut janela, moveu(x - 50, y), 10);
+    let quadros = janela.quadros();
+    // Três movimentos com o quadro em voo: nenhum quadro novo.
+    for dx in [60, 70, 80] {
+        ponteiro(&mut motor, &mut janela, moveu(x - dx, y), 20);
+    }
+    assert_eq!(janela.quadros(), quadros, "um quadro em voo por vez");
+    janela.mostrou();
+    motor.evento_overlay(&mut janela, EventoOverlay::Redesenhar, 30);
+    assert_eq!(janela.quadros(), quadros + 1);
+    let Some(Elemento::Sprite { x: sx, .. }) =
+        janela.cena.as_ref().and_then(|c| c.first().copied())
+    else {
+        panic!("sem sprite");
+    };
+    let antes = 1706; // a célula padrão do _teste no eDP-1
+    assert_eq!(sx, antes - 80, "a posição do último movimento");
+}

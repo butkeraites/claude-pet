@@ -18,6 +18,11 @@
 //! a mais: toca a tag uma vez, com as mesmas durações mínimas, e o repouso
 //! recomeça no fim dela, com a pausa inteira antes da próxima rajada.
 //!
+//! Um estado **segurado** (o `dangle` enquanto o pet é arrastado, M4) toca em
+//! laço até ser largado; uma reação no meio toca por cima dele e, no fim,
+//! volta ao laço. O arraste é a exceção ao orçamento de commits parado: ele
+//! acaba quando o botão é solto (decisão 0048).
+//!
 //! Tudo aqui recebe o relógio de fora (milissegundos), para os testes não
 //! dependerem de tempo real.
 
@@ -233,11 +238,20 @@ struct Tocando {
     fim_ms: u64,
 }
 
-/// O que o pet mostra: o repouso e, por cima dele, uma reação de cada vez.
+/// Um estado tocando em laço até ser largado.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Segurando {
+    nome: String,
+    animacao: Animacao,
+}
+
+/// O que o pet mostra: o repouso (ou um estado segurado) e, por cima, uma
+/// reação de cada vez.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Animador {
     repouso: Repouso,
     tocando: Option<Tocando>,
+    segurando: Option<Segurando>,
 }
 
 impl Animador {
@@ -245,7 +259,44 @@ impl Animador {
         Animador {
             repouso: Repouso::novo(skin, agora_ms),
             tocando: None,
+            segurando: None,
         }
+    }
+
+    /// Segura o estado `nome` em laço a partir de `agora_ms` (o `dangle`
+    /// enquanto o pet é arrastado), pelas mesmas reservas das reações, até
+    /// [`Animador::largar`]. Larga a reação que estiver tocando. `false`: a
+    /// skin não sabe tocar o estado (o pet fica como está).
+    pub fn segurar(&mut self, skin: &Skin, nome: &str, agora_ms: u64) -> bool {
+        let Some(tag) = tag_da_reacao(skin, nome) else {
+            return false;
+        };
+        self.tocando = None;
+        self.segurando = Some(Segurando {
+            nome: nome.to_owned(),
+            animacao: Animacao::nova(skin, tag, agora_ms, true),
+        });
+        true
+    }
+
+    /// Larga o estado segurado: o repouso recomeça agora, com a pausa
+    /// inteira antes da próxima rajada (ou no fim da reação que estiver
+    /// tocando).
+    pub fn largar(&mut self, skin: &Skin, agora_ms: u64) {
+        if self.segurando.take().is_none() {
+            return;
+        }
+        let fim_da_reacao = self
+            .tocando
+            .as_ref()
+            .filter(|t| agora_ms < t.fim_ms)
+            .map(|t| t.fim_ms);
+        self.repouso = Repouso::novo(skin, fim_da_reacao.unwrap_or(agora_ms));
+    }
+
+    /// Há um estado segurado.
+    pub fn segurado(&self) -> bool {
+        self.segurando.is_some()
     }
 
     /// A pose parada (primeiro quadro de `idle`).
@@ -281,15 +332,22 @@ impl Animador {
             let (quadro, proxima) = t.animacao.em(agora_ms);
             return (quadro, proxima.map_or(t.fim_ms, |p| p.min(t.fim_ms)));
         }
+        if let Some(s) = &self.segurando {
+            let (quadro, proxima) = s.animacao.em(agora_ms);
+            // Um laço de um quadro só não troca mais: o próximo prazo fica
+            // para quando ele for largado.
+            return (quadro, proxima.unwrap_or(u64::MAX));
+        }
         self.repouso.em(agora_ms)
     }
 
-    /// A reação tocando em `agora_ms`, se houver.
+    /// A reação (ou o estado segurado) tocando em `agora_ms`, se houver.
     pub fn reacao(&self, agora_ms: u64) -> Option<&str> {
         self.tocando
             .as_ref()
             .filter(|t| agora_ms < t.fim_ms)
             .map(|t| t.nome.as_str())
+            .or_else(|| self.segurando.as_ref().map(|s| s.nome.as_str()))
     }
 }
 
@@ -567,6 +625,52 @@ mod testes {
         let media = commits as f64 / 600.0;
         assert!(media <= 2.0, "{media} commits/s");
         assert!(menor >= DURACAO_MIN_MS, "trocas a {menor} ms");
+    }
+
+    #[test]
+    fn segurar_toca_em_laco_e_uma_reacao_no_meio_volta_ao_laco() {
+        let skin = skin_de_teste();
+        let mut a = Animador::novo(&skin, 0);
+        assert!(a.segurar(&skin, "dangle", 1_000));
+        assert!(a.segurado());
+        assert_eq!(a.reacao(1_000), Some("dangle"));
+        let dangle = skin.tags.iter().position(|t| t.nome == "dangle").unwrap();
+        let primeiro = skin.canonico[skin.tags[dangle].de];
+        let (q, proxima) = a.em(1_000);
+        assert_eq!(q, primeiro);
+        assert!(proxima > 1_000 && proxima < u64::MAX);
+        // Bem depois, ainda no laço (não volta à pose sozinho).
+        assert_eq!(a.reacao(60_000), Some("dangle"));
+        assert_ne!(a.em(60_000).1, u64::MAX);
+        // Uma reação no meio toca por cima e, no fim, o laço continua.
+        assert!(a.tocar(&skin, "done_small", 2_000));
+        assert_eq!(a.reacao(2_000), Some("done_small"));
+        assert_eq!(a.reacao(2_400), Some("dangle"), "done_small dura 400 ms");
+        // Largar: o repouso recomeça agora, com a pausa inteira.
+        a.largar(&skin, 3_000);
+        assert!(!a.segurado());
+        assert_eq!(a.reacao(3_000), None);
+        assert_eq!(a.em(3_000), (a.pose(), 3_000 + PAUSA_MS));
+        // Largar sem segurar não mexe em nada.
+        a.largar(&skin, 3_100);
+        assert_eq!(a.em(3_100), (a.pose(), 3_000 + PAUSA_MS));
+    }
+
+    #[test]
+    fn largar_no_meio_de_uma_reacao_deixa_a_reacao_acabar() {
+        let skin = skin_de_teste();
+        let mut a = Animador::novo(&skin, 0);
+        assert!(a.segurar(&skin, "dangle", 0));
+        assert!(a.tocar(&skin, "done_small", 100));
+        a.largar(&skin, 200);
+        assert_eq!(a.reacao(200), Some("done_small"));
+        assert_eq!(a.reacao(500), None);
+        assert_eq!(
+            a.em(500),
+            (a.pose(), 500 + PAUSA_MS),
+            "repouso no fim da reação"
+        );
+        assert!(!a.segurar(&skin, "nada_disso", 600), "estado desconhecido");
     }
 
     #[test]
