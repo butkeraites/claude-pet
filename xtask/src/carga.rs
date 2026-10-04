@@ -4,7 +4,7 @@
 //! Um cliente Wayland do host cria uma camada OVERLAY transparente (1 pixel
 //! de alfa 0 esticado pelo viewport, invisível e sem área clicável), do
 //! tamanho do monitor focado, com namespace
-//! `claude-pet-carga` e região de input vazia, e faz commit a cada frame
+//! `bichinho-carga` e região de input vazia, e faz commit a cada frame
 //! callback, no ritmo do monitor. Tem de ser OVERLAY: uma camada BACKGROUND
 //! fica tapada pela janela em tela cheia, e o Hyprland não manda frame
 //! callback para superfície tapada (medido: 2,6 commits/s em vez de 60).
@@ -44,7 +44,7 @@ use smithay_client_toolkit::shm::slot::{Buffer, SlotPool};
 use smithay_client_toolkit::shm::{Shm, ShmHandler};
 use smithay_client_toolkit::{delegate_registry, registry_handlers};
 
-pub const NAMESPACE: &str = "claude-pet-carga";
+pub const NAMESPACE: &str = "bichinho-carga";
 /// Teto da duração, para um esquecido não ficar repintando a tela.
 const MAX_SEGUNDOS: u64 = 600;
 

@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# claude-pet: um binário estático (musl) numa imagem alpine mínima.
+# bichinho: um binário estático (musl) numa imagem alpine mínima.
 # Sem Mesa, sem /dev/dri, sem áudio: os pixels vão por SHM e quem compõe é
 # a GPU do Hyprland (decisões 0002 e 0004).
 #
@@ -17,33 +17,40 @@ COPY Cargo.toml Cargo.lock ./
 COPY .cargo ./.cargo
 COPY crates ./crates
 COPY xtask ./xtask
+# O commit de onde a imagem saiu (o `bin/pet` passa `git rev-parse HEAD`,
+# com `-sujo` se a árvore tinha mudanças): vai para o `bichinho versao` e
+# para a etiqueta da imagem, e o `bin/pet instalar-host` só põe no PATH o
+# binário da worktree estável (decisão 0045).
+ARG BICHINHO_FONTE=desconhecida
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
-    cargo build --release --locked -p claude-pet \
- && install -Dm0755 target/release/claude-pet /out/claude-pet
+    BICHINHO_FONTE="$BICHINHO_FONTE" cargo build --release --locked -p bichinho \
+ && install -Dm0755 target/release/bichinho /out/bichinho
 
 FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS runtime
 ARG APP_UID=1000
 ARG APP_GID=1000
+ARG BICHINHO_FONTE=desconhecida
+LABEL bichinho.fonte="$BICHINHO_FONTE"
 RUN set -eux; \
     addgroup -g "$APP_GID" pet; \
     adduser -D -H -u "$APP_UID" -G pet -h /state -s /sbin/nologin pet; \
     install -d -o "$APP_UID" -g "$APP_GID" -m 0750 /state
-COPY --from=build /out/claude-pet /usr/local/bin/claude-pet
-COPY assets/ /opt/claude-pet/assets/
-COPY skins/ /opt/claude-pet/skins/
+COPY --from=build /out/bichinho /usr/local/bin/bichinho
+COPY assets/ /opt/bichinho/assets/
+COPY skins/ /opt/bichinho/skins/
 # Arte que não pode ser redistribuída: fora do git, mas entra na imagem
 # LOCAL (que nunca vai a registry). Decisão 0011.
-COPY skins-locais/ /opt/claude-pet/skins-locais/
+COPY skins-locais/ /opt/bichinho/skins-locais/
 ENV PET_HOST_RUNTIME=/host/run/user \
     PET_ESCUTA=0.0.0.0:27380 \
-    PET_ASSETS=/opt/claude-pet/assets \
-    PET_SKINS=/opt/claude-pet/skins:/opt/claude-pet/skins-locais \
+    PET_ASSETS=/opt/bichinho/assets \
+    PET_SKINS=/opt/bichinho/skins:/opt/bichinho/skins-locais \
     PET_ESTADO=/state \
-    PET_CONFIG=/etc/claude-pet \
+    PET_CONFIG=/etc/bichinho \
     HOME=/tmp \
     XDG_RUNTIME_DIR=/tmp/xdg
 USER ${APP_UID}:${APP_GID}
 EXPOSE 27380
-ENTRYPOINT ["/usr/local/bin/claude-pet"]
+ENTRYPOINT ["/usr/local/bin/bichinho"]
 CMD ["rodar"]

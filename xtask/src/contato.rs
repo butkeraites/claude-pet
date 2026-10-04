@@ -606,7 +606,7 @@ mod testes {
 
     #[test]
     fn previa_de_pack_nao_sai_para_pasta_do_git() {
-        let pasta = std::env::temp_dir().join(format!("claude-pet-contato-{}", std::process::id()));
+        let pasta = std::env::temp_dir().join(format!("bichinho-contato-{}", std::process::id()));
         let skin = pasta.join("pack");
         fs::create_dir_all(&skin).unwrap();
         let teste = crate::raiz().join("skins/_teste");

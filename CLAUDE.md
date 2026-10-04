@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-# claude-pet — contexto para o Claude Code
+# bichinho — contexto para o Claude Code
 
 O **Zeca** é um papagaio de pixel art que mora na tela do Renan (Omarchy,
 Hyprland 0.56, Wayland) e reage ao Claude Code rodando no terminal:
@@ -10,67 +10,49 @@ comemora quando o Claude termina, chama quando o Claude precisa dele, dorme
 quando ninguém mexe. Fica sempre por cima de tudo, pode ser arrastado e
 segue o monitor ativo. Roda em Docker. **Sem som** (decisão 0002).
 
-O plano completo, com marcos M0–M7 e como verificar cada um, está em
+O app se chama **bichinho** (binário, crate, camada, compose; decisão 0036);
+o repositório de desenvolvimento continua `claude-pet`
+(`~/Documents/claude-pet`).
+
+O plano completo, com marcos M0–M9 e como verificar cada um, está em
 `PLANO.md`. As decisões, com o porquê, estão em `DECISIONS.md`.
 
 ## Estado do repositório
 
-**M0 (fundação) concluído. M1 (overlay) concluído na branch `m1-overlay`,
-com o portão fechado com a tela acesa** (atualização da decisão 0005):
-nitidez exata, sem fantasma, parado a 0,70 commit/s e +0,58 ponto de CPU do
-Hyprland; sob repintura de tela cheia, +0,20 de CPU e +1,6 de GPU. A camada
-única fica; o plano B não é necessário. Fotos em `docs/fotos/m1/`. Falta só
-o clique manual (clicar ao lado do pet chega na janela de baixo).
+**Na `main` (tags `v0.1.0`–`v0.3.0`):** M0 (fundação), M1 (overlay nítido e
+barato; portão fechado com a tela acesa, decisão 0005), M2 (o Zeca, aprovado
+pelo Renan pela folha de contato, decisões 0023–0029) e M3 (hooks → reação:
+plugin `bichinho`, cérebro mínimo com `nod`, `done_small` e `bye`, `bin/pet
+testar`, decisões 0019–0022 e 0030–0034). O andamento por tarefa está no
+`PROGRESS.md`.
 
-O daemon acha o Hyprland pelo `hyprland.lock`, conecta ao Wayland (Rust
-puro, SCTK), cria a camada OVERLAY `claude-pet` no monitor focado e desenha
-a skin em blocos D×D de pixels do monitor, com orçamento de commits.
-Repositório privado em `github.com/butkeraites/claude-pet`.
+O Zeca só aparece com a skin da imagem aprovada (`bin/pet skin-aprovar`, que
+só aprova a skin da folha de contato vista; decisões 0026 e 0029). Sem
+aprovação a produção fica conectada e escondida (`tela: sem_personagem`).
+Aprovar e revogar trocam na tela na hora, e o config é relido a cada
+aprovação. A pilha de dev (`PET_DEBUG=1`) mostra a skin xadrez `_teste`, ou o
+personagem aprovado com `PET_DEBUG_PERSONAGEM=1`. Formato, arte e aprovação
+em `docs/SKINS.md`.
 
-**M2 (Zeca) na branch `m2-zeca`:** o pack *Cute Parrots!* (exclusiveOlive,
-zip em `~/Downloads`, fora do repo) vira o Zeca: Parrot 2 verde no visual
-"Malandro rosa" (bico rosa original, chapéu-palheta de faixa laranja,
-gravata-borboleta rosa dentro do contorno do pack) e o "chapéu voa e volta"
-no susto e no mergulho, caindo na cabeça depois do pouso (decisões
-0023–0025 e a revisão 0028). `bin/pet skin-instalar <zip>` gera
-`skins-locais/zeca` e `zeca-contorno` (fora do git) e as prévias em
-`tmp/previa-zeca-m2/`. O Zeca só aparece depois de `bin/pet subir` e
-`bin/pet skin-aprovar zeca`, que só aprova a skin da folha de contato vista
-(decisões 0026 e 0029); sem aprovação, a produção fica conectada e escondida
-(`tela: sem_personagem`). Aprovar e revogar trocam na tela na hora, e o
-config é relido a cada aprovação (`zeca-contorno` sem reiniciar). A pilha de
-dev (`PET_DEBUG=1`) mostra a skin xadrez `_teste`, ou o personagem aprovado
-com `PET_DEBUG_PERSONAGEM=1`. Formato, arte e aprovação em `docs/SKINS.md`.
-**Pendente:** a conferência na tela da arte revista (nitidez, foto
-mascarada, reaprovação com o pet na tela) e a medição de custo com o
-personagem: a sessão ficou bloqueada. Com a tela acesa e desbloqueada, rode
-`scripts/verificar-ao-vivo.sh --personagem` e `scripts/medir-custo.sh
---personagem` (aprovam só para o teste e revogam no fim).
+**Rumo (2026-10-03, decisões 0035–0042; revisão em 2026-10-04, decisões 0043–0046):** lançamento open source para
+Linux, macOS e Windows, com o app **bichinho** (o personagem continua Zeca).
+O PLANO ganhou o M8 (multiplataforma) e o M9 (publicação). Antes do M4,
+na branch `m3b-portabilidade`: a costura de plataforma (T8.0: o Motor e os
+traits no `pet-core`, o Wayland em `pet-wayland`), o hook nativo `bichinho
+avisar` em exec form com o nome novo (T8.1; o plugin instalado continua no
+`avisar.sh` até a troca do README) e o tamanho do Zeca no config (TP.2,
+`aparencia.tamanho`). No M4, o clique no Zeca leva ao terminal da sessão pelo
+foreign-toplevel, nunca pelo socket de comandos. A pesquisa está em
+`docs/pesquisa/09-multiplataforma.md`.
 
-**M3 (hooks → reação) na branch `m3-hooks`, rebaseada sobre a `m2-zeca`**
-(publicada, sem PR nem merge; a pilha é `m1-overlay` ← `m2-zeca` ←
-`m3-hooks`): fio v1 validado no `/v1/evento`, plugin `bichinho` (13 hooks
-async → `avisar.sh`), cérebro mínimo (T0 `nod`, T1 `done_small`, `bye`
-quando o Claude sai) e `bin/pet testar`. Na integração (decisão 0030) um
-`/v1/comando` só serve as reações (`tocar`, `esconder`, `mostrar`) e as
-aprovações (`aprovar_skin`, `revogar_skin`); as reações tocam pelos estados
-do `skin.json` com as reservas do catálogo: no Zeca, o aceno é a tag
-composta `nod` (levanta e senta) e o pulinho e o tchau são o pio; na
-`_teste`, o aceno cai no `wave`. O `nod` é nativo obrigatório do MVP, e o
-config relido a cada aprovação vale também para o cérebro. Gate ao vivo
-refeito com o Zeca (decisões 0021 e 0030). O plugin **não** está
-instalado: até o merge na `main`, só por sessão, com `claude --plugin-dir
-~/Documents/claude-pet/plugin`; depois do merge, pela worktree estável
-(README). Sem personagem aprovado a produção reage só no `/v1/estado`
-(`ultima_reacao`, `turnos`). A revisão adversarial da integração (decisões
-0031–0034) prendeu os hooks no 127.0.0.1 (sem curlrc, proxy nem `~/.jq`),
-ensinou o cérebro a esperar o Stop que chega depois do prompt seguinte e a
-reabrir o turno quando outro Stop hook segura o Claude, fez o `tocar` dizer
-o que tocou e refez o gate com um turno de Write. **Pendente:** no Zeca o
-aceno (`nod`: levanta e senta) é um pedaço da rajada do repouso
-(`stand_look_sit`), e dá para confundir os dois; mudar pede o Renan (muda o
-`skin.json`, a impressão e a aprovação). As reações com o Zeca ainda não
-foram vistas na tela: a sessão estava bloqueada nos dois gates.
+**Pendentes** (pedem a tela acesa e desbloqueada, ou o Renan): a
+conferência na tela da arte revista, das reações com o Zeca e do tamanho
+pequeno, a medição de custo com o personagem e a regressão do T8.0
+(`scripts/verificar-ao-vivo.sh --personagem` e `scripts/medir-custo.sh
+--personagem`, que aprovam só para o teste e revogam no fim), e o aceno
+(`nod`, levanta e senta), que é um pedaço da rajada do repouso
+(`stand_look_sit`) e dá para confundir: mudar pede uma folha de contato nova
+e a reaprovação do Renan.
 
 ## Comandos
 
@@ -80,10 +62,13 @@ Fora dele, use `~/.cargo/bin/cargo`.
 | Comando | O que faz |
 |---|---|
 | `bin/pet verificar` | portão antes de **todo** commit: fmt, clippy, testes, compose, plugin |
+| `rustup target add x86_64-pc-windows-msvc aarch64-apple-darwin` | com os alvos instalados, o `verificar` também passa o clippy do núcleo, dos esboços e do daemon para Windows e macOS (sem linkar, sem SDK) |
 | `bin/pet subir` / `parar` / `logs` / `estado` | compose e estado do pet |
-| `bin/pet testar rapido` / `pequeno` | eventos sintéticos pelo `avisar.sh` de verdade (`PET_TESTE=1`) → `nod` / `done_small` |
+| `bin/pet testar rapido` / `pequeno` | eventos sintéticos pelo hook de verdade (`bichinho avisar` do PATH ou `PET_BICHINHO`, com o commit dele; sem ele, o `avisar.sh` de reserva, com aviso), com `PET_TESTE=1` → `nod` / `done_small` |
+| `bin/pet instalar-host` | copia o binário estático da imagem para `~/.local/bin/bichinho` (o hook do plugin 0.2.0 o acha pelo PATH); só a imagem do commit da worktree estável, de árvore limpa (decisão 0045). `--da-branch` pula a conferência: só com `PET_BIN_HOST` numa pasta de teste fora do PATH |
+| `~/.cargo/bin/cargo build -p bichinho` + `PATH="$PWD/target/debug:$PATH" claude --plugin-dir plugin` | o hook da branch só numa sessão (e `PET_BICHINHO=$PWD/target/debug/bichinho bin/pet testar`) |
 | `bin/pet tocar <reação>` / `esconder` / `mostrar` | `/v1/comando` (não persiste); o `tocar` diz a tag que a skin tocou e se apareceu na tela |
-| `claude --plugin-dir ~/Documents/claude-pet/plugin` | o plugin numa sessão só (até o merge, nunca instalar) |
+| `claude --plugin-dir ~/Documents/claude-pet/plugin` | o plugin da branch numa sessão só (nunca instalar antes do merge) |
 | `~/.cargo/bin/cargo test` | testes do workspace (os quadros dourados regeneram com `PET_ATUALIZAR_OURO=1`) |
 | `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build` | modo desenvolvimento (sem restart, debug, skin `_teste`) |
 | `bin/pet foto` | foto do pet (grim no monitor inteiro); em debug, só os pixels opacos do pet sobre fundo neutro |
@@ -98,39 +83,70 @@ Fora dele, use `~/.cargo/bin/cargo`.
 
 ## Arquitetura em uma tela
 
-- Um binário Rust (`crates/claude-pet`) no container `alpine`, uid 1000,
-  rootfs somente leitura. Threads: principal (calloop, a partir do M1),
-  ingress HTTP, leitor do `.socket2.sock` (M4), watchdog.
-- `crates/pet-core` é **puro**: cérebro, pontuação, animador, skin,
-  raster. **Nunca** depende de crates Wayland — os testes ficam rápidos.
+- Crates (decisão 0040):
+  - `crates/pet-core` é **puro** (só `std` e crates de dados): cérebro,
+    animador, skin, raster, o **Motor** (`pet_core::motor`: personagem, pet e
+    palco, mostrar/esconder, estresse, painel, prazos em ms num relógio
+    injetado) e os contratos de cada sistema (`pet_core::plataforma`: os
+    traits `Overlay` e `Desktop`, `Monitor`, `EventoPonteiro` e a `Caixa`).
+    Tudo o que o Motor troca com a janela está no **palco**: pixels do
+    dispositivo do monitor, origem no canto dele (decisão 0044); cada janela
+    converte para as coordenadas dela. Os testes usam a
+    `plataforma::falsa::JanelaFalsa` (feature `teste` fora do core).
+    **Nunca** depende de crates Wayland ou de sistema, em nenhum alvo — os
+    testes ficam rápidos e o `bin/pet verificar` confere;
+  - `crates/pet-wayland`: a camada OVERLAY (a `Sessao` é o `Overlay` do
+    Wayland), os buffers e a descoberta; o que é só do Hyprland
+    (`hyprland.lock`, o monitor FALLBACK, o socket de eventos no M4) fica no
+    adaptador `hyprland`;
+  - `crates/pet-windows` e `crates/pet-macos`: esboços vazios que compilam
+    (`cargo clippy --target` no `bin/pet verificar`, com os alvos do
+    rustup instalados);
+  - `crates/bichinho`: o daemon e o hook (binário estático no container `alpine`,
+    uid 1000, rootfs somente leitura). O `nucleo` junta o Motor com as
+    aprovações em disco e o `/v1/estado`; o `laco` é o do Linux (calloop
+    com o Wayland); o `sem_janela` roda onde ainda não há janela (Windows e
+    macOS). Threads: principal (o laço), ingress HTTP, vigia.
 - Uma camada OVERLAY do tamanho do monitor focado, criada com output NULL,
   nunca redimensionada, sem subsurfaces; o Zeca anda dentro do buffer.
   Cada pixel de arte vira um bloco D×D inteiro de pixels do monitor.
 - Eventos do Claude Code chegam por `POST 127.0.0.1:27380/v1/evento`
-  vindos do plugin `bichinho` (hooks async → `plugin/scripts/avisar.sh`),
+  vindos do plugin `bichinho` (hooks async em exec form → `bichinho avisar
+  <Evento>`, com a lista branca do `pet_core::aviso`; decisão 0041),
   são validados campo a campo (`pet_core::evento`, decisão 0019) e vão
-  pelo canal do calloop para o cérebro (`pet_core::cerebro`, decisões
-  0020 e 0032), que mora no laço principal, conta os prazos da chegada de
-  cada evento e funciona mesmo sem compositor.
+  pela `Caixa` (um `mpsc` limitado que acorda o laço; no Linux, por um
+  `Ping` do calloop) para o cérebro (`pet_core::cerebro`, decisões 0020 e
+  0032), que mora no Motor, conta os prazos da chegada de cada evento e
+  funciona mesmo sem compositor. Antes de vencer um prazo, o laço esvazia a
+  caixa.
 - Comandos chegam por `POST /v1/comando`, sempre `{"cmd", "arg"}`: as
   reações (`tocar`, 200 com a tag e se apareceu na tela; `esconder` e
   `mostrar`, 204) e as aprovações (`aprovar_skin`, `revogar_skin`; 200
   depois de o laço trocar o personagem), com as mesmas checagens de `Host`,
   `X-Pet` e `Content-Type` (decisões 0030 e 0033). Só as aprovações passam
-  pelo cadeado: uma reação nunca espera uma aprovação. Uma reação toca a tag do estado de mesmo nome no
-  `skin.json`, ou a reserva do catálogo (`pet_core::estados`), nunca o
-  repouso.
+  pelo cadeado: uma reação nunca espera uma aprovação. Uma reação toca a
+  tag do estado de mesmo nome no `skin.json`, ou a reserva do catálogo
+  (`pet_core::estados`), nunca o repouso.
 
 ## Regras de ouro
 
-- **Hooks:** sempre `async`, só metadados (lista branca do jq), sempre
-  `exit 0`. Conteúdo (prompt, código, resposta, título de janela) nunca sai
-  do host nem vai para log. Os metadados só vão ao 127.0.0.1: todo curl que
-  fala com o pet leva `-q --noproxy '*'` (nenhum curlrc, nenhum proxy) e o
-  jq do `avisar.sh` roda sem `~/.jq` (decisão 0031).
+- **Hooks:** sempre `async`, só metadados, nunca imprimem, sempre `exit 0`.
+  O hook é o `bichinho avisar <Evento>` em exec form (decisão 0041): a lista
+  branca do `pet_core::aviso`, com os validadores do fio v1, lida em fluxo
+  (só os campos da lista ficam na memória; decisão 0045), sem log nenhum
+  (nem com `PET_LOG=debug`), sem core dump, e TCP direto ao 127.0.0.1
+  (nenhum proxy, nenhum curlrc). Conteúdo (prompt, código, resposta, título
+  de janela) nunca sai do host nem vai para log. O
+  `avisar.sh` fica de reserva até a troca: todo curl que fala com o pet leva
+  `-q --noproxy '*'` e o jq dele roda sem `~/.jq` (decisão 0031). Os
+  canários dos dois (`tests/hook.rs`, `tests/avisar.rs`) não podem cair.
 - **Hyprland:** o daemon **nunca** abre o `.socket.sock` e nunca chama
-  `hyprctl dispatch`/`keyword`. Só lê eventos do `.socket2.sock`.
-  `hyprctl` só aparece em scripts de teste do host.
+  `hyprctl dispatch`/`keyword` (nem em `pet-wayland`). Só lê eventos do
+  `.socket2.sock`. `hyprctl` só aparece em scripts de teste do host.
+- **Portável:** `unsafe` proibido no `pet-core` e no daemon do Linux; o que
+  é de um sistema fica atrás de `cfg` e dos traits de
+  `pet_core::plataforma`. Lógica nova do pet (arrastar, balões, voos) entra
+  no Motor, com teste em relógio falso, não no `pet-wayland`.
 - **Config do Hyprland** (`~/.config/hypr/*.lua`): só pela skill
   `omarchy` e com consentimento do Renan.
 - **Arte:** o pack e tudo derivado dele (sheet, GIFs, folhas de contato,
@@ -138,12 +154,18 @@ Fora dele, use `~/.cargo/bin/cargo`.
   em `docs/`; o xtask recusa gravar arte de pack em outra pasta do repo. Só
   `arte/zeca/` (acessórios, âncoras, trajetórias) é nossa e vai para o git.
   A skin `_teste` nunca vira personagem.
+- **Nome do personagem:** é o Zeca, um papagaio malandro com visual próprio.
+  Nunca o chame nem o descreva como personagem de terceiros, e nunca cite
+  nome, estúdio ou família de um, em código, docs, balões, commits ou PRs. O
+  `bin/pet verificar` reprova se aparecer nos arquivos ou nas mensagens dos
+  commits da branch (decisões 0035 e 0043); o corpo do PR se confere antes do
+  `gh pr create` com o mesmo padrão (`NOMES_DE_TERCEIROS` no `bin/pet`).
 - **Personagem só com aprovação:** o Zeca aparece só com a impressão
   digital aprovada pelo Renan (`bin/pet skin-aprovar`, decisões 0026 e 0029).
   Nunca aprove por ele: aprovação de teste se revoga no fim (os scripts ao
   vivo fazem isso sozinhos, até numa falha). **Nunca revogue uma aprovação
   que você não fez:** antes de mexer, leia `skin` no `/v1/estado` e o
-  `/state/skins/<id>/aprovacao.json` (`docker exec claude-pet-pet-1 cat …`);
+  `/state/skins/<id>/aprovacao.json` (`docker compose exec -T bichinho cat …`);
   a que já estava lá é do Renan. Para testar reações, `bin/pet testar` e
   `bin/pet tocar`, que nunca mexem em aprovação.
 - **Orçamento de commits Wayland:** média ≤ 2/s parado, 0 dormindo,
@@ -195,9 +217,29 @@ Fora dele, use `~/.cargo/bin/cargo`.
 - `pkill -f`/`pgrep -f` com um padrão que aparece na própria linha de
   comando acha o shell que está rodando: para parar um daemon de teste,
   guarde o PID.
-- Plugin: **nunca** `claude plugin marketplace add` / `install` antes do
-  merge na `main` (sessões de outros projetos rodariam a branch). Para
-  testar ao vivo, `claude --plugin-dir ~/Documents/claude-pet/plugin`.
+- Plugin: **nunca** `claude plugin marketplace add` / `install` / `update`
+  nem mexer na worktree estável (`~/.local/share/claude-pet/estavel`) antes
+  do merge na `main` (sessões de outros projetos rodariam a branch). Para
+  testar ao vivo, `claude --plugin-dir ~/Documents/claude-pet/plugin`. A
+  troca depois do merge está no README (a ordem importa: `bin/pet
+  instalar-host` antes de `claude plugin update`).
+- O hook em exec form acha o `bichinho` pelo PATH do Claude Code: sem ele,
+  os eventos não chegam e o `claude -p` fica calado (conferido). Confira com
+  `command -v bichinho`, `bichinho versao` (o commit) e `bin/pet testar`.
+- O `~/.local/bin/bichinho` é a lista branca de todas as sessões da máquina:
+  só o binário da worktree estável vai para lá (o `bin/pet instalar-host`
+  confere o commit gravado na imagem). Nunca instale o de uma branch no PATH
+  (`--da-branch` é só para uma pasta de teste); para testar, o binário da
+  branch vai só na sessão (`PATH="$PWD/target/debug:$PATH" claude
+  --plugin-dir plugin`).
+- `bichinho` sem subcomando não faz nada (no terminal, mostra a ajuda): o
+  daemon é `bichinho rodar` (o `CMD` da imagem e os testes já passam).
+  Um Claude Code que ignorasse o `args` do exec form não sobe daemon.
+- O compose avisa que o volume `claude-pet_estado` "foi criado para o
+  projeto claude-pet": é de propósito, o nome está preso a ele para a
+  aprovação do Zeca sobreviver ao nome novo (decisão 0041). Nunca apague
+  esse volume. O `bin/pet subir` (e `dev`, `reconstruir`) aposenta o
+  container do projeto antigo, que seguraria a porta 27380.
 - Hook async não aparece em lugar nenhum: para ver o que chegou, pilha de
   dev e `curl -H 'X-Pet: 1' 127.0.0.1:27380/v1/debug/eventos` (só
   metadados validados).
@@ -225,6 +267,10 @@ Fora dele, use `~/.cargo/bin/cargo`.
   `(decisão 0007)` quando fizer sentido, terminando com
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - Um PR por marco (`mN-tema`), revisado pelo Renan; corpo do PR termina com
-  `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
-- Nunca commitar `.env`, `config/claude-pet.toml`, `skins-locais/*`,
+  `🤖 Generated with [Claude Code](https://claude.com/claude-code)`. O merge
+  é com merge commit, nunca squash: os hashes do PROGRESS continuam valendo
+  (decisão 0037). Linha nova do PROGRESS nasce com "—" no commit.
+- DECISIONS só cresce (decisões novas no fim, em ordem numérica); a única
+  reescrita permitida foi a da decisão 0035.
+- Nunca commitar `.env`, `config/bichinho.toml` (ou o `claude-pet.toml` de antes), `skins-locais/*`,
   `tmp/`, `target/`.

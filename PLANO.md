@@ -1,6 +1,8 @@
-# Plano: claude-pet — o Zeca, papagaio pixel art que comemora quando o Claude Code termina
+# Plano: bichinho — o Zeca, papagaio pixel art que comemora quando o Claude Code termina
 
 > Plano aprovado em 2026-10-02. Mudanças de rumo entram em DECISIONS.md; este arquivo só ganha correções e IDs de tarefa.
+>
+> **Ampliado em 2026-10-03, a pedido do Renan** (decisões 0035–0039): o destino é um lançamento open source para Linux, macOS e Windows, com o app **bichinho**. Entraram os marcos M8 (multiplataforma) e M9 (publicação), a nova ordem (T8.0 e T8.1 antes do M4) e, no M4, o clique que leva ao terminal da sessão. A pesquisa está em `docs/pesquisa/09-multiplataforma.md`.
 
 ## Contexto
 
@@ -15,13 +17,14 @@ O Renan quer um bichinho de pixel art que more na tela e reaja ao Claude Code ro
 
 **Escolhas já feitas com ele:**
 
-- **Personagem.** É a arara do pack *Cute Parrots!* da exclusiveOlive (itch.io, US$ 0,50), transformada num papagaio malandro "estilo Zé Carioca, um pouco diferente":
+- **Personagem.** É a arara do pack *Cute Parrots!* da exclusiveOlive (itch.io, US$ 0,50), transformada num papagaio malandro com visual próprio:
   - verde, com chapéu-palheta e gravata-borboleta em cores próprias (laranja);
-  - nome próprio, proposto **Zeca**. Não é o personagem da Disney nem copia o visual dele.
+  - nome próprio, proposto **Zeca** (confirmado em 2026-10-03, também em público). Não copia nome nem visual de personagem de terceiros, e nenhum texto do projeto o associa a um (decisão 0035).
   - O Renan recusou rascunhos em ASCII ("muito feias"). Por isso o corpo e as animações vêm de um pixel artist profissional; nós só desenhamos acessórios pequenos.
 - **Sem som.** Toda a atenção vem da animação.
 - **Festa proporcional ao trabalho** do turno.
 - **Repositório privado** `butkeraites/claude-pet`, clonado em `~/Documents/claude-pet`.
+- **Lançamento aberto (2026-10-03):** no fim, o app **bichinho** sai open source para Linux, macOS e Windows; no macOS e no Windows como app nativo, e o Docker só no Linux. O repositório público será novo e limpo (marcos M8 e M9; decisões 0036 e 0038).
 
 **Ambiente (verificado):**
 
@@ -48,7 +51,7 @@ O Renan quer um bichinho de pixel art que more na tela e reaja ao Claude Code ro
 - O Zeca fica pousado no canto inferior direito do monitor ativo, por cima de tudo.
 - Só o corpo dele é clicável; o resto da tela recebe os cliques normalmente.
 - **Arrastar:** ele fica pendurado batendo as asas e, ao soltar, pousa com uma poeirinha.
-- **Clique:** ele dá uma risadinha com coração e marca o aviso exibido como visto.
+- **Clique:** com um aviso pendente (pronto ou precisa de você), ele dá uma risadinha com coração e leva você à janela do terminal daquela sessão do Claude, marcando o aviso como visto; com vários, o mais urgente primeiro, e cada clique passa para o próximo. Sem nada pendente, um balão mostra as sessões abertas e o estado de cada uma (M4, decisão 0039).
 - **Troca de monitor:** ele some num "poof" e reaparece no monitor que ganhou o foco.
 
 **Reações ao Claude:**
@@ -76,25 +79,25 @@ O Renan quer um bichinho de pixel art que more na tela e reaja ao Claude Code ro
 | Seguir o monitor | Só eventos do `.socket2.sock`, com debounce de 300 ms. | O `.socket.sock` executa comandos no host e congela o Hyprland se um cliente travar. O daemon nunca o abre. |
 | Docker | `alpine:3.24.2`, `restart: unless-stopped`, bind de `/run/user` (read_only, `rslave`, `create_host_path: false`). WAYLAND_DISPLAY e a assinatura do Hyprland são descobertos em tempo de execução. | Sobe no boot (docker.service + linger) e sobrevive a logout/login, crash, suspensão e hotplug sem unit de systemd. Não sofre a corrida de boot nem fica preso a sockets velhos. |
 | Entrada de eventos | HTTP em `127.0.0.1:27380`, só loopback. `POST /v1/evento` responde 204. | O curl sempre existe. Checar Host, Content-Type e `X-Pet: 1` barra requisições vindas do navegador. |
-| Hooks | Plugin `bichinho`, no próprio repo, com 13 hooks `async` de comando que chamam `avisar.sh` (jq + `curl -m 2`, sempre exit 0). | Async não atrasa o Claude. Um hook do tipo http mostraria erro no transcript sempre que o pet estivesse desligado. Só **metadados** saem do host. |
+| Hooks | Plugin `bichinho`, no próprio repo, com 13 hooks `async` em exec form que chamam o próprio binário, `bichinho avisar <Evento>`: a lista branca do `pet_core::aviso`, TCP direto ao 127.0.0.1 com prazo curto, sempre exit 0 (decisão 0041). Até a troca do plugin instalado, o `avisar.sh` (jq + `curl -m 2`) fica de reserva. | Async não atrasa o Claude. Um hook do tipo http mostraria erro no transcript sempre que o pet estivesse desligado. Só **metadados** saem do host. |
 | Festa | Calculada pelo **trabalho real**: ferramentas de trabalho, arquivos editados, subagentes e tempo de ferramenta. Não usa tempo de relógio. | Com Opus em esforço máximo, uma resposta simples leva 20–90 s. Medir por relógio daria festa em toda resposta. |
 | Atenção | Escalada só visual, com teto, e que sabe se você está presente: olhando o terminal do Claude, fica no nível 1. | Não há som. Movimento que começa chama atenção; movimento constante cansa. |
 | Arte | O pack comprado fica em `skins-locais/` (gitignored) e entra só na imagem local, que nunca vai a registry. Chapéu e gravata são arte nossa, commitada. | A licença permite editar e proíbe redistribuir. |
-| Nomes | - repo, binário, compose e namespace da camada: `claude-pet`;<br>- plugin e marketplace: `bichinho` (nomes de plugin que começam com `claude-` são reservados);<br>- personagem/skin: `zeca`;<br>- CLI: `bin/pet`;<br>- variáveis de ambiente: `PET_*`. | Trocar o personagem não exige renomear o código. |
+| Nomes | - app, binário, crate, compose (projeto, serviço, imagem) e namespace da camada: `bichinho` (decisão 0036; até o T8.1, `claude-pet`); o repositório de desenvolvimento continua `claude-pet`;<br>- plugin e marketplace: `bichinho` e `bichinho-local` (nomes de plugin que começam com `claude-` são reservados);<br>- personagem/skin: `zeca`;<br>- CLI de desenvolvimento: `bin/pet`;<br>- variáveis de ambiente: `PET_*`; cabeçalho `X-Pet: 1`. | Trocar o personagem não exige renomear o código; um nome próprio evita colisão e marca alheia. |
 | Fuso | Bind de `/etc/localtime`, nunca `TZ`. | O host está em America/New_York e os outros projetos usam São Paulo; não dá para assumir nenhum dos dois. |
 
 ## Arquitetura
 
 ```
-HOST (Hyprland, uid 1000)                                  CONTAINER claude-pet (alpine 3.24.2, uid 1000, rootfs ro)
+HOST (Hyprland, uid 1000)                                  CONTAINER bichinho (alpine 3.24.2, uid 1000, rootfs ro)
 claude (foot) + plugin bichinho                            PID1 docker-init (init: true)
-  hook async: sh avisar.sh <Evento>                         └ claude-pet rodar (um processo)
-    jq (lista branca) -> curl -m 2 POST ----------------->     main (calloop): cérebro, animador, cena, sessão Wayland, timers, estado
+  hook async: bichinho avisar <Evento>                      └ bichinho rodar (um processo)
+    lista branca (pet_core::aviso) -> POST -------------->     main (calloop): Motor (cérebro, animador, cena), sessão Wayland, prazos, estado
       127.0.0.1:27380/v1/evento                                thread ingress: HTTP 0.0.0.0:27380
 /run/user (bind ro, rslave) ------------------------------>    thread hypr: leitor do .socket2.sock (só eventos)
   1000/wayland-1          <- 1 camada OVERLAY                  thread watchdog: batimento > 60 s -> abort() -> Docker reinicia
   1000/hypr/<HIS>/.socket2.sock
-/etc/localtime (ro), ./config -> /etc/claude-pet (ro), volume estado -> /state
+/etc/localtime (ro), ./config -> /etc/bichinho (ro), volume claude-pet_estado -> /state
 ```
 
 **Falhas esperadas, tratadas dentro do processo:**
@@ -124,6 +127,8 @@ claude (foot) + plugin bichinho                            PID1 docker-init (ini
 - o `.dockerignore` **não** pode excluir `skins-locais/`.
 
 **`docker-compose.yml` (pontos essenciais):**
+
+Desde o T8.1 (decisões 0036 e 0041) o projeto, o serviço e a imagem se chamam `bichinho`, e o volume do estado fica preso ao nome antigo (`claude-pet_estado`), com a aprovação do Zeca. O esboço original:
 
 ```yaml
 name: claude-pet
@@ -160,7 +165,7 @@ volumes: {estado: {}}
 **Desenvolvimento:**
 - `docker-compose.dev.yml` traz `restart: "no"`, `PET_LOG=debug` e `PET_DEBUG=1`, e monta `skins/` e `assets/` somente-leitura.
   - Ele **não** pode se chamar `compose.override.yml`, porque esse nome é mesclado automaticamente.
-- Ciclo nativo, o mais rápido: `docker compose stop pet` e depois `cargo run -p claude-pet -- rodar`, com `PET_HOST_RUNTIME=/run/user` e caminhos locais.
+- Ciclo nativo, o mais rápido: `docker compose stop bichinho` e depois `cargo run -p bichinho -- rodar`, com `PET_HOST_RUNTIME=/run/user` e caminhos locais.
 
 ## Descoberta e ciclo de vida
 
@@ -181,12 +186,12 @@ volumes: {estado: {}}
 | Monitor muda de posição no layout | Mudança de posição/tamanho do xdg_output → re-home depois de 200 ms. |
 | Só sobrou o output FALLBACK, ou um output 0x0 | Esconde e espera `focusedmonv2`/`monitoraddedv2`. |
 | Na partida, nenhum foco conhecido | Usa o primeiro `wl_output` que não seja FALLBACK e tenha tamanho maior que zero. |
-| Pet desligado enquanto o Claude roda | O hook async falha calado: o curl expira em 2 s e o script sai com 0. |
+| Pet desligado enquanto o Claude roda | O hook async falha calado e sai com 0: a conexão é recusada na hora (com um pet travado, desiste em 2 s). |
 
 ## Superfície, renderização e nitidez
 
 **Superfície:**
-- camada OVERLAY, namespace `claude-pet`, ancorada nas 4 bordas;
+- camada OVERLAY, namespace `bichinho` (até o T8.1, `claude-pet`), ancorada nas 4 bordas;
 - `exclusive_zone -1` e teclado NONE, então nunca rouba o foco.
 
 **Primeiro mapeamento** (com output NULL, a escala só chega quando a camada é mapeada):
@@ -200,7 +205,7 @@ volumes: {estado: {}}
 - Cada superfície ganha um **SlotPool novo**, que nunca é reaproveitado entre monitores. Um slot reaproveitado é limpo antes de usar.
 - Cada pixel de arte vira um bloco **D×D** de pixels do monitor, com D inteiro calculado por monitor:
   - o alvo é o corpo do Zeca ocupar cerca de 12% da altura lógica do monitor (entre 80 e 160 px);
-  - dá para sobrescrever no config.
+  - dá para mudar no config: `aparencia.tamanho` = `pequeno` (~10%), `normal` (~12%) ou `grande` (~16%), com os limites acompanhando, D sempre inteiro e sem mexer na skin (TP.2, decisão 0042).
 - Toda posição é um pixel inteiro do monitor, e os deslocamentos andam em múltiplos de D.
 
 **Dano e ritmo:**
@@ -248,8 +253,9 @@ Assim o fade de saída do Hyprland não deixa um quadro fantasma.
 - Solto fora do monitor: re-home imediato para o monitor sob o ponteiro.
 - O cursor fica `grab` ao passar por cima e `grabbing` enquanto segura (cursor-shape-v1).
 
-**Clicar:**
-- Botão esquerdo: risadinha + coração. Marca como visto **só o aviso exibido**; as outras sessões continuam.
+**Clicar** (atualizado em 2026-10-03, decisão 0039; detalhes no M4):
+- Botão esquerdo com pendência: risadinha + coração e **foco na janela do terminal da sessão** do aviso exibido, que fica marcado como visto; as outras sessões continuam, e o próximo clique vai ao próximo aviso, do mais urgente para o menos urgente.
+- Botão esquerdo sem pendência: um balão com as sessões abertas e o estado de cada uma.
 - Botão direito: soneca de 30 min, só com reações pequenas e um selo "zZ".
 
 ## Hooks do Claude Code (plugin `bichinho`)
@@ -278,6 +284,8 @@ Assim o fade de saída do Hyprland não deixa um quadro fantasma.
 "Stop": [{"hooks": [{"type": "command", "async": true,
   "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" Stop || true"}]}]
 ```
+
+**O hook.** Desde o T8.1 (decisão 0041) é o próprio binário, `bichinho avisar <Evento>`, em exec form (`"command": "bichinho", "args": ["avisar", "<Evento>"]`): a mesma lista branca em Rust (`pet_core::aviso`, com os validadores do fio v1), TCP direto ao 127.0.0.1, calado, sempre 0, com prazo. O `avisar.sh` abaixo fica de reserva até a troca do plugin instalado.
 
 **`plugin/scripts/avisar.sh`** (POSIX sh + jq + curl):
 - lê o JSON do hook pela entrada padrão;
@@ -464,7 +472,7 @@ As outras sessões aparecem como selos: um contador "+N", uma bandeirinha com a 
    - Efeitos procedurais na paleta FX da skin: confete, brilhos, "!", "?", zZ, coração, poeira, poof e raios.
    - No máximo 40 partículas, ou 60 em T3.
    - O balão é um 9-slice com a fonte **monogram** (CC0, tem acentos), entra com pop e texto datilografado, e é truncado em 18 caracteres.
-   - Frases cariocas em PT-BR, editáveis em `assets/frases.toml`: "Prontinho!", "Tá pronto, parceiro!", "Ô, meu camarada! ‹proj› precisa de você", "Plano pra aprovar!", "Deu ruim...", "Cansei...", "Oi! Me arrasta pra onde quiser".
+   - Frases de malandro em PT-BR, editáveis em `assets/frases.toml`: "Prontinho!", "Tá pronto, parceiro!", "Ô, meu camarada! ‹proj› precisa de você", "Plano pra aprovar!", "Deu ruim...", "Cansei...", "Oi! Me arrasta pra onde quiser".
 8. **Créditos:** em `NOTICE.md` e no `CREDITS.md` de cada skin (exclusiveOlive e monogram/datagoblin).
 
 ## Repositório e convenções
@@ -475,6 +483,7 @@ claude-pet/
   Cargo.toml Cargo.lock rust-toolchain.toml(channel "stable" + clippy + rustfmt) rustfmt.toml .editorconfig
   crates/pet-core/src/{config,event,brain,score,attention,animator,recipes,skin,aseprite,raster,scene,particles,text,geometry,scenario}.rs
   crates/claude-pet/src/{main,daemon,discovery,hypr,ingress,store,watchdog}.rs  crates/claude-pet/src/wl/{surface,fractional,input,shm,idle}.rs
+  # desde o T8.0/T8.1: crates/{pet-core (com motor e plataforma), pet-wayland, pet-windows, pet-macos, bichinho}
   xtask/   # skin-importar | zeca | lint-skin | cobertura | contato | skin-teste | fonte | nitidez
   arte/zeca/{paleta.toml,ancoras.json,acessorios/}   assets/{fonte/monogram/,frases.toml}
   skins/_teste/   skins-locais/.gitkeep   cenarios/*.jsonl + *.esperado.jsonl   config/exemplo.toml
@@ -498,17 +507,17 @@ claude-pet/
 
 **DECISIONS.md:**
 - entradas `## NNNN — Título (AAAA-MM-DD)` com **Problema / Escolha / Por quê**;
-- novas entradas são acrescentadas, nunca reescritas;
+- novas entradas são acrescentadas, nunca reescritas (a única exceção, pedida pelo Renan, foi tirar as menções a um personagem de terceiros; decisão 0035);
 - as decisões deste plano entram como 0001+.
 
 **PROGRESS.md:** uma linha por tarefa, `| Data | Tarefa | O quê | Commit |`.
 
 **Commits e PRs:**
 - Commit: uma frase em português citando `(T2.3)` ou `(decisão 0007)`, terminando com `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
-- Um commit por tarefa; uma branch e um PR por marco, revisado por você; `gh pr merge --squash` e tag `v0.N.0`.
+- Um commit por tarefa; uma branch e um PR por marco, revisado por você; merge com **merge commit** (`gh pr merge --merge`), nunca squash, para os hashes citados no PROGRESS continuarem valendo (decisão 0037); tag `v0.N.0`.
 - O corpo do PR termina com a linha do Claude Code.
 
-**Nunca commitar:** `.env`, `config/claude-pet.toml`, `skins-locais/*`, `tmp/`, `target/`.
+**Nunca commitar:** `.env`, `config/bichinho.toml` (e o `config/claude-pet.toml` de antes), `skins-locais/*`, `tmp/`, `target/`.
 
 **CLAUDE.md:**
 - Estado do projeto e comandos. O `~/.cargo/bin` fica fora do PATH, mas `bin/pet` acrescenta.
@@ -530,7 +539,7 @@ claude-pet/
 | Skill | Receita |
 |---|---|
 | `nova-animacao` | catálogo → skin → gatilho no cérebro → cenário → `tocar` + `foto` |
-| `novo-evento-hook` | lista branca do `avisar.sh` → canário → `hooks.json` → tabela do cérebro → `/reload-plugins` |
+| `novo-evento-hook` | lista branca do `pet_core::aviso` (e do `avisar.sh`, enquanto a reserva existir) → canários em `tests/hook.rs` (e `tests/avisar.rs`) → `hooks.json` em exec form → tabela do cérebro → teste ao vivo só numa sessão, com o binário da branch (`cargo build -p bichinho` e `PATH="$PWD/target/debug:$PATH" claude --plugin-dir plugin`; decisão 0045) → `/reload-plugins` depois do merge |
 | `conferir-na-tela` | ciclo dev, `foto`, `nitidez`, consulta de camadas |
 
 ## CLI `bin/pet` (bash + curl + jq)
@@ -541,7 +550,7 @@ claude-pet/
 | `doutor` | saúde do container, conexões Wayland/hypr, `bichinho@bichinho-local` habilitado em `claude plugin list --json`, idade do último evento por sessão, DND, skin aprovada |
 | `soneca [30m]`, `acordar`, `esconder [30m]`, `mostrar`, `posicao-padrao`, `recarregar` | controles, persistidos |
 | `tocar <reação>` | toca uma reação direto |
-| `testar <cenário>` | eventos sintéticos **pelo `avisar.sh` real**, com `teste:true` e TTL de 60 s; nunca se misturam com sessões reais |
+| `testar <cenário>` | eventos sintéticos **pelo hook de verdade** (o `bichinho avisar` do PATH ou de `PET_BICHINHO`, que diz de que commit veio; sem ele, o `avisar.sh` de reserva), com `teste:true` e TTL de 60 s; nunca se misturam com sessões reais |
 | `simular <cenário>` | roda o cenário no core com relógio falso; o daemon só exibe as intenções |
 | `eventos --salvar <arquivo>` | grava um cenário com ids pseudonimizados |
 | `foto` | captura com grim para o Claude ler |
@@ -552,18 +561,39 @@ claude-pet/
 
 **`verificar` roda:**
 - `cargo fmt --check`;
+- `pet-core` sem crate de Wayland, de laço de eventos ou de sistema, em todos os alvos (`cargo tree --target all`; o `libc` só pela detecção de CPU do `sha2`, decisão 0044);
+- o socket de comandos do Hyprland e o `hyprctl` fora do código de produção de todos os crates (só o item marcado com `#[cfg(test)]` fica de fora), com uma prova da própria guarda a cada rodada;
+- nenhum nome de personagem de terceiros nos arquivos nem nas mensagens de commit da branch (decisões 0035 e 0043);
 - `cargo clippy --all-targets -- -D warnings`;
 - `cargo test`;
+- `cargo clippy --target` para Windows e macOS, com os alvos do rustup instalados;
 - `lint-skin` em todas as skins;
-- `docker compose config -q`;
+- `docker compose config -q` (produção e dev);
 - `claude plugin validate` (`--strict`) no repo e em `plugin/`;
 - shellcheck, se estiver instalado.
 
-**Config `config/claude-pet.toml`** (gitignored; modelo em `exemplo.toml`; relido a quente):
+**Config `config/bichinho.toml`** (gitignored; modelo em `exemplo.toml`; relido a quente; o nome de antes, `claude-pet.toml`, ainda vale sozinho):
 - Precedência: comandos persistidos em `/state`, depois `PET_*`, depois o arquivo, depois os padrões.
 - `/v1/estado.config` mostra o valor de cada chave e de onde veio.
 
 ## Marcos (cada um: branch + PR; cada tarefa: commit + linha no PROGRESS)
+
+### Ordem (decisão 0038, 2026-10-03)
+
+M0–M3 estão na `main` (tags `v0.1.0`–`v0.3.0`). Daqui em diante:
+
+1. **Agora, antes do M4** (branch `m3b-portabilidade`), duas peças pequenas do M8 e uma opção de config:
+   - **TP.1** plano e docs (M8, M9, esta ordem, o M4 novo, a pesquisa e a regra do nome);
+   - **T8.0** costura de plataforma, sem mudar o comportamento;
+   - **T8.1** hook nativo (`bichinho avisar`) e o nome **bichinho** no binário, na camada e no compose;
+   - **TP.2** tamanho do Zeca no config (`aparencia.tamanho`).
+
+   Assim arraste, balões e voos (M4–M6) já nascem no Motor portável, e não dentro do backend Wayland.
+2. **M4 → M7**, como planejado.
+3. **Depois do M7:** T8.2 → T8.3 → T8.4 e T8.5 → T8.6 e T8.7 → T9.1 a T9.6. A T8.8 (GNOME) fica para a v1.1, salvo decisão em contrário.
+4. **Em paralelo, sem código:** T9.0 (personagem público, licença da arte e o pedido à exclusiveOlive).
+
+A beta pública mínima é T8.0–T8.5 mais T9.0–T9.4.
 
 ### M0 — Fundação
 
@@ -594,7 +624,7 @@ claude-pet/
 - **T1.6** `scripts/verificar-ao-vivo.sh`, `cargo xtask nitidez`, medições de custo registradas em DECISIONS.
 
 **Verificação** (`scripts/verificar-ao-vivo.sh`):
-1. **Posição:** `hyprctl -j layers` mostra `claude-pet` no nível 3 do monitor focado, com o retângulo lógico do monitor.
+1. **Posição:** `hyprctl -j layers` mostra `bichinho` (até o T8.1, `claude-pet`) no nível 3 do monitor focado, com o retângulo lógico do monitor.
 2. **Nitidez:**
    - `grim -o <monitor>` captura o monitor inteiro, com transformação identidade;
    - recorte em pixels do monitor por `sprite_disp`;
@@ -607,12 +637,12 @@ claude-pet/
    - orçamento: parado com no máximo +1% de CPU do Hyprland e média de até 2 commits/s.
 4. **Limites do container:** RSS abaixo de 64 MiB (96 no 4K) e CPU parado abaixo de 1%.
 5. **Clique:** clicar ao lado do bicho chega na janela de baixo.
-6. **Reinício:** `docker compose restart pet` volta em até 3 s, no mesmo lugar.
+6. **Reinício:** `docker compose restart bichinho` volta em até 3 s, no mesmo lugar.
 7. **Crash:** `kill -9` do processo pelo host faz o RestartCount subir. `docker kill` **não** serve, porque cancela a política de restart.
-8. **Sem compositor:** `docker compose run --rm --no-deps -e PET_HOST_RUNTIME=/tmp/nada pet` registra "aguardando compositor".
+8. **Sem compositor:** `docker compose run --rm --no-deps -e PET_HOST_RUNTIME=/tmp/nada bichinho` registra "aguardando compositor".
 
 **Se falhar:**
-- Nitidez, clique ou reconexão falhando são bugs a corrigir em `wl/`.
+- Nitidez, clique ou reconexão falhando são bugs a corrigir no backend Wayland (`crates/pet-wayland`, desde o T8.0).
 - Custo acima do orçamento → plano B de duas superfícies (repouso pequeno + palco temporário).
 - O GTK fica só como saída de emergência com prazo, se o encanamento Wayland não convergir.
 
@@ -660,11 +690,13 @@ claude-pet/
   2. um segundo prompt que cria um arquivo temporário com a ferramenta Write → pulinho T1, com `arquivos: 1` no turno (`/v1/estado.turnos`; o `arq` exato, sha256 do caminho, só aparece na pilha de dev, em `/v1/debug/eventos`, e os canários o conferem);
   3. `/exit` → tchau.
 - `claude -p --plugin-dir …` só serve para conferir que, com o pet parado, não aparece erro de hook.
-- `time (printf '{}' | sh plugin/scripts/avisar.sh Stop)` leva no máximo 2,1 s com o pet parado.
+- `time (printf '{}' | sh plugin/scripts/avisar.sh Stop)` leva no máximo 2,1 s com o pet parado (desde o T8.1, o hook é o `bichinho avisar`: conexão recusada na hora, menos de 0,5 s nos canários).
 - Na tela (acesa e desbloqueada), o `commits_total` do `/v1/estado` sobe durante as reações; com a tela apagada ou bloqueada, as reações só são conferidas no `/v1/estado`.
 - Depois do merge: a instalação pela worktree estável (README) e `claude plugin list` mostrando `bichinho@bichinho-local` habilitado.
 
-### M4 — Arrastar e seguir o monitor ativo
+### M4 — Arrastar, seguir o monitor ativo e levar ao terminal
+
+Atualizado em 2026-10-03 (decisões 0038 e 0039). O M4 nasce em cima da costura do T8.0: a máquina de arrastar e clicar, as pendências e o balão moram no Motor (`pet_core::motor`), com relógio falso nos testes; o backend Wayland só traduz ponteiro, monitores e janelas (`pet_core::plataforma`).
 
 **Tarefas:**
 - máquina de arrastar/clicar (limiares, região de input com fail-safe, cursores);
@@ -675,10 +707,18 @@ claude-pet/
 - soltar entre monitores;
 - posições salvas por descrição do monitor;
 - esconder durante a proteção de tela;
-- botão direito para soneca.
+- botão direito para soneca;
+- **clicar no Zeca leva à janela do terminal da sessão do Claude que terminou ou que precisa de você** (decisão 0039):
+  - **identidade de janela por sessão:** o leitor do socket2 guarda um anel com as últimas ativações (`activewindowv2`: endereço da janela e a hora em que o evento chegou, nunca o título). O `ts` do `UserPromptSubmit` (e do `SessionStart`) de cada sessão escolhe no anel a janela que estava ativa quando o Renan mandou o prompt: é o terminal daquela sessão. O hook pode mandar também, num campo novo e opcional do fio v1 (validado no `pet_core::evento` e com decisão própria), os ids de terminal que ele vê no próprio ambiente (`TMUX_PANE`, `KITTY_WINDOW_ID`, `WEZTERM_PANE`; só ids, nunca títulos). Eles só separam sessões dentro de um mesmo terminal (painéis do tmux, abas): no Docker o daemon roda em outro espaço de PIDs, e nem o socket2 nem o foreign-toplevel trazem PID, então uma cadeia de PIDs não leva a uma janela sem o `hyprctl clients`, que é o socket de comandos (decisão 0043). Quando o anel tem dúvida (dois terminais trocados em menos de 1 s), o clique cai no balão com a lista;
+  - **focar sem o socket de comandos:** `zwlr_foreign_toplevel_manager_v1` + `hyprland_toplevel_mapping_manager_v1` (que liga cada handle de toplevel ao endereço de janela do Hyprland, o mesmo do `activewindowv2`) e `zwlr_foreign_toplevel_handle_v1.activate(seat)`. O daemon continua sem abrir o `.socket.sock` e sem chamar `hyprctl` (decisão 0006). Conferir na 0.56.2 que os dois protocolos aparecem no registro; se faltar algum, o clique cai no balão;
+  - **pendências em ciclo:** com vários avisos (precisa de você, erro, pronto), o primeiro clique vai ao mais urgente, pela prioridade do cérebro (esperando você > erro > pronto), e cada clique seguinte vai ao próximo. O clique que foca a janela de uma sessão marca o aviso dela como visto; o foco sem clique segue as regras de sempre (o pronto some depois de ~10 s com o terminal da sessão em foco; o "esperando você" só sai com um evento da própria sessão ou um clique);
+  - **clique sem pendência:** um balão com a lista das sessões abertas (nome da pasta do projeto, estado — pensando, trabalhando, esperando você, pronto, parado — e há quanto tempo), que some sozinho. Pede o **balão mínimo e a fonte de pixel** (monogram, CC0), puxados do M6; o M6 só acrescenta pop, datilografia e as frases;
+  - **sem como focar** (a janela fechou, a sessão não tem identidade, o compositor não oferece os protocolos): o balão diz isso e mostra a lista;
+- **tamanho:** `aparencia.tamanho` (`pequeno`, `normal`, `grande`) chega antes, no TP.2; no M4 o arraste, as posições salvas e o balão usam o D que o tamanho escolhido dá em cada monitor.
+- **o que a costura ganha no M4** (decisão 0043): o `EventoDesktop` e o `Motor::evento_desktop` (monitor em foco, anel de ativações, "não perturbe"); o `Overlay::cursor` (pegar e agarrar no arraste); um punho por conexão (janela e desktop juntos) no `Nucleo`, no lugar do `Option<&mut dyn Overlay>`. O `Desktop` do Wayland usa a mesma conexão e o mesmo `wl_seat` da `Sessao`, recriados a cada reconexão: o `zwlr_foreign_toplevel_manager_v1` (genérico, serve ao Sway, ao labwc e aos outros wlroots) fica no `pet-wayland`, e o `hyprland_toplevel_mapping_manager_v1` com o socket2 é a extensão do Hyprland.
 - Propor a regra opcional do Hyprland **pela skill omarchy e com seu consentimento**:
   ```lua
-  hl.layer_rule({ name = "claude-pet", match = { namespace = "^claude-pet$" }, order = 1, no_anim = true })
+  hl.layer_rule({ name = "bichinho", match = { namespace = "^bichinho$" }, order = 1, no_anim = true })
   ```
   - `order = 1` deixa o Zeca abaixo dos popups do Omarchy (polkit, menus, toasts);
   - `no_anim` tira o fade de ~180 ms em cada troca de monitor.
@@ -688,6 +728,9 @@ claude-pet/
 - a posição sobrevive ao restart;
 - `omarchy-launch-screensaver force` esconde o Zeca e ele volta depois;
 - canário do socket2: `activewindow>>firefox,SEGREDO-T` nunca aparece em logs, `/v1/estado` ou `/v1/debug/eventos`;
+- testes do Motor em relógio falso: anel de ativações × `ts` do hook (janela certa, troca no mesmo segundo, sessão sem identidade), ciclo das pendências do mais urgente ao menos urgente, balão de sessões sem pendência;
+- ao vivo, com a tela acesa e desbloqueada: duas sessões do Claude em dois `foot`, em áreas de trabalho diferentes; com a sessão A pronta, o clique foca o `foot` de A (`hyprctl -j activewindow` só no script de teste do host); com A e B pendentes, cliques seguidos vão do mais urgente ao outro; sem pendência, o balão lista as duas com o estado;
+- o daemon segue sem `.socket.sock` e sem `hyprctl` (`bin/pet verificar`), e nenhum título de janela aparece no log, no `/v1/estado` nem no `/v1/debug/eventos`;
 - `scripts/e2e-monitor.sh --autorizo`, só com seu consentimento a cada vez:
   - `hyprctl output create headless` e descobre o nome novo por diff em `hyprctl -j monitors`;
   - foca o monitor novo e confere o Zeca lá; volta e confere de novo, com prazos de ≥2,5 s;
@@ -738,7 +781,7 @@ claude-pet/
 
 **Tarefas:**
 - partículas e movimento reduzido;
-- balões (9-slice, monogram, pop, datilografia, frases cariocas, modo discreto);
+- balões (9-slice, monogram, pop, datilografia, frases de malandro, modo discreto; o balão mínimo e a fonte chegam antes, no M4);
 - variedade parada: piscar, olhar em volta, micro-ações sorteadas, bocejo, sono, sono profundo;
 - física do arraste: pêndulo, pouso com quique, poeira;
 - momentos T3 (voo atravessando a tela, chuva de confete, holofote "PRONTO!");
@@ -771,6 +814,53 @@ claude-pet/
 - **Clone novo** num diretório temporário: `docker compose up -d --build` → `bin/pet skin-instalar <zip>` → instalar o plugin → sessão interativa via tmux → festa acontece.
 - A desinstalação deixa `claude plugin list`, `claude plugin marketplace list` e `docker images` limpos.
 
+### M8 — Multiplataforma: Linux amplo, Windows e macOS
+
+Acrescentado em 2026-10-03 (decisão 0038), a partir de `docs/pesquisa/09-multiplataforma.md`. O núcleo (`pet-core`) e o backend Wayland ficam; por sistema mudam só a janela do bicho (`Overlay`) e a ligação com o desktop (`Desktop`). No macOS e no Windows o pet é um app nativo; o Docker fica só no Linux.
+
+> **Conferência visual no macOS e no Windows:** precisa de uma máquina de verdade (Mac alugado por dia, VM de avaliação do Windows, voluntários) ou dos runners macOS e Windows do GitHub Actions (prints como artefato). Este notebook só compila (`cargo check --target …`) e roda o que não precisa de tela; sem máquina nem runner, os itens visuais ficam **NÃO VERIFICADO**.
+
+**Tarefas e verificação:**
+- **T8.0 Costura de plataforma, sem mudar o comportamento (antes do M4).** `pet_core::motor` (cérebro, pet e palco, mostrar/esconder, estresse, painel, prazos em ms) e `pet_core::plataforma` (traits `Overlay` e `Desktop` com capacidades; `Monitor`, `EventoPonteiro`, `Alca`; a `Caixa`, canal neutro com despertador do SO, no lugar do canal do calloop); o `wl/` e a descoberta vão para `crates/pet-wayland`, com o Hyprland como adaptador; `pet-windows` e `pet-macos` vazios, compilando.
+  - *Verificação:* `bin/pet verificar` verde, com testes novos do Motor em relógio falso; `cargo check` para `x86_64-pc-windows-msvc` e `aarch64-apple-darwin`; com a tela acesa e desbloqueada, `scripts/verificar-ao-vivo.sh --personagem` e `scripts/medir-custo.sh` iguais ao M1 dentro do ruído.
+  - *Contrato de coordenadas* (revisão, decisão 0044): tudo o que o Motor troca com a janela está no **palco** (pixels do dispositivo do monitor, origem no canto dele): a cena, a célula, a área de toque e o ponteiro. A camada do Wayland converte o toque para coordenadas lógicas; uma janela pequena (T8.4–T8.6) subtrai a própria origem. O `Monitor` traz a descrição, a origem no desktop e a área útil (sem barra de tarefas, Dock ou painel), e a posição padrão do pet é o canto da área útil.
+- **T8.1 Hook nativo e o nome bichinho (antes do M4).** `bichinho avisar <Evento>` no lugar do `avisar.sh` (a mesma lista branca, com os validadores do `pet_core::evento`, hash do caminho editado, DND do Omarchy, `CLAUDE_CODE_ENTRYPOINT`, `PET_TESTE`, POST no 127.0.0.1 com prazo curto, sem proxy, calado, sempre 0); `hooks.json` em exec form; binário no host por `bin/pet instalar-host`; o `avisar.sh` fica de reserva até a troca. Binário, camada, compose e imagem passam a se chamar `bichinho`, com o volume da aprovação preservado.
+  - *Verificação:* os canários portados para testes do subcomando (reprovam uma versão vazando de propósito); `bin/pet testar` e o gate interativo do M3 pelo hook novo; `claude -p` calado com o pet parado; aprovação do Zeca intacta depois de refazer a produção. O token por usuário no loopback vem com a instalação nativa (T9.3): o `avisar.sh` instalado não o mandaria.
+- **T8.2 Spikes de risco e CI nos três SOs.** Código descartável que abre a skin `_teste` e mede o incerto: no Windows, janela *layered* com clique pelo alfa, todas as áreas de trabalho virtuais, DPI por monitor, firewall no loopback; no macOS, `NSPanel` não ativador em todos os Spaces e sobre tela cheia, clique pelo alfa (plano B: alternar `ignoresMouseEvents`), App Nap. CI com matriz `ubuntu-24.04`, `macos-15` e `windows-2025`.
+  - *Verificação:* uma tabela «funciona / plano B / não dá» por item, registrada como decisão antes de codar os backends; Mac alugado por um dia e VM do Windows (ou os prints dos runners; captura preta conta como NÃO VERIFICADO).
+- **T8.3 Linux: qualquer Wayland com layer-shell** (KDE Plasma 6, Sway, niri, COSMIC, labwc, Wayfire, river). Descoberta pelo `WAYLAND_DISPLAY` exigindo só `zwlr_layer_shell_v1` (o `hyprland.lock` fica para o modo Docker); "convocar" (recriar a camada com output NULL) como base universal; adaptadores Hyprland, Sway/i3, niri, KWin e wlr-foreign-toplevel; reservas sem escala fracionária ou cursor-shape; autostart XDG.
+  - *Verificação:* laboratório em Docker com Sway, labwc e niri aninhados (monitor, escala, D e região no `/v1/estado`); CI com Sway e labwc headless e a checagem de nitidez do M1; KDE e COSMIC por VM ou voluntários, com checklist.
+- **T8.4 Windows (Win32 nativo, `pet-windows`).** Janela pequena *layered* que anda (DIB pré-multiplicado, alfa 1/255 na área de toque), `WS_EX_TOOLWINDOW | NOACTIVATE | TOPMOST`, monitor ativo por `SetWinEventHook`, DPI por monitor, palco transitório para voo e confete, laço `MsgWaitForMultipleObjectsEx`, arquivos em `%APPDATA%`/`%LOCALAPPDATA%`, autostart pela chave Run. O `unsafe` fica só neste crate, com `// SAFETY:`.
+  - *Verificação:* CI `windows-2025` a cada PR (build, testes, canários do hook); smoke gráfico com captura comparada ao `/v1/debug/quadro` (±2) e clique ao lado chegando na janela de baixo; VM ou PC com checklist (áreas virtuais, vídeo em tela cheia, dois monitores com DPI diferente, Windows Terminal e VS Code, custo parado).
+- **T8.5 macOS (AppKit nativo, `pet-macos`).** App `Accessory` com `NSPanel` não ativador, `CALayer` com `CGImage` BGRA pré-multiplicado e filtro nearest, monitor ativo por `NSScreen.main`, laço `NSApplication.run`, LaunchAgent. O `unsafe` fica só neste crate.
+  - *Verificação:* CI `macos-15` a cada PR (build arm64 e x86_64, testes, canários); smoke gráfico com `screencapture`; Mac alugado com checklist (Spaces, tela cheia, Stage Manager, monitor 1x com Retina 2x, custo parado).
+- **T8.6 Linux X11** (Mint Cinnamon, XFCE, MATE, i3, KDE X11) **e GNOME experimental pelo XWayland.** `x11rb` em Rust puro (o binário musl continua estático): janela ARGB pequena, SHAPE de entrada, EWMH (ABOVE, STICKY, SKIP_TASKBAR), monitor ativo por `_NET_ACTIVE_WINDOW` e RandR.
+  - *Verificação:* Xephyr ou Xvfb em Docker com i3, Openbox e xfwm4, com e sem compositor (captura com `xwd`, nitidez, clique com `xdotool`); CI com Xvfb; Mint, XFCE e GNOME por VM (com consentimento) ou voluntários.
+- **T8.7 Focar o terminal em todos os SOs e a bolha de sessões.** O que o M4 faz no Hyprland vira `Desktop::focar` por ambiente: Sway (`[con_id] focus`), niri (`FocusWindow`), KWin (script), foreign-toplevel genérico, X11 (`_NET_ACTIVE_WINDOW` com source 2), Windows (`SetForegroundWindow` dentro do clique; a janela do Windows Terminal pelo dono da pseudo-janela), macOS (ativar o app do terminal; a aba exata por AppleScript pede permissão de Automação). A bolha reconcilia com `claude agents --json`.
+  - *Verificação:* duas sessões em dois terminais, em áreas diferentes, no Hyprland e no laboratório (Sway, niri, Xephyr); VM do Windows (duas janelas do Windows Terminal e o VS Code); Mac alugado (Terminal.app, iTerm2, Ghostty); canário: título de janela nunca no log, no `/v1/estado` nem no `/v1/debug/eventos`.
+- **T8.8 GNOME (Ubuntu, Fedora): extensão «overlay remoto».** Extensão GJS mínima (`addTopChrome`, clique e arraste, focar janela) falando D-Bus com o daemon (`zbus`, Rust puro), publicada no extensions.gnome.org. Fica para a v1.1, salvo decisão em contrário.
+  - *Verificação:* VM com GNOME 49/50; revisão aprovada no EGO; checklist (por cima de tudo, clique fora atravessa, foca a janela, logout/login documentado).
+
+### M9 — Publicação open source
+
+Acrescentado em 2026-10-03 (decisões 0036 e 0038). O repositório público é novo e limpo; o privado continua `claude-pet` por ora.
+
+**Tarefas e verificação:**
+- **T9.0 Personagem público, nome e licença (paralela, sem código, pode começar já).** Arte do personagem padrão (encomenda de um papagaio original em CC BY 4.0 ou CC0, ou licença por escrito da exclusiveOlive para embutir o Zeca, ou só «traga seu pack» com uma skin provisória livre), busca do nome no INPI e no USPTO, o comentário pedindo permissão na página do pack.
+  - *Verificação:* permissão ou licença por escrito arquivada; decisão no DECISIONS; a folha de contato do personagem novo passa pelo portão do M2 (`skin-aprovar`; `cobertura --nativos mvp` sem faltas).
+- **T9.1 Repositório público limpo.** Repositório novo, exportado sem o histórico; NOTICE e CREDITS em ordem; guarda no CI contra skin rastreada com `redistribuivel: false` e qualquer arquivo em `skins-locais/`; Dockerfile publicável; SECURITY.md, página de privacidade (só metadados), CONTRIBUTING e modelos de issue com a saída do `doutor`.
+  - *Verificação:* script no CI sem arquivo derivado do pack em `git log --all --name-only`; a guarda de nomes do `bin/pet verificar` (decisão 0035) verde; uma skin plantada com `redistribuivel: false` faz o CI falhar.
+- **T9.2 Skin padrão livre embutida e «traga seu pack» no binário.** A skin original embutida e aprovada pelo build; o montador do `xtask` vira o crate `pet-arte` e o subcomando `bichinho skin instalar <zip>` (grava na pasta de dados do usuário, nunca baixa nada do itch.io).
+  - *Verificação:* CI nos três SOs com um pack sintético dá a mesma impressão sha256 (determinismo); o pack de verdade só no notebook, nunca no CI.
+- **T9.3 Instalar, iniciar com o sistema, desinstalar e `doutor`, por SO.** `bichinho configurar` (autostart e o plugin, sempre com confirmação), supervisor, instância única por usuário, menu no botão direito, porta e token por usuário no loopback, `doutor` (binário no PATH que o Claude vê, porta, token, backend e capacidades, permissões no macOS).
+  - *Verificação:* contêineres Linux limpos (Arch, Ubuntu, Fedora); runners macOS e Windows instalam, `doutor` verde, desinstalam sem sobras; Mac alugado e VM sobem o pet sozinhos depois do reboot.
+- **T9.4 Release e canais.** `dist` (Linux musl x86_64 e aarch64, macOS arm64 e x86_64, Windows x86_64; shell, PowerShell, Homebrew, MSI; atestados e SHA256), mais `.deb`, `.rpm`, AUR `-bin` e winget à parte; Rust fixo no CI, `--locked` e `--remap-path-prefix`; marketplace do plugin no próprio repositório.
+  - *Verificação:* tag de ensaio num repositório de teste com todos os jobs verdes e `gh attestation verify`; instalação por canal nos runners; dois builds Linux com o mesmo SHA256.
+- **T9.5 Assinatura.** Windows por SignPath Foundation (grátis, exige tudo OSI e nenhuma arte proprietária no binário) ou Certum Open Source (€ 69+); macOS sem notarização no começo (fórmula do Homebrew), Developer ID quando houver `.dmg` ou o foco na aba exata.
+  - *Verificação:* `signtool verify /pa` no runner e o nome do editor numa VM limpa; depois `spctl -a -vv` e `codesign -dv`.
+- **T9.6 Beta pública e v1.0.0.** README com tabela de suporte por SO e desktop, GIF só da skin livre, instalação por canal, plugin e privacidade; checklist manual por SO a cada release; beta de 2 a 4 semanas.
+  - *Verificação:* instalação nova e completa em cada SO (Hyprland no notebook, laboratório Docker, VM KDE, Mac alugado, VM do Windows): instalar, abrir sessão do Claude, aceno, pulinho e chamada, clicar e focar o terminal, desinstalar sem sobras; matriz da beta preenchida.
+
 ## Segurança e privacidade (vai para DECISIONS e docs/SEGURANCA.md)
 
 **O container é empacotamento, não sandbox.** Quem acessa o `wayland-1` (teclado virtual, captura de tela) já roda código como o usuário. O bind de `/run/user` expõe também o D-Bus e o gpg-agent.
@@ -800,9 +890,10 @@ claude-pet/
 ## Pendências que dependem de você
 
 - **Comprar e baixar** o pack da arara (US$ 0,50+): https://exclusiveolive.itch.io/cute-parrots-pixel-art-asset-pack
-- **Nome Zeca:** confirmar ou trocar. Só muda a skin e os balões.
+- **Nome Zeca:** confirmado em 2026-10-03, também em público (decisão 0035).
 - **Consentimentos:**
   - a regra do Hyprland no M4;
   - cada execução do e2e com monitor virtual;
-  - CI no GitHub Actions (opcional).
+  - CI no GitHub Actions (opcional até o M8; a T8.2 pede os runners de macOS e Windows).
 - **Testes manuais que exigem hardware:** HDMI, tampa fechada, suspensão, logout/login, reboot.
+- **Abertas pela pesquisa multiplataforma** (`docs/pesquisa/09-multiplataforma.md`, T9.0): a arte do personagem público (encomenda, licença da exclusiveOlive ou só «traga seu pack»), quanto gastar com arte e assinatura, GNOME e X11 na v1.0 ou na v1.1, a rota de assinatura no Windows, a conta da Apple, um Mac e um Windows para a conferência visual (aluguel, VM ou voluntários) e o tempo para issues e contribuições.

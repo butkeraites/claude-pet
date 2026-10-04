@@ -1,6 +1,9 @@
 #!/bin/sh
-# avisar.sh — hook do plugin bichinho: conta ao claude-pet o que o Claude
-# Code acabou de fazer (decisões 0009 e 0019).
+# avisar.sh — o hook de antes do `bichinho avisar` (decisões 0009 e 0019):
+# conta ao bichinho o que o Claude Code acabou de fazer. O plugin 0.2.0 chama
+# o binário em exec form (decisão 0041); este script fica de reserva até a
+# troca, para o plugin 0.1.0 instalado e para o `bin/pet testar` sem o
+# binário no PATH.
 #
 #   sh avisar.sh <Evento>        # o JSON do hook chega pela entrada padrão
 #

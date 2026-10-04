@@ -1,5 +1,5 @@
 {
-  "description": "Conta ao claude-pet (o Zeca, no 127.0.0.1:27380) o que o Claude Code está fazendo: só metadados (evento, ids, ferramenta, contagens, hash do arquivo editado, nome da pasta do projeto). Hooks async que nunca imprimem nada e sempre saem 0.",
+  "description": "Conta ao bichinho (o Zeca, no 127.0.0.1:27380) o que o Claude Code está fazendo: só metadados (evento, ids, ferramenta, contagens, hash do arquivo editado, nome da pasta do projeto). Hooks async em exec form que chamam o binário bichinho no PATH (bichinho avisar <Evento>): sem shell, jq nem curl; nunca imprimem nada e sempre saem 0.",
   "hooks": {
     "SessionStart": [
       {
@@ -7,7 +7,8 @@
           {
             "type": "command",
             "async": true,
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" SessionStart || true"
+            "command": "bichinho",
+            "args": ["avisar", "SessionStart"]
           }
         ]
       }
@@ -18,7 +19,8 @@
           {
             "type": "command",
             "async": true,
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" UserPromptSubmit || true"
+            "command": "bichinho",
+            "args": ["avisar", "UserPromptSubmit"]
           }
         ]
       }
@@ -30,7 +32,8 @@
           {
             "type": "command",
             "async": true,
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" PreToolUse || true"
+            "command": "bichinho",
+            "args": ["avisar", "PreToolUse"]
           }
         ]
       }
@@ -41,7 +44,8 @@
           {
             "type": "command",
             "async": true,
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" PostToolUse || true"
+            "command": "bichinho",
+            "args": ["avisar", "PostToolUse"]
           }
         ]
       }
@@ -52,7 +56,8 @@
           {
             "type": "command",
             "async": true,
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" PostToolUseFailure || true"
+            "command": "bichinho",
+            "args": ["avisar", "PostToolUseFailure"]
           }
         ]
       }
@@ -63,7 +68,8 @@
           {
             "type": "command",
             "async": true,
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" PermissionRequest || true"
+            "command": "bichinho",
+            "args": ["avisar", "PermissionRequest"]
           }
         ]
       }
@@ -75,7 +81,8 @@
           {
             "type": "command",
             "async": true,
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" Notification || true"
+            "command": "bichinho",
+            "args": ["avisar", "Notification"]
           }
         ]
       }
@@ -86,7 +93,8 @@
           {
             "type": "command",
             "async": true,
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" SubagentStart || true"
+            "command": "bichinho",
+            "args": ["avisar", "SubagentStart"]
           }
         ]
       }
@@ -97,7 +105,8 @@
           {
             "type": "command",
             "async": true,
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" PreCompact || true"
+            "command": "bichinho",
+            "args": ["avisar", "PreCompact"]
           }
         ]
       }
@@ -108,7 +117,8 @@
           {
             "type": "command",
             "async": true,
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" PostCompact || true"
+            "command": "bichinho",
+            "args": ["avisar", "PostCompact"]
           }
         ]
       }
@@ -119,7 +129,8 @@
           {
             "type": "command",
             "async": true,
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" Stop || true"
+            "command": "bichinho",
+            "args": ["avisar", "Stop"]
           }
         ]
       }
@@ -130,7 +141,8 @@
           {
             "type": "command",
             "async": true,
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" StopFailure || true"
+            "command": "bichinho",
+            "args": ["avisar", "StopFailure"]
           }
         ]
       }
@@ -141,7 +153,8 @@
           {
             "type": "command",
             "async": true,
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\" SessionEnd || true"
+            "command": "bichinho",
+            "args": ["avisar", "SessionEnd"]
           }
         ]
       }

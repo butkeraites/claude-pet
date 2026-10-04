@@ -1,8 +1,8 @@
-# claude-pet
+# bichinho
 
-O **Zeca** é um papagaio de pixel art que mora por cima de tudo na sua tela
-e reage ao [Claude Code](https://claude.com/claude-code) rodando no
-terminal:
+O **bichinho** põe o **Zeca**, um papagaio de pixel art, por cima de tudo na
+sua tela, reagindo ao [Claude Code](https://claude.com/claude-code) rodando
+no terminal:
 
 - **terminou** → aceno, pulinho, voo curto com confete ou, se o trabalho
   foi grande, um voo atravessando a tela com chuva de confete;
@@ -15,10 +15,11 @@ terminal:
 Pode ser arrastado com o mouse para qualquer lugar e sempre aparece no
 monitor que está em foco. Sem som.
 
-> **Estado:** em construção. O M1 (overlay nítido na tela, seguindo o
-> orçamento de custo no Hyprland) está pronto na branch `m1-overlay`; o M2
-> (o Zeca, com aprovação do personagem) está na branch `m2-zeca`; o M3
-> (hooks → reação) está na branch `m3-hooks`, em cima da `m2-zeca`. Veja
+> **Estado:** em construção. Na `main`: o overlay nítido no Hyprland (M1),
+> o Zeca com aprovação do personagem (M2) e hooks → reação (M3). Em
+> andamento: a costura para Windows e macOS e o hook nativo (M8, antes do
+> M4); o destino é um lançamento open source para Linux, macOS e Windows.
+> O repositório de desenvolvimento ainda se chama `claude-pet`. Veja
 > `PLANO.md` para os marcos e `PROGRESS.md` para o andamento.
 
 ## Requisitos
@@ -27,7 +28,13 @@ monitor que está em foco. Sem som.
   usa `wlr-layer-shell` e os eventos do Hyprland para seguir o monitor.
 - **Docker** com Compose, e o serviço `docker` habilitado no boot
   (`sudo systemctl enable docker.service`).
-- `curl` e `jq` no host (os hooks do Claude Code usam).
+- `~/.local/bin` no PATH que o Claude Code vê (o hook é o binário
+  `bichinho`, copiado da imagem por `bin/pet instalar-host`).
+- Claude Code com hooks em exec form (`command` + `args`; testado no
+  2.1.288). Um Claude Code que ignorasse o `args` chamaria só `bichinho`, que
+  sem subcomando não faz nada: o pet fica surdo, mas nada mais roda.
+- `curl` e `jq` no host para o `bin/pet` (e para o `avisar.sh`, o hook de
+  reserva até a troca).
 
 ## Subir
 
@@ -36,11 +43,25 @@ git clone git@github.com:butkeraites/claude-pet.git ~/Documents/claude-pet
 cd ~/Documents/claude-pet
 cp .env.example .env            # opcional: porta, uid/gid
 bin/pet subir                   # docker compose up -d --build
+bin/pet instalar-host           # o binário do hook em ~/.local/bin/bichinho
 bin/pet estado
 ```
 
 O container sobe no boot, espera o Hyprland e se reconecta sozinho depois
 de logout, suspensão ou troca de monitor.
+
+Para mudar alguma coisa, copie `config/exemplo.toml` para
+`config/bichinho.toml` (fora do git). Por exemplo, o Zeca menor:
+
+```toml
+[aparencia]
+tamanho = "pequeno"   # pequeno (~10% da altura do monitor), normal (~12%) ou grande (~16%)
+```
+
+O tamanho muda só a escala do desenho, nunca a skin: não pede outra
+aprovação. Vale quando o pet reinicia (`bin/pet parar && bin/pet subir`; um
+`bin/pet subir` sozinho não recria o container quando só o config muda) ou na
+próxima aprovação, que relê o config.
 
 ### Arte
 
@@ -57,7 +78,7 @@ bin/pet skin-aprovar zeca             # depois de ver a folha de contato
 
 Sem aprovação o Zeca fica escondido, e a aprovação só vale para a skin da
 folha de contato que você viu. Para o Zeca com contorno creme, ponha
-`aparencia.skin = "zeca-contorno"` em `config/claude-pet.toml` e aprove
+`aparencia.skin = "zeca-contorno"` em `config/bichinho.toml` e aprove
 `zeca-contorno`. O chapéu, a gravata e o encaixe são arte deste repositório
 (`arte/zeca/`); detalhes em `docs/SKINS.md`.
 
@@ -65,17 +86,33 @@ folha de contato que você viu. Para o Zeca com contorno creme, ponha
 
 Os hooks vêm no plugin `bichinho`, que mora neste repositório (`plugin/`,
 com o marketplace local `bichinho-local` em `.claude-plugin/`): 13 hooks
-async que chamam `plugin/scripts/avisar.sh`. Ele manda **só metadados**
-para `127.0.0.1:27380` — nome do evento, ids opacos, nome da ferramenta,
-contagens e durações, um hash do caminho do arquivo editado e o nome da
-pasta do projeto —, nunca o texto dos prompts, código, respostas ou
-caminhos. E só para lá: o curl ignora proxy e `~/.curlrc`. Não imprime
-nada, sempre sai 0 e não atrasa o Claude: com o pet desligado, desiste na
-hora. Precisa de `jq` e `curl` no host.
+async em exec form que chamam o próprio binário, `bichinho avisar <Evento>`.
+Ele lê o JSON do hook e manda **só metadados** para `127.0.0.1:27380` —
+nome do evento, ids opacos, nome da ferramenta, contagens e durações, um
+hash do caminho do arquivo editado e o nome da pasta do projeto —, nunca o
+texto dos prompts, código, respostas ou caminhos. E só para lá: fala TCP
+direto com o 127.0.0.1, sem proxy nem curlrc. Não imprime nada, sempre sai 0
+e não atrasa o Claude: com o pet desligado, desiste na hora. Lê o JSON em
+fluxo e guarda só os campos da lista branca: o resto (prompt, resposta,
+saída das ferramentas) só passa, sem ser interpretado nem ficar na memória.
 
-**Instalação, depois do merge na `main`.** O marketplace aponta para uma
-worktree estável, destacada na `main`, para uma branch em andamento nunca
-chegar às sessões de outros projetos:
+**O binário no PATH.** O exec form acha o `bichinho` pelo PATH do Claude
+Code. `bin/pet instalar-host` copia o binário estático (musl) da imagem para
+`~/.local/bin/bichinho`, que precisa estar nesse PATH (no Omarchy, está).
+Confira com `command -v bichinho` e `bichinho versao`, que diz o commit de
+onde o binário saiu. Sem o binário, os hooks não chegam ao pet (o `claude -p`
+continua calado); o `plugin/scripts/avisar.sh` (sh + jq + curl) continua no
+plugin como reserva até a troca.
+
+Esse binário é a lista branca de **todas** as sessões do Claude Code da
+máquina. Por isso o `bin/pet instalar-host` só aceita a imagem do commit da
+worktree estável (numa máquina sem ela, o da `main`) e de árvore limpa: o
+`bin/pet subir` grava na imagem o commit de onde ela saiu. Uma branch nunca
+vai para o `~/.local/bin`; para testar uma, veja abaixo.
+
+**Instalação**, a partir da `main`. O marketplace aponta para uma worktree
+estável, destacada na `main`, para uma branch em andamento nunca chegar às
+sessões de outros projetos:
 
 ```sh
 git -C ~/Documents/claude-pet worktree add --detach ~/.local/share/claude-pet/estavel main
@@ -85,21 +122,41 @@ claude plugin install bichinho@bichinho-local
 claude plugin list                    # bichinho@bichinho-local habilitado
 ```
 
-Depois de cada merge, atualize a worktree
-(`git -C ~/.local/share/claude-pet/estavel checkout --detach main`) e rode
-`/reload-plugins` nas sessões abertas.
-
-**Até o merge**, ou para testar uma mudança, carregue o plugin só numa
-sessão:
+**Depois de cada merge** (e, na primeira vez, a troca do `avisar.sh` pelo
+hook nativo, plugin 0.2.0), com o clone na `main`:
 
 ```sh
-claude --plugin-dir ~/Documents/claude-pet/plugin
+git -C ~/Documents/claude-pet switch main && git -C ~/Documents/claude-pet pull
+git -C ~/.local/share/claude-pet/estavel checkout --detach main
+bin/pet subir                         # a imagem nova, com o commit da main (e o nome bichinho no compose)
+bin/pet instalar-host                 # o binário do hook, ANTES de atualizar o plugin
+bichinho versao                       # o commit tem de ser o da worktree estável
+claude plugin marketplace update bichinho-local
+claude plugin update bichinho@bichinho-local
+```
+
+e `/reload-plugins` nas sessões abertas (ou abra outra). A ordem importa: o
+plugin 0.2.0 chama o `bichinho` do PATH, e o `instalar-host` recusa uma
+imagem que não seja do commit da worktree estável. Até atualizar, o plugin
+instalado continua no `avisar.sh` da cópia dele, que fala com o mesmo pet:
+nada fica surdo no meio da troca.
+
+**Para testar uma mudança**, carregue o plugin e o binário da branch só
+numa sessão (o `~/.local/bin` continua com o da worktree estável):
+
+```sh
+cd ~/Documents/claude-pet
+~/.cargo/bin/cargo build -p bichinho            # target/debug/bichinho, desta branch
+PATH="$PWD/target/debug:$PATH" claude --plugin-dir ~/Documents/claude-pet/plugin
 ```
 
 Para conferir sem o Claude: `bin/pet testar rapido` (aceno) e
-`bin/pet testar pequeno` (pulinho) mandam eventos sintéticos pelo mesmo
-`avisar.sh`, e `bin/pet tocar nod` toca uma reação e diz se ela apareceu na
-tela. Só sessões de terminal contam (`sessoes.origens = ["cli"]` em
+`bin/pet testar pequeno` (pulinho) mandam eventos sintéticos pelo mesmo hook
+(o `bichinho avisar` do PATH, ou o de `PET_BICHINHO`, por exemplo
+`PET_BICHINHO="$PWD/target/debug/bichinho"`; sem nenhum, o `avisar.sh`, com
+aviso), dizem de que commit é o binário, e
+`bin/pet tocar nod` toca uma reação e diz se ela apareceu na tela. Só
+sessões de terminal contam (`sessoes.origens = ["cli"]` em
 `config/exemplo.toml`): `claude -p`, SDK e IDE ficam de fora.
 
 Com o Zeca aprovado, uma resposta sem trabalho (sem editar arquivo, rodar

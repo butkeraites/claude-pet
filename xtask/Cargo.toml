@@ -1,6 +1,6 @@
 [package]
 name = "xtask"
-description = "Ferramentas de desenvolvimento do claude-pet (skins, arte, verificação de nitidez)."
+description = "Ferramentas de desenvolvimento do bichinho (skins, arte, verificação de nitidez)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

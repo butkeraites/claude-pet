@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# bin/pet — atalhos do claude-pet. `bin/pet ajuda` lista os comandos.
+# bin/pet — atalhos de desenvolvimento do bichinho. `bin/pet ajuda` lista os
+# comandos.
 #
 # Funciona de qualquer pasta (resolve a raiz do repo pelo próprio caminho)
 # e acrescenta ~/.cargo/bin ao PATH, que fica fora do PATH do Renan.
@@ -28,13 +29,24 @@ ajuda() {
   cat <<'TEXTO'
 uso: bin/pet <comando>
 
-  subir           sobe o pet (docker compose up -d --build)
+  subir           sobe o pet (docker compose up -d --build), com o commit da
+                  árvore na imagem; na primeira vez depois do nome novo,
+                  aposenta o container claude-pet antigo (o volume com a
+                  aprovação fica)
   parar           para o pet
   logs            acompanha os logs
   estado          mostra /v1/estado (o que o pet está vendo e pensando)
-  testar CENÁRIO  manda eventos sintéticos pelo plugin/scripts/avisar.sh de
-                  verdade (PET_TESTE=1: isolados das sessões reais e
-                  esquecidos em 60 s) e mostra a reação: rapido → nod,
+  instalar-host [--da-branch]
+                  copia o binário estático da imagem para ~/.local/bin/bichinho
+                  (o hook do plugin chama `bichinho avisar`; PET_BIN_HOST muda
+                  a pasta). Só aceita a imagem do commit da worktree estável
+                  (sem ela, o da main) e de árvore limpa: o hook vale para todas
+                  as sessões do Claude Code. --da-branch pula a conferência
+                  (só para uma pasta fora do PATH, nos testes)
+  testar CENÁRIO  manda eventos sintéticos pelo hook de verdade (o `bichinho
+                  avisar` do PATH, ou PET_BICHINHO; sem ele, o avisar.sh de
+                  reserva), com PET_TESTE=1 (isolados das sessões reais e
+                  esquecidos em 60 s), e mostra a reação: rapido → nod,
                   pequeno → done_small
   tocar REAÇÃO    toca uma reação (nod, done_small, wave, alert, …) e diz a
                   tag que a skin tocou e se ela apareceu na tela
@@ -115,10 +127,38 @@ tocar_reacao() {
   fi
 }
 
-# Um cenário sintético PELO avisar.sh de verdade, como o Claude Code chamaria:
-# o JSON do hook na entrada padrão, CLAUDE_CODE_ENTRYPOINT=cli (uma sessão
-# de terminal) e PET_TESTE=1 (o pet isola o evento das sessões reais e o
-# esquece em 60 s). Depois espera a acomodação do Stop e mostra a reação.
+# O commit desta árvore, para a imagem saber de onde saiu (decisão 0045):
+# `git rev-parse HEAD`, com `-sujo` se há mudanças (arquivos novos contam; os
+# ignorados, como config/bichinho.toml, não).
+fonte_do_clone() {
+  local commit
+  commit="$(git rev-parse HEAD 2>/dev/null || true)"
+  if [ -z "$commit" ]; then
+    printf 'desconhecida'
+    return
+  fi
+  if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+    commit="${commit}-sujo"
+  fi
+  printf '%s' "$commit"
+}
+
+# O hook que o plugin chama (decisão 0041): o `bichinho` do PATH, como o
+# Claude Code acha no exec form, ou PET_BICHINHO; vazio se não houver.
+binario_do_hook() {
+  if [ -n "${PET_BICHINHO:-}" ]; then
+    printf '%s' "$PET_BICHINHO"
+  else
+    command -v bichinho 2>/dev/null || true
+  fi
+}
+
+# Um cenário sintético PELO hook de verdade, como o Claude Code chamaria: o
+# JSON do hook na entrada padrão, CLAUDE_CODE_ENTRYPOINT=cli (uma sessão de
+# terminal) e PET_TESTE=1 (o pet isola o evento das sessões reais e o esquece
+# em 60 s). O hook é o `bichinho avisar` (o do PATH ou PET_BICHINHO); sem ele,
+# o avisar.sh de reserva, com aviso. Depois espera a acomodação do Stop e
+# mostra a reação.
 testar() {
   local cenario="${1:-}" esperado
   case "$cenario" in
@@ -133,15 +173,25 @@ testar() {
     echo "o pet não respondeu em ${URL} — está de pé? (bin/pet subir)" >&2
     return 1
   fi
-  local sid id_turno
+  local sid id_turno nativo
   sid="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')-pet-testar"
   id_turno="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+  nativo="$(binario_do_hook)"
+  if [ -n "$nativo" ]; then
+    echo "pelo hook nativo: $nativo avisar ($("$nativo" versao 2>/dev/null || echo 'sem versão'))"
+  else
+    echo "aviso: o bichinho não está no PATH (bin/pet instalar-host); indo pelo avisar.sh de reserva" >&2
+  fi
   hook() {
     jq -nc --arg e "$1" --arg sid "$sid" --arg turno "$id_turno" --argjson extra "$2" \
       '{session_id: $sid, prompt_id: $turno, cwd: "/tmp/pet-testar",
         transcript_path: "/dev/null", hook_event_name: $e} + $extra' |
-      PET_TESTE=1 PET_PORTA="$PORTA" CLAUDE_CODE_ENTRYPOINT=cli \
-        sh "$RAIZ/plugin/scripts/avisar.sh" "$1"
+      if [ -n "$nativo" ]; then
+        PET_TESTE=1 PET_PORTA="$PORTA" CLAUDE_CODE_ENTRYPOINT=cli "$nativo" avisar "$1"
+      else
+        PET_TESTE=1 PET_PORTA="$PORTA" CLAUDE_CODE_ENTRYPOINT=cli \
+          sh "$RAIZ/plugin/scripts/avisar.sh" "$1"
+      fi
   }
   hook SessionStart '{"source": "startup"}'
   hook UserPromptSubmit '{"prompt": "teste do bin/pet", "source": "user"}'
@@ -182,15 +232,45 @@ testar() {
   fi
 }
 
-# O core é puro (CLAUDE.md): nenhuma dependência normal, direta ou
-# transitiva, pode ser crate de Wayland ou do laço de eventos.
+# O core é puro (CLAUDE.md, decisões 0040 e 0044): nenhuma dependência
+# normal, direta ou transitiva, pode ser crate de Wayland, do laço de eventos
+# ou de um sistema operacional, em nenhum alvo (`--target all`: um crate só
+# do Windows ou do macOS também conta). A exceção é o `libc` que o `sha2`
+# puxa pela detecção de CPU (`cpufeatures`) nos alvos aarch64: só ele pode
+# depender do `libc`.
 core_sem_wayland() {
-  local proibidas
-  proibidas="$(cargo tree -p pet-core -e normal --prefix none --quiet |
-    grep -iE '^(wayland|smithay|calloop)' || true)"
-  if [ -n "$proibidas" ]; then
-    printf 'pet-core depende de:\n%s\n' "$proibidas" >&2
+  local proibidas dependentes
+  proibidas="$(cargo tree -p pet-core -e normal --target all --prefix none --quiet |
+    grep -iE '^(wayland|smithay|calloop|rustix|signal-hook|nix |windows|objc2|core-foundation|cocoa|x11rb|zbus)' |
+    sort -u || true)"
+  dependentes="$(cargo tree -p pet-core -e normal --target all --prefix none --quiet -i libc --depth 1 2>/dev/null |
+    grep -vE '^libc ' | grep -vE '^cpufeatures ' | sort -u || true)"
+  if [ -n "$proibidas" ] || [ -n "$dependentes" ]; then
+    printf 'pet-core depende de:\n%s\n' "$proibidas${dependentes:+$'\n'libc por: $dependentes}" >&2
     return 1
+  fi
+}
+
+# O núcleo, os esboços e o daemon compilam para o Windows e o macOS
+# (decisão 0040): `cargo clippy --target …`, que não linka e não pede SDK.
+# Só roda com os alvos instalados (`rustup target add x86_64-pc-windows-msvc
+# aarch64-apple-darwin`); sem eles, avisa e pula.
+outros_sistemas() {
+  local instalados alvo crate faltam=()
+  instalados="$(rustup target list --installed 2>/dev/null || true)"
+  for alvo in x86_64-pc-windows-msvc aarch64-apple-darwin; do
+    if ! grep -qx "$alvo" <<<"$instalados"; then
+      faltam+=("$alvo")
+      continue
+    fi
+    case "$alvo" in
+      *windows*) crate=pet-windows ;;
+      *) crate=pet-macos ;;
+    esac
+    cargo clippy --quiet --target "$alvo" -p pet-core -p "$crate" -p bichinho -- -D warnings || return 1
+  done
+  if [ "${#faltam[@]}" -gt 0 ]; then
+    echo "  (sem os alvos ${faltam[*]}: rustup target add ${faltam[*]})"
   fi
 }
 
@@ -232,18 +312,86 @@ foto() {
   fi
 }
 
-# Regra de ouro checável no código (decisão 0006): o daemon nunca abre o
-# socket de comandos do Hyprland nem chama hyprctl. Olha só o código de
-# produção (o que vem antes de `#[cfg(test)]`), fora de comentários; os
-# testes podem criar um `.socket.sock` falso para provar que ninguém conecta.
+# Regra de ouro checável no código (decisões 0006 e 0044): o daemon nunca
+# abre o socket de comandos do Hyprland nem chama hyprctl. Olha o código de
+# produção de todos os crates, fora de comentários; os testes podem criar um
+# `.socket.sock` falso para provar que ninguém conecta.
+#
+# O awk pula só o item marcado com `#[cfg(test)]` na coluna 0: um `mod x;`
+# (uma linha) ou um bloco `… {` até a `}` da coluna 0. Antes ele parava no
+# primeiro `#[cfg(test)]` do arquivo, e um `#[cfg(test)] mod testes;` no topo
+# escondia o resto (o Motor inteiro). Qualquer outra coisa depois do atributo
+# volta a ser lida (melhor um falso alarme que um ponto cego).
+linhas_de_producao() {
+  # shellcheck disable=SC2016 # é o programa do awk: os $ são do awk
+  awk '
+    FNR == 1 { pular = 0 }
+    pular == 2 { if ($0 ~ /^}/) pular = 0; next }
+    pular == 1 {
+      if ($0 ~ /^[[:space:]]*#\[/) next
+      if ($0 ~ /;[[:space:]]*$/) { pular = 0; next }
+      if ($0 ~ /\{[[:space:]]*$/) { pular = 2; next }
+      pular = 0
+    }
+    /^#\[cfg\(test\)\]/ { pular = 1; next }
+    { print FILENAME ":" FNR ":" $0 }
+  ' "$@"
+}
+
+achados_do_socket() {
+  linhas_de_producao "$@" |
+    grep -E '\.socket\.sock|hyprctl' | grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true
+}
+
 daemon_sem_socket_de_comandos() {
-  local achados
-  # shellcheck disable=SC2016 # é o programa do awk: o $0 é do awk, não do shell
-  achados="$(find crates/claude-pet/src -name '*.rs' -print0 |
-    xargs -0 awk '/^#\[cfg\(test\)\]/ {nextfile} {print FILENAME ":" FNR ":" $0}' |
-    grep -E '\.socket\.sock|hyprctl' | grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true)"
+  local achados arquivos=()
+  while IFS= read -r -d '' arquivo; do arquivos+=("$arquivo"); done \
+    < <(find crates/*/src -name '*.rs' -print0)
+  achados="$(achados_do_socket "${arquivos[@]}")"
   if [ -n "$achados" ]; then
     printf 'o daemon cita o socket de comandos do Hyprland ou o hyprctl:\n%s\n' "$achados" >&2
+    return 1
+  fi
+}
+
+# A guarda de cima se prova a cada verificar: uma linha plantada depois de
+# um `#[cfg(test)] mod testes;` no topo e depois de um bloco de teste tem de
+# ser achada; a de dentro do bloco de teste, não.
+guarda_do_socket_se_prova() {
+  local pasta achados ok=0
+  pasta="$(mktemp -d)"
+  printf '%s\n' '//! Topo.' '#[cfg(test)]' 'mod testes;' '' \
+    'fn cedo() { let _ = ".socket.sock"; }' >"$pasta/cedo.rs"
+  printf '%s\n' '#[cfg(test)]' '#[allow(dead_code)]' 'mod testes {' \
+    '    const S: &str = "/run/hypr/.socket.sock";' '}' '' \
+    'fn depois() { let _ = "hyprctl"; }' >"$pasta/bloco.rs"
+  achados="$(achados_do_socket "$pasta/cedo.rs" "$pasta/bloco.rs")"
+  rm -rf "$pasta"
+  grep -q 'cedo.rs:5:' <<<"$achados" || ok=1
+  grep -q 'bloco.rs:7:' <<<"$achados" || ok=1
+  if grep -q 'bloco.rs:4:' <<<"$achados"; then ok=1; fi
+  if [ "$ok" -ne 0 ]; then
+    printf 'a guarda do socket de comandos não achou o que devia (ou achou teste):\n%s\n' "$achados" >&2
+  fi
+  return "$ok"
+}
+
+# Decisões 0035 e 0043: nenhum texto do projeto cita o personagem de
+# terceiros nem o estúdio dele. Procura sem caixa nos arquivos rastreados e
+# nos novos (os ignorados ficam de fora) e nas mensagens dos commits da
+# branch que ainda não estão na main; os colchetes fazem o padrão não casar
+# consigo mesmo. O corpo do PR se confere antes do `gh pr create`.
+NOMES_DE_TERCEIROS='cari[o]ca|dis[n]ey'
+sem_nomes_de_terceiros() {
+  local achados mensagens=""
+  achados="$(git grep --untracked -n -i -E "$NOMES_DE_TERCEIROS" -- . 2>/dev/null || true)"
+  if git rev-parse --verify --quiet main >/dev/null; then
+    mensagens="$(git log --format='%h %B' main..HEAD 2>/dev/null |
+      grep -i -E "$NOMES_DE_TERCEIROS" || true)"
+  fi
+  if [ -n "$achados" ] || [ -n "$mensagens" ]; then
+    printf 'texto citando personagem de terceiros (decisão 0035):\n%s\n' \
+      "$achados${mensagens:+$'\n'commits da branch:$'\n'$mensagens}" >&2
     return 1
   fi
 }
@@ -389,7 +537,7 @@ skin_aprovar() {
   pedida="$(skin_pedida || true)"
   if [ -n "$pedida" ] && [ "$pedida" != "$id" ]; then
     echo "atenção: o pet está configurado para «$pedida»; para usar «$id», ponha" \
-      "aparencia.skin = \"$id\" em config/claude-pet.toml (o pet relê o config a cada" \
+      "aparencia.skin = \"$id\" em config/bichinho.toml (o pet relê o config a cada" \
       "aprovação) e rode bin/pet skin-aprovar $id de novo" >&2
   fi
 }
@@ -420,6 +568,115 @@ skin_revogar() {
   jq -r '.personagem | if .id then "personagem: \(.id) (\(.origem))" else "personagem: nenhum (o pet fica escondido)" end' <<<"$RESPOSTA"
 }
 
+# O nome antigo (decisões 0036 e 0041): o projeto do compose era claude-pet,
+# com o serviço pet. O container dele segura a porta 27380 e impediria o
+# novo de subir: sai (parado e removido), junto com a rede. O volume
+# claude-pet_estado, com a aprovação do Zeca, fica: o compose novo usa o
+# mesmo, pelo nome.
+aposentar_nome_antigo() {
+  local antigos
+  antigos="$(docker ps -aq --filter label=com.docker.compose.project=claude-pet 2>/dev/null || true)"
+  [ -z "$antigos" ] && return 0
+  echo "▸ aposentando o container do nome antigo (claude-pet); o volume claude-pet_estado fica"
+  # shellcheck disable=SC2086 # um id por palavra
+  docker rm -f $antigos >/dev/null
+  docker network rm claude-pet_default >/dev/null 2>&1 || true
+}
+
+# A worktree estável, de onde o marketplace instala o plugin (README).
+ESTAVEL="${PET_ESTAVEL:-$HOME/.local/share/claude-pet/estavel}"
+
+# O commit que o hook do PATH tem de ter: o da worktree estável ou, numa
+# máquina sem ela (um clone novo), o da main.
+commit_de_referencia() {
+  if git -C "$ESTAVEL" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+    git -C "$ESTAVEL" rev-parse HEAD
+  else
+    git rev-parse --verify --quiet main || true
+  fi
+}
+
+# instalar-host: o hook do plugin chama `bichinho avisar` (exec form, decisão
+# 0041), então o binário tem de estar no PATH que o Claude Code vê. Copia o
+# binário estático (musl) da imagem local para ~/.local/bin/bichinho
+# (PET_BIN_HOST muda a pasta), trocando de uma vez, e confere que ele roda no
+# host.
+#
+# Esse binário é a lista branca de TODAS as sessões do Claude Code da máquina
+# (decisão 0045): só vai para lá o do commit da worktree estável, de árvore
+# limpa, que é o código que o marketplace instalou. A imagem diz de onde saiu
+# (etiqueta `bichinho.fonte`, posta pelo `bin/pet subir`), e o binário
+# confirma no `bichinho versao`. Para testar uma branch, o binário vai só
+# para a sessão (README); `--da-branch` pula a conferência, para uma pasta de
+# teste fora do PATH.
+instalar_host() {
+  local destino="${PET_BIN_HOST:-$HOME/.local/bin}" id pasta achado fonte referencia da_branch=0
+  case "${1:-}" in
+    "") ;;
+    --da-branch) da_branch=1 ;;
+    *)
+      echo "uso: bin/pet instalar-host [--da-branch]" >&2
+      return 2
+      ;;
+  esac
+  if ! docker image inspect bichinho:local >/dev/null 2>&1; then
+    echo "falta a imagem bichinho:local: rode bin/pet subir antes" >&2
+    return 1
+  fi
+  fonte="$(docker image inspect bichinho:local \
+    --format '{{ index .Config.Labels "bichinho.fonte" }}' 2>/dev/null || true)"
+  case "$fonte" in
+    '' | '<no value>' | desconhecida) fonte="" ;;
+  esac
+  referencia="$(commit_de_referencia)"
+  if [ "$da_branch" -eq 1 ]; then
+    echo "atenção: instalando o binário de ${fonte:-origem desconhecida} sem conferir a worktree estável (--da-branch)." >&2
+    echo "  Numa pasta do PATH do Claude Code, ele vale para todas as sessões da máquina." >&2
+  elif [ -z "$fonte" ]; then
+    echo "a imagem bichinho:local não diz de que commit saiu: refaça com bin/pet subir" >&2
+    return 1
+  elif [ "$fonte" != "$referencia" ]; then
+    echo "a imagem saiu de ${fonte:0:12}, e o hook do PATH tem de ser o de ${referencia:0:12} (a worktree estável, ou a main sem ela)." >&2
+    echo "  O hook vale para todas as sessões do Claude Code da máquina (decisão 0045). Depois do merge:" >&2
+    echo "  clone e worktree estável na main, bin/pet subir e bin/pet instalar-host (README)." >&2
+    echo "  Para testar esta branch só numa sessão:" >&2
+    echo "  ~/.cargo/bin/cargo build -p bichinho && PATH=\"\$PWD/target/debug:\$PATH\" claude --plugin-dir plugin" >&2
+    return 1
+  fi
+  mkdir -p "$destino"
+  pasta="$(mktemp -d "$destino/.bichinho-XXXXXX")"
+  id="$(docker create bichinho:local)"
+  if ! docker cp "$id:/usr/local/bin/bichinho" "$pasta/bichinho" >/dev/null; then
+    docker rm -f "$id" >/dev/null
+    rm -rf "$pasta"
+    echo "não consegui copiar o binário da imagem" >&2
+    return 1
+  fi
+  docker rm -f "$id" >/dev/null
+  chmod 0755 "$pasta/bichinho"
+  if ! "$pasta/bichinho" versao >/dev/null; then
+    rm -rf "$pasta"
+    echo "o binário da imagem não roda neste host" >&2
+    return 1
+  fi
+  if [ -n "$fonte" ] && ! "$pasta/bichinho" versao | grep -qF "(fonte $fonte)"; then
+    rm -rf "$pasta"
+    echo "o binário não diz a mesma fonte da etiqueta da imagem ($fonte)" >&2
+    return 1
+  fi
+  mv -f "$pasta/bichinho" "$destino/bichinho"
+  rmdir "$pasta"
+  echo "instalado: $destino/bichinho ($("$destino/bichinho" versao))"
+  achado="$(command -v bichinho 2>/dev/null || true)"
+  case ":$PATH:" in
+    *":$destino:"*) ;;
+    *) echo "atenção: $destino não está no PATH deste shell; o Claude Code precisa achar o bichinho no PATH dele" >&2 ;;
+  esac
+  if [ -n "$achado" ] && [ "$(readlink -f "$achado")" != "$(readlink -f "$destino/bichinho")" ]; then
+    echo "atenção: o PATH acha outro bichinho antes: $achado" >&2
+  fi
+}
+
 verificar() {
   local falhou=0
   passo() {
@@ -432,10 +689,13 @@ verificar() {
     fi
   }
   passo "cargo fmt" cargo fmt --all --check
-  passo "pet-core sem Wayland" core_sem_wayland
+  passo "pet-core sem Wayland nem sistema (todos os alvos)" core_sem_wayland
+  passo "guarda do socket de comandos se prova" guarda_do_socket_se_prova
   passo "daemon sem socket de comandos" daemon_sem_socket_de_comandos
+  passo "nomes de terceiros" sem_nomes_de_terceiros
   passo "cargo clippy" cargo clippy --all-targets --quiet -- -D warnings
   passo "cargo test" cargo test --quiet
+  passo "Windows e macOS (cargo clippy --target)" outros_sistemas
   passo "lint-skin" lint_skins
   passo "compose" docker compose config -q
   passo "compose dev" docker compose -f docker-compose.yml -f docker-compose.dev.yml config -q
@@ -463,9 +723,12 @@ comando="${1:-ajuda}"
 [ "$#" -gt 0 ] && shift
 
 case "$comando" in
-  subir) docker compose up -d --build "$@" ;;
+  subir)
+    aposentar_nome_antigo
+    BICHINHO_FONTE="$(fonte_do_clone)" docker compose up -d --build "$@"
+    ;;
   parar) docker compose stop "$@" ;;
-  logs) docker compose logs -f --tail=100 pet ;;
+  logs) docker compose logs -f --tail=100 bichinho ;;
   estado)
     if ! api /v1/estado | jq .; then
       echo "o pet não respondeu em ${URL} — está de pé? (bin/pet subir)" >&2
@@ -486,8 +749,17 @@ case "$comando" in
   skin-instalar) skin_instalar "$@" ;;
   skin-aprovar) skin_aprovar "$@" ;;
   skin-revogar) skin_revogar "$@" ;;
-  reconstruir) docker compose build --pull pet && docker compose up -d pet ;;
-  dev) docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build ;;
+  reconstruir)
+    aposentar_nome_antigo
+    BICHINHO_FONTE="$(fonte_do_clone)" docker compose build --pull bichinho &&
+      docker compose up -d bichinho
+    ;;
+  dev)
+    aposentar_nome_antigo
+    BICHINHO_FONTE="$(fonte_do_clone)" \
+      docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+    ;;
+  instalar-host) instalar_host "$@" ;;
   verificar) verificar ;;
   ajuda | -h | --help) ajuda ;;
   *)

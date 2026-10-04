@@ -10,10 +10,10 @@ robô desenhados em ASCII) foi recusado como "muito feio". Um bichinho que
 fica o dia inteiro na tela precisa de arte de verdade.
 **Escolha:** a base é a arara do pack *Cute Parrots!* da exclusiveOlive
 (itch.io, 48x48, ~20 animações). Ela vira o **Zeca**, um papagaio malandro
-"estilo Zé Carioca, um pouco diferente": corpo verde, chapéu-palheta e
-gravata-borboleta com faixa laranja. Corpo e animações são da artista; nós
-só desenhamos os acessórios pequenos e a troca de paleta. Nada de nome ou
-visual da Disney.
+com visual próprio: corpo verde, chapéu-palheta e gravata-borboleta com
+faixa laranja. Corpo e animações são da artista; nós só desenhamos os
+acessórios pequenos e a troca de paleta. Nada de nome ou visual copiado de
+personagem de terceiros (decisão 0035).
 **Por quê:** o pack já cobre praticamente todos os estados do pet
 (comer, piar, decolar, planar, pousar, dormir, machucar). Desenhar o bicho
 inteiro do zero cairia na "arte de programador" que já foi recusada.
@@ -554,8 +554,9 @@ visuais sobre o pack comprado e escolheu.
   `#CE3F6F`; a troca de paleta é vazia), **chapéu-palheta** com **faixa
   laranja** (`#FA9662`) e uma **gravata-borboleta rosa** pequena no peito
   (o rosa do bico, com o nó em `#CE3F6F`);
-- "estilo Zé Carioca, um pouco diferente": nada de nome nem visual da Disney
-  (sem paletó, sem charuto, sem guarda-chuva; faixa laranja e gravata rosa).
+- papagaio malandro com visual próprio: nada de nome nem visual copiado de
+  personagem de terceiros (sem paletó, sem charuto, sem guarda-chuva; faixa
+  laranja e gravata rosa; decisão 0035).
 
 Como o encaixe funciona (`cargo xtask zeca`, `arte/zeca/`):
 - chapéu e gravata são grades de texto nossas (MIT), só com cores da paleta
@@ -578,7 +579,7 @@ Como o encaixe funciona (`cargo xtask zeca`, `arte/zeca/`):
 A fonte monogram, que estava na lista do M2, vai para o M6 junto com os
 balões, que são os únicos que a usam.
 **Por quê:** o bico rosa com gravata rosa amarra as cores, e o chapéu de
-faixa laranja é a marca de malandro sem copiar o personagem da Disney. O
+faixa laranja é a marca de malandro sem copiar personagem nenhum. O
 encaixe por dados (regra do olho mais correções) deixa cada quadro conferido
 e reproduzível sem redesenhar nada do pack.
 
@@ -1190,3 +1191,611 @@ e uma reaprovação dele, e depois a conferência na tela.
 **Por quê:** o teste tem de achar o próprio resultado, não o do vizinho. O
 plano não pode mandar quebrar uma regra de ouro. Estado de máquina vai para
 o PROGRESS ou o corpo do PR; regra vai para o CLAUDE.md.
+
+## 0035 — O personagem é o Zeca, nunca associado a personagem de terceiros (2026-10-03)
+
+**Problema:** a pesquisa multiplataforma (`docs/pesquisa/09-multiplataforma.md`,
+achado 4) mostrou que textos do DECISIONS e do PLANO citavam um personagem de
+terceiros como referência de estilo. Papagaio verde, chapéu-palheta,
+gravata-borboleta e um nome curto não são protegidos sozinhos; somados a um
+texto que cita o personagem, facilitam uma reclamação (DMCA ou marca) contra
+o projeto quando ele for público.
+**Escolha (do Renan):**
+- o personagem continua **Zeca**, também em público: um papagaio malandro com
+  visual próprio;
+- nada no projeto (código, docs, balões, commits, PRs) o chama ou o descreve
+  como personagem de terceiros, nem cita nome, estúdio, título ou família de
+  um;
+- as passagens antigas (decisões 0001 e 0023, o PLANO) foram reescritas de
+  forma neutra, a pedido do Renan. É a única exceção à regra de nunca
+  reescrever o DECISIONS. A pesquisa nova já entrou reescrita;
+- guarda: o `bin/pet verificar` reprova se uma busca sem caixa pelo nome do
+  personagem e do estúdio achar algo nos arquivos do repositório (rastreados e
+  novos, fora os ignorados). O padrão está escrito de um jeito que não casa
+  consigo mesmo;
+- a arte não muda: sem paletó, charuto ou guarda-chuva, cores próprias (faixa
+  laranja, gravata rosa). O personagem padrão do app público continua em
+  aberto (T9.0);
+- o histórico do repositório privado ainda tem os textos antigos: o público
+  será um repositório novo, sem o histórico (decisão 0036, T9.1).
+
+**Por quê:** o risco está na combinação, e o texto era a parte que dependia só
+de nós. O nome é escolha do Renan. A guarda impede que um texto novo traga a
+referência de volta.
+
+## 0036 — O app se chama bichinho (2026-10-03)
+
+**Problema:** `claude-pet` é o nome do repositório, do binário, do compose e da
+camada (decisão 0012). Já existe outro projeto com esse nome no GitHub (MIT,
+desde 2026-02), e ele usa a marca de outra empresa. O nome do binário vai
+entrar no `hooks.json` e no PATH de quem instalar (pesquisa, achado 4).
+**Escolha (do Renan):**
+- o produto e o binário se chamam **bichinho**, como o plugin; "para o Claude
+  Code" fica só na descrição;
+- o T8.1 troca o nome do crate e do binário, do namespace da camada, do
+  projeto, do serviço e da imagem do compose, das mensagens da CLI e dos
+  docs, preservando o volume com a aprovação do Zeca;
+- ficam como estão: o repositório privado `butkeraites/claude-pet` (por ora),
+  as variáveis `PET_*`, o cabeçalho `X-Pet`, a porta 27380 (o `avisar.sh` do
+  plugin instalado continua falando com o pet até a troca), o `bin/pet`
+  (atalho de desenvolvimento), a skin `zeca` e as strings de autoria gravadas
+  na arte gerada (mudá-las mudaria a impressão digital aprovada);
+- o repositório público será novo e limpo, sem o histórico (M9, T9.1).
+
+Substitui a decisão 0012 no que ela dizia do repositório público, do binário,
+do compose e da camada.
+**Por quê:** um nome próprio evita a colisão e a marca alheia, e o binário
+precisa do nome final antes de o hook nativo ir para o PATH.
+
+## 0037 — Merge com merge commit, nunca squash (2026-10-03)
+
+**Problema:** o PLANO mandava `gh pr merge --squash`. Com squash, os commits
+de tarefa que o PROGRESS cita ficam fora da `main`.
+**Escolha (do Renan):** os PRs entram na `main` com merge commit (`gh pr merge
+--merge`): os commits da branch, um por tarefa, entram com os mesmos hashes.
+As linhas novas do PROGRESS nascem com "—" na coluna Commit e ganham o hash
+depois, num commit seguinte ou no PR.
+**Por quê:** o PROGRESS é o índice das tarefas e precisa apontar para commits
+que existem na `main`.
+
+## 0038 — Lançamento multiplataforma e a nova ordem: T8.0 e T8.1 antes do M4 (2026-10-03)
+
+**Problema:** o Renan quer, no fim, um lançamento open source para Linux,
+macOS e Windows. A pesquisa (`docs/pesquisa/09-multiplataforma.md`) mostrou que
+dá: o `pet-core` e o backend Wayland são reaproveitados, e por sistema mudam
+só a janela do bicho e a ligação com o desktop. Mostrou também que arraste,
+balões e voos (M4–M6) feitos dentro do `wl/` teriam de ser reescritos depois.
+**Escolha (do Renan):**
+- destino: open source; no macOS e no Windows o pet é um app nativo (AppKit,
+  Win32). O Docker fica só no Linux: no Mac e no Windows ele é uma VM sem
+  acesso à tela;
+- marcos novos no PLANO: **M8** (multiplataforma, T8.0–T8.8) e **M9**
+  (publicação, T9.0–T9.6), cada passo com a sua verificação;
+- ordem: agora, antes do M4, só a costura de plataforma (T8.0) e o hook
+  nativo com o nome novo (T8.1), mais o tamanho do Zeca no config (TP.2); depois
+  M4–M7; depois T8.2–T8.8 e o M9. A T9.0 (arte, nome e licença) pode correr
+  em paralelo, sem código. A T8.8 (GNOME) fica para a v1.1, salvo decisão em
+  contrário;
+- a conferência visual no macOS e no Windows precisa de uma máquina de verdade
+  ou dos runners do GitHub Actions; sem isso, o item fica NÃO VERIFICADO;
+- continuam abertas, com o Renan: a arte do personagem público, quanto gastar,
+  GNOME e X11 na v1.0, a assinatura no Windows, a conta da Apple e o CI.
+
+**Por quê:** as duas peças são pequenas (1 a 2 dias cada, pela pesquisa) e
+fazem o M4–M6 nascer no código portável; feitas depois do M7, custariam o
+dobro.
+
+## 0039 — O clique no Zeca foca o terminal da sessão pelo foreign-toplevel, não pelo socket de comandos (2026-10-03)
+
+**Problema:** o Renan quer que o clique no Zeca leve à janela do terminal da
+sessão do Claude que terminou. No Hyprland o caminho óbvio é despachar
+`focuswindow` pelo `hyprctl` (a pesquisa dos hooks sugeriu isso), mas isso é o
+`.socket.sock`, que executa comandos no host e que o daemon nunca abre
+(decisão 0006).
+**Escolha (escopo do M4):**
+- focar pelo Wayland: `zwlr_foreign_toplevel_manager_v1` com o
+  `hyprland_toplevel_mapping_manager_v1`, que liga cada handle de toplevel ao
+  endereço de janela do Hyprland (o mesmo do `activewindowv2`), e
+  `zwlr_foreign_toplevel_handle_v1.activate(seat)`. A ideia de despachar
+  `focuswindow` pelo socket de comandos fica descartada; a 0006 continua
+  inteira. No M4, conferir na 0.56.2 que os dois protocolos estão no registro;
+- identidade de janela por sessão: um anel com as últimas ativações (endereço
+  e hora de chegada do `activewindowv2` no socket2, nunca o título), casado com
+  o `ts` do hook (`UserPromptSubmit`, `SessionStart`) de cada sessão, e
+  reforçado por dicas da cadeia de PIDs que o hook manda (`CLAUDE_PID` e pais,
+  ids de terminal). As dicas entram como campo novo e opcional do fio v1, com
+  decisão própria quando chegarem;
+- pendências em ciclo, a mais urgente primeiro (a prioridade do cérebro); o
+  clique sem pendência mostra um balão com as sessões abertas e o estado de
+  cada uma. O balão mínimo e a fonte de pixel vêm do M6 para o M4;
+- sem como focar (janela fechada, sessão sem identidade, protocolo ausente),
+  o balão diz isso e mostra a lista;
+- nos outros desktops (T8.7) o foco entra como `Desktop::focar` de cada
+  adaptador.
+
+**Por quê:** o foreign-toplevel é uma ação de alto nível sobre uma janela, sem
+executar nada no host, e mantém o daemon longe do socket que roda comandos e
+pode congelar o Hyprland. O anel casado com o `ts` acha o terminal sem ler
+títulos de janela.
+
+## 0040 — Costura de plataforma: o Motor no core, o Wayland num crate e a Caixa no lugar do canal do calloop (2026-10-03)
+
+**Problema:** o M4–M6 (arraste, balões, voos) e o porte para Windows e macOS
+(M8) precisam de um núcleo que não saiba em que sistema está. Até o M3, o
+que o pet decide morava espalhado no laço do calloop (`laco.rs`: cérebro,
+personagem, mostrar e esconder) e na sessão Wayland (`wl/mod.rs`: pet, palco,
+estresse, painel, relógio da animação), e a entrada HTTP falava com o laço
+pelo canal do calloop. A decisão 0038 antecipou esta costura para antes do
+M4; ela não pode mudar nada do que o pet faz.
+**Escolha (T8.0):**
+- **`pet_core::motor`**: o `Motor` (cérebro, personagem, pet e palco,
+  mostrar e esconder pela função pura `passo_de_visibilidade`, estresse,
+  commits, painel do `/v1/estado`, quadro esperado da nitidez) e os prazos
+  em milissegundos de um relógio monotônico que o laço injeta; o laço só
+  acorda no `proximo_prazo` e entrega os eventos da janela. 16 testes novos
+  com relógio falso e uma janela falsa (desenhar e marcar a próxima troca,
+  quadro em voo que adia e o `Redesenhar` que retoma, esconder e cancelar a
+  saída, trocar e revogar a skin, `tocar` com cada resposta, o cérebro
+  acenando no prazo, janela fechada e recriada, painel, quadro esperado,
+  estresse, encerrar, commit só de estado).
+- **`pet_core::plataforma`**: os traits `Overlay` (a janela) e `Desktop` (a
+  ligação com o ambiente) com capacidades (`CapOverlay`, `CapDesktop`), os
+  tipos simples `Monitor`, `EventoPonteiro`, `Botao`, `Alca`, `Fase`, `Passo`,
+  `Desenho` e `EventoOverlay`, e a **`Caixa`**: um `mpsc` limitado mais um
+  `Despertador` do sistema (no Linux, o `Ping` do calloop), no lugar do
+  `SyncSender` do calloop na entrada HTTP. Cheia, ela acorda o laço e a
+  entrada responde 503, como antes.
+- **`crates/pet-wayland`**: o `wl/` e a descoberta. A `Sessao` implementa o
+  `Overlay`: põe na tela a cena que o Motor manda e conta o que aconteceu
+  (camada pronta, quadro mostrado, camada fechada, ponteiro) como eventos; os
+  prazos dela (destruir 50 ms depois de esconder, reservas de escala e de
+  `enter`, recriar 250 ms depois de um `closed`) vencem no relógio do laço.
+  O que é só do Hyprland (`hyprland.lock`, o monitor FALLBACK, e no M4 o
+  socket de eventos e o foco) virou o adaptador `hyprland`, com um
+  `Desktop` ainda sem capacidade; o resto (socket por caminho longo, backoff)
+  ficou em `conexao`.
+- **`crates/pet-windows` e `crates/pet-macos`**: vazios, compilando, com
+  `#![cfg]` do próprio sistema. O daemon depende deles só no alvo deles.
+- **O daemon**: o `nucleo` (igual em todo sistema) junta o Motor com as
+  aprovações em disco e o `/v1/estado`; o `laco` do Linux só traz as fontes
+  (sinais, caixa, batimento, descoberta, Wayland) e **um** prazo, o mais
+  próximo entre o do Motor e o da janela. Antes de vencer um prazo o laço
+  esvazia a caixa: a garantia da decisão 0032 (um evento que chegou antes
+  cancela a acomodação) deixa de depender da ordem de despacho do calloop.
+  Onde ainda não há janela (Windows e macOS), o `sem_janela` roda só com a
+  `std`: o cérebro e o `/v1/estado` funcionam, como no Linux sem
+  compositor; um teste o roda no Linux.
+- **O log** (`registro`) foi para o core, com as mesmas mensagens.
+- **Portão:** o `bin/pet verificar` procura o socket de comandos em todos os
+  crates (provado com uma linha plantada no `pet-wayland`), barra crates de
+  sistema no `pet-core` e, com os alvos `x86_64-pc-windows-msvc` e
+  `aarch64-apple-darwin` instalados no rustup (instalados nesta máquina),
+  passa o `cargo clippy --target … -D warnings` no core, nos esboços e no
+  daemon. O check não linka: não pede o SDK da Microsoft nem o da Apple.
+
+Ao vivo, com a tela apagada e a sessão bloqueada, um daemon nativo de
+debug (porta 27399, `/state` de rascunho, skin `_teste`) ligado ao Hyprland
+de verdade: camada criada, `configure`, `enter`, `preferred_scale` 180/120,
+D = 5 com a célula em (1706, 951), o primeiro quadro, `tocar` respondendo
+`tocou: true`, esconder com o quadro transparente, mostrar recriando a
+camada, o quadro esperado do `/v1/debug/quadro` e a saída com "o compositor
+processou o quadro transparente e a destruição". Ficam pendentes, porque
+pedem a tela acesa e desbloqueada: `scripts/verificar-ao-vivo.sh
+--personagem` e `scripts/medir-custo.sh` (nitidez, fantasma, ritmo parado e
+custo no Hyprland iguais ao M1).
+**Por quê:** a costura é pequena agora e cara depois do M4–M6. Com o Motor
+puro, o que o pet faz é testado sem compositor, e o porte para outro sistema
+é escrever um `Overlay`, um `Desktop` e um laço, sem tocar no resto.
+
+## 0041 — Hook nativo (`bichinho avisar`) em exec form e o nome bichinho, com o volume da aprovação preso ao nome antigo (2026-10-03)
+
+**Problema:** o hook era o `avisar.sh` (sh + jq + curl): no Windows, sem Git
+Bash ele nem roda e, sem jq, só sai o evento mínimo; a lista branca vivia
+num programa jq, duplicando os validadores do `pet_core::evento`. O nome
+`claude-pet` ia para o binário, a camada e o compose (decisão 0036 trocou
+para `bichinho`), e o volume com a aprovação do Zeca leva o nome do projeto
+do compose: trocar o projeto criaria um volume vazio, sem a aprovação. E o
+plugin instalado (0.1.0, decisão 0021) continua chamando o `avisar.sh` até a
+troca depois do merge.
+**Escolha (T8.1):**
+- **`bichinho avisar <Evento>`**: lê o JSON do hook na entrada padrão (até
+  64 MiB), monta o corpo pela lista branca de `pet_core::aviso` — a mesma do
+  `avisar.sh`, campo a campo, com os validadores do fio v1, então o que o pet
+  descartaria nem sai —, faz o hash do caminho editado (12 hexadecimais do
+  sha256), lê o "não perturbe" do Omarchy (só o booleano), valida o
+  `CLAUDE_CODE_ENTRYPOINT`, respeita `PET_TESTE=1` e manda por TCP direto ao
+  127.0.0.1 (conexão em 300 ms, envio e resposta em 2 s): nenhum proxy,
+  curlrc, jq ou shell. Espera a resposta do pet para o evento não se perder
+  no fim do processo. Nunca imprime (um pânico sai 0, calado), sempre sai 0 e
+  nunca passa de 4 s, nem com a entrada padrão aberta. Diferenças do
+  `avisar.sh`, todas a favor do pet: a pasta passa pelo validador do pet; uma
+  contagem `bg` acima de 10 000 não sai; uma porta 0 ou acima de 65 535 vira
+  a padrão.
+- **`hooks.json` em exec form**, igual nos três sistemas: `{"type":
+  "command", "async": true, "command": "bichinho", "args": ["avisar",
+  "<Evento>"]}` (`claude plugin validate --strict` aceita); plugin 0.2.0.
+- **O binário no host:** o exec form acha o `bichinho` pelo PATH do Claude
+  Code. `bin/pet instalar-host` copia o binário estático (musl, static-pie)
+  da imagem para `~/.local/bin/bichinho` (troca de uma vez, confere que roda
+  no host, avisa se a pasta não está no PATH ou se outro `bichinho` vem
+  antes). Requisito documentado: `~/.local/bin` no PATH que o Claude Code vê
+  (no Omarchy, está). Sem o binário, os hooks não chegam ao pet e o `claude
+  -p` continua calado (conferido com um plugin de sondagem cujo comando não
+  existe).
+- **Reserva até a troca:** o `avisar.sh` fica no plugin, com os canários
+  dele; o plugin 0.1.0 instalado continua chamando a cópia dele (no cache do
+  Claude Code), que fala com o mesmo pet: a troca nunca deixa o pet surdo. O
+  `bin/pet testar` vai pelo `bichinho` do PATH (ou `PET_BICHINHO`) e, sem
+  ele, pelo `avisar.sh`, avisando. A troca depois do merge, na ordem (está no
+  README): clone e worktree estável na `main`, `bin/pet subir`, `bin/pet
+  instalar-host`, `claude plugin marketplace update bichinho-local`,
+  `claude plugin update bichinho@bichinho-local` e `/reload-plugins`.
+- **Canários portados** para o binário (`tests/hook.rs`, 18 testes, com os
+  casos do `avisar.sh` num módulo comum): o binário de verdade, o ambiente
+  limpo e um pet falso no 127.0.0.1 que guarda o pedido inteiro (linha,
+  cabeçalhos e corpo) — nenhum segredo em evento nenhum, campos por evento,
+  `PET_TESTE`, "não perturbe", entrada que não é JSON, tipos errados, nome de
+  evento inválido, cabeçalhos, proxy e curlrc ignorados, origem, validadores
+  iguais aos do pet, entrada de 8 MiB, pet desligado (menos de 0,5 s), pet
+  travado (menos de 2,6 s), entrada que nunca fecha (sai no prazo) e o pet de
+  verdade sem nada recusado nem descartado. Seis versões erradas de propósito
+  reprovaram: a lista branca aberta (o prompt no `src`: 5 testes), o caminho
+  editado em claro (2), imprimir no stderr (14), sair 1 (14), sem o prazo
+  total (1) e a pasta inteira no `proj` (7).
+- **O nome bichinho** (decisão 0036): crate e binário, namespace da camada,
+  projeto, serviço e imagem do compose (`bichinho:local`), `/opt/bichinho` e
+  `/etc/bichinho` no container, `config/bichinho.toml` (o `claude-pet.toml`
+  ainda vale sozinho, com aviso no log), a pasta dos symlinks curtos, a carga
+  de medição (`bichinho-carga`) e as mensagens. Ficam `claude-pet`: o
+  repositório, a worktree estável e as strings de autoria gravadas na arte
+  gerada (mudariam a impressão digital aprovada).
+- **O volume:** preso ao nome `claude-pet_estado` no compose, sem copiar a
+  aprovação; o compose avisa que ele foi criado para o projeto antigo, e é de
+  propósito. `bin/pet subir`, `dev` e `reconstruir` aposentam o container do
+  projeto antigo (ele seguraria a porta 27380); o volume nunca é tocado.
+
+Ao vivo (tela apagada e sessão bloqueada; só `/v1/estado` e log): `bin/pet
+subir` aposentou o `claude-pet-pet-1` e subiu o `bichinho-bichinho-1`
+(healthy) com o mesmo volume: `tela: ativa`, `zeca` da imagem com a aprovação
+do Renan (sha 5b843b03…), o `aprovacao.json` idêntico ao de antes, D = 8.
+`bin/pet instalar-host` pôs o binário em `~/.local/bin/bichinho`;
+`bin/pet testar rapido` → `nod` e `pequeno` → `done_small`, pelo hook nativo.
+O `avisar.sh` do plugin instalado (mesmo sha256 antes e depois) entregou um
+evento de teste ao daemon novo. Shellcheck limpo pela imagem oficial,
+removida depois.
+
+Fica para depois: a porta e o token por usuário no loopback (T9.3; o
+`avisar.sh` instalado não mandaria o token) e a CLI de usuário no binário
+(`estado`, `tocar`, `doutor`), que por enquanto é o `bin/pet`.
+**Por quê:** um binário só, sem shell nem jq, é o mesmo hook nos três
+sistemas, e a lista branca passa a ter uma fonte com os validadores do pet.
+Prender o volume ao nome antigo não copia nem arrisca a aprovação, e vale
+para todo jeito de subir o compose (produção, dev e scripts).
+
+## 0042 — O tamanho do Zeca é config (`aparencia.tamanho`), sem mexer na skin (2026-10-03)
+
+**Problema:** o Renan quer o Zeca menor na tela, ~10% da altura lógica do
+monitor (hoje o corpo dá 12,7% no eDP-1). O tamanho vinha de uma fração fixa
+(12%, entre 80 e 160 pixels lógicos) dividida pelo `corpo_px` da skin; mudar
+a skin mudaria a impressão digital e pediria outra aprovação.
+**Escolha (TP.2):**
+- **`aparencia.tamanho`** = `pequeno` | `normal` | `grande` no config
+  (`PET_APARENCIA_TAMANHO` no ambiente; padrão `normal`, o de antes), ~10%,
+  ~12% e ~16% da altura lógica do monitor. O alvo do `normal` (12%, entre 80 e
+  160 lógicos) é multiplicado por `fração ÷ 12%`, limites inclusive: os três
+  continuam diferentes até no 4K, onde o `normal` bate no teto. O D continua
+  inteiro e por monitor, e as posições em pixels inteiros. Com o Zeca (corpo
+  de 19): D = 6, 8 e 10 no eDP-1 (o corpo dá 9,5%, 12,7% e 15,8%) e 11, 13 e
+  17 no 4K. O `normal` dá exatamente o D de antes.
+- **A skin não muda:** o tamanho entra no palco (`Motor`), não no
+  `skin.json`; a impressão digital e a aprovação ficam como estão.
+- Relido a cada aprovação (decisão 0029): com a janela pronta, o palco é
+  refeito e o quadro novo redesenha a tela toda. No mais, vale quando o pet
+  reinicia (`bin/pet parar && bin/pet subir`; o `bin/pet subir` sozinho não
+  recria o container quando só o config muda).
+- O `config/bichinho.toml` local do Renan (fora do git) pede `tamanho =
+  "pequeno"`.
+
+Ao vivo, com a tela apagada e a sessão bloqueada (só `/v1/estado`, log e o
+`/state`; a conferência na tela fica pendente): produção refeita desta
+branch, `tela: ativa`, D = 6 (era 8), `aparencia.tamanho` = `pequeno` vindo
+do arquivo, célula em (1698, 984), região de toque de 76×76 lógicos (era
+102×102), o `zeca` da imagem com a aprovação do Renan (sha 5b843b03…, o
+`aprovacao.json` idêntico ao de antes). E o fim da branch, também ao vivo:
+- `bin/pet testar rapido` → `nod` e `pequeno` → `done_small`, pelo hook
+  nativo (`~/.local/bin/bichinho`);
+- `claude --plugin-dir` com o plugin 0.2.0: só ele dispara, sem o 0.1.0
+  instalado em dobro (medido com um invólucro que registra cada chamada do
+  `bichinho`, só o nome do evento, num daemon de rascunho);
+- gate interativo no tmux em `~/Documents`, sem `CLAUDECODE` e as
+  `CLAUDE_*` do agente: "responda só: ok" → `nod` (T0); um Write → um turno
+  de trabalho 1 e `arquivos: 1` → `done_small` (T1); `/exit` → `bye`. Sete
+  chamadas do hook nativo, 15 eventos aceitos, nenhum recusado; nada dos
+  prompts nem do caminho no log nem no `/v1/estado`;
+- pet parado: o hook sai 0 em 1 ms; `claude -p --plugin-dir …` imprime só
+  `ok`, com stderr vazio e saída 0 (quatro chamadas do hook nativo);
+- o plugin instalado, o marketplace e a worktree estável ficaram como
+  estavam (mesmo sha256 do `avisar.sh` e do `hooks.json` no cache).
+**Por quê:** o tamanho é gosto de quem usa, não arte: fica no config, onde
+trocar não pede aprovação. Multiplicar o alvo inteiro (limites junto) mantém
+os três tamanhos distintos em qualquer monitor sem mexer no `normal`.
+
+## 0043 — Revisão do plano do M4: ids de terminal em vez da cadeia de PIDs, aviso visto só com clique, os contratos do M4 na costura e a guarda de nomes nas mensagens (2026-10-04)
+
+**Problema:** as três revisões da branch `m3b-portabilidade` acharam no plano
+(TP.1):
+- a decisão 0039 e o M4 diziam que a cadeia de PIDs que o hook manda
+  (`CLAUDE_PID` e pais) desempataria o anel de ativações. No Docker o daemon
+  roda em outro espaço de PIDs e não lê o `/proc` do host; o socket2, o
+  foreign-toplevel e o `hyprland_toplevel_mapping` não trazem PID. Ligar um
+  PID a uma janela pediria o `hyprctl clients`, que é o socket de comandos
+  (decisão 0006) e só aparece em scripts de teste do host;
+- o M4 dizia que o aviso de uma sessão some "quando a janela dela é focada",
+  contra as regras do cérebro: o pronto some com ~10 s de foco, e o
+  "esperando você" só sai com um evento da sessão ou um clique;
+- a decisão 0040 punha o foco no adaptador `hyprland`, que não tem conexão
+  Wayland. O `activate(seat)` do foreign-toplevel precisa da conexão e do
+  `wl_seat`, que moram na `Sessao`;
+- o PLANO ainda descrevia o hook antigo em alguns trechos: o `avisar.sh` como
+  o hook, o curl de 2 s, a receita `novo-evento-hook` e o `testar`. Também
+  citava o serviço `pet` do compose;
+- a guarda de nomes (decisão 0035) olhava só os arquivos.
+
+**Escolha:**
+- **As dicas do hook** vão num campo novo e opcional do fio v1, com decisão
+  própria no M4. São os ids de terminal do ambiente do hook (`TMUX_PANE`,
+  `KITTY_WINDOW_ID`, `WEZTERM_PANE`), que só separam sessões dentro de um
+  mesmo terminal. A identidade da janela é o anel de ativações casado com o
+  `ts`; quando há dúvida, o clique cai no balão com a lista.
+  - Se um dia a cadeia de PIDs for necessária, só uma decisão nova pode
+    deixar o **hook** ler o `hyprctl -j clients`, jogando fora os títulos na
+    memória. O daemon nunca. A regra do CLAUDE.md muda junto com essa
+    decisão.
+  - Corrige a 0039 nesse ponto.
+- **O clique** que foca a janela de uma sessão marca o aviso dela como
+  visto. O foco sem clique segue as regras de sempre.
+- **A costura no M4** ganha:
+  - o `EventoDesktop` e o `Motor::evento_desktop`;
+  - o `Overlay::cursor`;
+  - um punho por conexão no `Nucleo`, com a janela e o desktop juntos.
+
+  O `Desktop` do Wayland usa a conexão e o `wl_seat` da `Sessao`, recriados a
+  cada reconexão. O foreign-toplevel genérico fica no `pet-wayland`, e o
+  mapeamento do Hyprland com o socket2 é a extensão do Hyprland. Corrige a
+  0040 nesse ponto.
+- **O PLANO** descreve o hook nativo, com o `avisar.sh` de reserva, o serviço
+  `bichinho` e a receita nova do `novo-evento-hook`.
+- **A guarda de nomes:** o `bin/pet verificar` procura os nomes também nas
+  mensagens dos commits da branch (`main..HEAD`). O corpo do PR se confere
+  antes do `gh pr create` (CLAUDE.md). A nota de memória do Claude sobre o
+  projeto, fora do repositório, foi reescrita sem o nome.
+
+**Por quê:** o plano não pode prometer o que as regras de ouro proíbem nem
+contradizer o cérebro. E o M4 precisa encontrar a costura pronta para o foco.
+
+## 0044 — Revisão da costura: o palco como sistema de coordenadas, a área útil do monitor, a janela pronta sem dado velho, o laço sem trabalho à toa e as guardas sem ponto cego (2026-10-04)
+
+**Problema:** as revisões da costura (T8.0) acharam seis falhas.
+- **Coordenadas misturadas no `Overlay`.** A cena e a célula estavam em
+  pixels do monitor, a área de toque em coordenadas lógicas da janela, e o
+  ponteiro "relativo à janela". Isso só funcionava porque a camada do Wayland
+  cobre o monitor inteiro. Numa janela pequena (Win32, AppKit, X11), o clique
+  e o arraste do M4 comparariam grandezas diferentes. Além disso:
+  - o `Monitor` não tinha origem, área útil nem descrição;
+  - a posição padrão usava o monitor inteiro, então o pet cairia na barra de
+    tarefas ou no Dock;
+  - o Motor nunca olhava as capacidades da janela.
+- **Palco velho no buffer novo.** O `EventoOverlay::Pronta(monitor)` levava o
+  monitor do momento em que entrou na fila. Quando dois chegavam na mesma
+  leva (escala e `configure` juntos), o primeiro desenhava com o palco velho
+  no buffer novo. Antes do T8.0, o código desenhava sempre com o estado de
+  agora.
+- **Nome vago.** O `EventoOverlay::Mudou` só significava "a janela terminou de
+  sair".
+- **Trabalho à toa no laço.** O laço do Linux rodava o `assentar` inteiro a
+  cada leva do Wayland: publicava o painel e tirava e punha de novo o mesmo
+  timer. A `Sessao` passava ao Motor cada movimento do ponteiro sobre o pet,
+  e o Motor os ignora. Passar o mouse por cima custava trabalho na taxa do
+  mouse, e recolocar o timer podia atrasar o prazo uma volta.
+- **Guardas com ponto cego.**
+  - A guarda do socket de comandos parava no primeiro `#[cfg(test)]` de cada
+    arquivo. No `motor/mod.rs` ele vinha na linha 23 (`mod testes;`), e as
+    574 linhas do Motor ficavam sem olhar. A decisão 0040 dizia que a guarda
+    olhava todos os crates.
+  - A guarda do core olhava só o alvo do host. No aarch64 (macOS e Linux
+    arm), o core já puxa o `libc` pelo `cpufeatures` do `sha2`.
+- **Testes faltando.** A agenda interna da camada não tinha testes, e o teste
+  do laço sem janela dependia de um `sleep` com 400 ms de folga.
+
+**Escolha (revisão do T8.0):**
+- **O palco.** Tudo o que o Motor troca com a janela fica em pixels do
+  dispositivo do monitor, com a origem no canto dele: a cena, a célula, a
+  área de toque do `Overlay::desenhar` e o `EventoPonteiro`.
+  - A camada do Wayland converte o toque para coordenadas lógicas. A conta é
+    a mesma de antes, agora dentro dela.
+  - Uma janela pequena subtrai a própria origem.
+  - O `InfoOverlay.regiao` (o `regiao_entrada` do `/v1/estado`) continua nas
+    coordenadas da janela.
+- **O `Monitor`** ganhou três campos: `descricao` (para as posições salvas do
+  M4), `origem` no desktop (para as janelas pequenas) e `area_util` no palco.
+  A posição padrão do pet é o canto inferior direito da área útil. No Wayland
+  a área útil é o monitor inteiro, porque a camada ignora as zonas
+  exclusivas; no Hyprland, nada muda.
+- **O Motor consulta as capacidades.** O estresse (confete pela tela inteira)
+  só começa com uma janela do tamanho do monitor. O
+  `Motor::acerta_o_pet(x, y)`, no palco, é por onde o clique do M4 vai
+  começar.
+- **Eventos da janela.** O `EventoOverlay::Pronta` não carrega mais o
+  monitor: o Motor refaz o palco com o `Overlay::pronta()` de agora. O
+  `Mudou` virou `Saiu`.
+- **O laço.**
+  - O prazo armado fica onde está quando não muda.
+  - Depois de uma leva do Wayland, o painel só sai se um evento mudou o pet
+    ou a janela; o batimento de 5 s republica de todo jeito.
+  - Movimentos seguidos do ponteiro viram um só na fila.
+- **A guarda do socket** pula só o item marcado com `#[cfg(test)]`: um
+  `mod x;` ou um bloco até a `}` da coluna 0. Ela se prova a cada `verificar`
+  com linhas plantadas. O `mod testes;` do Motor foi para o fim do arquivo. A
+  afirmação da 0040 sobre a guarda passa a ser verdade.
+- **A guarda do core** olha todos os alvos (`cargo tree --target all`). O
+  `libc` só pode vir do `cpufeatures`.
+- **Testes.**
+  - A janela de mentira virou `plataforma::falsa::JanelaFalsa`, com uma
+    versão pequena. Ela fica atrás da feature `teste`, que o binário nunca
+    liga.
+  - O Motor ganhou testes novos: duas `Pronta` na mesma leva, janela pequena
+    com barra de tarefas e acerto no palco, e estresse recusado na janela
+    pequena.
+  - A agenda interna da camada é uma estrutura pura, com testes da ordem de
+    vencimento e da geração.
+  - O laço sem janela espera a reação aparecer, em vez de dormir um prazo
+    fixo.
+
+Ficaram para depois, de propósito:
+- um teste do laço do calloop provando que a caixa entra antes do prazo
+  (decisão 0032). O código são três linhas, e o teste pediria montar o laço
+  com a conexão;
+- um relógio injetado no `Nucleo`.
+
+**Por quê:** a costura existe para o M4 e o M8 escreverem em cima dela. Um
+contrato que só vale no Wayland seria pago depois, com o arraste e o clique
+já escritos. E uma guarda com ponto cego dá uma garantia que não existe.
+
+## 0045 — Revisão do hook nativo: o binário do PATH preso à worktree estável, leitura em fluxo só da lista branca, sem log, sem core dump e sem daemon por engano (2026-10-04)
+
+**Problema:** as revisões do hook nativo (T8.1) acharam cinco problemas.
+- **Isolamento perdido.** No exec form, o código do hook é o `bichinho` que
+  estiver no PATH, e o `bin/pet instalar-host` o copiava da imagem montada
+  da branch do clone. Depois da troca para o plugin 0.2.0, um
+  `bin/pet subir && bin/pet instalar-host` numa branch trocaria a lista
+  branca de **todas** as sessões do Claude Code da máquina. É exatamente o
+  que a worktree estável existe para impedir (decisão 0021). O
+  `--plugin-dir` testava o hooks.json da branch com o binário velho do
+  PATH, e o `bichinho versao` não dizia de onde o binário saiu.
+- **Leitura frágil e cara.** O hook lia o JSON inteiro como uma árvore de
+  `Value`. Bastava um erro em qualquer lugar, mesmo num campo que o hook não
+  lê, para ir só o mínimo `{"v":1,"e":…}`, que o pet ignora:
+  - um substituto UTF-16 sozinho. O Claude Code corta um texto no meio de um
+    emoji e o `JSON.stringify` manda `\ud83d`;
+  - bytes que não são UTF-8;
+  - mais de 128 níveis de aninhamento;
+  - um número como `1e400`.
+
+  O `avisar.sh` (jq) guardava os metadados em quase todos esses casos, então
+  a 0041 errou ao dizer que as diferenças eram "todas a favor do pet". A
+  mesma leitura gastava cerca de 17 vezes a entrada em memória: 172 MiB para
+  um array numérico de 10 MB, cerca de 1 GiB para 60 MB.
+- **Log no hook.** O hook herdava o log do daemon (`PET_LOG`) antes de
+  começar. Os canários nunca rodaram com `PET_LOG=debug` nem com segredos no
+  ambiente.
+- **Daemon por engano.** O `bichinho` sem subcomando subia o daemon. Um
+  Claude Code que ignorasse o `args` do exec form subiria um daemon a cada
+  hook.
+- **Windows e DND.** No Windows o `cwd` usa barra invertida, e o `proj` nunca
+  saía. O "não perturbe" do Omarchy era lido em todo sistema.
+
+**Escolha (revisão do T8.1):**
+- **O binário do PATH é o da worktree estável.**
+  - O `bin/pet subir` (e `dev`, `reconstruir`, e os scripts ao vivo) grava na
+    imagem o commit de onde ela saiu: `BICHINHO_FONTE`, que é o
+    `git rev-parse HEAD`, com `-sujo` se a árvore tem mudanças. O commit vai
+    na etiqueta `bichinho.fonte`, no `bichinho versao` e no `/v1/estado`
+    (`fonte`).
+  - O `bin/pet instalar-host` recusa se esse commit não for o da worktree
+    estável (numa máquina sem ela, o da `main`) ou se a árvore estava suja.
+    Também confere que o binário diz a mesma fonte da etiqueta.
+  - O `--da-branch` pula a conferência, com aviso. Serve só para uma pasta de
+    teste (`PET_BIN_HOST`) fora do PATH.
+  - Para testar uma branch, o binário vai só na sessão:
+    `cargo build -p bichinho` e
+    `PATH="$PWD/target/debug:$PATH" claude --plugin-dir plugin`. No
+    `bin/pet testar`, o mesmo vale com `PET_BICHINHO`, e ele mostra o commit
+    do binário.
+- **Leitura em fluxo, só da lista branca** (`pet_core::aviso::Lido`).
+  - As chaves são lidas como bytes. Os campos da lista ficam como texto cru e
+    são interpretados um a um; um que não se lê cai sozinho.
+  - Do `tool_input`, só o `file_path` e o `notebook_path`. Do
+    `background_tasks`, a contagem e as 16 primeiras tarefas válidas.
+  - O resto é pulado sem ser validado nem guardado.
+  - A entrada é lida em fluxo e o hook segue quando o objeto fecha, sem
+    esperar a entrada padrão fechar.
+  - Medido: 12 MiB de pico com 10 MB ou com 60 MB de entrada (eram 172 MiB e
+    cerca de 1 GiB).
+  - Chave repetida: vale a última, como no jq.
+  - Lixo depois do objeto é ignorado. Antes, mandava o mínimo.
+  - O `avisar.sh` de reserva continua como era: com um substituto alto
+    sozinho, ele também manda só o mínimo.
+- **Sem log no hook.** O `main` chama `registro::desligar()` antes do
+  `avisar`, sem olhar o `PET_LOG`. O `PET_LOG` ganhou o nível `off`.
+- **Sem core dump.** No Linux o hook se marca como não despejável
+  (`PR_SET_DUMPABLE` pelo invólucro seguro do `rustix`, sem `unsafe` nosso).
+  Um aborto não leva a entrada para o `systemd-coredump`.
+- **Sem daemon por engano.** O daemon é só `bichinho rodar`; a imagem e os
+  testes já passavam o `rodar`. Sem subcomando, nada roda: sai 0 calado e,
+  no terminal, mostra a ajuda.
+- **Windows.** O `proj` corta nas duas barras. Uma barra invertida nunca
+  passa no validador do pet, então no Linux só muda um nome de pasta com
+  barra invertida, que agora manda o último pedaço. O DND do Omarchy só é
+  lido no Linux.
+- **Canários novos** em `tests/hook.rs`:
+  - a matriz inteira com `PET_LOG=debug` e segredos no ambiente: chave da
+    API, token, `TERM_PROGRAM`, `TMUX_PANE`, `KITTY_WINDOW_ID` e uma
+    variável desconhecida;
+  - conteúdo quebrado fora da lista: substitutos sozinhos, bytes que não são
+    UTF-8, 200 níveis e `1e400`, no prompt, na saída da ferramenta, na
+    resposta e na descrição de uma tarefa. Os metadados ficam;
+  - objeto fechado com a entrada aberta;
+  - sem subcomando, nada roda;
+  - `versao` com a fonte.
+
+  Cinco versões erradas de propósito reprovaram:
+  - a leitura antiga por `Value`;
+  - o log ligado no hook;
+  - sem subcomando subindo o daemon;
+  - esperar a entrada fechar;
+  - um id de terminal no corpo.
+
+**Por quê:** o hook é a fronteira da privacidade e roda em toda sessão da
+máquina. O código dele tem de ser o revisado da `main`, tem de falhar para o
+lado de mandar menos e nunca pode deixar o conteúdo em log, em core dump ou
+em memória à toa.
+
+## 0046 — Revisão do tamanho: o tamanho novo entra junto com a escolha do personagem, e o compose repassa as chaves do config que o ambiente pode trocar (2026-10-04)
+
+**Problema:** a revisão do TP.2 achou dois problemas.
+- **Quadro a mais ao reler o config.** Numa aprovação, o config relido
+  aplicava o `aparencia.tamanho` novo na hora: refazia o palco e desenhava um
+  quadro forçado com a skin de agora. Só depois escolhia o personagem.
+  - Se a aprovação revogava a skin, ela era desenhada mais uma vez, no
+    tamanho novo, antes de sair.
+  - Se a aprovação trocava de skin, eram dois quadros forçados, e o primeiro
+    ia para o lixo.
+
+  Isso contrariava a regra de que, sem skin, o pet sai só com o quadro
+  transparente.
+- **Variável documentada que não fazia nada.** O `config/exemplo.toml` e a
+  decisão 0042 diziam que `PET_APARENCIA_TAMANHO=pequeno` valia como o
+  arquivo. O compose não passava a variável ao container: no Docker ela não
+  fazia nada, sem aviso. O mesmo valia para `PET_SESSOES_ORIGENS` (M3),
+  `PET_APARENCIA_SKIN` e `PET_CELEBRACAO_MODO`.
+
+**Escolha (revisão do TP.2):**
+- **O config relido só anota o tamanho novo.** A escolha do personagem que
+  vem em seguida cuida da tela:
+  - uma skin nova já nasce no palco novo;
+  - uma skin revogada sai só com o quadro transparente;
+  - a mesma skin ganha um quadro só, forçado, no palco novo
+    (`Motor::redesenhar_palco`).
+
+  Dois testes no núcleo do daemon reprovaram o código de antes. Eles usam a
+  janela de mentira e uma aprovação de verdade em pastas temporárias.
+- **O compose repassa as quatro variáveis sem valor:** `PET_APARENCIA_SKIN`,
+  `PET_APARENCIA_TAMANHO`, `PET_CELEBRACAO_MODO` e `PET_SESSOES_ORIGENS`. Elas
+  só existem no container se estiverem no ambiente do `bin/pet subir` ou no
+  `.env`. Conferido num container avulso: sem a variável, ela nem aparece; com
+  `PET_APARENCIA_TAMANHO=grande`, aparece. A precedência do config (o
+  ambiente antes do arquivo) passa a valer também no Docker.
+
+**Por quê:** uma aprovação é uma troca de personagem, e a tela tem de mudar
+uma vez só, do jeito certo. Uma opção documentada que não faz nada é pior que
+nenhuma.

@@ -1,4 +1,4 @@
-name: claude-pet
+name: bichinho
 
 # Sem isto o json-file cresce sem limite até encher o disco do host.
 x-log: &log
@@ -7,12 +7,17 @@ x-log: &log
     options: {max-size: "10m", max-file: "5"}
 
 services:
-  pet:
+  bichinho:
     <<: *log
-    image: claude-pet:local
+    image: bichinho:local
     build:
       context: .
-      args: {APP_UID: "${APP_UID:-1000}", APP_GID: "${APP_GID:-1000}"}
+      # BICHINHO_FONTE: o commit de onde a imagem sai (o bin/pet põe;
+      # decisão 0045).
+      args:
+        APP_UID: "${APP_UID:-1000}"
+        APP_GID: "${APP_GID:-1000}"
+        BICHINHO_FONTE: "${BICHINHO_FONTE:-desconhecida}"
     # O binário espera o Hyprland e reconecta sozinho: vale desde o boot
     # (docker.service + linger), sobrevive a logout/login, crash do
     # compositor, suspensão e hotplug, sem unit do systemd (decisão 0007).
@@ -34,6 +39,14 @@ services:
       PET_LOG: ${PET_LOG:-info}
       # Para conferir o cabeçalho Host das requisições.
       PET_PORTA_PUBLICA: ${PET_PORTA:-27380}
+      # As chaves do config que o ambiente pode trocar (config/exemplo.toml):
+      # sem valor aqui, só passam se estiverem no ambiente do `bin/pet subir`
+      # ou no .env; senão nem existem no container e vale o
+      # config/bichinho.toml (decisão 0046).
+      PET_APARENCIA_SKIN:
+      PET_APARENCIA_TAMANHO:
+      PET_CELEBRACAO_MODO:
+      PET_SESSOES_ORIGENS:
     tmpfs:
       - /tmp:size=16m,mode=1777
     volumes:
@@ -51,17 +64,17 @@ services:
         target: /etc/localtime
         read_only: true
         bind: {create_host_path: false}
-      # config/claude-pet.toml (fora do git); modelo em config/exemplo.toml.
+      # config/bichinho.toml (fora do git); modelo em config/exemplo.toml.
       - type: bind
         source: ./config
-        target: /etc/claude-pet
+        target: /etc/bichinho
         read_only: true
         bind: {create_host_path: false}
       - estado:/state
     healthcheck:
       # "Aguardando login" também é saudável. O Docker não reinicia container
       # unhealthy; quem reinicia um laço travado é o vigia interno (abort).
-      test: ["CMD", "/usr/local/bin/claude-pet", "saude"]
+      test: ["CMD", "/usr/local/bin/bichinho", "saude"]
       interval: 60s
       timeout: 5s
       retries: 3
@@ -69,4 +82,9 @@ services:
       start_interval: 2s
 
 volumes:
+  # O volume do estado (a aprovação do Zeca, em /state) foi criado quando o
+  # projeto se chamava claude-pet. O nome fica preso a ele para a aprovação
+  # sobreviver ao nome novo (decisão 0041); o compose avisa que o volume é de
+  # outro projeto, e é de propósito.
   estado:
+    name: claude-pet_estado

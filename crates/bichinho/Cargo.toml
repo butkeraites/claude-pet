@@ -1,0 +1,36 @@
+[package]
+name = "bichinho"
+description = "O bichinho: o daemon (entrada HTTP, o laço de cada sistema e o Motor) e o hook nativo dos plugins (`bichinho avisar`)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+pet-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# O backend de cada sistema (decisão 0040). No Linux, o Wayland (layer-shell)
+# com o laço do calloop; no Windows e no macOS, por enquanto só um esboço.
+[target.'cfg(target_os = "linux")'.dependencies]
+pet-wayland.workspace = true
+smithay-client-toolkit.workspace = true
+signal-hook.workspace = true
+# O hook sem core dump (`prctl` pelo invólucro seguro; decisão 0045).
+rustix.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+pet-windows.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+pet-macos.workspace = true
+
+[dev-dependencies]
+sha2.workspace = true
+# A janela de mentira do Motor, para testar o núcleo sem compositor.
+pet-core = { workspace = true, features = ["teste"] }
+
+[lints]
+workspace = true

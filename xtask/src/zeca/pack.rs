@@ -174,7 +174,7 @@ mod testes {
             ],
             true,
         );
-        let pasta = std::env::temp_dir().join(format!("claude-pet-pack-{}", std::process::id()));
+        let pasta = std::env::temp_dir().join(format!("bichinho-pack-{}", std::process::id()));
         fs::create_dir_all(&pasta).unwrap();
         let arquivo = pasta.join("pack.zip");
         fs::write(&arquivo, &z).unwrap();

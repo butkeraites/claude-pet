@@ -48,6 +48,13 @@ export PET_DEBUG_PERSONAGEM="$PERSONAGEM"
 RAIZ="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 cd "$RAIZ" || exit 1
 export PATH="$HOME/.cargo/bin:$PATH"
+# O commit da árvore vai para a imagem que este script refaz (a etiqueta e o
+# `bichinho versao`; decisão 0045).
+BICHINHO_FONTE="$(git rev-parse HEAD 2>/dev/null || echo desconhecida)"
+if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+  BICHINHO_FONTE="${BICHINHO_FONTE}-sujo"
+fi
+export BICHINHO_FONTE
 URL="http://127.0.0.1:${PET_PORTA:-27380}"
 DEV=(docker compose -f docker-compose.yml -f docker-compose.dev.yml)
 PROD=(docker compose)
@@ -81,7 +88,7 @@ CARGA_PID=""
 CONF=""
 APROVOU_PARA_TESTE=0
 aprovada_no_volume() {
-  docker compose exec -T pet test -f "/state/skins/$1/aprovacao.json" >/dev/null 2>&1
+  docker compose exec -T bichinho test -f "/state/skins/$1/aprovacao.json" >/dev/null 2>&1
 }
 restaurar() {
   [ -n "$CARGA_PID" ] && kill "$CARGA_PID" 2>/dev/null
@@ -170,7 +177,7 @@ carga_iniciar() { # <segundos>
   CARGA_PID=$!
   sleep 2
   hyprctl -j layers | jq -e --arg m "$MONITOR" \
-    '[.[$m].levels[]?[] | select(.namespace == "claude-pet-carga" and .pid > 0)] | length == 1' \
+    '[.[$m].levels[]?[] | select(.namespace == "bichinho-carga" and .pid > 0)] | length == 1' \
     >/dev/null || parar "a camada de carga não apareceu em $MONITOR: $(cat "$CARGA_LOG")"
 }
 carga_fim() {

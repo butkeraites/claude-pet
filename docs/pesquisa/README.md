@@ -1,7 +1,8 @@
 # Pesquisa de origem
 
 Material bruto das pesquisas feitas antes do plano (2026-10-02), quase todo
-em inglês. **O que vale é o `PLANO.md` e o `DECISIONS.md`**; isto aqui é a
+em inglês, e da pesquisa multiplataforma de 2026-10-03 (quase toda em
+português). **O que vale é o `PLANO.md` e o `DECISIONS.md`**; isto aqui é a
 evidência por trás deles — com caminhos de arquivo, linhas do código-fonte
 do Hyprland e do Claude Code, e links conferidos naquela data. Pode
 envelhecer: confira antes de confiar num detalhe.
@@ -16,3 +17,4 @@ envelhecer: confira antes de confiar num detalhe.
 | `06-inspiracoes.md` | conceitos de personagem, packs prontos com licença/preço, verificação de links |
 | `07-desenho-sintese.md` | notas do juiz sobre as três propostas e o plano sintetizado original |
 | `08-revisoes.md` | as duas revisões adversariais (viabilidade e produto) |
+| `09-multiplataforma.md` | **2026-10-03:** Linux além do Hyprland, Windows e macOS (janela do pet, hooks em exec form, foco do terminal, distribuição, assinatura, licença da arte) e o desenho dos marcos M8 e M9 |

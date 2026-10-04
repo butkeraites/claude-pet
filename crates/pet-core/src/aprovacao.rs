@@ -321,8 +321,7 @@ mod testes {
 
     #[test]
     fn arquivos_da_pasta_na_ordem_da_impressao() {
-        let pasta =
-            std::env::temp_dir().join(format!("claude-pet-aprovacao-{}", std::process::id()));
+        let pasta = std::env::temp_dir().join(format!("bichinho-aprovacao-{}", std::process::id()));
         std::fs::create_dir_all(&pasta).unwrap();
         std::fs::write(
             pasta.join("skin.json"),

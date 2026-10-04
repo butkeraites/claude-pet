@@ -1,0 +1,17 @@
+[package]
+name = "pet-windows"
+description = "Backend do Windows (M8, T8.4): por enquanto só o esboço que compila."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+# Só no Windows: em outro sistema o crate fica vazio (decisão 0040). Sem
+# dependência de SDK por enquanto: o `cargo check --target
+# x86_64-pc-windows-msvc` roda neste notebook, sem linkar.
+[target.'cfg(windows)'.dependencies]
+pet-core.workspace = true
+
+[lints]
+workspace = true

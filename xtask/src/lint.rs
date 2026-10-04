@@ -317,7 +317,7 @@ mod testes {
     /// pasta temporária e devolve a pasta.
     fn skin_em(nome: &str, quadros: &[(Vec<u8>, u64)], extra: serde_json::Value) -> PathBuf {
         let pasta = std::env::temp_dir()
-            .join(format!("claude-pet-lint-{}-{nome}", std::process::id()))
+            .join(format!("bichinho-lint-{}-{nome}", std::process::id()))
             .join(nome);
         let _ = fs::remove_dir_all(&pasta);
         fs::create_dir_all(&pasta).unwrap();

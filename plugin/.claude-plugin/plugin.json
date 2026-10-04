@@ -1,7 +1,7 @@
 {
   "name": "bichinho",
-  "version": "0.1.0",
-  "description": "Hooks do claude-pet: o Zeca, papagaio de pixel art, reage ao Claude Code na tela (Hyprland). Só metadados saem do Claude Code.",
+  "version": "0.2.0",
+  "description": "Hooks do bichinho: o Zeca, papagaio de pixel art, reage ao Claude Code na tela. Chama o binário bichinho no PATH (bichinho avisar); só metadados saem do Claude Code.",
   "author": {
     "name": "butkeraites"
   },
