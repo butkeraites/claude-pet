@@ -48,6 +48,13 @@ export PET_DEBUG_PERSONAGEM="$PERSONAGEM"
 RAIZ="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 cd "$RAIZ" || exit 1
 export PATH="$HOME/.cargo/bin:$PATH"
+# O commit da árvore vai para a imagem que este script refaz (a etiqueta e o
+# `bichinho versao`; decisão 0045).
+BICHINHO_FONTE="$(git rev-parse HEAD 2>/dev/null || echo desconhecida)"
+if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+  BICHINHO_FONTE="${BICHINHO_FONTE}-sujo"
+fi
+export BICHINHO_FONTE
 URL="http://127.0.0.1:${PET_PORTA:-27380}"
 DEV=(docker compose -f docker-compose.yml -f docker-compose.dev.yml)
 PROD=(docker compose)

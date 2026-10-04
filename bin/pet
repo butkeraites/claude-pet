@@ -29,15 +29,20 @@ ajuda() {
   cat <<'TEXTO'
 uso: bin/pet <comando>
 
-  subir           sobe o pet (docker compose up -d --build); na primeira vez
-                  depois do nome novo, aposenta o container claude-pet antigo
-                  (o volume com a aprovação fica)
+  subir           sobe o pet (docker compose up -d --build), com o commit da
+                  árvore na imagem; na primeira vez depois do nome novo,
+                  aposenta o container claude-pet antigo (o volume com a
+                  aprovação fica)
   parar           para o pet
   logs            acompanha os logs
   estado          mostra /v1/estado (o que o pet está vendo e pensando)
-  instalar-host   copia o binário estático da imagem para ~/.local/bin/bichinho
+  instalar-host [--da-branch]
+                  copia o binário estático da imagem para ~/.local/bin/bichinho
                   (o hook do plugin chama `bichinho avisar`; PET_BIN_HOST muda
-                  a pasta)
+                  a pasta). Só aceita a imagem do commit da worktree estável
+                  (sem ela, o da main) e de árvore limpa: o hook vale para todas
+                  as sessões do Claude Code. --da-branch pula a conferência
+                  (só para uma pasta fora do PATH, nos testes)
   testar CENÁRIO  manda eventos sintéticos pelo hook de verdade (o `bichinho
                   avisar` do PATH, ou PET_BICHINHO; sem ele, o avisar.sh de
                   reserva), com PET_TESTE=1 (isolados das sessões reais e
@@ -122,6 +127,22 @@ tocar_reacao() {
   fi
 }
 
+# O commit desta árvore, para a imagem saber de onde saiu (decisão 0045):
+# `git rev-parse HEAD`, com `-sujo` se há mudanças (arquivos novos contam; os
+# ignorados, como config/bichinho.toml, não).
+fonte_do_clone() {
+  local commit
+  commit="$(git rev-parse HEAD 2>/dev/null || true)"
+  if [ -z "$commit" ]; then
+    printf 'desconhecida'
+    return
+  fi
+  if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+    commit="${commit}-sujo"
+  fi
+  printf '%s' "$commit"
+}
+
 # O hook que o plugin chama (decisão 0041): o `bichinho` do PATH, como o
 # Claude Code acha no exec form, ou PET_BICHINHO; vazio se não houver.
 binario_do_hook() {
@@ -157,7 +178,7 @@ testar() {
   id_turno="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
   nativo="$(binario_do_hook)"
   if [ -n "$nativo" ]; then
-    echo "pelo hook nativo: $nativo avisar"
+    echo "pelo hook nativo: $nativo avisar ($("$nativo" versao 2>/dev/null || echo 'sem versão'))"
   else
     echo "aviso: o bichinho não está no PATH (bin/pet instalar-host); indo pelo avisar.sh de reserva" >&2
   fi
@@ -562,15 +583,64 @@ aposentar_nome_antigo() {
   docker network rm claude-pet_default >/dev/null 2>&1 || true
 }
 
+# A worktree estável, de onde o marketplace instala o plugin (README).
+ESTAVEL="${PET_ESTAVEL:-$HOME/.local/share/claude-pet/estavel}"
+
+# O commit que o hook do PATH tem de ter: o da worktree estável ou, numa
+# máquina sem ela (um clone novo), o da main.
+commit_de_referencia() {
+  if git -C "$ESTAVEL" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+    git -C "$ESTAVEL" rev-parse HEAD
+  else
+    git rev-parse --verify --quiet main || true
+  fi
+}
+
 # instalar-host: o hook do plugin chama `bichinho avisar` (exec form, decisão
 # 0041), então o binário tem de estar no PATH que o Claude Code vê. Copia o
 # binário estático (musl) da imagem local para ~/.local/bin/bichinho
 # (PET_BIN_HOST muda a pasta), trocando de uma vez, e confere que ele roda no
 # host.
+#
+# Esse binário é a lista branca de TODAS as sessões do Claude Code da máquina
+# (decisão 0045): só vai para lá o do commit da worktree estável, de árvore
+# limpa, que é o código que o marketplace instalou. A imagem diz de onde saiu
+# (etiqueta `bichinho.fonte`, posta pelo `bin/pet subir`), e o binário
+# confirma no `bichinho versao`. Para testar uma branch, o binário vai só
+# para a sessão (README); `--da-branch` pula a conferência, para uma pasta de
+# teste fora do PATH.
 instalar_host() {
-  local destino="${PET_BIN_HOST:-$HOME/.local/bin}" id pasta achado
+  local destino="${PET_BIN_HOST:-$HOME/.local/bin}" id pasta achado fonte referencia da_branch=0
+  case "${1:-}" in
+    "") ;;
+    --da-branch) da_branch=1 ;;
+    *)
+      echo "uso: bin/pet instalar-host [--da-branch]" >&2
+      return 2
+      ;;
+  esac
   if ! docker image inspect bichinho:local >/dev/null 2>&1; then
     echo "falta a imagem bichinho:local: rode bin/pet subir antes" >&2
+    return 1
+  fi
+  fonte="$(docker image inspect bichinho:local \
+    --format '{{ index .Config.Labels "bichinho.fonte" }}' 2>/dev/null || true)"
+  case "$fonte" in
+    '' | '<no value>' | desconhecida) fonte="" ;;
+  esac
+  referencia="$(commit_de_referencia)"
+  if [ "$da_branch" -eq 1 ]; then
+    echo "atenção: instalando o binário de ${fonte:-origem desconhecida} sem conferir a worktree estável (--da-branch)." >&2
+    echo "  Numa pasta do PATH do Claude Code, ele vale para todas as sessões da máquina." >&2
+  elif [ -z "$fonte" ]; then
+    echo "a imagem bichinho:local não diz de que commit saiu: refaça com bin/pet subir" >&2
+    return 1
+  elif [ "$fonte" != "$referencia" ]; then
+    echo "a imagem saiu de ${fonte:0:12}, e o hook do PATH tem de ser o de ${referencia:0:12} (a worktree estável, ou a main sem ela)." >&2
+    echo "  O hook vale para todas as sessões do Claude Code da máquina (decisão 0045). Depois do merge:" >&2
+    echo "  clone e worktree estável na main, bin/pet subir e bin/pet instalar-host (README)." >&2
+    echo "  Para testar esta branch só numa sessão:" >&2
+    echo "  ~/.cargo/bin/cargo build -p bichinho && PATH=\"\$PWD/target/debug:\$PATH\" claude --plugin-dir plugin" >&2
     return 1
   fi
   mkdir -p "$destino"
@@ -587,6 +657,11 @@ instalar_host() {
   if ! "$pasta/bichinho" versao >/dev/null; then
     rm -rf "$pasta"
     echo "o binário da imagem não roda neste host" >&2
+    return 1
+  fi
+  if [ -n "$fonte" ] && ! "$pasta/bichinho" versao | grep -qF "(fonte $fonte)"; then
+    rm -rf "$pasta"
+    echo "o binário não diz a mesma fonte da etiqueta da imagem ($fonte)" >&2
     return 1
   fi
   mv -f "$pasta/bichinho" "$destino/bichinho"
@@ -650,7 +725,7 @@ comando="${1:-ajuda}"
 case "$comando" in
   subir)
     aposentar_nome_antigo
-    docker compose up -d --build "$@"
+    BICHINHO_FONTE="$(fonte_do_clone)" docker compose up -d --build "$@"
     ;;
   parar) docker compose stop "$@" ;;
   logs) docker compose logs -f --tail=100 bichinho ;;
@@ -676,13 +751,15 @@ case "$comando" in
   skin-revogar) skin_revogar "$@" ;;
   reconstruir)
     aposentar_nome_antigo
-    docker compose build --pull bichinho && docker compose up -d bichinho
+    BICHINHO_FONTE="$(fonte_do_clone)" docker compose build --pull bichinho &&
+      docker compose up -d bichinho
     ;;
   dev)
     aposentar_nome_antigo
-    docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+    BICHINHO_FONTE="$(fonte_do_clone)" \
+      docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
     ;;
-  instalar-host) instalar_host ;;
+  instalar-host) instalar_host "$@" ;;
   verificar) verificar ;;
   ajuda | -h | --help) ajuda ;;
   *)

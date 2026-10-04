@@ -64,8 +64,9 @@ Fora dele, use `~/.cargo/bin/cargo`.
 | `bin/pet verificar` | portão antes de **todo** commit: fmt, clippy, testes, compose, plugin |
 | `rustup target add x86_64-pc-windows-msvc aarch64-apple-darwin` | com os alvos instalados, o `verificar` também passa o clippy do núcleo, dos esboços e do daemon para Windows e macOS (sem linkar, sem SDK) |
 | `bin/pet subir` / `parar` / `logs` / `estado` | compose e estado do pet |
-| `bin/pet testar rapido` / `pequeno` | eventos sintéticos pelo hook de verdade (`bichinho avisar` do PATH ou `PET_BICHINHO`; sem ele, o `avisar.sh` de reserva, com aviso), com `PET_TESTE=1` → `nod` / `done_small` |
-| `bin/pet instalar-host` | copia o binário estático da imagem para `~/.local/bin/bichinho` (o hook do plugin 0.2.0 o acha pelo PATH) |
+| `bin/pet testar rapido` / `pequeno` | eventos sintéticos pelo hook de verdade (`bichinho avisar` do PATH ou `PET_BICHINHO`, com o commit dele; sem ele, o `avisar.sh` de reserva, com aviso), com `PET_TESTE=1` → `nod` / `done_small` |
+| `bin/pet instalar-host` | copia o binário estático da imagem para `~/.local/bin/bichinho` (o hook do plugin 0.2.0 o acha pelo PATH); só a imagem do commit da worktree estável, de árvore limpa (decisão 0045). `--da-branch` pula a conferência: só com `PET_BIN_HOST` numa pasta de teste fora do PATH |
+| `~/.cargo/bin/cargo build -p bichinho` + `PATH="$PWD/target/debug:$PATH" claude --plugin-dir plugin` | o hook da branch só numa sessão (e `PET_BICHINHO=$PWD/target/debug/bichinho bin/pet testar`) |
 | `bin/pet tocar <reação>` / `esconder` / `mostrar` | `/v1/comando` (não persiste); o `tocar` diz a tag que a skin tocou e se apareceu na tela |
 | `claude --plugin-dir ~/Documents/claude-pet/plugin` | o plugin da branch numa sessão só (nunca instalar antes do merge) |
 | `~/.cargo/bin/cargo test` | testes do workspace (os quadros dourados regeneram com `PET_ATUALIZAR_OURO=1`) |
@@ -131,9 +132,11 @@ Fora dele, use `~/.cargo/bin/cargo`.
 
 - **Hooks:** sempre `async`, só metadados, nunca imprimem, sempre `exit 0`.
   O hook é o `bichinho avisar <Evento>` em exec form (decisão 0041): a lista
-  branca do `pet_core::aviso`, com os validadores do fio v1, e TCP direto ao
-  127.0.0.1 (nenhum proxy, nenhum curlrc). Conteúdo (prompt, código,
-  resposta, título de janela) nunca sai do host nem vai para log. O
+  branca do `pet_core::aviso`, com os validadores do fio v1, lida em fluxo
+  (só os campos da lista ficam na memória; decisão 0045), sem log nenhum
+  (nem com `PET_LOG=debug`), sem core dump, e TCP direto ao 127.0.0.1
+  (nenhum proxy, nenhum curlrc). Conteúdo (prompt, código, resposta, título
+  de janela) nunca sai do host nem vai para log. O
   `avisar.sh` fica de reserva até a troca: todo curl que fala com o pet leva
   `-q --noproxy '*'` e o jq dele roda sem `~/.jq` (decisão 0031). Os
   canários dos dois (`tests/hook.rs`, `tests/avisar.rs`) não podem cair.
@@ -222,7 +225,16 @@ Fora dele, use `~/.cargo/bin/cargo`.
   instalar-host` antes de `claude plugin update`).
 - O hook em exec form acha o `bichinho` pelo PATH do Claude Code: sem ele,
   os eventos não chegam e o `claude -p` fica calado (conferido). Confira com
-  `command -v bichinho` e `bin/pet testar`.
+  `command -v bichinho`, `bichinho versao` (o commit) e `bin/pet testar`.
+- O `~/.local/bin/bichinho` é a lista branca de todas as sessões da máquina:
+  só o binário da worktree estável vai para lá (o `bin/pet instalar-host`
+  confere o commit gravado na imagem). Nunca instale o de uma branch no PATH
+  (`--da-branch` é só para uma pasta de teste); para testar, o binário da
+  branch vai só na sessão (`PATH="$PWD/target/debug:$PATH" claude
+  --plugin-dir plugin`).
+- `bichinho` sem subcomando não faz nada (no terminal, mostra a ajuda): o
+  daemon é `bichinho rodar` (o `CMD` da imagem e os testes já passam).
+  Um Claude Code que ignorasse o `args` do exec form não sobe daemon.
 - O compose avisa que o volume `claude-pet_estado` "foi criado para o
   projeto claude-pet": é de propósito, o nome está preso a ele para a
   aprovação do Zeca sobreviver ao nome novo (decisão 0041). Nunca apague

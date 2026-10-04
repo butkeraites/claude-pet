@@ -18,6 +18,8 @@ serde_json.workspace = true
 pet-wayland.workspace = true
 smithay-client-toolkit.workspace = true
 signal-hook.workspace = true
+# O hook sem core dump (`prctl` pelo invólucro seguro; decisão 0045).
+rustix.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 pet-windows.workspace = true

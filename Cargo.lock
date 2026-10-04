@@ -36,6 +36,7 @@ dependencies = [
  "pet-macos",
  "pet-wayland",
  "pet-windows",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",

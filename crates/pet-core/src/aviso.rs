@@ -11,8 +11,22 @@
 //! Tudo aqui é puro (recebe o JSON do hook e o ambiente já lido); quem lê a
 //! entrada padrão, o arquivo do "não perturbe" e faz o POST é o subcomando
 //! `avisar` do binário.
+//!
+//! **Leitura** (decisão 0045): o JSON do hook é lido em fluxo, e só os
+//! campos da lista branca são guardados, como texto cru, e interpretados um
+//! a um ([`Lido`]). O resto (o prompt, a resposta, a saída das ferramentas)
+//! é pulado sem ser interpretado: um texto com um caractere quebrado (um
+//! substituto UTF-16 sozinho, bytes que não são UTF-8), um aninhamento
+//! fundo ou um número enorme num campo que o hook não lê não derruba os
+//! metadados, e a memória não cresce com o tamanho deles. Um campo da lista
+//! que não se lê cai sozinho, como um de tipo errado.
+
+use std::fmt;
+use std::io::Read;
 
 use serde::Serialize;
+use serde::de::{self, Deserialize, Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
+use serde_json::value::RawValue;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
@@ -144,18 +158,370 @@ pub fn hash_do_caminho(caminho: &str) -> String {
     hex(&Sha256::digest(caminho.as_bytes()))[..12].to_owned()
 }
 
+/// Os campos do JSON do hook que a lista branca lê. Nada mais é guardado.
+const ESCALARES: [&str; 12] = [
+    "session_id",
+    "prompt_id",
+    "agent_id",
+    "tool_name",
+    "notification_type",
+    "error",
+    "source",
+    "reason",
+    "is_interrupt",
+    "stop_hook_active",
+    "duration_ms",
+    "cwd",
+];
+
+/// O que o hook leu do JSON: só os campos da lista branca, cada um já
+/// interpretado (um que não se lê fica de fora). Nenhum outro campo do hook
+/// chega aqui.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct Lido {
+    /// Os campos simples da lista ([`ESCALARES`]).
+    campos: Map<String, Value>,
+    /// O `tool_input`, só com o `file_path` e o `notebook_path`; `None` se
+    /// não é um objeto.
+    entrada_da_ferramenta: Option<Map<String, Value>>,
+    /// O `background_tasks`, se é uma lista.
+    tarefas: Option<Tarefas>,
+}
+
+/// As tarefas em segundo plano: quantas a lista tem e as primeiras válidas
+/// (tipo normalizado e id), sem guardar o resto delas.
+#[derive(Debug, Default, Clone, PartialEq)]
+struct Tarefas {
+    contagem: u64,
+    validas: Vec<(String, String)>,
+}
+
+/// Lê o JSON do hook de `leitor`, em fluxo. Só o primeiro valor conta: com
+/// ele fechado, o hook não espera o fim da entrada. `null` vale como objeto
+/// vazio (como no jq); outra coisa que não um objeto é erro.
+pub fn ler_de(leitor: impl Read) -> Result<Lido, serde_json::Error> {
+    Lido::deserialize(&mut serde_json::Deserializer::from_reader(leitor))
+}
+
+/// [`ler_de`] de bytes já na memória.
+pub fn ler(entrada: &[u8]) -> Result<Lido, serde_json::Error> {
+    Lido::deserialize(&mut serde_json::Deserializer::from_slice(entrada))
+}
+
+/// O texto cru de um campo vira valor; o que não se lê (um substituto
+/// sozinho, um número fora do `f64`, aninhamento demais) fica de fora.
+fn interpretar(cru: &RawValue) -> Option<Value> {
+    serde_json::from_str(cru.get()).ok()
+}
+
+/// Guarda o campo `nome` (o último vale, como no jq); se ele não se lê, o
+/// campo cai.
+fn guardar(campos: &mut Map<String, Value>, nome: &str, cru: &RawValue) {
+    match interpretar(cru) {
+        Some(valor) => {
+            campos.insert(nome.to_owned(), valor);
+        }
+        None => {
+            campos.remove(nome);
+        }
+    }
+}
+
+/// Uma chave do JSON do hook, lida como bytes: o texto de uma chave que a
+/// lista não usa nunca é validado nem guardado.
+enum Chave {
+    Escalar(&'static str),
+    EntradaDaFerramenta,
+    Tarefas,
+    Outra,
+}
+
+impl Chave {
+    fn de(nome: &[u8]) -> Chave {
+        match nome {
+            b"tool_input" => Chave::EntradaDaFerramenta,
+            b"background_tasks" => Chave::Tarefas,
+            _ => ESCALARES
+                .iter()
+                .find(|e| e.as_bytes() == nome)
+                .map_or(Chave::Outra, |e| Chave::Escalar(e)),
+        }
+    }
+}
+
+/// O visitante das chaves: aceita a chave em bytes ou em texto.
+struct VisitanteDeChave<F>(F);
+
+impl<'de, T, F: FnOnce(&[u8]) -> T> Visitor<'de> for VisitanteDeChave<F> {
+    type Value = T;
+
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("uma chave")
+    }
+
+    fn visit_bytes<E: de::Error>(self, v: &[u8]) -> Result<T, E> {
+        Ok((self.0)(v))
+    }
+
+    fn visit_str<E: de::Error>(self, v: &str) -> Result<T, E> {
+        Ok((self.0)(v.as_bytes()))
+    }
+}
+
+impl<'de> Deserialize<'de> for Chave {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Chave, D::Error> {
+        d.deserialize_bytes(VisitanteDeChave(Chave::de))
+    }
+}
+
+/// Uma chave de dentro do `tool_input`: só o caminho interessa.
+struct ChaveDoCaminho(Option<&'static str>);
+
+impl<'de> Deserialize<'de> for ChaveDoCaminho {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<ChaveDoCaminho, D::Error> {
+        d.deserialize_bytes(VisitanteDeChave(|nome: &[u8]| {
+            ChaveDoCaminho(match nome {
+                b"file_path" => Some("file_path"),
+                b"notebook_path" => Some("notebook_path"),
+                _ => None,
+            })
+        }))
+    }
+}
+
+/// Uma chave de uma tarefa em segundo plano: só o tipo e o id interessam.
+struct ChaveDaTarefa(Option<&'static str>);
+
+impl<'de> Deserialize<'de> for ChaveDaTarefa {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<ChaveDaTarefa, D::Error> {
+        d.deserialize_bytes(VisitanteDeChave(|nome: &[u8]| {
+            ChaveDaTarefa(match nome {
+                b"type" => Some("type"),
+                b"id" => Some("id"),
+                _ => None,
+            })
+        }))
+    }
+}
+
+/// Num visitante que espera um tipo, qualquer valor simples de outro tipo
+/// vale `$nada` (o campo cai, como um de tipo errado).
+macro_rules! simples_valem {
+    ($nada:expr) => {
+        fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
+            Ok($nada)
+        }
+        fn visit_i64<E: de::Error>(self, _: i64) -> Result<Self::Value, E> {
+            Ok($nada)
+        }
+        fn visit_u64<E: de::Error>(self, _: u64) -> Result<Self::Value, E> {
+            Ok($nada)
+        }
+        fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self::Value, E> {
+            Ok($nada)
+        }
+        fn visit_str<E: de::Error>(self, _: &str) -> Result<Self::Value, E> {
+            Ok($nada)
+        }
+        fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+            Ok($nada)
+        }
+    };
+}
+
+/// Pula uma lista inteira sem interpretar os itens.
+fn pular_lista<'de, A: SeqAccess<'de>>(mut lista: A) -> Result<(), A::Error> {
+    while lista.next_element::<IgnoredAny>()?.is_some() {}
+    Ok(())
+}
+
+/// Pula um objeto inteiro sem interpretar as chaves nem os valores.
+fn pular_objeto<'de, A: MapAccess<'de>>(mut objeto: A) -> Result<(), A::Error> {
+    while objeto.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+    Ok(())
+}
+
+impl<'de> Deserialize<'de> for Lido {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Lido, D::Error> {
+        struct V;
+
+        impl<'de> Visitor<'de> for V {
+            type Value = Lido;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("o objeto JSON do hook")
+            }
+
+            fn visit_unit<E: de::Error>(self) -> Result<Lido, E> {
+                Ok(Lido::default())
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut objeto: A) -> Result<Lido, A::Error> {
+                let mut lido = Lido::default();
+                while let Some(chave) = objeto.next_key::<Chave>()? {
+                    match chave {
+                        Chave::Escalar(nome) => {
+                            let cru: Box<RawValue> = objeto.next_value()?;
+                            guardar(&mut lido.campos, nome, &cru);
+                        }
+                        Chave::EntradaDaFerramenta => {
+                            lido.entrada_da_ferramenta =
+                                objeto.next_value::<EntradaDaFerramenta>()?.0;
+                        }
+                        Chave::Tarefas => {
+                            lido.tarefas = objeto.next_value::<ListaDeTarefas>()?.0;
+                        }
+                        Chave::Outra => {
+                            objeto.next_value::<IgnoredAny>()?;
+                        }
+                    }
+                }
+                Ok(lido)
+            }
+        }
+
+        d.deserialize_any(V)
+    }
+}
+
+/// O `tool_input`: só o caminho, se for um objeto.
+struct EntradaDaFerramenta(Option<Map<String, Value>>);
+
+impl<'de> Deserialize<'de> for EntradaDaFerramenta {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<EntradaDaFerramenta, D::Error> {
+        struct V;
+
+        impl<'de> Visitor<'de> for V {
+            type Value = EntradaDaFerramenta;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("o tool_input")
+            }
+
+            simples_valem!(EntradaDaFerramenta(None));
+
+            fn visit_seq<A: SeqAccess<'de>>(self, lista: A) -> Result<Self::Value, A::Error> {
+                pular_lista(lista)?;
+                Ok(EntradaDaFerramenta(None))
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut objeto: A) -> Result<Self::Value, A::Error> {
+                let mut campos = Map::new();
+                while let Some(ChaveDoCaminho(nome)) = objeto.next_key()? {
+                    match nome {
+                        Some(nome) => {
+                            let cru: Box<RawValue> = objeto.next_value()?;
+                            guardar(&mut campos, nome, &cru);
+                        }
+                        None => {
+                            objeto.next_value::<IgnoredAny>()?;
+                        }
+                    }
+                }
+                Ok(EntradaDaFerramenta(Some(campos)))
+            }
+        }
+
+        d.deserialize_any(V)
+    }
+}
+
+/// O `background_tasks`: a contagem e as primeiras válidas, se for uma
+/// lista.
+struct ListaDeTarefas(Option<Tarefas>);
+
+impl<'de> Deserialize<'de> for ListaDeTarefas {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<ListaDeTarefas, D::Error> {
+        struct V;
+
+        impl<'de> Visitor<'de> for V {
+            type Value = ListaDeTarefas;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("o background_tasks")
+            }
+
+            simples_valem!(ListaDeTarefas(None));
+
+            fn visit_map<A: MapAccess<'de>>(self, objeto: A) -> Result<Self::Value, A::Error> {
+                pular_objeto(objeto)?;
+                Ok(ListaDeTarefas(None))
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut lista: A) -> Result<Self::Value, A::Error> {
+                let mut tarefas = Tarefas::default();
+                while let Some(Tarefa(tarefa)) = lista.next_element()? {
+                    tarefas.contagem += 1;
+                    if let Some(par) = tarefa
+                        && tarefas.validas.len() < MAX_TAREFAS
+                    {
+                        tarefas.validas.push(par);
+                    }
+                }
+                Ok(ListaDeTarefas(Some(tarefas)))
+            }
+        }
+
+        d.deserialize_any(V)
+    }
+}
+
+/// Uma tarefa em segundo plano: `Some((tipo, id))` se é um objeto com tipo e
+/// id válidos.
+struct Tarefa(Option<(String, String)>);
+
+impl<'de> Deserialize<'de> for Tarefa {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Tarefa, D::Error> {
+        struct V;
+
+        impl<'de> Visitor<'de> for V {
+            type Value = Tarefa;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("uma tarefa")
+            }
+
+            simples_valem!(Tarefa(None));
+
+            fn visit_seq<A: SeqAccess<'de>>(self, lista: A) -> Result<Self::Value, A::Error> {
+                pular_lista(lista)?;
+                Ok(Tarefa(None))
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut objeto: A) -> Result<Self::Value, A::Error> {
+                let mut campos = Map::new();
+                while let Some(ChaveDaTarefa(nome)) = objeto.next_key()? {
+                    match nome {
+                        Some(nome) => {
+                            let cru: Box<RawValue> = objeto.next_value()?;
+                            guardar(&mut campos, nome, &cru);
+                        }
+                        None => {
+                            objeto.next_value::<IgnoredAny>()?;
+                        }
+                    }
+                }
+                let par = tipo_de_tarefa(campos.get("type")).zip(texto(campos.get("id"), eh_id));
+                Ok(Tarefa(par))
+            }
+        }
+
+        d.deserialize_any(V)
+    }
+}
+
 /// O caminho editado, só no PostToolUse de uma ferramenta de edição:
 /// `tool_input.file_path`, ou `notebook_path` se ele faltar (o `//` do jq).
 /// Nunca sai daqui: vira [`hash_do_caminho`].
-pub fn caminho_editado<'a>(evento: &str, entrada: &'a Value) -> Option<&'a str> {
+pub fn caminho_editado<'a>(evento: &str, lido: &'a Lido) -> Option<&'a str> {
     if evento != "PostToolUse" {
         return None;
     }
-    let ferramenta = entrada.get("tool_name")?.as_str()?;
+    let ferramenta = lido.campos.get("tool_name")?.as_str()?;
     if !FERRAMENTAS_DE_EDICAO.contains(&ferramenta) {
         return None;
     }
-    let entrada = entrada.get("tool_input")?.as_object()?;
+    let entrada = lido.entrada_da_ferramenta.as_ref()?;
     let alvo = match entrada.get("file_path") {
         Some(v) if !matches!(v, Value::Null | Value::Bool(false)) => v,
         _ => entrada.get("notebook_path")?,
@@ -200,36 +566,28 @@ fn tipo_de_tarefa(v: Option<&Value>) -> Option<String> {
     })
 }
 
-/// Só o nome da última pasta do `cwd`, nunca o caminho.
+/// Só o nome da última pasta do `cwd`, nunca o caminho. Corta nas duas
+/// barras: no Windows o `cwd` vem como `C:\Users\x\projeto` (uma barra
+/// invertida nunca passa no validador do pet, então no Linux nada muda).
 fn pasta(v: Option<&Value>) -> Option<String> {
     let cwd = v?.as_str()?;
-    let ultima = cwd.split('/').rfind(|p| !p.is_empty())?;
+    let ultima = cwd.rsplit(['/', '\\']).find(|p| !p.is_empty())?;
     eh_projeto(ultima).then(|| ultima.to_owned())
 }
 
-/// Monta o corpo do fio v1 a partir do JSON do hook. `arq` é o hash do
+/// Monta o corpo do fio v1 a partir do que o hook leu. `arq` é o hash do
 /// caminho editado ([`hash_do_caminho`]), calculado por quem chama. Cada
 /// campo só vale no evento que o tem e passa pelo validador do pet; nenhum
 /// outro campo do hook é lido.
-pub fn montar(entrada: &Map<String, Value>, ctx: &Contexto, arq: Option<&str>) -> Fio {
+pub fn montar(lido: &Lido, ctx: &Contexto, arq: Option<&str>) -> Fio {
     let e = ctx.evento;
-    let campo = |nome: &str| entrada.get(nome);
+    let campo = |nome: &str| lido.campos.get(nome);
     let de_ferramenta = matches!(
         e,
         "PreToolUse" | "PostToolUse" | "PostToolUseFailure" | "PermissionRequest"
     );
-    let tarefas: &[Value] = match campo("background_tasks") {
-        Some(Value::Array(lista)) => lista,
-        _ => &[],
-    };
-    let validas: Vec<(String, String)> = tarefas
-        .iter()
-        .filter(|t| t.is_object())
-        .filter_map(|t| Some((tipo_de_tarefa(t.get("type"))?, texto(t.get("id"), eh_id)?)))
-        .take(MAX_TAREFAS)
-        .collect();
+    let validas: &[(String, String)] = lido.tarefas.as_ref().map_or(&[], |t| &t.validas);
     let stop = e == "Stop";
-    let lista_de_tarefas = matches!(campo("background_tasks"), Some(Value::Array(_)));
     Fio {
         v: 1,
         e: e.to_owned(),
@@ -273,8 +631,11 @@ pub fn montar(entrada: &Map<String, Value>, ctx: &Contexto, arq: Option<&str>) -
         } else {
             None
         },
-        bg: (stop && lista_de_tarefas)
-            .then_some(tarefas.len() as u64)
+        bg: lido
+            .tarefas
+            .as_ref()
+            .filter(|_| stop)
+            .map(|t| t.contagem)
             .filter(|&n| n <= MAX_CONTAGEM),
         bgt: (stop && !validas.is_empty()).then(|| validas.iter().map(|t| t.0.clone()).collect()),
         bgi: (stop && !validas.is_empty()).then(|| validas.iter().map(|t| t.1.clone()).collect()),
@@ -291,23 +652,26 @@ pub fn montar(entrada: &Map<String, Value>, ctx: &Contexto, arq: Option<&str>) -
     }
 }
 
-/// O corpo inteiro, do jeito que vai no POST: o JSON do hook vira o fio v1;
-/// o que não é um objeto JSON vira o [`minimo`]. `null` vale como objeto
-/// vazio (como no jq).
-pub fn corpo(entrada: &[u8], ctx: &Contexto) -> String {
-    let valor: Value = match serde_json::from_slice(entrada) {
-        Ok(valor) => valor,
-        Err(_) => return minimo(ctx.evento, ctx.teste),
+/// O corpo inteiro, do jeito que vai no POST, a partir do que se leu do
+/// JSON do hook; o que não é um objeto JSON (ou não fecha) vira o
+/// [`minimo`]. `null` vale como objeto vazio (como no jq).
+pub fn corpo_do_lido(lido: Result<Lido, serde_json::Error>, ctx: &Contexto) -> String {
+    let Ok(lido) = lido else {
+        return minimo(ctx.evento, ctx.teste);
     };
-    let vazio = Map::new();
-    let objeto = match &valor {
-        Value::Object(objeto) => objeto,
-        Value::Null => &vazio,
-        _ => return minimo(ctx.evento, ctx.teste),
-    };
-    let arq = caminho_editado(ctx.evento, &valor).map(hash_do_caminho);
-    let fio = montar(objeto, ctx, arq.as_deref());
+    let arq = caminho_editado(ctx.evento, &lido).map(hash_do_caminho);
+    let fio = montar(&lido, ctx, arq.as_deref());
     serde_json::to_string(&fio).unwrap_or_else(|_| minimo(ctx.evento, ctx.teste))
+}
+
+/// [`corpo_do_lido`] de bytes já na memória.
+pub fn corpo(entrada: &[u8], ctx: &Contexto) -> String {
+    corpo_do_lido(ler(entrada), ctx)
+}
+
+/// [`corpo_do_lido`] lendo em fluxo (a entrada padrão do hook).
+pub fn corpo_de(leitor: impl Read, ctx: &Contexto) -> String {
+    corpo_do_lido(ler_de(leitor), ctx)
 }
 
 #[cfg(test)]
@@ -395,24 +759,177 @@ mod testes {
         assert_eq!(tipo_de_tarefa(Some(&json!(3))), None);
     }
 
+    fn lido(v: Value) -> Lido {
+        ler(v.to_string().as_bytes()).expect("objeto")
+    }
+
     #[test]
     fn hash_e_caminho_so_da_edicao() {
         assert_eq!(hash_do_caminho("/tmp/x"), {
             let h = hex(&Sha256::digest(b"/tmp/x"));
             h[..12].to_owned()
         });
-        let edit = json!({"tool_name": "Edit", "tool_input": {"file_path": "/a/b.rs"}});
+        let edit = lido(json!({"tool_name": "Edit", "tool_input": {"file_path": "/a/b.rs"}}));
         assert_eq!(caminho_editado("PostToolUse", &edit), Some("/a/b.rs"));
         assert_eq!(caminho_editado("PreToolUse", &edit), None);
-        let nb = json!({"tool_name": "NotebookEdit",
-                        "tool_input": {"file_path": null, "notebook_path": "/n.ipynb"}});
+        let nb = lido(json!({"tool_name": "NotebookEdit",
+                        "tool_input": {"file_path": null, "notebook_path": "/n.ipynb"}}));
         assert_eq!(caminho_editado("PostToolUse", &nb), Some("/n.ipynb"));
-        let lido = json!({"tool_name": "Read", "tool_input": {"file_path": "/etc/x"}});
-        assert_eq!(caminho_editado("PostToolUse", &lido), None);
-        let ruim = json!({"tool_name": "Write", "tool_input": "SEGREDO"});
+        let leitura = lido(json!({"tool_name": "Read", "tool_input": {"file_path": "/etc/x"}}));
+        assert_eq!(caminho_editado("PostToolUse", &leitura), None);
+        let ruim = lido(json!({"tool_name": "Write", "tool_input": "SEGREDO"}));
         assert_eq!(caminho_editado("PostToolUse", &ruim), None);
-        let vazio = json!({"tool_name": "Write", "tool_input": {"file_path": ""}});
+        let lista = lido(json!({"tool_name": "Write", "tool_input": [{"file_path": "/x"}]}));
+        assert_eq!(caminho_editado("PostToolUse", &lista), None);
+        let vazio = lido(json!({"tool_name": "Write", "tool_input": {"file_path": ""}}));
         assert_eq!(caminho_editado("PostToolUse", &vazio), None);
+    }
+
+    #[test]
+    fn so_a_lista_branca_e_guardada() {
+        // O resto do JSON nem vira valor: só os campos da lista ficam.
+        let l = lido(json!({
+            "session_id": "s1", "prompt": "SEGREDO", "last_assistant_message": "SEGREDO",
+            "tool_input": {"file_path": "/a", "content": "SEGREDO", "old_string": "SEGREDO"},
+            "background_tasks": [{"id": "t1", "type": "shell", "description": "SEGREDO"}],
+            "tool_response": {"stdout": "SEGREDO"}
+        }));
+        let guardado = format!("{l:?}");
+        assert!(!guardado.contains("SEGREDO"), "{guardado}");
+        assert_eq!(l.campos.len(), 1);
+        assert_eq!(
+            l.tarefas,
+            Some(Tarefas {
+                contagem: 1,
+                validas: vec![("shell".into(), "t1".into())]
+            })
+        );
+    }
+
+    /// O mesmo hook, com `ruim` (um texto JSON) num campo que a lista não
+    /// lê: os metadados ficam.
+    fn com_lixo_em(campo: &str, ruim: &str) -> Value {
+        let texto = format!(
+            r#"{{"session_id":"s1","prompt_id":"p1","stop_hook_active":true,"{campo}":{ruim},"cwd":"/home/x/proj"}}"#
+        );
+        let corpo = corpo(texto.as_bytes(), &ctx("Stop"));
+        serde_json::from_str(&corpo).unwrap()
+    }
+
+    #[test]
+    fn lixo_fora_da_lista_nao_derruba_os_metadados() {
+        let fundo = format!("{}{}", "[".repeat(200), "]".repeat(200));
+        let objetos = format!("{}1{}", "{\"a\":".repeat(200), "}".repeat(200));
+        for ruim in [
+            r#""fim \udc00""#, // substituto baixo sozinho
+            r#""fim \ud83d""#, // substituto alto sozinho (emoji cortado)
+            r#""\ud83d\ud83d""#,
+            "1e400", // número fora do f64
+            "-1e999",
+            &fundo,   // 200 níveis de lista
+            &objetos, // 200 níveis de objeto
+        ] {
+            for campo in ["prompt", "last_assistant_message", "tool_response", "x"] {
+                let v = com_lixo_em(campo, ruim);
+                assert_eq!(
+                    (&v["sid"], &v["turno"], &v["ent"], &v["sha"], &v["proj"]),
+                    (
+                        &json!("s1"),
+                        &json!("p1"),
+                        &json!("cli"),
+                        &json!(true),
+                        &json!("proj")
+                    ),
+                    "{campo}: {ruim:.40}"
+                );
+            }
+        }
+        // Bytes que não são UTF-8, num campo que o hook não lê.
+        let mut bruto = br#"{"session_id":"s1","last_assistant_message":"a"#.to_vec();
+        bruto.extend_from_slice(b"\xff\xfe");
+        bruto.extend_from_slice(br#"b","prompt_id":"p1"}"#);
+        let v: Value = serde_json::from_str(&corpo(&bruto, &ctx("Stop"))).unwrap();
+        assert_eq!((&v["sid"], &v["turno"]), (&json!("s1"), &json!("p1")));
+        // Na descrição de uma tarefa.
+        let texto = r#"{"session_id":"s1","background_tasks":[{"id":"t1","type":"shell","description":"x \udc00"}]}"#;
+        let v: Value = serde_json::from_str(&corpo(texto.as_bytes(), &ctx("Stop"))).unwrap();
+        assert_eq!((&v["sid"], &v["bgi"]), (&json!("s1"), &json!(["t1"])));
+    }
+
+    #[test]
+    fn campo_da_lista_que_nao_se_le_cai_sozinho() {
+        // O substituto sozinho no próprio session_id: ele cai, o resto fica.
+        let texto = r#"{"session_id":"s\udc00","prompt_id":"p1","duration_ms":1e400}"#;
+        let v: Value = serde_json::from_str(&corpo(texto.as_bytes(), &ctx("PostToolUse"))).unwrap();
+        assert!(v.get("sid").is_none() && v.get("dur").is_none(), "{v}");
+        assert_eq!(v["turno"], "p1");
+        // Chave repetida: vale a última (como no jq), e uma última ruim cai.
+        let texto = r#"{"session_id":"a","session_id":"b","prompt_id":"p","prompt_id":"\udc00"}"#;
+        let v: Value = serde_json::from_str(&corpo(texto.as_bytes(), &ctx("Stop"))).unwrap();
+        assert_eq!(v["sid"], "b");
+        assert!(v.get("turno").is_none(), "{v}");
+        // Uma chave estranha (bytes quebrados) é só pulada.
+        let mut bruto = b"{\"\xff\":1,\"session_id\":\"s1\"}".to_vec();
+        bruto.truncate(bruto.len());
+        let v: Value = serde_json::from_str(&corpo(&bruto, &ctx("Stop"))).unwrap();
+        assert_eq!(v["sid"], "s1");
+    }
+
+    #[test]
+    fn lista_de_tarefas_enorme_conta_sem_guardar() {
+        let mut texto = String::from(r#"{"background_tasks":["#);
+        for i in 0..50_000 {
+            if i > 0 {
+                texto.push(',');
+            }
+            texto.push_str(&format!(
+                r#"{{"id":"t{i}","type":"shell","description":"SEGREDO"}}"#
+            ));
+        }
+        texto.push_str("]}");
+        let l = ler(texto.as_bytes()).unwrap();
+        let t = l.tarefas.unwrap();
+        assert_eq!(t.contagem, 50_000);
+        assert_eq!(t.validas.len(), MAX_TAREFAS, "só as primeiras");
+    }
+
+    #[test]
+    fn em_fluxo_nao_espera_o_fim_da_entrada() {
+        // Um leitor que entrega o objeto e depois diria que há mais para
+        // ler (falharia se fosse lido): o hook para no fim do objeto.
+        struct Leitor(Vec<u8>, usize);
+        impl Read for Leitor {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                if self.1 >= self.0.len() {
+                    return Err(std::io::Error::other("a entrada não fecha"));
+                }
+                let n = buf.len().min(self.0.len() - self.1);
+                buf[..n].copy_from_slice(&self.0[self.1..self.1 + n]);
+                self.1 += n;
+                Ok(n)
+            }
+        }
+        let leitor = Leitor(br#"{"session_id":"s1"}"#.to_vec(), 0);
+        let v: Value = serde_json::from_str(&corpo_de(leitor, &ctx("Stop"))).unwrap();
+        assert_eq!(v["sid"], "s1");
+    }
+
+    #[test]
+    fn pasta_do_windows_e_do_linux() {
+        let proj = |cwd: &str| pasta(Some(&json!(cwd)));
+        assert_eq!(proj("/home/x/meu-projeto").as_deref(), Some("meu-projeto"));
+        assert_eq!(proj("/home/x/meu-projeto/").as_deref(), Some("meu-projeto"));
+        assert_eq!(
+            proj(r"C:\Users\x\meu-projeto").as_deref(),
+            Some("meu-projeto")
+        );
+        assert_eq!(
+            proj(r"C:\Users\x\meu-projeto\").as_deref(),
+            Some("meu-projeto")
+        );
+        assert_eq!(proj(r"\\servidor\pasta\proj").as_deref(), Some("proj"));
+        assert_eq!(proj(r"C:\"), None, "a raiz do disco não é projeto");
+        assert_eq!(proj("/"), None);
     }
 
     #[test]

@@ -30,6 +30,9 @@ monitor que está em foco. Sem som.
   (`sudo systemctl enable docker.service`).
 - `~/.local/bin` no PATH que o Claude Code vê (o hook é o binário
   `bichinho`, copiado da imagem por `bin/pet instalar-host`).
+- Claude Code com hooks em exec form (`command` + `args`; testado no
+  2.1.288). Um Claude Code que ignorasse o `args` chamaria só `bichinho`, que
+  sem subcomando não faz nada: o pet fica surdo, mas nada mais roda.
 - `curl` e `jq` no host para o `bin/pet` (e para o `avisar.sh`, o hook de
   reserva até a troca).
 
@@ -89,14 +92,23 @@ nome do evento, ids opacos, nome da ferramenta, contagens e durações, um
 hash do caminho do arquivo editado e o nome da pasta do projeto —, nunca o
 texto dos prompts, código, respostas ou caminhos. E só para lá: fala TCP
 direto com o 127.0.0.1, sem proxy nem curlrc. Não imprime nada, sempre sai 0
-e não atrasa o Claude: com o pet desligado, desiste na hora.
+e não atrasa o Claude: com o pet desligado, desiste na hora. Lê o JSON em
+fluxo e guarda só os campos da lista branca: o resto (prompt, resposta,
+saída das ferramentas) só passa, sem ser interpretado nem ficar na memória.
 
 **O binário no PATH.** O exec form acha o `bichinho` pelo PATH do Claude
 Code. `bin/pet instalar-host` copia o binário estático (musl) da imagem para
 `~/.local/bin/bichinho`, que precisa estar nesse PATH (no Omarchy, está).
-Confira com `command -v bichinho`. Sem o binário, os hooks não chegam ao pet
-(o `claude -p` continua calado); o `plugin/scripts/avisar.sh` (sh + jq +
-curl) continua no plugin como reserva até a troca.
+Confira com `command -v bichinho` e `bichinho versao`, que diz o commit de
+onde o binário saiu. Sem o binário, os hooks não chegam ao pet (o `claude -p`
+continua calado); o `plugin/scripts/avisar.sh` (sh + jq + curl) continua no
+plugin como reserva até a troca.
+
+Esse binário é a lista branca de **todas** as sessões do Claude Code da
+máquina. Por isso o `bin/pet instalar-host` só aceita a imagem do commit da
+worktree estável (numa máquina sem ela, o da `main`) e de árvore limpa: o
+`bin/pet subir` grava na imagem o commit de onde ela saiu. Uma branch nunca
+vai para o `~/.local/bin`; para testar uma, veja abaixo.
 
 **Instalação**, a partir da `main`. O marketplace aponta para uma worktree
 estável, destacada na `main`, para uma branch em andamento nunca chegar às
@@ -116,26 +128,33 @@ hook nativo, plugin 0.2.0), com o clone na `main`:
 ```sh
 git -C ~/Documents/claude-pet switch main && git -C ~/Documents/claude-pet pull
 git -C ~/.local/share/claude-pet/estavel checkout --detach main
-bin/pet subir                         # a imagem nova (e o nome bichinho no compose)
+bin/pet subir                         # a imagem nova, com o commit da main (e o nome bichinho no compose)
 bin/pet instalar-host                 # o binário do hook, ANTES de atualizar o plugin
+bichinho versao                       # o commit tem de ser o da worktree estável
 claude plugin marketplace update bichinho-local
 claude plugin update bichinho@bichinho-local
 ```
 
 e `/reload-plugins` nas sessões abertas (ou abra outra). A ordem importa: o
-plugin 0.2.0 chama o `bichinho` do PATH. Até atualizar, o plugin instalado
-continua no `avisar.sh` da cópia dele, que fala com o mesmo pet: nada fica
-surdo no meio da troca.
+plugin 0.2.0 chama o `bichinho` do PATH, e o `instalar-host` recusa uma
+imagem que não seja do commit da worktree estável. Até atualizar, o plugin
+instalado continua no `avisar.sh` da cópia dele, que fala com o mesmo pet:
+nada fica surdo no meio da troca.
 
-**Para testar uma mudança**, carregue o plugin só numa sessão:
+**Para testar uma mudança**, carregue o plugin e o binário da branch só
+numa sessão (o `~/.local/bin` continua com o da worktree estável):
 
 ```sh
-claude --plugin-dir ~/Documents/claude-pet/plugin
+cd ~/Documents/claude-pet
+~/.cargo/bin/cargo build -p bichinho            # target/debug/bichinho, desta branch
+PATH="$PWD/target/debug:$PATH" claude --plugin-dir ~/Documents/claude-pet/plugin
 ```
 
 Para conferir sem o Claude: `bin/pet testar rapido` (aceno) e
 `bin/pet testar pequeno` (pulinho) mandam eventos sintéticos pelo mesmo hook
-(o `bichinho avisar` do PATH; sem ele, o `avisar.sh`, com aviso), e
+(o `bichinho avisar` do PATH, ou o de `PET_BICHINHO`, por exemplo
+`PET_BICHINHO="$PWD/target/debug/bichinho"`; sem nenhum, o `avisar.sh`, com
+aviso), dizem de que commit é o binário, e
 `bin/pet tocar nod` toca uma reação e diz se ela apareceu na tela. Só
 sessões de terminal contam (`sessoes.origens = ["cli"]` em
 `config/exemplo.toml`): `claude -p`, SDK e IDE ficam de fora.

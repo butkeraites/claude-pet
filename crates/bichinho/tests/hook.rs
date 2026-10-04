@@ -296,6 +296,212 @@ fn nenhum_segredo_sai_em_evento_nenhum() {
 }
 
 #[test]
+fn nenhum_segredo_com_log_ligado_e_segredos_no_ambiente() {
+    // O hook herda o ambiente do Claude Code: chaves, tokens, ids de
+    // terminal e o PET_LOG=debug de quem depura o daemon. Nada disso sai,
+    // nem para o pet, nem no stdout ou no stderr (o log do hook é desligado
+    // antes de tudo; decisão 0045).
+    let banca = Banca::nova();
+    let captor = Captor::novo(true);
+    for caso in casos() {
+        let nome = caso.nome;
+        let pedido = rodar_e_pegar(
+            &banca,
+            &captor,
+            nome,
+            caso.evento,
+            caso.entrada.to_string().as_bytes(),
+            |c| {
+                c.env("PET_LOG", "debug")
+                    .env("ANTHROPIC_API_KEY", "SEGREDO-chave-da-api")
+                    .env("CLAUDE_CODE_OAUTH_TOKEN", "SEGREDO-token")
+                    .env("TERM_PROGRAM", "SEGREDO-terminal")
+                    .env("TMUX_PANE", "%SEGREDO")
+                    .env("KITTY_WINDOW_ID", "SEGREDO-janela")
+                    .env("VARIAVEL_QUE_NINGUEM_CONHECE", "SEGREDO-nova");
+            },
+        );
+        sem_segredo(&format!("{nome}, pedido com log ligado"), &pedido.bruto);
+        let corpo = json_do(&pedido, nome);
+        assert_eq!(corpo["sid"], SID, "{nome}");
+        for chave in corpo.as_object().unwrap().keys() {
+            assert!(
+                CHAVES_DO_FIO.contains(&chave.as_str()),
+                "{nome}: chave fora do fio: {chave}"
+            );
+        }
+    }
+}
+
+/// O JSON de um caso com `ruim` (texto JSON cru) no lugar de um campo de
+/// conteúdo.
+fn com_lixo(evento: &str, campo: &str, ruim: &str) -> Vec<u8> {
+    let base = com(evento, json!({"prompt": "SEGREDO-prompt"})).to_string();
+    let sem_fecho = base.strip_suffix('}').unwrap();
+    format!("{sem_fecho},\"{campo}\":{ruim}}}").into_bytes()
+}
+
+#[test]
+fn conteudo_quebrado_fora_da_lista_nao_derruba_os_metadados() {
+    // Um texto com um caractere quebrado (o Claude Code corta um texto no
+    // meio de um emoji e o JSON.stringify manda o substituto sozinho), um
+    // aninhamento fundo ou um número enorme, num campo que o hook não lê:
+    // os metadados ficam (decisão 0045). Antes ia só {"v":1,"e":…}, que o
+    // pet ignora.
+    let banca = Banca::nova();
+    let captor = Captor::novo(true);
+    let fundo = format!("{}{}", "[".repeat(200), "]".repeat(200));
+    let objetos = format!("{}1{}", "{\"a\":".repeat(200), "}".repeat(200));
+    let tarefa_quebrada =
+        r#"[{"id":"task-1","type":"shell","description":"SEGREDO \udc00 \ud83d"}]"#;
+    let mut casos: Vec<(String, Vec<u8>)> = Vec::new();
+    for ruim in [
+        r#""SEGREDO \udc00""#,
+        r#""SEGREDO \ud83d""#,
+        "1e400",
+        fundo.as_str(),
+        objetos.as_str(),
+    ] {
+        for campo in ["prompt", "tool_response", "last_assistant_message"] {
+            casos.push((
+                format!("{campo} = {ruim:.24}"),
+                com_lixo("Stop", campo, ruim),
+            ));
+        }
+    }
+    casos.push((
+        "background_tasks com descrição quebrada".into(),
+        com_lixo("Stop", "background_tasks", tarefa_quebrada),
+    ));
+    // Bytes que não são UTF-8 dentro da resposta.
+    let mut bruto = com_lixo("Stop", "last_assistant_message", r#""SEGREDO-a""#);
+    let pos = bruto.windows(9).position(|j| j == b"SEGREDO-a").unwrap() + 8;
+    bruto.splice(pos..pos, [0xff, 0xfe]);
+    casos.push(("bytes que não são UTF-8".into(), bruto));
+    for (nome, entrada) in casos {
+        let pedido = rodar_e_pegar(&banca, &captor, &nome, "Stop", &entrada, |_| {});
+        sem_segredo(&nome, &pedido.bruto);
+        let corpo = json_do(&pedido, &nome);
+        assert_eq!(
+            (
+                &corpo["sid"],
+                &corpo["turno"],
+                &corpo["ent"],
+                &corpo["proj"]
+            ),
+            (
+                &json!(SID),
+                &json!(TURNO),
+                &json!("cli"),
+                &json!("meu-projeto")
+            ),
+            "{nome}: {corpo}"
+        );
+        if nome.starts_with("background_tasks") {
+            assert_eq!(corpo["bgi"], json!(["task-1"]), "{nome}");
+        }
+        let lido = pet_core::evento::ler(pedido.corpo.as_bytes()).unwrap();
+        assert!(
+            lido.descartados.is_empty(),
+            "{nome}: {:?}",
+            lido.descartados
+        );
+    }
+}
+
+#[test]
+fn objeto_fechado_com_a_entrada_aberta_chega_na_hora() {
+    // Lido em fluxo: o hook segue quando o objeto fecha, mesmo que quem
+    // chama não feche a entrada padrão.
+    let banca = Banca::nova();
+    let captor = Captor::novo(true);
+    let mut filho = hook()
+        .args(["avisar", "Stop"])
+        .env_clear()
+        .env("HOME", banca.pasta.join("home"))
+        .env("CLAUDE_CODE_ENTRYPOINT", "cli")
+        .env("PET_PORTA", captor.porta.to_string())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = filho.stdin.take().unwrap();
+    stdin
+        .write_all(com("Stop", json!({})).to_string().as_bytes())
+        .unwrap();
+    let inicio = Instant::now();
+    let saida = loop {
+        if let Some(status) = filho.try_wait().unwrap() {
+            break status;
+        }
+        assert!(
+            inicio.elapsed() < Duration::from_secs(2),
+            "o hook esperou a entrada fechar"
+        );
+        thread::sleep(Duration::from_millis(20));
+    };
+    drop(stdin);
+    assert_eq!(saida.code(), Some(0));
+    let pedido = captor.receber().expect("o evento chegou");
+    assert_eq!(json_do(&pedido, "entrada aberta")["sid"], SID);
+}
+
+#[test]
+fn sem_subcomando_nada_roda() {
+    // O binário fica no PATH de todo Claude Code: chamado sem nada (um
+    // Claude Code que ignorasse os `args` do exec form), com o JSON do hook
+    // na entrada, ele sai 0 na hora, calado, sem subir daemon nem escutar
+    // porta nenhuma (decisão 0045).
+    let banca = Banca::nova();
+    let porta = TcpListener::bind("127.0.0.1:0")
+        .and_then(|o| o.local_addr())
+        .unwrap()
+        .port();
+    let inicio = Instant::now();
+    let mut filho = hook()
+        .env_clear()
+        .env("HOME", banca.pasta.join("home"))
+        .env("PET_ESCUTA", format!("127.0.0.1:{porta}"))
+        .env("PET_HOST_RUNTIME", banca.pasta.join("sem-runtime"))
+        .env("PET_ESTADO", banca.pasta.join("estado"))
+        .env("PET_CONFIG", banca.pasta.join("config"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = filho.stdin.take().unwrap();
+    let _ = stdin.write_all(com("Stop", json!({})).to_string().as_bytes());
+    drop(stdin);
+    let saida = loop {
+        if let Some(_status) = filho.try_wait().unwrap() {
+            break filho.wait_with_output().unwrap();
+        }
+        if inicio.elapsed() > Duration::from_secs(2) {
+            let _ = filho.kill();
+            let _ = filho.wait();
+            panic!("sem subcomando, o binário ficou rodando (subiu o daemon?)");
+        }
+        thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(saida.status.code(), Some(0));
+    assert!(saida.stdout.is_empty() && saida.stderr.is_empty());
+    assert!(
+        TcpStream::connect(("127.0.0.1", porta)).is_err(),
+        "ninguém escuta na porta"
+    );
+}
+
+#[test]
+fn versao_diz_de_que_commit_saiu() {
+    let saida = hook().arg("versao").env_clear().output().unwrap();
+    let texto = String::from_utf8(saida.stdout).unwrap();
+    assert!(texto.starts_with("bichinho "), "{texto}");
+    assert!(texto.contains("(fonte "), "{texto}");
+}
+
+#[test]
 fn campos_de_cada_evento() {
     let banca = Banca::nova();
     let captor = Captor::novo(true);

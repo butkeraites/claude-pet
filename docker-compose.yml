@@ -12,7 +12,12 @@ services:
     image: bichinho:local
     build:
       context: .
-      args: {APP_UID: "${APP_UID:-1000}", APP_GID: "${APP_GID:-1000}"}
+      # BICHINHO_FONTE: o commit de onde a imagem sai (o bin/pet põe;
+      # decisão 0045).
+      args:
+        APP_UID: "${APP_UID:-1000}"
+        APP_GID: "${APP_GID:-1000}"
+        BICHINHO_FONTE: "${BICHINHO_FONTE:-desconhecida}"
     # O binário espera o Hyprland e reconecta sozinho: vale desde o boot
     # (docker.service + linger), sobrevive a logout/login, crash do
     # compositor, suspensão e hotplug, sem unit do systemd (decisão 0007).

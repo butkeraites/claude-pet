@@ -1660,3 +1660,102 @@ Ficaram para depois, de propósito:
 **Por quê:** a costura existe para o M4 e o M8 escreverem em cima dela. Um
 contrato que só vale no Wayland seria pago depois, com o arraste e o clique
 já escritos. E uma guarda com ponto cego dá uma garantia que não existe.
+
+## 0045 — Revisão do hook nativo: o binário do PATH preso à worktree estável, leitura em fluxo só da lista branca, sem log, sem core dump e sem daemon por engano (2026-10-04)
+
+**Problema:** as revisões do hook nativo (T8.1) acharam cinco problemas.
+- **Isolamento perdido.** No exec form, o código do hook é o `bichinho` que
+  estiver no PATH, e o `bin/pet instalar-host` o copiava da imagem montada
+  da branch do clone. Depois da troca para o plugin 0.2.0, um
+  `bin/pet subir && bin/pet instalar-host` numa branch trocaria a lista
+  branca de **todas** as sessões do Claude Code da máquina. É exatamente o
+  que a worktree estável existe para impedir (decisão 0021). O
+  `--plugin-dir` testava o hooks.json da branch com o binário velho do
+  PATH, e o `bichinho versao` não dizia de onde o binário saiu.
+- **Leitura frágil e cara.** O hook lia o JSON inteiro como uma árvore de
+  `Value`. Bastava um erro em qualquer lugar, mesmo num campo que o hook não
+  lê, para ir só o mínimo `{"v":1,"e":…}`, que o pet ignora:
+  - um substituto UTF-16 sozinho. O Claude Code corta um texto no meio de um
+    emoji e o `JSON.stringify` manda `\ud83d`;
+  - bytes que não são UTF-8;
+  - mais de 128 níveis de aninhamento;
+  - um número como `1e400`.
+
+  O `avisar.sh` (jq) guardava os metadados em quase todos esses casos, então
+  a 0041 errou ao dizer que as diferenças eram "todas a favor do pet". A
+  mesma leitura gastava cerca de 17 vezes a entrada em memória: 172 MiB para
+  um array numérico de 10 MB, cerca de 1 GiB para 60 MB.
+- **Log no hook.** O hook herdava o log do daemon (`PET_LOG`) antes de
+  começar. Os canários nunca rodaram com `PET_LOG=debug` nem com segredos no
+  ambiente.
+- **Daemon por engano.** O `bichinho` sem subcomando subia o daemon. Um
+  Claude Code que ignorasse o `args` do exec form subiria um daemon a cada
+  hook.
+- **Windows e DND.** No Windows o `cwd` usa barra invertida, e o `proj` nunca
+  saía. O "não perturbe" do Omarchy era lido em todo sistema.
+
+**Escolha (revisão do T8.1):**
+- **O binário do PATH é o da worktree estável.**
+  - O `bin/pet subir` (e `dev`, `reconstruir`, e os scripts ao vivo) grava na
+    imagem o commit de onde ela saiu: `BICHINHO_FONTE`, que é o
+    `git rev-parse HEAD`, com `-sujo` se a árvore tem mudanças. O commit vai
+    na etiqueta `bichinho.fonte`, no `bichinho versao` e no `/v1/estado`
+    (`fonte`).
+  - O `bin/pet instalar-host` recusa se esse commit não for o da worktree
+    estável (numa máquina sem ela, o da `main`) ou se a árvore estava suja.
+    Também confere que o binário diz a mesma fonte da etiqueta.
+  - O `--da-branch` pula a conferência, com aviso. Serve só para uma pasta de
+    teste (`PET_BIN_HOST`) fora do PATH.
+  - Para testar uma branch, o binário vai só na sessão:
+    `cargo build -p bichinho` e
+    `PATH="$PWD/target/debug:$PATH" claude --plugin-dir plugin`. No
+    `bin/pet testar`, o mesmo vale com `PET_BICHINHO`, e ele mostra o commit
+    do binário.
+- **Leitura em fluxo, só da lista branca** (`pet_core::aviso::Lido`).
+  - As chaves são lidas como bytes. Os campos da lista ficam como texto cru e
+    são interpretados um a um; um que não se lê cai sozinho.
+  - Do `tool_input`, só o `file_path` e o `notebook_path`. Do
+    `background_tasks`, a contagem e as 16 primeiras tarefas válidas.
+  - O resto é pulado sem ser validado nem guardado.
+  - A entrada é lida em fluxo e o hook segue quando o objeto fecha, sem
+    esperar a entrada padrão fechar.
+  - Medido: 12 MiB de pico com 10 MB ou com 60 MB de entrada (eram 172 MiB e
+    cerca de 1 GiB).
+  - Chave repetida: vale a última, como no jq.
+  - Lixo depois do objeto é ignorado. Antes, mandava o mínimo.
+  - O `avisar.sh` de reserva continua como era: com um substituto alto
+    sozinho, ele também manda só o mínimo.
+- **Sem log no hook.** O `main` chama `registro::desligar()` antes do
+  `avisar`, sem olhar o `PET_LOG`. O `PET_LOG` ganhou o nível `off`.
+- **Sem core dump.** No Linux o hook se marca como não despejável
+  (`PR_SET_DUMPABLE` pelo invólucro seguro do `rustix`, sem `unsafe` nosso).
+  Um aborto não leva a entrada para o `systemd-coredump`.
+- **Sem daemon por engano.** O daemon é só `bichinho rodar`; a imagem e os
+  testes já passavam o `rodar`. Sem subcomando, nada roda: sai 0 calado e,
+  no terminal, mostra a ajuda.
+- **Windows.** O `proj` corta nas duas barras. Uma barra invertida nunca
+  passa no validador do pet, então no Linux só muda um nome de pasta com
+  barra invertida, que agora manda o último pedaço. O DND do Omarchy só é
+  lido no Linux.
+- **Canários novos** em `tests/hook.rs`:
+  - a matriz inteira com `PET_LOG=debug` e segredos no ambiente: chave da
+    API, token, `TERM_PROGRAM`, `TMUX_PANE`, `KITTY_WINDOW_ID` e uma
+    variável desconhecida;
+  - conteúdo quebrado fora da lista: substitutos sozinhos, bytes que não são
+    UTF-8, 200 níveis e `1e400`, no prompt, na saída da ferramenta, na
+    resposta e na descrição de uma tarefa. Os metadados ficam;
+  - objeto fechado com a entrada aberta;
+  - sem subcomando, nada roda;
+  - `versao` com a fonte.
+
+  Cinco versões erradas de propósito reprovaram:
+  - a leitura antiga por `Value`;
+  - o log ligado no hook;
+  - sem subcomando subindo o daemon;
+  - esperar a entrada fechar;
+  - um id de terminal no corpo.
+
+**Por quê:** o hook é a fronteira da privacidade e roda em toda sessão da
+máquina. O código dele tem de ser o revisado da `main`, tem de falhar para o
+lado de mandar menos e nunca pode deixar o conteúdo em log, em core dump ou
+em memória à toa.

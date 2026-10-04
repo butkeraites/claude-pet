@@ -8,19 +8,22 @@
 //! - só METADADOS saem; prompt, código, resposta, texto de erro, títulos e
 //!   caminhos nunca saem do host nem vão para log (o caminho editado vira o
 //!   hash dele, aqui);
-//! - não imprime nada, nem num pânico;
+//! - não imprime nada, nem num pânico, e não tem log (o `main` o desliga
+//!   antes de chegar aqui, até com `PET_LOG=debug` no ambiente);
 //! - SEMPRE sai 0 (um Stop hook que saísse com 2 seguraria o Claude) e nunca
-//!   passa de [`PRAZO_TOTAL`], nem com a entrada padrão aberta para sempre.
+//!   passa de [`PRAZO_TOTAL`], nem com a entrada padrão aberta para sempre;
+//! - lê o JSON em fluxo e guarda só os campos da lista branca (decisão 0045):
+//!   a memória não cresce com o tamanho do prompt ou da saída de uma
+//!   ferramenta, e no Linux o processo não deixa core dump (que levaria a
+//!   entrada para o disco).
 //!
 //! Ambiente: `PET_PORTA` (porta do pet, padrão 27380), `PET_TESTE=1` (evento
 //! sintético do `bin/pet testar`: o pet o isola das sessões reais e o
 //! esquece em 60 s), `CLAUDE_CODE_ENTRYPOINT` (posto pelo Claude Code) e
 //! `XDG_STATE_HOME`/`HOME` (onde o Omarchy guarda o "não perturbe").
 
-use std::ffi::OsString;
-use std::io::{Read, Write};
+use std::io::{BufReader, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
-use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -34,16 +37,19 @@ pub const PRAZO_POST: Duration = Duration::from_secs(2);
 /// O hook inteiro: depois disto ele sai 0, aconteça o que acontecer.
 pub const PRAZO_TOTAL: Duration = Duration::from_secs(4);
 /// Teto da entrada lida (um prompt colado de 8 MiB passa folgado); além
-/// disso o JSON não fecha e vai o mínimo.
+/// disso o JSON não fecha e vai o mínimo. Lida em fluxo: o que não é da
+/// lista branca só passa, sem ficar na memória.
 const LIMITE_ENTRADA: u64 = 64 * 1024 * 1024;
 /// Teto do arquivo do "não perturbe" (ele guarda o histórico das
 /// notificações, que nunca sai daqui).
+#[cfg(target_os = "linux")]
 const LIMITE_DND: u64 = 16 * 1024 * 1024;
 
 /// O subcomando. `argumentos` é o que vem depois de `avisar`.
 pub fn rodar(mut argumentos: impl Iterator<Item = String>) -> ExitCode {
     // Pânico sai 0, calado: o gancho padrão imprimiria no stderr.
     std::panic::set_hook(Box::new(|_| std::process::exit(0)));
+    sem_core_dump();
     let _ = std::thread::Builder::new().name("prazo".into()).spawn(|| {
         std::thread::sleep(PRAZO_TOTAL);
         std::process::exit(0);
@@ -60,12 +66,6 @@ pub fn rodar(mut argumentos: impl Iterator<Item = String>) -> ExitCode {
     let porta = aviso::porta(std::env::var("PET_PORTA").ok().as_deref());
     let teste = std::env::var("PET_TESTE").ok().as_deref() == Some("1");
     let ent = std::env::var("CLAUDE_CODE_ENTRYPOINT").ok();
-    // O JSON do hook fica só na memória deste processo.
-    let mut entrada = Vec::new();
-    let _ = std::io::stdin()
-        .lock()
-        .take(LIMITE_ENTRADA)
-        .read_to_end(&mut entrada);
     let contexto = Contexto {
         evento: &evento,
         ts,
@@ -73,16 +73,39 @@ pub fn rodar(mut argumentos: impl Iterator<Item = String>) -> ExitCode {
         dnd: nao_perturbe(),
         teste,
     };
-    let corpo = aviso::corpo(&entrada, &contexto);
-    drop(entrada);
+    // O JSON do hook passa por este processo em fluxo: só os campos da
+    // lista branca ficam na memória, e o hook segue assim que o objeto
+    // fecha.
+    let entrada = BufReader::with_capacity(64 * 1024, std::io::stdin().take(LIMITE_ENTRADA));
+    let corpo = aviso::corpo_de(entrada, &contexto);
     let _ = enviar(porta, &corpo);
     ExitCode::SUCCESS
 }
 
-/// O "não perturbe" do Omarchy, em
+/// No Linux o hook não deixa core dump: um aborto (falta de memória, por
+/// exemplo) levaria a entrada (o prompt) para o `systemd-coredump`. Sem
+/// `unsafe`: o `prctl` pelo invólucro seguro do `rustix`.
+#[cfg(target_os = "linux")]
+fn sem_core_dump() {
+    use rustix::process::{DumpableBehavior, set_dumpable_behavior};
+    let _ = set_dumpable_behavior(DumpableBehavior::NotDumpable);
+}
+
+#[cfg(not(target_os = "linux"))]
+fn sem_core_dump() {}
+
+/// O "não perturbe" do Omarchy (só existe no Linux), em
 /// `${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/notifications.json`. Só o
 /// booleano sai do arquivo.
+#[cfg(not(target_os = "linux"))]
 fn nao_perturbe() -> bool {
+    false
+}
+
+#[cfg(target_os = "linux")]
+fn nao_perturbe() -> bool {
+    use std::ffi::OsString;
+    use std::path::PathBuf;
     let base = match std::env::var_os("XDG_STATE_HOME").filter(|v| !v.is_empty()) {
         Some(estado) => PathBuf::from(estado),
         None => {

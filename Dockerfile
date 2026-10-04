@@ -17,14 +17,21 @@ COPY Cargo.toml Cargo.lock ./
 COPY .cargo ./.cargo
 COPY crates ./crates
 COPY xtask ./xtask
+# O commit de onde a imagem saiu (o `bin/pet` passa `git rev-parse HEAD`,
+# com `-sujo` se a árvore tinha mudanças): vai para o `bichinho versao` e
+# para a etiqueta da imagem, e o `bin/pet instalar-host` só põe no PATH o
+# binário da worktree estável (decisão 0045).
+ARG BICHINHO_FONTE=desconhecida
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
-    cargo build --release --locked -p bichinho \
+    BICHINHO_FONTE="$BICHINHO_FONTE" cargo build --release --locked -p bichinho \
  && install -Dm0755 target/release/bichinho /out/bichinho
 
 FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS runtime
 ARG APP_UID=1000
 ARG APP_GID=1000
+ARG BICHINHO_FONTE=desconhecida
+LABEL bichinho.fonte="$BICHINHO_FONTE"
 RUN set -eux; \
     addgroup -g "$APP_GID" pet; \
     adduser -D -H -u "$APP_UID" -G pet -h /state -s /sbin/nologin pet; \

@@ -9,7 +9,9 @@ publish = false
 
 [dependencies]
 serde.workspace = true
-serde_json.workspace = true
+# `raw_value`: o hook guarda só o texto cru dos campos da lista branca e
+# pula o resto do JSON sem interpretar (decisão 0045).
+serde_json = { workspace = true, features = ["raw_value"] }
 toml.workspace = true
 png.workspace = true
 # Impressão digital da skin aprovada (decisão 0026).

@@ -194,6 +194,7 @@ impl Compartilhado {
         json!({
             "ok": self.saudavel(),
             "versao": pet_core::VERSAO,
+            "fonte": crate::FONTE,
             "tela": self.tela().nome(),
             "batimento_ms": self.idade_batimento().as_millis() as u64,
         })
@@ -208,6 +209,7 @@ impl Compartilhado {
         let do_cerebro = |chave: &str, vazio: Value| cerebro.get(chave).cloned().unwrap_or(vazio);
         json!({
             "versao": pet_core::VERSAO,
+            "fonte": crate::FONTE,
             "tela": self.tela().nome(),
             "desde_s": self.inicio.elapsed().as_secs(),
             "batimento_ms": self.idade_batimento().as_millis() as u64,

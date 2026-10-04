@@ -539,7 +539,7 @@ claude-pet/
 | Skill | Receita |
 |---|---|
 | `nova-animacao` | catálogo → skin → gatilho no cérebro → cenário → `tocar` + `foto` |
-| `novo-evento-hook` | lista branca do `pet_core::aviso` (e do `avisar.sh`, enquanto a reserva existir) → canários em `tests/hook.rs` (e `tests/avisar.rs`) → `hooks.json` em exec form → tabela do cérebro → teste ao vivo só numa sessão (`--plugin-dir`) → `/reload-plugins` depois do merge |
+| `novo-evento-hook` | lista branca do `pet_core::aviso` (e do `avisar.sh`, enquanto a reserva existir) → canários em `tests/hook.rs` (e `tests/avisar.rs`) → `hooks.json` em exec form → tabela do cérebro → teste ao vivo só numa sessão, com o binário da branch (`cargo build -p bichinho` e `PATH="$PWD/target/debug:$PATH" claude --plugin-dir plugin`; decisão 0045) → `/reload-plugins` depois do merge |
 | `conferir-na-tela` | ciclo dev, `foto`, `nitidez`, consulta de camadas |
 
 ## CLI `bin/pet` (bash + curl + jq)
@@ -550,7 +550,7 @@ claude-pet/
 | `doutor` | saúde do container, conexões Wayland/hypr, `bichinho@bichinho-local` habilitado em `claude plugin list --json`, idade do último evento por sessão, DND, skin aprovada |
 | `soneca [30m]`, `acordar`, `esconder [30m]`, `mostrar`, `posicao-padrao`, `recarregar` | controles, persistidos |
 | `tocar <reação>` | toca uma reação direto |
-| `testar <cenário>` | eventos sintéticos **pelo hook de verdade** (o `bichinho avisar` do PATH ou de `PET_BICHINHO`; sem ele, o `avisar.sh` de reserva), com `teste:true` e TTL de 60 s; nunca se misturam com sessões reais |
+| `testar <cenário>` | eventos sintéticos **pelo hook de verdade** (o `bichinho avisar` do PATH ou de `PET_BICHINHO`, que diz de que commit veio; sem ele, o `avisar.sh` de reserva), com `teste:true` e TTL de 60 s; nunca se misturam com sessões reais |
 | `simular <cenário>` | roda o cenário no core com relógio falso; o daemon só exibe as intenções |
 | `eventos --salvar <arquivo>` | grava um cenário com ids pseudonimizados |
 | `foto` | captura com grim para o Claude ler |
