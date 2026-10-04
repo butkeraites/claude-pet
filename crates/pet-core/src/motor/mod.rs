@@ -20,7 +20,9 @@
 //!
 //! Desde o M4, o Motor também arrasta e clica ([`arraste`], decisão 0048):
 //! o ponteiro chega no palco, o pet anda em múltiplos de D e a área de toque
-//! cresce para o palco inteiro só enquanto arrasta.
+//! cresce para o palco inteiro só enquanto arrasta. O clique esquerdo leva
+//! ao terminal da sessão do aviso mais urgente ([`Motor::clicar`], decisão
+//! 0057).
 
 pub mod arraste;
 pub mod balao;
@@ -39,13 +41,13 @@ use serde::Serialize;
 use crate::animador;
 use crate::aviso::EVENTOS_COM_TERMINAL;
 use crate::cena::{self, Elemento};
-use crate::cerebro::{self, Agora, Cerebro, ConfigCerebro, Reacao, Resumo};
+use crate::cerebro::{self, Agora, Cerebro, ConfigCerebro, Pendencia, Reacao, Resumo, TipoAviso};
 use crate::confete::{Chuva, Grade};
 use crate::evento::Evento;
 use crate::geometria::{Ret, Tamanho};
 use crate::plataforma::{
-    Botao, Cursor, Desenho, EventoDesktop, EventoOverlay, EventoPonteiro, Fase, Monitor, Overlay,
-    Passo, Punho, passo_de_visibilidade,
+    Alca, Botao, Cursor, Desenho, ErroFoco, EventoDesktop, EventoOverlay, EventoPonteiro, Fase,
+    Monitor, Overlay, Passo, Punho, passo_de_visibilidade,
 };
 use crate::skin::Skin;
 
@@ -76,6 +78,13 @@ pub const BOCEJO: &str = "yawn";
 pub const DESPERTAR: &str = "wake";
 /// A soneca do botão direito (decisão 0053).
 pub const SONECA_MS: u64 = 30 * 60 * 1000;
+/// O pronto e o erro de uma sessão saem depois de tanto tempo com o
+/// terminal dela em foco (decisão 0057).
+pub const VISTO_PELO_FOCO_MS: u64 = 10_000;
+/// Quanto o clique espera o desktop contar que a janela ficou ativa.
+pub const CONFIRMAR_FOCO_MS: u64 = 1_500;
+/// O coração da risadinha do clique que leva ao terminal.
+pub const CORACAO_MS: u64 = 1_200;
 
 /// O que o pet publica para o `/v1/estado` (o laço publica; a entrada HTTP
 /// só lê).
@@ -116,6 +125,9 @@ pub struct Painel {
     /// O desktop: a fonte dos eventos, o monitor em foco, a janela ativa (só
     /// o endereço) e o que a conexão sabe fazer.
     pub desktop: PainelDesktop,
+    /// O clique pediu o foco desta janela (o endereço) e espera o desktop
+    /// contar que ela ficou ativa (decisão 0057).
+    pub focando: Option<String>,
 }
 
 /// O que um `tocar` do `/v1/comando` fez (decisão 0033).
@@ -130,6 +142,46 @@ pub enum Tocou {
     SemPersonagem,
     /// A skin não tem estado, reserva nem tag com esse nome.
     Desconhecida { skin: String },
+}
+
+/// O que um clique no pet fez (decisão 0057): o do ponteiro e o do
+/// `/v1/comando` `clique`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Clicou {
+    /// Pediu o foco da janela do terminal da sessão do aviso da vez.
+    /// `confirmado`: ela já estava ativa, ou o desktop não conta trocas, e o
+    /// aviso já saiu; senão ele sai quando o desktop contar que ela ficou
+    /// ativa.
+    Focou {
+        sid8: String,
+        aviso: TipoAviso,
+        janela: String,
+        confirmado: bool,
+    },
+    /// Havia aviso, mas não deu para focar: o balão diz o porquê e mostra as
+    /// sessões.
+    NaoFocou {
+        sid8: String,
+        aviso: TipoAviso,
+        motivo: &'static str,
+    },
+    /// Nenhum aviso: o balão com as sessões abertas.
+    Lista { sessoes: usize },
+    /// O botão direito: a soneca começou ou acabou.
+    Soneca { cochilando: bool },
+    /// Nada (outro botão; sem a janela do pet).
+    Nada { motivo: &'static str },
+}
+
+/// Um foco pedido pelo clique, à espera de o desktop contar que a janela
+/// ficou ativa.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Focando {
+    chave: janelas::Chave,
+    janela: Alca,
+    proj: Option<String>,
+    tipo: TipoAviso,
+    ate_ms: u64,
 }
 
 /// O sprite como deveria estar na tela: o RGBA exato, em pixels do monitor,
@@ -190,6 +242,18 @@ pub struct Motor {
     soneca_ate: Option<u64>,
     /// A janela do terminal de cada sessão (decisão 0055).
     identidades: janelas::Identidades,
+    /// O foco que o clique pediu e o desktop ainda não confirmou (decisão
+    /// 0057).
+    focando: Option<Focando>,
+    /// As sessões que o clique já visitou nesta volta do ciclo de avisos.
+    ciclo: Vec<janelas::Chave>,
+    /// Desde quando (relógio do laço) a janela ativa de agora está ativa.
+    ativa_desde: u64,
+    /// Até quando o coração da risadinha fica na tela.
+    coracao_ate: Option<u64>,
+    /// Um aviso saiu fora de um evento do Claude ou de um tique (o clique, o
+    /// foco): o núcleo publica o cérebro de novo.
+    cerebro_mudou: bool,
 }
 
 impl Motor {
@@ -214,6 +278,11 @@ impl Motor {
             deslocamento_parede: 0,
             soneca_ate: None,
             identidades: janelas::Identidades::default(),
+            focando: None,
+            ciclo: Vec::new(),
+            ativa_desde: 0,
+            coracao_ate: None,
+            cerebro_mudou: false,
         }
     }
 
@@ -259,13 +328,8 @@ impl Motor {
         sessoes
             .iter()
             .map(|s| {
-                balao::linha_da_sessao(
-                    s.proj.as_deref(),
-                    balao::estado(s),
-                    s.estado_desde_ms,
-                    agora,
-                    s.teste,
-                )
+                let (estado, desde) = balao::estado(s);
+                balao::linha_da_sessao(s.proj.as_deref(), estado, desde, agora, s.teste)
             })
             .collect()
     }
@@ -341,11 +405,13 @@ impl Motor {
         reacoes
     }
 
-    /// O prazo do cérebro venceu (acomodação do Stop, sessões que expiram).
+    /// O prazo do cérebro venceu (acomodação do Stop, sessões e avisos que
+    /// expiram, o pronto visto pelo foco).
     pub fn tique(&mut self, agora: Agora) -> Vec<Reacao> {
         self.acertar_relogio(agora);
         let reacoes = self.cerebro.tique(agora);
         self.esquecer_janelas_sem_sessao();
+        self.ver_pelo_foco(agora.mono_ms);
         reacoes
     }
 
@@ -354,8 +420,13 @@ impl Motor {
         self.identidades.manter(|chave| cerebro.tem_sessao(chave));
     }
 
+    /// Quando chamar [`Self::tique`]: os prazos do cérebro e o do pronto
+    /// visto pelo foco.
     pub fn prazo_do_cerebro(&self) -> Option<u64> {
-        self.cerebro.proximo_prazo()
+        [self.cerebro.proximo_prazo(), self.prazo_visto_pelo_foco()]
+            .into_iter()
+            .flatten()
+            .min()
     }
 
     /// O resumo do cérebro, com a janela de cada sessão.
@@ -436,10 +507,13 @@ impl Motor {
         self.proximo_quadro = None;
     }
 
-    /// A janela acabou com a sessão (o compositor caiu).
+    /// A janela acabou com a sessão (o compositor caiu). Um foco pedido pelo
+    /// clique morre com ela (o handle era dela).
     pub fn desconectou(&mut self) {
         self.pet = None;
         self.palco = None;
+        self.focando = None;
+        self.coracao_ate = None;
         self.arraste.cancelar();
         self.seguir.terminar();
         self.estresse = None;
@@ -631,6 +705,7 @@ impl Motor {
     fn comecar_viagem(&mut self, ov: &mut dyn Overlay, pouso: Option<Pouso>, agora_ms: u64) {
         self.largar_o_arraste(agora_ms);
         self.balao = None;
+        self.coracao_ate = None;
         let desenhado = ov.fase() == (Fase::Viva { conteudo: true }) && self.palco.is_some();
         let rapida = self.seguir.comecar(agora_ms, pouso, desenhado);
         info!(
@@ -764,6 +839,7 @@ impl Motor {
             Gesto::Apertou => punho.janela().cursor(Cursor::Agarrar),
             Gesto::Comecou => {
                 self.balao = None;
+                self.coracao_ate = None;
                 if let Some(pet) = self.pet.as_mut() {
                     pet.segurar(ARRASTADO, agora_ms);
                 }
@@ -799,7 +875,7 @@ impl Motor {
             Gesto::Cancelou => self.pousar(punho.janela(), agora_ms),
             Gesto::Clique(botao) => {
                 punho.janela().cursor(Cursor::Pegar);
-                self.clique(punho, botao, agora_ms);
+                self.clicar(punho, botao, agora_ms);
             }
         }
     }
@@ -853,18 +929,199 @@ impl Motor {
         }
     }
 
-    /// Um clique no pet: o esquerdo dá a risadinha e mostra o balão com as
-    /// sessões abertas (levar ao terminal de uma sessão chega na T4.10); o
-    /// direito, a soneca (T4.7).
-    fn clique(&mut self, punho: &mut dyn Punho, botao: Botao, agora_ms: u64) {
+    // --- avisos e o clique (decisão 0057) ------------------------------------
+
+    /// Um clique no pet. O esquerdo vai ao aviso da vez (o mais urgente que
+    /// esta volta do ciclo ainda não visitou): foca o terminal da sessão
+    /// dele, com a risadinha e o coração, e o aviso sai quando o desktop
+    /// conta que a janela ficou ativa. Sem como focar, o balão diz o porquê e
+    /// mostra as sessões; sem aviso, só as sessões. O direito, a soneca
+    /// (decisão 0053).
+    pub fn clicar(&mut self, punho: &mut dyn Punho, botao: Botao, agora_ms: u64) -> Clicou {
         match botao {
-            Botao::Esquerdo => {
-                self.tocar(Some(punho.janela()), RISADINHA, agora_ms);
-                let linhas = self.linhas_das_sessoes(agora_ms);
-                self.mostrar_balao(Some(punho.janela()), linhas, agora_ms);
+            Botao::Esquerdo => self.clique_esquerdo(punho, agora_ms),
+            Botao::Direito => {
+                self.alternar_soneca(punho.janela(), agora_ms);
+                Clicou::Soneca {
+                    cochilando: self.soneca(agora_ms).is_some(),
+                }
             }
-            Botao::Direito => self.alternar_soneca(punho.janela(), agora_ms),
-            _ => {}
+            _ => Clicou::Nada {
+                motivo: "o pet só atende o botão esquerdo e o direito",
+            },
+        }
+    }
+
+    fn clique_esquerdo(&mut self, punho: &mut dyn Punho, agora_ms: u64) -> Clicou {
+        let pendencias = self.cerebro.pendencias();
+        self.ciclo
+            .retain(|chave| pendencias.iter().any(|p| &p.chave == chave));
+        let da_vez = match pendencias.iter().find(|p| !self.ciclo.contains(&p.chave)) {
+            Some(p) => Some(p.clone()),
+            // Todas já visitadas nesta volta: começa outra.
+            None => {
+                self.ciclo.clear();
+                pendencias.first().cloned()
+            }
+        };
+        let Some(alvo) = da_vez else {
+            self.tocar(Some(punho.janela()), RISADINHA, agora_ms);
+            let linhas = self.linhas_das_sessoes(agora_ms);
+            let sessoes = self.cerebro.resumo().sessoes.len();
+            self.mostrar_balao(Some(punho.janela()), linhas, agora_ms);
+            return Clicou::Lista { sessoes };
+        };
+        self.ciclo.push(alvo.chave.clone());
+        let tipo = alvo.aviso.tipo;
+        let motivo = match self.janela_da_sessao(&alvo.chave).cloned() {
+            None => self
+                .identidades
+                .de(&alvo.chave)
+                .map_or(janelas::Certeza::SemAnel, |i| i.certeza)
+                .motivo(),
+            Some(janela) => match punho.desktop().focar(&janela) {
+                Ok(()) => return self.focou(punho, alvo, janela, agora_ms),
+                Err(ErroFoco::NaoSuportado) => "aqui eu não sei focar janelas",
+                Err(ErroFoco::JanelaSumiu) => "a janela dela sumiu",
+                Err(ErroFoco::Recusado(_)) => "o sistema recusou o foco",
+            },
+        };
+        info!(
+            "clique: o {} da sessão {} ficou sem foco: {motivo}",
+            tipo.nome(),
+            alvo.sid8
+        );
+        self.balao_sem_foco(punho.janela(), alvo.proj.as_deref(), tipo, motivo, agora_ms);
+        Clicou::NaoFocou {
+            sid8: alvo.sid8,
+            aviso: tipo,
+            motivo,
+        }
+    }
+
+    /// O desktop aceitou focar a janela do aviso: a risadinha com o coração.
+    /// Se ele conta as trocas de janela e ela ainda não é a ativa, o aviso só
+    /// sai quando ele contar que ela ficou (o Hyprland recusa o foco com a
+    /// sessão bloqueada sem dizer nada); senão, sai já.
+    fn focou(
+        &mut self,
+        punho: &mut dyn Punho,
+        alvo: Pendencia,
+        janela: Alca,
+        agora_ms: u64,
+    ) -> Clicou {
+        let ja_ativa = self.desktop.janela_ativa.as_ref() == Some(&janela);
+        let conta_trocas =
+            self.desktop.ligado == Some(true) || punho.ver_desktop().capacidades().janela_ativa;
+        let esperar = conta_trocas && !ja_ativa;
+        info!(
+            "clique: focando a janela {} da sessão {} ({})",
+            janela.0,
+            alvo.sid8,
+            alvo.aviso.tipo.nome()
+        );
+        if esperar {
+            self.focando = Some(Focando {
+                chave: alvo.chave.clone(),
+                janela: janela.clone(),
+                proj: alvo.proj.clone(),
+                tipo: alvo.aviso.tipo,
+                ate_ms: agora_ms + CONFIRMAR_FOCO_MS,
+            });
+        } else {
+            self.ver(&alvo.chave);
+        }
+        self.balao = None;
+        self.coracao_ate = Some(agora_ms + CORACAO_MS);
+        if !self.tocar(Some(punho.janela()), RISADINHA, agora_ms) {
+            self.desenhar(punho.janela(), agora_ms, false);
+        }
+        Clicou::Focou {
+            sid8: alvo.sid8,
+            aviso: alvo.aviso.tipo,
+            janela: janela.0,
+            confirmado: !esperar,
+        }
+    }
+
+    /// O balão de um aviso sem foco: a sessão, o porquê e as sessões.
+    fn balao_sem_foco(
+        &mut self,
+        ov: &mut dyn Overlay,
+        proj: Option<&str>,
+        tipo: TipoAviso,
+        motivo: &str,
+        agora_ms: u64,
+    ) {
+        let mut linhas = balao::linhas_sem_foco(proj, tipo, motivo);
+        linhas.extend(self.linhas_das_sessoes(agora_ms));
+        self.mostrar_balao(Some(ov), linhas, agora_ms);
+    }
+
+    /// O Renan viu o aviso da sessão: ele sai, e o núcleo publica o cérebro.
+    fn ver(&mut self, chave: &janelas::Chave) -> Option<TipoAviso> {
+        let tipo = self.cerebro.ver(chave);
+        if tipo.is_some() {
+            self.cerebro_mudou = true;
+        }
+        self.ciclo.retain(|c| c != chave);
+        tipo
+    }
+
+    /// Um aviso saiu fora de um evento do Claude ou de um tique desde a
+    /// última pergunta: o núcleo publica o cérebro de novo.
+    pub fn tirar_mudanca_do_cerebro(&mut self) -> bool {
+        std::mem::take(&mut self.cerebro_mudou)
+    }
+
+    /// A janela ativa, se a fonte das trocas está ligada (com ela fora, a
+    /// de antes pode não ser mais a ativa).
+    fn janela_em_foco(&self) -> Option<&Alca> {
+        if self.desktop.ligado != Some(true) {
+            return None;
+        }
+        self.desktop.janela_ativa.as_ref()
+    }
+
+    fn janela_da_sessao(&self, chave: &janelas::Chave) -> Option<&Alca> {
+        self.identidades.de(chave).and_then(|i| i.janela.as_ref())
+    }
+
+    /// As sessões com o pronto ou o erro pendente cujo terminal está em foco
+    /// e desde quando contam os [`VISTO_PELO_FOCO_MS`]: o mais cedo.
+    fn vistas_pelo_foco(&self) -> Vec<(Pendencia, u64)> {
+        let Some(ativa) = self.janela_em_foco() else {
+            return Vec::new();
+        };
+        self.cerebro
+            .pendencias()
+            .into_iter()
+            .filter(|p| p.aviso.tipo != TipoAviso::Esperando)
+            .filter(|p| self.janela_da_sessao(&p.chave) == Some(ativa))
+            .map(|p| {
+                let prazo = p.aviso.desde_mono.max(self.ativa_desde) + VISTO_PELO_FOCO_MS;
+                (p, prazo)
+            })
+            .collect()
+    }
+
+    fn prazo_visto_pelo_foco(&self) -> Option<u64> {
+        self.vistas_pelo_foco().into_iter().map(|(_, p)| p).min()
+    }
+
+    /// O pronto e o erro das sessões cujo terminal está em foco há
+    /// [`VISTO_PELO_FOCO_MS`] saem: o Renan já viu. O "esperando você" fica
+    /// (só um evento da sessão ou o clique o tiram).
+    fn ver_pelo_foco(&mut self, agora_ms: u64) {
+        for (p, prazo) in self.vistas_pelo_foco() {
+            if agora_ms >= prazo {
+                self.ver(&p.chave);
+                info!(
+                    "o {} da sessão {} saiu: o terminal dela ficou em foco",
+                    p.aviso.tipo.nome(),
+                    p.sid8
+                );
+            }
         }
     }
 
@@ -924,7 +1181,33 @@ impl Motor {
             self.identidades.fechou(janela);
         }
         let protetor_antes = self.desktop.protetor_ativo();
+        let ativa_antes = self.desktop.janela_ativa.clone();
+        let ligado_antes = self.desktop.ligado;
         let mudou = self.desktop.aplicar(evento, agora.parede_ms);
+        // Desde quando a janela ativa está ativa (o pronto visto pelo foco):
+        // a fonte que volta não sabe desde quando.
+        if self.desktop.janela_ativa != ativa_antes
+            || (self.desktop.ligado == Some(true) && ligado_antes != Some(true))
+        {
+            self.ativa_desde = agora.mono_ms;
+        }
+        // O foco que o clique pediu chegou: o aviso sai (decisão 0057). O
+        // socket2 e o foreign-toplevel contam a ativação.
+        let ativou = match evento {
+            EventoDesktop::JanelaAtiva {
+                janela: Some(janela),
+                ..
+            }
+            | EventoDesktop::JanelaInicial { janela, .. } => Some(janela),
+            _ => None,
+        };
+        if let Some(janela) = ativou
+            && self.focando.as_ref().is_some_and(|f| &f.janela == janela)
+            && let Some(focando) = self.focando.take()
+        {
+            info!("clique: a janela {} ficou ativa", janela.0);
+            self.ver(&focando.chave);
+        }
         // A proteção de tela do Omarchy abriu ou fechou: o pet sai e volta
         // (decisão 0053).
         if self.desktop.protetor_ativo() != protetor_antes {
@@ -995,6 +1278,14 @@ impl Motor {
             && poof.is_none()
         {
             cena.extend(balao::selo_zz(corpo, palco.area, balao::dt(palco.d)));
+            proxima = Some(proxima.map_or(ate, |p| p.min(ate)));
+        }
+        // O coração da risadinha do clique que leva ao terminal.
+        if let Some(ate) = self.coracao_ate.filter(|&ate| agora_ms < ate)
+            && let Some(corpo) = pet.toque_no_palco(&palco)
+            && poof.is_none()
+        {
+            cena.extend(balao::coracao(corpo, palco.area, balao::dt(palco.d)));
             proxima = Some(proxima.map_or(ate, |p| p.min(ate)));
         }
         // O balão em cima do corpo, até o prazo dele.
@@ -1073,18 +1364,41 @@ impl Motor {
             info!("soneca acabou");
             self.desenhar(punho.janela(), agora_ms, false);
         }
+        if self.coracao_ate.is_some_and(|ate| agora_ms >= ate) {
+            self.coracao_ate = None;
+            self.desenhar(punho.janela(), agora_ms, false);
+        }
+        // O desktop não contou que a janela do clique ficou ativa: o aviso
+        // fica, e o balão diz.
+        if self.focando.as_ref().is_some_and(|f| agora_ms >= f.ate_ms)
+            && let Some(focando) = self.focando.take()
+        {
+            info!(
+                "clique: a janela {} não ficou ativa em {} ms",
+                focando.janela.0, CONFIRMAR_FOCO_MS
+            );
+            self.balao_sem_foco(
+                punho.janela(),
+                focando.proj.as_deref(),
+                focando.tipo,
+                "não consegui focar a janela dela",
+                agora_ms,
+            );
+        }
         self.vencer_animacao(punho.janela(), agora_ms);
     }
 
     /// O próximo prazo do Motor (cérebro, animação, arraste ou viagem).
     pub fn proximo_prazo(&self) -> Option<u64> {
         [
-            self.cerebro.proximo_prazo(),
+            self.prazo_do_cerebro(),
             self.proximo_quadro,
             self.arraste.prazo(),
             self.seguir.prazo(),
             self.balao.as_ref().map(|b| b.ate_ms),
             self.soneca_ate,
+            self.coracao_ate,
+            self.focando.as_ref().map(|f| f.ate_ms),
         ]
         .into_iter()
         .flatten()
@@ -1248,6 +1562,7 @@ impl Motor {
                 .soneca(agora_ms)
                 .map(|ate| (ate - agora_ms).div_ceil(1000)),
             desktop: painel_desktop,
+            focando: self.focando.as_ref().map(|f| f.janela.0.clone()),
         }
     }
 

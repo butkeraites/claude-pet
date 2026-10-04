@@ -1238,3 +1238,348 @@ fn sem_anel_nao_ha_janela_e_o_hook_traz_os_ids_de_terminal() {
             .is_none()
     );
 }
+
+// --- avisos e o clique (decisão 0057) ----------------------------------------
+
+fn ligar_desktop(motor: &mut Motor, ms: u64) {
+    motor.evento_desktop(
+        None,
+        &crate::plataforma::EventoDesktop::Ligado(true),
+        em(ms),
+    );
+}
+
+/// Um hook da sessão `sid` (no turno `{sid}-p`, o do [`prompt_em`]).
+fn hook_em(motor: &mut Motor, sid: &str, proj: &str, e: &str, ms: u64) {
+    let ev = Evento {
+        e: e.into(),
+        sid: Some(sid.into()),
+        turno: Some(format!("{sid}-p")),
+        ent: Some("cli".into()),
+        proj: Some(proj.into()),
+        tool: (e == "PermissionRequest").then(|| "Bash".into()),
+        ts: Some(PAREDE + ms),
+        ..Evento::default()
+    };
+    motor.evento(&ev, PAREDE + ms, em(ms));
+}
+
+/// A sessão `sid` terminou o turno em `ms`: o pronto depois da acomodação.
+fn pronto_em(motor: &mut Motor, sid: &str, proj: &str, ms: u64) {
+    hook_em(motor, sid, proj, "Stop", ms);
+    motor.tique(em(ms + crate::cerebro::ACOMODACAO_MS));
+}
+
+fn pendentes(motor: &Motor) -> Vec<(String, TipoAviso)> {
+    motor
+        .cerebro
+        .pendencias()
+        .into_iter()
+        .map(|p| (p.chave.1, p.aviso.tipo))
+        .collect()
+}
+
+fn tem_blocos(janela: &Falsa) -> bool {
+    janela
+        .cena
+        .as_ref()
+        .is_some_and(|c| c.iter().any(|e| matches!(e, Elemento::Bloco { .. })))
+}
+
+fn alcas(nomes: &[&str]) -> Vec<crate::plataforma::Alca> {
+    nomes
+        .iter()
+        .map(|n| crate::plataforma::Alca((*n).into()))
+        .collect()
+}
+
+#[test]
+fn clique_leva_ao_terminal_do_aviso_mais_urgente_e_o_seguinte_ao_proximo() {
+    let (mut motor, mut janela) = ligado();
+    motor.acertar_relogio(em(0));
+    ligar_desktop(&mut motor, 0);
+    // A no foot1 (vai ficar pronto), B no foot2 (vai pedir permissão).
+    ativou(&mut motor, Some("f00d01"), 1_000);
+    prompt_em(&mut motor, "sessao-a", "api", 2_000);
+    ativou(&mut motor, Some("f00d02"), 3_000);
+    prompt_em(&mut motor, "sessao-b", "web", 4_000);
+    pronto_em(&mut motor, "sessao-a", "api", 5_000);
+    hook_em(&mut motor, "sessao-b", "web", "PermissionRequest", 6_000);
+    assert_eq!(
+        pendentes(&motor),
+        vec![
+            ("sessao-b".to_owned(), TipoAviso::Esperando),
+            ("sessao-a".to_owned(), TipoAviso::Pronto)
+        ]
+    );
+    janela.desktop.janelas = alcas(&["f00d01", "f00d02"]);
+    // O Renan está numa terceira janela. Primeiro clique: B, a mais urgente.
+    ativou(&mut motor, Some("f00d03"), 7_000);
+    janela.mostrou();
+    let clicou = motor.clicar(&mut janela, Botao::Esquerdo, 8_000);
+    assert_eq!(
+        clicou,
+        Clicou::Focou {
+            sid8: "sessao-b".into(),
+            aviso: TipoAviso::Esperando,
+            janela: "f00d02".into(),
+            confirmado: false
+        }
+    );
+    assert_eq!(janela.desktop.focos, alcas(&["f00d02"]));
+    let p = motor.painel(Some(&janela), 8_000);
+    assert_eq!(p.reacao.as_deref(), Some(RISADINHA));
+    assert_eq!(p.focando.as_deref(), Some("f00d02"));
+    assert!(tem_blocos(&janela), "o coração na cena");
+    assert_eq!(pendentes(&motor).len(), 2, "o aviso espera a confirmação");
+    // O socket2 conta que o foot2 ficou ativo: o aviso de B sai.
+    ativou(&mut motor, Some("f00d02"), 8_100);
+    assert!(motor.tirar_mudanca_do_cerebro(), "o núcleo publica");
+    assert_eq!(motor.painel(Some(&janela), 8_100).focando, None);
+    assert_eq!(
+        pendentes(&motor),
+        vec![("sessao-a".to_owned(), TipoAviso::Pronto)]
+    );
+    // O coração sai no prazo dele.
+    janela.mostrou();
+    motor.vencer(&mut janela, 8_000 + CORACAO_MS);
+    assert!(!tem_blocos(&janela), "sem coração");
+    // O clique seguinte vai a A.
+    janela.mostrou();
+    let clicou = motor.clicar(&mut janela, Botao::Esquerdo, 10_000);
+    assert!(
+        matches!(&clicou, Clicou::Focou { sid8, janela, aviso: TipoAviso::Pronto, .. }
+            if sid8 == "sessao-a" && janela == "f00d01"),
+        "{clicou:?}"
+    );
+    ativou(&mut motor, Some("f00d01"), 10_050);
+    assert!(pendentes(&motor).is_empty());
+    // Sem aviso: o balão com as sessões.
+    janela.mostrou();
+    let clicou = motor.clicar(&mut janela, Botao::Esquerdo, 12_000);
+    assert_eq!(clicou, Clicou::Lista { sessoes: 2 });
+    let linhas = motor.painel(Some(&janela), 12_000).balao.unwrap();
+    assert_eq!(
+        linhas,
+        vec![
+            "web: esperando você (6 s)".to_owned(),
+            "api: parado (7 s)".to_owned()
+        ]
+    );
+}
+
+#[test]
+fn sem_como_focar_o_balao_diz_o_porque_e_o_ciclo_da_a_volta() {
+    let (mut motor, mut janela) = ligado();
+    motor.acertar_relogio(em(0));
+    ligar_desktop(&mut motor, 0);
+    // C perguntou antes de o pet ver janela nenhuma: sem identidade.
+    prompt_em(&mut motor, "sessao-c", "api", 1_000);
+    pronto_em(&mut motor, "sessao-c", "api", 2_000);
+    // D no foot4, que o desktop não conhece mais (fechou sem o socket2
+    // contar).
+    ativou(&mut motor, Some("f00d04"), 3_000);
+    prompt_em(&mut motor, "sessao-d", "web", 4_000);
+    hook_em(&mut motor, "sessao-d", "web", "PermissionRequest", 5_000);
+    janela.mostrou();
+    let clicou = motor.clicar(&mut janela, Botao::Esquerdo, 6_000);
+    assert_eq!(
+        clicou,
+        Clicou::NaoFocou {
+            sid8: "sessao-d".into(),
+            aviso: TipoAviso::Esperando,
+            motivo: "a janela dela sumiu"
+        }
+    );
+    let linhas = motor.painel(Some(&janela), 6_000).balao.unwrap();
+    assert_eq!(
+        linhas,
+        vec![
+            "web: esperando você".to_owned(),
+            "a janela dela sumiu".to_owned(),
+            "web: esperando você (1 s)".to_owned(),
+            "api: pronto (4 s)".to_owned()
+        ]
+    );
+    assert_eq!(
+        motor.painel(Some(&janela), 6_000).reacao,
+        None,
+        "sem risadinha"
+    );
+    // O seguinte vai a C, que não tem janela.
+    let clicou = motor.clicar(&mut janela, Botao::Esquerdo, 7_000);
+    assert_eq!(
+        clicou,
+        Clicou::NaoFocou {
+            sid8: "sessao-c".into(),
+            aviso: TipoAviso::Pronto,
+            motivo: "não vi a janela dela"
+        }
+    );
+    // Visitou todas: volta a D. E sem os protocolos, o balão diz.
+    janela.desktop.janelas = alcas(&["f00d04"]);
+    janela.desktop.capacidades.foca_janela = false;
+    let clicou = motor.clicar(&mut janela, Botao::Esquerdo, 8_000);
+    assert_eq!(
+        clicou,
+        Clicou::NaoFocou {
+            sid8: "sessao-d".into(),
+            aviso: TipoAviso::Esperando,
+            motivo: "aqui eu não sei focar janelas"
+        }
+    );
+    assert!(janela.desktop.focos.is_empty());
+    assert_eq!(pendentes(&motor).len(), 2, "nada foi visto");
+    // O botão direito: a soneca.
+    assert_eq!(
+        motor.clicar(&mut janela, Botao::Direito, 9_000),
+        Clicou::Soneca { cochilando: true }
+    );
+    assert!(matches!(
+        motor.clicar(&mut janela, Botao::Meio, 9_100),
+        Clicou::Nada { .. }
+    ));
+}
+
+#[test]
+fn foco_sem_confirmacao_deixa_o_aviso_e_o_balao_diz() {
+    let (mut motor, mut janela) = ligado();
+    motor.acertar_relogio(em(0));
+    ligar_desktop(&mut motor, 0);
+    ativou(&mut motor, Some("f00d01"), 1_000);
+    prompt_em(&mut motor, "sessao-a", "api", 2_000);
+    pronto_em(&mut motor, "sessao-a", "api", 3_000);
+    ativou(&mut motor, Some("f00d03"), 4_000);
+    janela.desktop.janelas = alcas(&["f00d01"]);
+    janela.mostrou();
+    let clicou = motor.clicar(&mut janela, Botao::Esquerdo, 5_000);
+    assert!(matches!(
+        clicou,
+        Clicou::Focou {
+            confirmado: false,
+            ..
+        }
+    ));
+    assert!(motor.proximo_prazo().unwrap() <= 5_000 + CONFIRMAR_FOCO_MS);
+    // Outra janela ficou ativa (não a do clique): continua esperando.
+    ativou(&mut motor, Some("f00d05"), 5_500);
+    janela.mostrou();
+    motor.vencer(&mut janela, 5_000 + CONFIRMAR_FOCO_MS - 1);
+    assert!(motor.painel(Some(&janela), 6_000).focando.is_some());
+    // O prazo vence sem a janela ficar ativa (a sessão bloqueada): o aviso
+    // fica, e o balão diz.
+    janela.mostrou();
+    motor.vencer(&mut janela, 5_000 + CONFIRMAR_FOCO_MS);
+    let p = motor.painel(Some(&janela), 6_500);
+    assert_eq!(p.focando, None);
+    let linhas = p.balao.unwrap();
+    assert_eq!(
+        &linhas[..2],
+        &[
+            "api: pronto".to_owned(),
+            "não consegui focar a janela dela".to_owned()
+        ]
+    );
+    assert_eq!(
+        pendentes(&motor),
+        vec![("sessao-a".to_owned(), TipoAviso::Pronto)]
+    );
+    assert!(!motor.tirar_mudanca_do_cerebro());
+}
+
+#[test]
+fn com_a_janela_ja_ativa_o_clique_ve_na_hora() {
+    let (mut motor, mut janela) = ligado();
+    motor.acertar_relogio(em(0));
+    ligar_desktop(&mut motor, 0);
+    ativou(&mut motor, Some("f00d01"), 1_000);
+    prompt_em(&mut motor, "sessao-a", "api", 2_000);
+    pronto_em(&mut motor, "sessao-a", "api", 3_000);
+    janela.desktop.janelas = alcas(&["f00d01"]);
+    janela.mostrou();
+    let clicou = motor.clicar(&mut janela, Botao::Esquerdo, 4_000);
+    assert!(matches!(
+        clicou,
+        Clicou::Focou {
+            confirmado: true,
+            ..
+        }
+    ));
+    assert!(pendentes(&motor).is_empty());
+    assert!(motor.tirar_mudanca_do_cerebro());
+    // Sem fonte de trocas e sem o foreign-toplevel contar ativações, o
+    // aviso também sai na hora (não há como confirmar).
+    let (mut motor, mut janela) = ligado();
+    motor.acertar_relogio(em(0));
+    ligar_desktop(&mut motor, 0);
+    ativou(&mut motor, Some("f00d01"), 1_000);
+    prompt_em(&mut motor, "sessao-a", "api", 2_000);
+    pronto_em(&mut motor, "sessao-a", "api", 3_000);
+    motor.evento_desktop(
+        None,
+        &crate::plataforma::EventoDesktop::Ligado(false),
+        em(3_500),
+    );
+    janela.desktop.janelas = alcas(&["f00d01"]);
+    janela.desktop.capacidades.janela_ativa = false;
+    let clicou = motor.clicar(&mut janela, Botao::Esquerdo, 4_000);
+    assert!(matches!(
+        clicou,
+        Clicou::Focou {
+            confirmado: true,
+            ..
+        }
+    ));
+    assert!(pendentes(&motor).is_empty());
+}
+
+#[test]
+fn o_pronto_sai_com_10_s_do_terminal_em_foco_e_o_esperando_fica() {
+    let mut motor = Motor::novo(ConfigCerebro::default());
+    motor.acertar_relogio(em(0));
+    ligar_desktop(&mut motor, 0);
+    ativou(&mut motor, Some("f00d01"), 1_000);
+    prompt_em(&mut motor, "sessao-a", "api", 2_000);
+    ativou(&mut motor, Some("f00d02"), 3_000);
+    prompt_em(&mut motor, "sessao-b", "web", 4_000);
+    hook_em(&mut motor, "sessao-b", "web", "PermissionRequest", 5_000);
+    // A fica pronta com o foot2 em foco: nada de prazo pelo foco de A.
+    pronto_em(&mut motor, "sessao-a", "api", 6_000);
+    assert_eq!(pendentes(&motor).len(), 2);
+    let sem_foco = motor.prazo_do_cerebro().unwrap();
+    assert!(sem_foco > 60_000, "só os prazos do cérebro: {sem_foco}");
+    // O Renan vai ao foot1 por 9 s e sai: o pronto fica.
+    ativou(&mut motor, Some("f00d01"), 10_000);
+    assert_eq!(motor.prazo_do_cerebro(), Some(10_000 + VISTO_PELO_FOCO_MS));
+    motor.tique(em(19_000));
+    ativou(&mut motor, Some("f00d03"), 19_000);
+    motor.tique(em(20_000));
+    assert_eq!(pendentes(&motor).len(), 2);
+    // Volta e fica 10 s: o pronto sai sem clique.
+    ativou(&mut motor, Some("f00d01"), 30_000);
+    motor.tique(em(39_999));
+    assert_eq!(pendentes(&motor).len(), 2);
+    motor.tique(em(40_000));
+    assert_eq!(
+        pendentes(&motor),
+        vec![("sessao-b".to_owned(), TipoAviso::Esperando)]
+    );
+    assert!(motor.tirar_mudanca_do_cerebro());
+    // O "esperando você" não sai pelo foco, nem com 1 min no foot2.
+    ativou(&mut motor, Some("f00d02"), 50_000);
+    motor.tique(em(110_000));
+    assert_eq!(pendentes(&motor).len(), 1);
+    // Com a fonte das trocas fora, a janela "ativa" não conta.
+    hook_em(&mut motor, "sessao-b", "web", "PostToolUse", 120_000);
+    pronto_em(&mut motor, "sessao-b", "web", 121_000);
+    motor.evento_desktop(
+        None,
+        &crate::plataforma::EventoDesktop::Ligado(false),
+        em(122_000),
+    );
+    motor.tique(em(140_000));
+    assert_eq!(
+        pendentes(&motor),
+        vec![("sessao-b".to_owned(), TipoAviso::Pronto)]
+    );
+}

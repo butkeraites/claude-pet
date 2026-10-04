@@ -18,8 +18,8 @@ use std::time::Instant;
 use pet_core::cerebro::{Agora, ConfigCerebro, Reacao};
 use pet_core::config::ConfigEfetiva;
 use pet_core::evento;
-use pet_core::motor::{Motor, Posicoes, Tocou};
-use pet_core::plataforma::{EventoDesktop, EventoOverlay, Overlay, Punho};
+use pet_core::motor::{Clicou, Motor, Posicoes, Tocou};
+use pet_core::plataforma::{EventoDesktop, EventoOverlay, EventoPonteiro, Overlay, Punho};
 
 use crate::comando::{Comando, Recebido};
 use crate::estado::{Compartilhado, InfoSkin, Painel, Tela};
@@ -273,6 +273,17 @@ impl Nucleo {
                 }
                 let _ = resposta.try_send(tocou);
             }
+            Comando::Clique { botao, resposta } => {
+                let agora = self.agora_ms();
+                let clicou = match punho(&mut ov) {
+                    Some(p) => self.motor.clicar(p, botao, agora),
+                    None => Clicou::Nada {
+                        motivo: "sem compositor: o clique precisa da janela do pet",
+                    },
+                };
+                self.publicar_avisos();
+                let _ = resposta.try_send(clicou);
+            }
             Comando::Esconder | Comando::Mostrar => {
                 let visivel = matches!(comando, Comando::Mostrar);
                 self.motor.definir_visivel(visivel);
@@ -324,6 +335,19 @@ impl Nucleo {
         let mudou = self.motor.evento_desktop(janela(&mut ov), evento, agora);
         // Uma janela que fechou tira a janela das sessões dela.
         if matches!(evento, EventoDesktop::JanelaFechou(_)) {
+            self.motor.tirar_mudanca_do_cerebro();
+            self.comp.publicar_cerebro(&self.motor.resumo());
+        }
+        // A janela que o clique focou ficou ativa: o aviso saiu.
+        self.publicar_avisos() || mudou
+    }
+
+    /// Um aviso saiu fora de um evento do Claude (o clique, o terminal em
+    /// foco; decisão 0057): o `/v1/estado.sessoes` sai de novo. Devolve se
+    /// publicou.
+    fn publicar_avisos(&mut self) -> bool {
+        let mudou = self.motor.tirar_mudanca_do_cerebro();
+        if mudou {
             self.comp.publicar_cerebro(&self.motor.resumo());
         }
         mudou
@@ -349,6 +373,7 @@ impl Nucleo {
         for reacao in &reacoes {
             self.reagir(reacao, punho(&mut ov));
         }
+        self.motor.tirar_mudanca_do_cerebro();
         self.comp.publicar_cerebro(&self.motor.resumo());
     }
 
@@ -401,6 +426,7 @@ impl Nucleo {
         if let Some(ov) = punho(&mut ov) {
             self.motor.vencer(ov, agora);
         }
+        self.publicar_avisos();
         self.guardar_posicoes();
     }
 
@@ -432,13 +458,24 @@ impl Nucleo {
             }
             let agora = self.agora_ms();
             for evento in eventos {
-                mudou |= !matches!(evento, EventoOverlay::Ponteiro(_));
+                // Mover o ponteiro não muda o painel; apertar e soltar (o
+                // clique, o fim do arraste) mudam.
+                mudou |= !matches!(
+                    evento,
+                    EventoOverlay::Ponteiro(
+                        EventoPonteiro::Entrou { .. }
+                            | EventoPonteiro::Moveu { .. }
+                            | EventoPonteiro::Saiu
+                    )
+                );
                 self.motor.evento_overlay(ov, evento, agora);
             }
             for evento in &do_desktop {
                 mudou |= self.evento_desktop(evento, Some(&mut *ov));
             }
         }
+        // O clique viu um aviso (a janela já estava ativa).
+        mudou |= self.publicar_avisos();
         self.guardar_posicoes();
         mudou
     }
@@ -565,6 +602,88 @@ mod testes {
         assert!(nucleo.evento_desktop(&EventoDesktop::Ligado(true), Some(&mut janela)));
         nucleo.publicar(Some(&janela));
         assert_eq!(nucleo.comp.estado_json()["desktop"]["eventos"], "ligado");
+    }
+
+    #[test]
+    fn o_clique_foca_o_terminal_e_o_aviso_visto_sai_do_estado() {
+        use pet_core::evento::Evento;
+        use pet_core::plataforma::{Alca, Botao};
+        let a = Ambiente::novo("nucleo-clique");
+        let config = a.raiz.join("config");
+        fs::create_dir_all(&config).unwrap();
+        let (mut nucleo, mut janela) = ligado(&a, &config);
+        let clicar = |nucleo: &mut Nucleo, janela: Option<&mut JanelaFalsa>| {
+            let (resposta, recebeu) = mpsc::sync_channel(1);
+            nucleo.comando(
+                Comando::Clique {
+                    botao: Botao::Esquerdo,
+                    resposta,
+                },
+                janela.map(|j| j as &mut dyn Punho),
+            );
+            recebeu.try_recv().expect("o clique responde na hora")
+        };
+        // Sem compositor, o clique não faz nada.
+        assert!(matches!(clicar(&mut nucleo, None), Clicou::Nada { .. }));
+        // O socket2 conta o foot ativo; a sessão pede permissão nele.
+        let agora = agora_desde_1970_ms();
+        let ativa = |janela: &str, parede_ms: u64| EventoDesktop::JanelaAtiva {
+            janela: Some(Alca(janela.into())),
+            parede_ms,
+        };
+        nucleo.evento_desktop(&EventoDesktop::Ligado(true), Some(&mut janela));
+        nucleo.evento_desktop(&ativa("f00d01", agora - 5_000), Some(&mut janela));
+        for (e, ts) in [
+            ("UserPromptSubmit", agora - 4_000),
+            ("PermissionRequest", agora - 3_000),
+        ] {
+            let evento = Evento {
+                e: e.into(),
+                sid: Some("0123456789abcdef".into()),
+                turno: Some("p1".into()),
+                ent: Some("cli".into()),
+                proj: Some("api".into()),
+                tool: Some("Bash".into()),
+                ts: Some(ts),
+                ..Evento::default()
+            };
+            let recebido = Recebido {
+                evento,
+                recebido_ms: ts,
+                chegada: Instant::now(),
+            };
+            nucleo.comando(Comando::Evento(Box::new(recebido)), Some(&mut janela));
+        }
+        let estado = nucleo.comp.estado_json();
+        assert_eq!(estado["sessoes"][0]["aviso"]["tipo"], "esperando");
+        assert_eq!(estado["sessoes"][0]["janela"]["endereco"], "f00d01");
+        // Outra janela ativa: o clique foca o foot e espera a confirmação.
+        nucleo.evento_desktop(&ativa("f00d02", agora - 1_000), Some(&mut janela));
+        janela.desktop.janelas = vec![Alca("f00d01".into())];
+        janela.mostrou();
+        assert!(matches!(
+            clicar(&mut nucleo, Some(&mut janela)),
+            Clicou::Focou {
+                confirmado: false,
+                ..
+            }
+        ));
+        assert_eq!(janela.desktop.focos, vec![Alca("f00d01".into())]);
+        nucleo.publicar(Some(&janela));
+        assert_eq!(nucleo.comp.estado_json()["focando"], "f00d01");
+        // O socket2 conta a troca: o aviso sai do /v1/estado na hora.
+        assert!(nucleo.evento_desktop(&ativa("f00d01", agora), Some(&mut janela)));
+        let estado = nucleo.comp.estado_json();
+        assert!(
+            estado["sessoes"][0]["aviso"].is_null(),
+            "{}",
+            estado["sessoes"]
+        );
+        // Sem aviso, o clique mostra as sessões.
+        assert_eq!(
+            clicar(&mut nucleo, Some(&mut janela)),
+            Clicou::Lista { sessoes: 1 }
+        );
     }
 
     #[test]

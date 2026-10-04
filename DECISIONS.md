@@ -2207,3 +2207,71 @@ para a libwayland em C, com `unsafe` — proibido fora dos esboços.
 sem executar nada no host; o mapeamento é o que liga o handle ao endereço
 que o anel conhece. Escrever as tabelas à mão é o preço de não ter `unsafe`,
 e o teste contra o XML garante que elas são as do protocolo.
+
+## 0057 — Os avisos das sessões e o clique que leva ao terminal, em ciclo (2026-10-04)
+
+**Problema:** o clique esquerdo no Zeca leva à janela do terminal da sessão
+que terminou ou que precisa do Renan (decisão 0039): com vários avisos, o
+mais urgente primeiro (esperando você > erro > pronto) e cada clique ao
+próximo; o clique que foca marca o aviso como visto; o pronto some com uns
+10 s do terminal da sessão em foco, e o "esperando você" só com um evento da
+própria sessão ou um clique. Sem pendência, o balão com as sessões; sem como
+focar, o balão diz o porquê e mostra a lista.
+**Escolha (T4.10):**
+- **Os avisos moram no cérebro** (`pet_core::cerebro`): um espaço por
+  sessão, com o tipo e desde quando.
+  - Mudar de estado resolve o aviso de antes; entrar em "esperando você"
+    (o `PermissionRequest`, a pergunta e o plano pelo `PreToolUse`, as
+    notificações que pedem o Renan) ou em erro (o `StopFailure`) abre um.
+  - O pronto abre quando a acomodação do Stop termina (o instante da festa,
+    com ou sem festa: a celebração desligada não tira o aviso), desde a hora
+    do Stop. A continuação de outro plugin, que reabre o turno, o tira; o
+    Stop seguinte o devolve. Um prompt novo o resolve.
+  - Um segundo gatilho do mesmo diálogo (a notificação depois do
+    `PermissionRequest`) não abre outro, nem depois de visto. O
+    `idle_prompt` nunca abre nem resolve: ele fecha o turno e para a
+    sessão, mas a permissão continua na tela. Um evento atrasado, com `ts`
+    mais velho que o estado de agora (a permissão que a ferramenta já
+    usou), não mexe no aviso.
+  - O pronto e o erro somem sozinhos em 2 h; o "esperando você" só com um
+    evento da sessão, visto, ou com a sessão (o `SessionEnd`, as 12 h).
+  - No `/v1/estado.sessoes[].aviso`, o tipo (`esperando`, `erro`, `pronto`)
+    e desde quando; na lista do balão, a sessão parada com o pronto aparece
+    como "pronto".
+- **A ordem** (`Cerebro::pendencias`): o tipo mais urgente; no mesmo tipo,
+  as sessões reais antes das de teste e a que espera há mais tempo primeiro.
+- **O clique esquerdo** (`Motor::clicar`) vai ao aviso da vez: o mais
+  urgente que esta volta do ciclo ainda não visitou (visitados todos,
+  recomeça). Com a janela certa da sessão (decisão 0055), pede o foco ao
+  desktop (`Desktop::focar`, o foreign-toplevel da decisão 0056), com a
+  risadinha e um coração procedural (7 por 6 pixels da fonte, vermelho com
+  borda de tinta, 1,2 s parado: dois commits). O aviso sai quando o desktop
+  conta que a janela ficou ativa (o `activewindowv2` do socket2 ou o
+  `activated` do foreign-toplevel), em até 1,5 s; já ativa, ou sem quem
+  conte as trocas, sai na hora. Sem a confirmação no prazo (bloqueado, o
+  Hyprland recusa o foco sem dizer nada), o aviso fica e o balão diz "não
+  consegui focar a janela dela".
+- **Sem como focar**, o balão traz a sessão com o aviso, o porquê e a lista
+  das sessões, e o ciclo anda do mesmo jeito. Os porquês: da identidade
+  ("não vi a janela dela", "trocou de janela perto do prompt", "nenhuma
+  janela estava ativa", "a janela dela fechou") e do desktop ("aqui eu não
+  sei focar janelas", "a janela dela sumiu", "o sistema recusou o foco").
+  Sem aviso, a risadinha e a lista (decisão 0052).
+- **O foco sem clique:** o pronto e o erro de uma sessão saem com 10 s do
+  terminal dela em foco (contados do aviso ou de quando a janela ficou
+  ativa, o que vier depois), só com a fonte das trocas ligada; o "esperando
+  você" não sai assim.
+- **`/v1/comando` `clique`** (`"esquerdo"`, o padrão, ou `"direito"`) e
+  `bin/pet clique`: clicam no pet como o ponteiro e respondem o que ele fez
+  (`focou`, com o endereço da janela e se o desktop já confirmou; `balao`,
+  com o porquê; `lista`; `soneca`; sem compositor, `nada`). É por onde os
+  scripts ao vivo conferem o clique, sem título nenhum.
+- **Publicar:** um aviso visto fora de um evento do Claude (o clique, a
+  confirmação, o foco) republica o `/v1/estado.sessoes`; apertar e soltar o
+  botão republicam o painel, com o `focando` (o endereço que espera a
+  confirmação). No log, só o endereço, o id curto da sessão e o tipo do
+  aviso; o nome do projeto fica no balão e no `/v1/estado`, como antes.
+**Por quê:** o aviso é o estado da sessão visto pelo lado do Renan, o que
+ele ainda não viu, e o cérebro já sabe o estado. Esperar a confirmação do
+desktop evita marcar como visto um foco que não aconteceu, e a memória da
+volta evita que uma sessão sem janela prenda o clique nela.

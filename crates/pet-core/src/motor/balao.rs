@@ -10,7 +10,7 @@
 //! rabinho virado para cima).
 
 use crate::cena::Elemento;
-use crate::cerebro::{EstadoSessao, ResumoSessao};
+use crate::cerebro::{EstadoSessao, ResumoSessao, TipoAviso};
 use crate::fonte;
 use crate::geometria::Ret;
 
@@ -29,6 +29,19 @@ pub const TETO_MS: u64 = 12_000;
 /// opacos).
 const FUNDO: [u8; 4] = [0xE3, 0xF1, 0xF7, 0xFF];
 const TINTA: [u8; 4] = [0x2A, 0x1B, 0x1D, 0xFF];
+/// O vermelho do coração.
+const VERMELHO: [u8; 4] = [0x4F, 0x3B, 0xE2, 0xFF];
+
+/// O coração da risadinha (decisão 0057), em pixels da fonte: `#` tinta,
+/// `r` vermelho, `w` o brilho creme.
+const CORACAO: [&str; 6] = [
+    ".##.##.", //
+    "#wr#rr#", //
+    "#rrrrr#", //
+    ".#rrr#.", //
+    "..#r#..", //
+    "...#...", //
+];
 
 /// Folgas em pixels da fonte: dos lados, em cima e embaixo do texto (as
 /// linhas da monogram já têm o espaço dos acentos em cima).
@@ -176,16 +189,77 @@ pub fn selo_zz(corpo: Ret, area: Ret, dt: i32) -> Vec<Elemento> {
     saida
 }
 
-/// Como uma sessão aparece na lista: o estado em palavras.
-pub fn estado(sessao: &ResumoSessao) -> &'static str {
-    match sessao.estado {
+/// O coração da risadinha do clique que leva ao terminal (decisão 0057): 7
+/// por 6 pixels da fonte, no alto, à esquerda do corpo (o selo "zZ" fica à
+/// direita), preso na área útil. Parado: um commit para aparecer e um para
+/// sumir.
+pub fn coracao(corpo: Ret, area: Ret, dt: i32) -> Vec<Elemento> {
+    let dt = dt.max(1);
+    let w = CORACAO[0].len() as i32 * dt;
+    let h = CORACAO.len() as i32 * dt;
+    // Metade para fora do corpo, na grade do corpo (múltiplos de `dt`).
+    let x0 = (corpo.x - (CORACAO[0].len() as i32 / 2) * dt)
+        .min(area.direita() - w)
+        .max(area.x);
+    let y0 = (corpo.y - h + 2 * dt).max(area.y);
+    let mut saida = Vec::new();
+    for (j, linha) in CORACAO.iter().enumerate() {
+        let bytes = linha.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            let c = bytes[i];
+            let mut fim = i + 1;
+            while fim < bytes.len() && bytes[fim] == c {
+                fim += 1;
+            }
+            let cor = match c {
+                b'#' => Some(TINTA),
+                b'r' => Some(VERMELHO),
+                b'w' => Some(FUNDO),
+                _ => None,
+            };
+            if let Some(cor) = cor {
+                saida.push(Elemento::Bloco {
+                    ret: Ret::novo(
+                        x0 + i as i32 * dt,
+                        y0 + j as i32 * dt,
+                        (fim - i) as i32 * dt,
+                        dt,
+                    ),
+                    cor,
+                });
+            }
+            i = fim;
+        }
+    }
+    saida
+}
+
+/// Como uma sessão aparece na lista: o estado em palavras e desde quando.
+/// Parada com o pronto pendente é "pronto", desde o Stop (decisão 0057).
+pub fn estado(sessao: &ResumoSessao) -> (&'static str, u64) {
+    if sessao.estado == EstadoSessao::Parada
+        && let Some(aviso) = sessao.aviso
+        && aviso.tipo == TipoAviso::Pronto
+    {
+        return ("pronto", aviso.desde_ms);
+    }
+    let palavra = match sessao.estado {
         EstadoSessao::Parada => "parado",
         EstadoSessao::Pensando => "pensando",
         EstadoSessao::Trabalhando => "trabalhando",
         EstadoSessao::Esperando => "esperando você",
         EstadoSessao::Compactando => "compactando",
         EstadoSessao::Erro => "erro",
-    }
+    };
+    (palavra, sessao.estado_desde_ms)
+}
+
+/// O começo do balão de um aviso que o clique não levou ao terminal
+/// (decisão 0057): a sessão com o aviso e o porquê.
+pub fn linhas_sem_foco(proj: Option<&str>, tipo: TipoAviso, motivo: &str) -> Vec<String> {
+    let nome = fonte::cortar(proj.unwrap_or("sem pasta"), MAX_PROJETO);
+    vec![format!("{nome}: {}", tipo.nome()), motivo.to_owned()]
 }
 
 /// "há quanto tempo", curto: 40 s, 3 min, 2 h.
@@ -321,6 +395,46 @@ mod testes {
             canto
                 .iter()
                 .all(|e| matches!(*e, Elemento::Glifo { y, .. } if y >= -6))
+        );
+    }
+
+    #[test]
+    fn coracao_em_blocos_no_alto_a_esquerda_e_dentro_da_area() {
+        let corpo = Ret::novo(1_782, 1_062, 114, 114);
+        let c = coracao(corpo, area(), 3);
+        let caixa = limites(&c);
+        assert_eq!((caixa.w, caixa.h), (21, 18), "7 por 6 pixels de 3");
+        assert!(caixa.x < corpo.x && caixa.y < corpo.y, "no alto à esquerda");
+        let vermelhos = c
+            .iter()
+            .filter(|e| matches!(e, Elemento::Bloco { cor, .. } if *cor == VERMELHO))
+            .count();
+        assert!(vermelhos >= 5, "uma corrida por linha com vermelho");
+        for e in &c {
+            let Elemento::Bloco { ret, cor } = *e else {
+                panic!("só blocos");
+            };
+            assert_eq!((ret.x % 3, ret.w % 3, ret.h), (corpo.x % 3, 0, 3));
+            assert_eq!(cor[3], 255, "opaco");
+        }
+        // Colado no canto de cima à esquerda: preso na área.
+        let canto = limites(&coracao(Ret::novo(0, 0, 60, 60), area(), 3));
+        assert!(canto.x >= 0 && canto.y >= 0);
+    }
+
+    #[test]
+    fn linhas_sem_foco_e_o_pronto_na_lista() {
+        assert_eq!(
+            linhas_sem_foco(
+                Some("claude-pet"),
+                TipoAviso::Pronto,
+                "a janela dela fechou"
+            ),
+            vec!["claude-pet: pronto", "a janela dela fechou"]
+        );
+        assert_eq!(
+            linhas_sem_foco(None, TipoAviso::Esperando, "x")[0],
+            "sem pasta: esperando você"
         );
     }
 

@@ -50,6 +50,11 @@ uso: bin/pet <comando>
                   pequeno → done_small
   tocar REAÇÃO    toca uma reação (nod, done_small, wave, alert, …) e diz a
                   tag que a skin tocou e se ela apareceu na tela
+  clique [esquerdo|direito]
+                  clica no pet como o mouse e mostra o que ele fez: focou o
+                  terminal da sessão do aviso mais urgente, mostrou o balão
+                  (com o porquê de não focar) ou a lista das sessões, ou a
+                  soneca (direito)
   esconder        esconde o pet (até mostrar ou reiniciar)
   mostrar         mostra o pet de novo
   foto            foto do pet na tela (grim no monitor inteiro, recorte exato;
@@ -125,6 +130,31 @@ tocar_reacao() {
     printf '«%s» não apareceu: %s (tag %s)\n' "$1" "$(jq -r .motivo <<<"$RESPOSTA")" "$tag" >&2
     return 1
   fi
+}
+
+# clique [esquerdo|direito]: o pet clica em si mesmo como o ponteiro
+# (decisão 0057) e responde o que fez, em JSON: `focou` (o endereço da janela
+# e se o desktop já confirmou), `balao` (o porquê de não focar), `lista` ou
+# `soneca`. Sem compositor, `nada`.
+clicar_no_pet() {
+  local botao="${1:-esquerdo}"
+  case "$botao" in
+    esquerdo | direito) ;;
+    *)
+      echo "uso: bin/pet clique [esquerdo|direito]" >&2
+      return 2
+      ;;
+  esac
+  if ! comando_pet "$(jq -nc --arg b "$botao" '{cmd: "clique", arg: $b}')"; then
+    echo "o pet não respondeu em ${URL} — está de pé? (bin/pet subir)" >&2
+    return 1
+  fi
+  if [ "$STATUS" != 200 ]; then
+    printf 'o pet recusou (%s): %s\n' "$STATUS" \
+      "$(jq -r '.erro // empty' <<<"$RESPOSTA" 2>/dev/null || true)" >&2
+    return 1
+  fi
+  jq -c . <<<"$RESPOSTA"
 }
 
 # O commit desta árvore, para a imagem saber de onde saiu (decisão 0045):
@@ -743,6 +773,7 @@ case "$comando" in
     fi
     tocar_reacao "$1"
     ;;
+  clique) clicar_no_pet "$@" ;;
   esconder) comando '{"cmd": "esconder"}' ;;
   mostrar) comando '{"cmd": "mostrar"}' ;;
   foto) foto ;;

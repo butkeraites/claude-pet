@@ -229,6 +229,7 @@ impl Compartilhado {
             "viagem": painel.viagem,
             "balao": painel.balao,
             "soneca_restante_s": painel.soneca_restante_s,
+            "focando": painel.focando,
             "desktop": painel.desktop,
             "eventos": self.eventos_json(),
             "sessoes": do_cerebro("sessoes", json!([])),
@@ -360,6 +361,11 @@ mod testes {
         assert_eq!(estado["ultima_reacao"]["sid8"], "01234567");
         assert_eq!(estado["turnos"][0]["nivel"], "T0");
         assert_eq!(estado["cerebro"]["origens"], json!(["cli"]));
+        // O pronto (decisão 0057), sem o relógio monotônico.
+        assert_eq!(
+            estado["sessoes"][0]["aviso"],
+            json!({"tipo": "pronto", "desde_ms": 1_790_000_000_000u64})
+        );
         assert!(
             !estado.to_string().contains("0123456789abcdef"),
             "só o sid curto"

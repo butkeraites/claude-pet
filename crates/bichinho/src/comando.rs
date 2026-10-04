@@ -3,16 +3,17 @@
 //! Chegam pela [`pet_core::plataforma::Caixa`] (limitada: uma entrada
 //! afobada recebe 503 em vez de crescer a memória), que acorda o laço de
 //! cada sistema: os eventos dos hooks (`/v1/evento`), os comandos do
-//! `/v1/comando` (as reações do M3 e as aprovações de personagem do M2) e as
-//! rotas de debug.
+//! `/v1/comando` (as reações do M3, as aprovações de personagem do M2 e o
+//! clique do M4) e as rotas de debug.
 
 use std::sync::mpsc::SyncSender;
 use std::time::Instant;
 
 use pet_core::cerebro::Agora;
 use pet_core::evento::Evento;
+use pet_core::plataforma::Botao;
 
-pub use pet_core::motor::{QuadroEsperado, Tocou};
+pub use pet_core::motor::{Clicou, QuadroEsperado, Tocou};
 
 /// Quantos comandos esperam na caixa antes de a entrada responder 503
 /// (folga para rajadas de PostToolUse de ferramentas em paralelo enquanto o
@@ -59,6 +60,12 @@ pub enum Comando {
     },
     Esconder,
     Mostrar,
+    /// Clica no pet como o ponteiro (`/v1/comando` `clique`, decisão 0057);
+    /// o laço responde o que fez.
+    Clique {
+        botao: Botao,
+        resposta: SyncSender<Clicou>,
+    },
     /// Confete pela tela inteira, para medir o custo no compositor.
     Estresse {
         fps: u32,

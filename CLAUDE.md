@@ -68,6 +68,7 @@ Fora dele, use `~/.cargo/bin/cargo`.
 | `bin/pet instalar-host` | copia o binário estático da imagem para `~/.local/bin/bichinho` (o hook do plugin 0.2.0 o acha pelo PATH); só a imagem do commit da worktree estável, de árvore limpa (decisão 0045). `--da-branch` pula a conferência: só com `PET_BIN_HOST` numa pasta de teste fora do PATH |
 | `~/.cargo/bin/cargo build -p bichinho` + `PATH="$PWD/target/debug:$PATH" claude --plugin-dir plugin` | o hook da branch só numa sessão (e `PET_BICHINHO=$PWD/target/debug/bichinho bin/pet testar`) |
 | `bin/pet tocar <reação>` / `esconder` / `mostrar` | `/v1/comando` (não persiste); o `tocar` diz a tag que a skin tocou e se apareceu na tela |
+| `bin/pet clique [esquerdo\|direito]` | clica no pet como o mouse (`/v1/comando` `clique`, decisão 0057) e mostra o que ele fez: `focou` o terminal da sessão do aviso mais urgente (o endereço da janela e se o desktop já confirmou), `balao` com o porquê de não focar, `lista` das sessões ou `soneca` |
 | `claude --plugin-dir ~/Documents/claude-pet/plugin` | o plugin da branch numa sessão só (nunca instalar antes do merge) |
 | `~/.cargo/bin/cargo test` | testes do workspace (os quadros dourados regeneram com `PET_ATUALIZAR_OURO=1`) |
 | `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build` | modo desenvolvimento (sem restart, debug, skin `_teste`) |
@@ -121,7 +122,8 @@ Fora dele, use `~/.cargo/bin/cargo`.
   caixa.
 - Comandos chegam por `POST /v1/comando`, sempre `{"cmd", "arg"}`: as
   reações (`tocar`, 200 com a tag e se apareceu na tela; `esconder` e
-  `mostrar`, 204) e as aprovações (`aprovar_skin`, `revogar_skin`; 200
+  `mostrar`, 204), o clique (`clique`, 200 com o que ele fez; decisão 0057)
+  e as aprovações (`aprovar_skin`, `revogar_skin`; 200
   depois de o laço trocar o personagem), com as mesmas checagens de `Host`,
   `X-Pet` e `Content-Type` (decisões 0030 e 0033). Só as aprovações passam
   pelo cadeado: uma reação nunca espera uma aprovação. Uma reação toca a

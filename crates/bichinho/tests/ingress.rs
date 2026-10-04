@@ -113,6 +113,24 @@ fn comandos_de_ponta_a_ponta() {
     assert_eq!(d.post_json("/v1/comando", r#"{"cmd":"esconder"}"#).0, 204);
     assert_eq!(d.post_json("/v1/comando", r#"{"cmd":"mostrar"}"#).0, 204);
     assert_eq!(d.post_json("/v1/comando", r#"{"cmd":"voar"}"#).0, 400);
+    // O clique do M4 (decisão 0057): sem compositor, não há janela do pet.
+    let (status, corpo) = d.post_json("/v1/comando", r#"{"cmd":"clique"}"#);
+    assert_eq!(status, 200, "{corpo}");
+    let resposta: serde_json::Value = serde_json::from_str(&corpo).unwrap();
+    assert_eq!(resposta["acao"], "nada");
+    assert_eq!(resposta["botao"], "esquerdo");
+    assert!(
+        resposta["motivo"]
+            .as_str()
+            .unwrap()
+            .contains("sem compositor"),
+        "{corpo}"
+    );
+    assert_eq!(
+        d.post_json("/v1/comando", r#"{"cmd":"clique","arg":"meio"}"#)
+            .0,
+        400
+    );
     // As aprovações do M2 vêm pelo mesmo `/v1/comando` (decisão 0030): o
     // laço escolhe o personagem de novo e a resposta traz o resultado.
     let (status, corpo) = d.post_json("/v1/comando", r#"{"cmd":"revogar_skin","arg":"zeca"}"#);
