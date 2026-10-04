@@ -1,0 +1,92 @@
+# O Zeca como skin (decisões 0023 a 0025). Arte e dados nossos, MIT; os
+# pixels do corpo são do pack e só existem em skins-locais/.
+
+[skin]
+id = "zeca"
+nome = "Zeca"
+autor = "exclusiveOlive (corpo e animações, Cute Parrots! Parrot 2) e claude-pet (chapéu, gravata e encaixe)"
+licenca = "Pack: uso comercial e não comercial, pode editar, NÃO pode redistribuir nem revender, mesmo editado. Acessórios: MIT."
+fonte = "https://exclusiveolive.itch.io/cute-parrots-pixel-art-asset-pack"
+# 48 px de célula viram 144 px em x3 (regras de estilo).
+escala_padrao = 3
+# Linha dos pés: o contorno debaixo dos pés é a linha 31, e eles pisam em 32.
+pe = [24, 32]
+# toque e corpo_px saem da pose parada vestida (com chapéu), sem contorno.
+# Tags com os pés no chão (o lint confere a linha dos pés nelas).
+chao = [
+  "idle", "walk", "sit", "sit_idle", "stand", "sleep_start", "sleep", "awake",
+  "eating", "chirp", "hurt", "stand_look_sit", "nod",
+]
+# Nunca usado (PLANO.md, item 4): o Zeca não morre.
+excluir = ["death"]
+
+# Estado semântico → tags (PLANO.md, "Zeca: arte e skin", item 4). Chaves
+# em inglês, como na skin de teste e no cérebro. Em `idle`, a primeira tag
+# dá a pose fixa e as rajadas do repouso alternam entre as tags (decisão
+# 0016); nas reações, toca a primeira tag do estado.
+[estados]
+# parado: Sit Idle como pose fixa; as rajadas do repouso vão em ordem: três
+# respiradas sentado e uma levantada para olhar (decisão 0028). Cada troca de
+# quadro repinta o monitor (decisão 0005): assim o Zeca fica em ~0,9 commit/s
+# parado, perto do 0,7–0,8 medido no M1, e mais calmo.
+idle = ["sit_idle", "sit_idle", "sit_idle", "stand_look_sit"]
+# trabalhando: bicando sementes (as micro-rajadas espaçadas são do M6).
+working = ["eating"]
+# pensando: Sit Idle (o "…" é efeito do M6).
+thinking = ["sit_idle"]
+# esperando você e a chamada: pio (o "!" é efeito do M6).
+waiting = ["chirp"]
+alert = ["chirp"]
+# pronto: levanta (Stand) e fica de pé.
+ready = ["stand"]
+# T0, aceno discreto: levanta e senta de novo.
+nod = ["nod"]
+wave = ["chirp"]
+# T1: pio (o pulinho é receita do M6).
+done_small = ["chirp"]
+# T2 e T3: voo curto e voo grande com mergulho; o caminho pela tela é do M6.
+done_medium = ["short_flight"]
+done_big = ["big_flight"]
+# erro: susto, com o chapéu voando (decisão 0024).
+error = ["hurt"]
+# cansado (bocejo), dormindo e acordando.
+yawn = ["sleep_start"]
+sleep = ["sleep"]
+wake = ["awake"]
+# arrastado e solto.
+dangle = ["fly"]
+land = ["landing"]
+# clique, oi e tchau: pio (coração, aceno e poof são efeitos do M6).
+giggle = ["chirp"]
+hello = ["chirp"]
+bye = ["chirp"]
+
+# Tags compostas: sequências feitas de tags do pack (já vestidas), para cada
+# estado tocar uma tag só do começo ao fim e voltar à pose.
+[[composicao]]
+nome = "stand_look_sit"
+nota = "rajada do repouso: levanta, respira em pé e senta de novo"
+partes = [{ tag = "stand" }, { tag = "idle" }, { tag = "sit" }]
+
+[[composicao]]
+nome = "nod"
+nota = "aceno discreto (T0): levanta e senta"
+partes = [{ tag = "stand" }, { tag = "sit" }]
+
+[[composicao]]
+nome = "short_flight"
+nota = "voo curto (T2): decola, bate asas e pousa"
+partes = [{ tag = "take_off" }, { tag = "fly", vezes = 2 }, { tag = "landing" }]
+
+[[composicao]]
+nome = "big_flight"
+nota = "voo grande (T3): decola, voa, plana, mergulha com o chapéu voando e pousa; o chapéu cai na cabeça depois do pouso"
+partes = [
+  { tag = "take_off" },
+  { tag = "fly", vezes = 2 },
+  { tag = "glide" },
+  { tag = "dive_start" },
+  { tag = "dive_loop", vezes = 2 },
+  { tag = "dive_end" },
+  { tag = "landing_mergulho" },
+]

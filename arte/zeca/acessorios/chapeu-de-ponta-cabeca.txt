@@ -1,0 +1,6 @@
+; Chapéu de ponta-cabeça (180°), no alto da cambalhota.
+.#########.
+#aaaaaaaaa#
+.#ffffff#..
+.#cccccc#..
+..######...

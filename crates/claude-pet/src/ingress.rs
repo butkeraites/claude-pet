@@ -8,6 +8,13 @@
 //! cabeçalho `X-Pet: 1`: isso barra requisições disparadas por navegador
 //! (DNS rebinding, CSRF).
 //!
+//! - `GET /v1/estado`: o que o pet está vendo e pensando (só metadados).
+//! - `POST /v1/comando` (`Content-Type: application/json`, no formato do M3
+//!   `{"cmd": …, "arg": …}`): `aprovar_skin` com `{"id", "sha256"}` aprova
+//!   o conteúdo exato da skin da imagem e guarda a cópia em `/state`;
+//!   `revogar_skin` com o id apaga a aprovação (decisão 0026). Depois de
+//!   cada um, o laço principal escolhe o personagem de novo.
+//!
 //! Com `PET_DEBUG=1` existem também as rotas `/v1/debug/*` (mesmas
 //! checagens): `quadro` (o RGBA esperado do sprite, para a checagem de
 //! nitidez), `esconder`, `mostrar` e `estresse`. Sem debug elas respondem
@@ -21,12 +28,17 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
+use std::sync::Mutex;
+
 use pet_core::skin::codificar_png;
-use serde_json::json;
+use serde::Deserialize;
+use serde_json::{Value, json};
 use smithay_client_toolkit::reexports::calloop::channel::SyncSender;
 
+use crate::aprovacao;
 use crate::comando::{Comando, QuadroEsperado};
 use crate::estado::Compartilhado;
+use crate::personagem::Onde;
 
 pub const LIMITE_CABECALHOS: usize = 8 * 1024;
 pub const LIMITE_CORPO: usize = 8 * 1024;
@@ -83,6 +95,10 @@ pub struct Contexto {
     pub debug: bool,
     /// Canal para o laço principal.
     pub comandos: Option<SyncSender<Comando>>,
+    /// Onde estão as skins da imagem e as aprovações (`/state`).
+    pub onde: Onde,
+    /// Uma aprovação ou revogação por vez.
+    pub aprovando: Mutex<()>,
 }
 
 pub fn ler_requisicao(entrada: &mut impl Read) -> Result<Requisicao, ErroHttp> {
@@ -172,6 +188,8 @@ pub fn escrever_resposta(saida: &mut impl Write, status: u16, corpo: &str) -> io
         403 => "Forbidden",
         409 => "Conflict",
         404 => "Not Found",
+        422 => "Unprocessable Content",
+        500 => "Internal Server Error",
         405 => "Method Not Allowed",
         411 => "Length Required",
         413 => "Payload Too Large",
@@ -230,9 +248,124 @@ pub fn rotear(req: &Requisicao, ctx: &Contexto) -> (u16, String) {
     match (req.metodo.as_str(), caminho) {
         ("GET", "/v1/estado") => (200, ctx.comp.estado_json().to_string()),
         (_, "/v1/estado") => (405, erro_json("use GET")),
+        ("POST", "/v1/comando") => receber_comando(req, ctx),
+        (_, "/v1/comando") => (405, erro_json("use POST")),
         (_, rota) if ctx.debug && rota.starts_with("/v1/debug/") => rotear_debug(req, ctx, rota),
         _ => (404, erro_json("rota desconhecida")),
     }
+}
+
+/// `Content-Type: application/json`, com ou sem parâmetros (`; charset=…`).
+fn eh_json(req: &Requisicao) -> bool {
+    req.cabecalho("content-type")
+        .and_then(|valor| valor.split(';').next())
+        .is_some_and(|tipo| tipo.trim().eq_ignore_ascii_case("application/json"))
+}
+
+/// Corpo do `/v1/comando` (o mesmo formato do M3).
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PedidoComando {
+    cmd: String,
+    #[serde(default)]
+    arg: Option<Value>,
+}
+
+/// `arg` do `aprovar_skin`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PedidoAprovacao {
+    id: String,
+    sha256: String,
+}
+
+/// `POST /v1/comando`: aprovar e revogar personagem (os comandos do M3,
+/// `tocar`, `esconder` e `mostrar`, chegam com ele).
+fn receber_comando(req: &Requisicao, ctx: &Contexto) -> (u16, String) {
+    if !eh_json(req) {
+        return (415, erro_json("Content-Type precisa ser application/json"));
+    }
+    let objeto = req.corpo.iter().find(|b| !b.is_ascii_whitespace()) == Some(&b'{');
+    let pedido: PedidoComando = match serde_json::from_slice(&req.corpo) {
+        Ok(pedido) if objeto => pedido,
+        // O erro do serde pode citar o corpo: nunca é repassado.
+        _ => {
+            return (
+                400,
+                erro_json(r#"o corpo precisa ser {"cmd": "…", "arg": …} sem outros campos"#),
+            );
+        }
+    };
+    let _vez = ctx.aprovando.lock().unwrap_or_else(|e| e.into_inner());
+    let resposta = match (pedido.cmd.as_str(), pedido.arg) {
+        ("aprovar_skin", Some(arg)) => {
+            let Ok(PedidoAprovacao { id, sha256 }) = serde_json::from_value(arg) else {
+                return (
+                    400,
+                    erro_json(r#"aprovar_skin leva arg {"id": "…", "sha256": "…"}"#),
+                );
+            };
+            match aprovacao::aprovar(&id, &sha256, &ctx.onde.busca, &ctx.onde.estado) {
+                Ok(r) => {
+                    info!("skin «{}» aprovada (sha {})", r.id, &r.sha256[..12]);
+                    json!({
+                        "id": r.id,
+                        "sha256": r.sha256,
+                        "aprovada_em_ms": r.aprovada_em_ms,
+                        "snapshot": aprovacao::pasta_da_skin(&ctx.onde.estado, &r.id),
+                    })
+                }
+                Err(e) => return (e.status(), erro_json(&e.mensagem())),
+            }
+        }
+        ("revogar_skin", Some(arg)) => {
+            let id = match &arg {
+                Value::String(id) => id.clone(),
+                outro => match outro.get("id").and_then(Value::as_str) {
+                    Some(id) if outro.as_object().is_some_and(|o| o.len() == 1) => id.to_owned(),
+                    _ => {
+                        return (
+                            400,
+                            erro_json(r#"revogar_skin leva arg "id" ou {"id": "…"}"#),
+                        );
+                    }
+                },
+            };
+            match aprovacao::revogar(&id, &ctx.onde.estado) {
+                Ok(revogada) => {
+                    info!(
+                        "skin «{id}»: aprovação {}",
+                        if revogada { "revogada" } else { "não existia" }
+                    );
+                    json!({"id": id, "revogada": revogada})
+                }
+                Err(e) => return (e.status(), erro_json(&e.mensagem())),
+            }
+        }
+        ("aprovar_skin" | "revogar_skin", None) => {
+            return (400, erro_json("falta o arg"));
+        }
+        _ => {
+            return (
+                400,
+                erro_json("cmd desconhecido: use aprovar_skin ou revogar_skin"),
+            );
+        }
+    };
+    // A aprovação já está gravada; o laço escolhe o personagem de novo e a
+    // resposta só sai depois (com prazo), para quem pediu ver o resultado.
+    let mut resposta = resposta;
+    if let Some(canal) = &ctx.comandos {
+        let (feito, espera) = mpsc::sync_channel(1);
+        let aplicado = canal.send(Comando::RecarregarPersonagem(feito)).is_ok()
+            && espera.recv_timeout(ESPERA_QUADRO).is_ok();
+        if !aplicado {
+            aviso!("o laço principal não confirmou a troca de personagem");
+        }
+        resposta["aplicado"] = json!(aplicado);
+        resposta["personagem"] = ctx.comp.estado_json()["skin"].clone();
+    }
+    (200, resposta.to_string())
 }
 
 /// Rotas de debug (só com `PET_DEBUG=1`).
@@ -428,6 +561,13 @@ mod testes {
             porta_publica: 27380,
             debug: false,
             comandos: None,
+            onde: crate::personagem::Onde {
+                busca: Vec::new(),
+                estado: std::path::PathBuf::from("/nao/existe"),
+                debug: false,
+                debug_personagem: false,
+            },
+            aprovando: Mutex::new(()),
         }
     }
 
@@ -451,6 +591,119 @@ mod testes {
             corpo.len()
         ))
         .unwrap()
+    }
+
+    fn post_json(caminho: &str, corpo: &str) -> Requisicao {
+        ler(&format!(
+            "POST {caminho} HTTP/1.1\r\nHost: 127.0.0.1:27380\r\nX-Pet: 1\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{corpo}",
+            corpo.len()
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn comando_aprova_e_revoga_e_avisa_o_laco() {
+        let a = crate::aprovacao::testes::Ambiente::novo("ingress");
+        let (canal, recebe) = smithay_client_toolkit::reexports::calloop::channel::sync_channel(4);
+        let laco = laco_que_confirma(recebe);
+        let ctx = Contexto {
+            comandos: Some(canal),
+            onde: crate::personagem::Onde {
+                busca: a.busca(),
+                estado: a.estado.clone(),
+                debug: false,
+                debug_personagem: false,
+            },
+            ..contexto()
+        };
+        let sha = a.sha();
+        let corpo = format!(r#"{{"cmd":"aprovar_skin","arg":{{"id":"zeca","sha256":"{sha}"}}}}"#);
+        let (status, resposta) = rotear(&post_json("/v1/comando", &corpo), &ctx);
+        assert_eq!(status, 200, "{resposta}");
+        assert!(resposta.contains(&sha));
+        assert!(resposta.contains("\"aplicado\":true"), "{resposta}");
+        let outro = format!(
+            r#"{{"cmd":"aprovar_skin","arg":{{"id":"zeca","sha256":"{}"}}}}"#,
+            "1".repeat(64)
+        );
+        assert_eq!(rotear(&post_json("/v1/comando", &outro), &ctx).0, 409);
+        let revoga = r#"{"cmd":"revogar_skin","arg":"zeca"}"#;
+        let (status, resposta) = rotear(&post_json("/v1/comando", revoga), &ctx);
+        assert_eq!(
+            (status, resposta.contains("\"revogada\":true")),
+            (200, true)
+        );
+        let objeto = r#"{"cmd":"revogar_skin","arg":{"id":"zeca"}}"#;
+        assert!(
+            rotear(&post_json("/v1/comando", objeto), &ctx)
+                .1
+                .contains("\"revogada\":false")
+        );
+        drop(ctx);
+        assert_eq!(
+            laco.join().unwrap(),
+            3,
+            "aprovou, revogou e revogou de novo: 3 trocas"
+        );
+    }
+
+    /// Um "laço principal" numa thread: confirma cada troca de personagem e
+    /// devolve quantas foram quando o canal fecha.
+    fn laco_que_confirma(
+        recebe: smithay_client_toolkit::reexports::calloop::channel::Channel<Comando>,
+    ) -> thread::JoinHandle<usize> {
+        use smithay_client_toolkit::reexports::calloop::EventLoop;
+        use smithay_client_toolkit::reexports::calloop::channel::Event;
+        thread::spawn(move || {
+            let mut laco = EventLoop::<(usize, bool)>::try_new().unwrap();
+            laco.handle()
+                .insert_source(
+                    recebe,
+                    |evento, _, estado: &mut (usize, bool)| match evento {
+                        Event::Msg(Comando::RecarregarPersonagem(feito)) => {
+                            estado.0 += 1;
+                            let _ = feito.try_send(());
+                        }
+                        Event::Msg(_) => {}
+                        Event::Closed => estado.1 = true,
+                    },
+                )
+                .unwrap();
+            let mut estado = (0, false);
+            while !estado.1 {
+                laco.dispatch(Some(Duration::from_millis(20)), &mut estado)
+                    .unwrap();
+            }
+            estado.0
+        })
+    }
+
+    #[test]
+    fn comando_mal_formado() {
+        let ctx = contexto();
+        for (corpo, esperado) in [
+            (r#"{"cmd":"aprovar_skin"}"#, 400),
+            (r#"{"cmd":"aprovar_skin","arg":{"id":"zeca"}}"#, 400),
+            (
+                r#"{"cmd":"aprovar_skin","arg":{"id":"zeca","sha256":"x","y":1}}"#,
+                400,
+            ),
+            (r#"{"cmd":"revogar_skin","arg":3}"#, 400),
+            (r#"{"cmd":"soneca"}"#, 400),
+            (r#"{"cmd":"revogar_skin","arg":"zeca","x":1}"#, 400),
+            (r#"["cmd"]"#, 400),
+            (
+                r#"{"cmd":"aprovar_skin","arg":{"id":"_teste","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}"#,
+                403,
+            ),
+        ] {
+            let (obtido, resposta) = rotear(&post_json("/v1/comando", corpo), &ctx);
+            assert_eq!(obtido, esperado, "{corpo} → {resposta}");
+        }
+        let sem_tipo = post("/v1/comando", r#"{"cmd":"revogar_skin","arg":"zeca"}"#);
+        assert_eq!(rotear(&sem_tipo, &ctx).0, 415);
+        let ok = "Host: 127.0.0.1:27380\r\nX-Pet: 1\r\n";
+        assert_eq!(rotear(&get("/v1/comando", ok), &ctx).0, 405);
     }
 
     #[test]

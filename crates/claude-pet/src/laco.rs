@@ -29,11 +29,13 @@ use smithay_client_toolkit::reexports::calloop::{
 };
 use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
 
+use pet_core::aprovacao::Origem;
 use pet_core::skin::Skin;
 
 use crate::comando::Comando;
 use crate::descoberta::{self, Espera, Reconexao};
-use crate::estado::{Compartilhado, Painel, Tela};
+use crate::estado::{Compartilhado, InfoSkin, Painel, Tela};
+use crate::personagem::{self, Escolha, Onde};
 use crate::wl;
 
 /// Batimento do laço principal (o vigia aborta com 60 s sem batimento).
@@ -54,11 +56,31 @@ pub struct Laco {
     batimento: Option<RegistrationToken>,
     /// Última razão de espera registrada no log (só loga quando muda).
     ultima_espera: Option<String>,
-    /// O personagem (só a skin de teste, em debug, no M1).
+    /// O personagem: a skin aprovada (ou a de teste, em debug).
     skin: Option<Rc<Skin>>,
+    /// Quem está na tela: (id, impressão digital, origem). Uma aprovação que
+    /// não muda isso (aprovar de novo a mesma skin, revogar outra) não mexe
+    /// na tela.
+    na_tela: NaTela,
+    /// Onde procurar skins e aprovações, para escolher de novo.
+    onde: Onde,
+    /// A skin configurada (`aparencia.skin`).
+    configurada: String,
+    /// `claude-pet.toml`, relido a cada aprovação: trocar `aparencia.skin`
+    /// (o `zeca-contorno`, por exemplo) vale sem reiniciar o container.
+    arquivo_config: Option<PathBuf>,
     /// O pet deve estar na tela (o debug pode esconder e mostrar).
     visivel: bool,
     pub parar: bool,
+}
+
+/// Quem está na tela: (id, impressão digital, origem).
+type NaTela = Option<(String, Option<String>, Option<Origem>)>;
+
+/// A escolha nova é exatamente o personagem que já está na tela (aprovar de
+/// novo a mesma skin, revogar a de outro id): nada a trocar.
+fn mesma_tela(havia_skin: bool, antes: &NaTela, depois: &NaTela) -> bool {
+    havia_skin && depois.is_some() && antes == depois
 }
 
 /// Uma sessão Wayland conectada.
@@ -75,9 +97,11 @@ impl Laco {
         handle: LoopHandle<'static, Laco>,
         base: PathBuf,
         curto: PathBuf,
-        skin: Option<Rc<Skin>>,
+        onde: Onde,
+        configurada: String,
+        arquivo_config: Option<PathBuf>,
     ) -> Laco {
-        Laco {
+        let mut laco = Laco {
             comp,
             handle,
             base,
@@ -87,9 +111,81 @@ impl Laco {
             descoberta: None,
             batimento: None,
             ultima_espera: None,
-            skin,
+            skin: None,
+            na_tela: None,
+            onde,
+            configurada,
+            arquivo_config,
             visivel: true,
             parar: false,
+        };
+        laco.escolher_personagem();
+        laco
+    }
+
+    /// Relê o `claude-pet.toml` (o mesmo caminho e as mesmas variáveis da
+    /// partida): uma aprovação depois de trocar `aparencia.skin` já vale.
+    fn reler_config(&mut self) {
+        let Some(arquivo) = &self.arquivo_config else {
+            return;
+        };
+        let config = crate::daemon::carregar_config(arquivo);
+        let skin = config.texto("aparencia.skin").to_owned();
+        if skin != self.configurada {
+            info!(
+                "config: aparencia.skin mudou de «{}» para «{skin}»",
+                self.configurada
+            );
+            self.configurada = skin;
+        }
+        self.comp.definir_config(config);
+    }
+
+    /// Escolhe o personagem (decisões 0011 e 0026), publica no `/v1/estado`
+    /// e, com o compositor conectado, troca na tela se mudou.
+    pub fn escolher_personagem(&mut self) {
+        let Escolha {
+            skin,
+            pedida,
+            origem,
+            sha256,
+            avisos,
+        } = personagem::escolher(&self.onde, &self.configurada);
+        for aviso in &avisos {
+            aviso!("personagem: {aviso}");
+        }
+        match &skin {
+            Some(skin) => info!("personagem: skin «{}» ({})", skin.id, skin.nome),
+            None => info!("sem personagem (pedida: «{pedida}»): o pet fica escondido"),
+        }
+        let na_tela = skin
+            .as_ref()
+            .map(|s| (s.id.clone(), sha256.clone(), origem));
+        self.comp.definir_skin(InfoSkin {
+            id: skin.as_ref().map(|s| s.id.clone()),
+            pedida,
+            origem,
+            sha256,
+            avisos,
+        });
+        if mesma_tela(self.skin.is_some(), &self.na_tela, &na_tela) {
+            // A mesma skin, com a mesma impressão e da mesma origem: a tela
+            // fica como está (sem recomeçar a animação).
+            return;
+        }
+        self.na_tela = na_tela;
+        let skin = skin.map(Rc::new);
+        self.skin = skin.clone();
+        if self.viva.is_some() {
+            self.comp.definir_tela(if self.skin.is_some() {
+                Tela::Ativa
+            } else {
+                Tela::SemPersonagem
+            });
+            let visivel = self.visivel;
+            if let Some(sessao) = self.sessao_mut() {
+                sessao.trocar_skin(skin, visivel);
+            }
         }
     }
 
@@ -118,7 +214,7 @@ impl Laco {
         Ok(())
     }
 
-    /// Comandos das outras threads (rotas de debug no M1).
+    /// Comandos das outras threads (rotas de debug e aprovações).
     pub fn instalar_comandos(&mut self, canal: Channel<Comando>) -> Result<(), String> {
         self.handle
             .insert_source(canal, |evento, _, laco| {
@@ -150,6 +246,12 @@ impl Laco {
             Comando::Quadro(resposta) => {
                 let quadro = self.sessao_mut().and_then(|s| s.quadro_esperado());
                 let _ = resposta.try_send(quadro);
+            }
+            Comando::RecarregarPersonagem(feito) => {
+                info!("aprovação mudou: escolhendo o personagem de novo");
+                self.reler_config();
+                self.escolher_personagem();
+                let _ = feito.try_send(());
             }
         }
     }
@@ -326,5 +428,35 @@ impl Laco {
         self.comp.definir_tela(Tela::Aguardando);
         self.comp.publicar_painel(Painel::default());
         self.armar_descoberta(Duration::ZERO);
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    #[test]
+    fn so_troca_a_tela_quando_muda_quem_esta_nela() {
+        let zeca =
+            |sha: &str, origem| Some(("zeca".to_owned(), Some(sha.to_owned()), Some(origem)));
+        let a = zeca("aa", Origem::Imagem);
+        assert!(mesma_tela(true, &a, &a), "aprovar de novo a mesma skin");
+        assert!(
+            !mesma_tela(true, &a, &zeca("bb", Origem::Imagem)),
+            "skin nova"
+        );
+        assert!(
+            !mesma_tela(true, &a, &zeca("aa", Origem::Snapshot)),
+            "a da imagem quebrou: vai a cópia de /state"
+        );
+        assert!(!mesma_tela(true, &a, &None), "revogou: esconde");
+        assert!(
+            !mesma_tela(false, &None, &None),
+            "nada antes, nada agora: publica de qualquer jeito"
+        );
+        assert!(
+            !mesma_tela(false, &a, &a),
+            "sem skin carregada ainda: troca"
+        );
     }
 }

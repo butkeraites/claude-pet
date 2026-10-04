@@ -21,19 +21,52 @@
 #      restart: unless-stopped; `docker kill` cancelaria a política);
 #  10. sem compositor, o log diz "aguardando compositor".
 #
-# Com a tela apagada (DPMS) o Hyprland não desenha: nitidez, pixel velho,
-# fantasma e o ritmo parado saem como NÃO VERIFICADOS (contam como falha).
+# Com a tela apagada (DPMS) ou a sessão bloqueada (tela de senha do Omarchy)
+# o Hyprland não desenha o pet: nitidez, pixel velho, fantasma e o ritmo
+# parado saem como NÃO VERIFICADOS (contam como falha).
 #
 # No fim, mesmo se algo falhar, deixa a pilha de PRODUÇÃO de pé: sem
-# personagem aprovado, o pet fica escondido (tela sem_personagem).
+# personagem aprovado, o pet fica escondido (tela sem_personagem); com a skin
+# configurada aprovada pelo Renan, a produção a mostra (tela ativa), e a
+# checagem de fantasma na troca para a produção fica de fora (a produção
+# desenha no mesmo lugar).
+#
+# `--personagem` (M2): a pilha de desenvolvimento mostra o personagem
+# APROVADO (PET_DEBUG_PERSONAGEM=1, decisão 0026) em vez da skin `_teste`, e a
+# nitidez, o pixel velho e o fantasma ao esconder são conferidos com o Zeca.
+# Sem aprovação, o script aprova só para o teste (`bin/pet skin-aprovar`, que
+# exige a folha de contato da mesma skin) e REVOGA no fim, até se algo falhar
+# no meio: o pet termina escondido, como estava. Também confere que aprovar
+# de novo com o pet na tela não o congela.
 #
 # Do Hyprland só usa consultas de leitura (`hyprctl -j monitors|layers`).
-# Capturas do monitor e recortes com o fundo são apagados no fim; o que fica
-# (para o PR) mostra só os pixels opacos do pet sobre um fundo neutro.
+# Capturas do monitor e recortes com o fundo são apagados no fim. O que fica
+# mostra só os pixels opacos do pet sobre um fundo neutro: com a `_teste`
+# pode ir para o PR; com o personagem (pixels de pack comprado) fica em tmp/
+# e nunca vai para o git (decisão 0011).
 set -uo pipefail
 
 RAIZ="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 cd "$RAIZ" || exit 1
+
+PERSONAGEM=0
+case "${1:-}" in
+  --personagem) PERSONAGEM=1 ;;
+  "") ;;
+  *)
+    echo "uso: scripts/verificar-ao-vivo.sh [--personagem]" >&2
+    exit 2
+    ;;
+esac
+# O compose de dev repassa esta variável ao container.
+export PET_DEBUG_PERSONAGEM="$PERSONAGEM"
+if [ "$PERSONAGEM" = 1 ]; then
+  ESPERADO_PROD=ativa
+  QUEM="o personagem aprovado"
+else
+  ESPERADO_PROD=sem_personagem
+  QUEM="a skin _teste"
+fi
 export PATH="$HOME/.cargo/bin:$PATH"
 URL="http://127.0.0.1:${PET_PORTA:-27380}"
 DEV=(docker compose -f docker-compose.yml -f docker-compose.dev.yml)
@@ -67,15 +100,35 @@ esperar_campo() {
   return 1
 }
 
+# A skin configurada (aparencia.skin) e se ela tem aprovação no volume
+# /state (o mesmo para dev e produção).
+CONF=""
+APROVOU_PARA_TESTE=0
+skin_configurada() { campo '.config.chaves["aparencia.skin"].valor'; }
+aprovada_no_volume() {
+  docker compose exec -T pet test -f "/state/skins/$1/aprovacao.json" >/dev/null 2>&1
+}
+
 RESTAURADO=0
 restaurar() {
   [ "$RESTAURADO" = 1 ] && return 0
   RESTAURADO=1
   rm -rf "$PRIVADO"
-  echo "▸ deixando a pilha de produção de pé (sem personagem → pet escondido)"
   docker rm -f claude-pet-sem-compositor >/dev/null 2>&1 || true
+  if [ "$APROVOU_PARA_TESTE" = 1 ]; then
+    ESPERADO_PROD=sem_personagem
+  fi
+  echo "▸ deixando a pilha de produção de pé (esperado: tela $ESPERADO_PROD)"
   "${PROD[@]}" up -d >/dev/null 2>&1 || echo "não consegui subir a produção" >&2
-  esperar_campo 20 .tela sem_personagem || true
+  if [ "$APROVOU_PARA_TESTE" = 1 ]; then
+    esperar_campo 20 .tela ativa || true
+    if "$RAIZ/bin/pet" skin-revogar "$CONF" >/dev/null 2>&1; then
+      echo "  aprovação de teste de «$CONF» revogada: quem aprova é o Renan"
+    else
+      echo "✗ NÃO consegui revogar a aprovação de teste de «$CONF»: rode bin/pet skin-revogar $CONF" >&2
+    fi
+  fi
+  esperar_campo 20 .tela "$ESPERADO_PROD" || true
   printf '  produção: tela=%s visivel=%s\n' "$(campo .tela)" "$(campo .visivel)"
 }
 trap restaurar EXIT
@@ -85,22 +138,53 @@ cargo build -q -p xtask || { falhou "o xtask não compila"; exit 1; }
 XTASK="$RAIZ/target/debug/xtask"
 
 # --- 1. saúde ---------------------------------------------------------------
-echo "▸ subindo a pilha de desenvolvimento (PET_DEBUG=1, skin _teste)"
+echo "▸ subindo a pilha de desenvolvimento (PET_DEBUG=1, $QUEM)"
 if ! "${DEV[@]}" up -d --build >"$SAIDA/build.log" 2>&1; then
   falhou "subida da pilha de desenvolvimento (veja $SAIDA/build.log)"
   exit 1
 fi
+for _ in $(seq 1 50); do
+  CONF="$(skin_configurada)"
+  [ -n "$CONF" ] && [ "$CONF" != null ] && break
+  sleep 0.2
+done
+if [ "$PERSONAGEM" = 1 ]; then
+  if ! aprovada_no_volume "$CONF"; then
+    echo "▸ «$CONF» sem aprovação: aprovando só para o teste (revogada no fim)"
+    if "$RAIZ/bin/pet" skin-aprovar "$CONF"; then
+      APROVOU_PARA_TESTE=1
+    else
+      falhou "aprovação de teste de «$CONF» (gere as prévias com bin/pet skin-instalar)"
+      exit 1
+    fi
+  fi
+elif aprovada_no_volume "$CONF"; then
+  # A produção vai mostrar o personagem aprovado pelo Renan.
+  ESPERADO_PROD=ativa
+fi
 if esperar_campo 20 .tela ativa && esperar_campo 10 .visivel true &&
   curl -fsS -m 3 "${URL}/saude" >/dev/null; then
-  passou "saúde: /saude 200, tela ativa, pet visível"
+  passou "saúde: /saude 200, tela ativa, pet visível ($(campo '.skin.id'), origem $(campo '.skin.origem'))"
 else
   falhou "saúde: tela=$(campo .tela) visivel=$(campo .visivel)"
+  [ "$PERSONAGEM" = 1 ] && falhou "sem personagem aprovado na tela: $(campo_json .skin.avisos) — aprove antes (bin/pet skin-aprovar)"
 fi
 
 # --- 2. camada --------------------------------------------------------------
 FOCADO="$(hyprctl -j monitors | jq -c '.[] | select(.focused)' | head -n1)"
 NOME="$(jq -r .name <<<"$FOCADO")"
+# A tela mostra a camada do pet só acesa (DPMS) e com a sessão desbloqueada:
+# com o lock do Omarchy (quickshell, ext-session-lock) o Hyprland desenha só a
+# tela de senha, e o logind não marca LockedHint. O sinal é LOCK em
+# solitaryBlockedBy (o mesmo do omarchy-hyprland-session-locked).
 ACESA="$(jq -r .dpmsStatus <<<"$FOCADO")"
+BLOQUEADA="$(hyprctl -j monitors | jq -r 'any(.[]; (.solitaryBlockedBy // []) | index("LOCK") != null)')"
+if [ "$BLOQUEADA" = true ]; then
+  MOTIVO="sessão bloqueada (a tela de senha cobre as camadas)"
+  ACESA=false
+else
+  MOTIVO="tela apagada (DPMS)"
+fi
 read -r MX MY MW MH < <(jq -r '
   (if (.transform % 2) == 1 then [.height, .width] else [.width, .height] end) as $m
   | "\(.x) \(.y) \(($m[0] / .scale) | round) \(($m[1] / .scale) | round)"' <<<"$FOCADO")
@@ -140,7 +224,7 @@ recortar() {
 
 # --- 4. nitidez ---------------------------------------------------------------
 if [ "$ACESA" != true ]; then
-  falhou "nitidez: NÃO VERIFICADA — a tela de $NOME está apagada (DPMS) e o grim só captura com ela acesa"
+  falhou "nitidez: NÃO VERIFICADA — $MOTIVO em $NOME; o grim só vê o pet com a tela acesa e desbloqueada"
 elif ! "$RAIZ/scripts/capturar-pet.sh" "$PRIVADO/nitidez"; then
   falhou "nitidez: não consegui um quadro estável e uma captura"
 else
@@ -163,7 +247,7 @@ fi
 
 # --- 5. sem pixel velho e sem fantasma ------------------------------------------
 if [ "$ACESA" != true ]; then
-  falhou "pixel velho e fantasma: NÃO VERIFICADOS — tela apagada (DPMS)"
+  falhou "pixel velho e fantasma: NÃO VERIFICADOS — $MOTIVO"
 else
   read -r SX SY SW SH < <(campo '.sprite_disp | "\(.x) \(.y) \(.w) \(.h)"')
   F="$PRIVADO/fantasma"
@@ -208,6 +292,33 @@ else
   fi
 fi
 
+# --- 5b. aprovar de novo com o pet na tela (--personagem) -----------------------
+# A revisão do M2 achou o pet congelado depois de uma aprovação com ele na
+# tela (o palco sumia). Aprovar de novo não pode parar o desenho. Só quando a
+# aprovação é a deste teste ou já é a da versão da imagem: se o Renan aprovou
+# uma versão anterior (o pet mostra a cópia de /state), aprovar de novo
+# trocaria a aprovação dele, e isso o script nunca faz.
+if [ "$PERSONAGEM" = 1 ] && [ "$APROVOU_PARA_TESTE" != 1 ] && [ "$(campo .skin.origem)" != imagem ]; then
+  manual "aprovar de novo com o pet na tela: fora (a aprovação do Renan é de outra versão da skin; o script não a troca)"
+elif [ "$PERSONAGEM" = 1 ]; then
+  K0="$(campo .commits_total)"
+  "$RAIZ/bin/pet" skin-aprovar "$CONF" >/dev/null 2>&1
+  sleep 1
+  ANDOU=0
+  for _ in $(seq 1 60); do
+    [ "$(campo .commits_total)" -gt "$K0" ] && { ANDOU=1; break; }
+    sleep 0.25
+  done
+  if [ "$(campo '.visivel and .d != null and .sprite_disp != null')" = true ] &&
+    api /v1/debug/quadro >/dev/null 2>&1 && [ "$ANDOU" = 1 ]; then
+    passou "aprovar de novo com o pet na tela: continua desenhando (d=$(campo .d), commits seguem)"
+  elif [ "$ACESA" != true ]; then
+    falhou "aprovar de novo com o pet na tela: NÃO VERIFICADO — $MOTIVO (sem frame callback não há commits)"
+  else
+    falhou "aprovar de novo com o pet na tela: visivel=$(campo .visivel) d=$(campo .d) sprite_disp=$(campo_json .sprite_disp), commits $K0 → $(campo .commits_total)"
+  fi
+fi
+
 # --- 6. orçamentos do container ---------------------------------------------------
 CONTAINER="$("${DEV[@]}" ps -q pet)"
 TAMANHO="$(docker image inspect claude-pet:local --format '{{.Size}}')"
@@ -233,7 +344,7 @@ for _ in 1 2 3 4 5; do
 done
 CPU="$(awk -v s="$CPU_SOMA" 'BEGIN{printf "%.2f", s/5}')"
 NOTA=""
-[ "$ACESA" != true ] && NOTA=", tela apagada: sem animação"
+[ "$ACESA" != true ] && NOTA=", $MOTIVO: sem animação"
 if awk -v c="$CPU" 'BEGIN{exit !(c < 1)}'; then
   passou "CPU do container parado: ${CPU}% (< 1%, média de 5 amostras${NOTA})"
 else
@@ -255,11 +366,11 @@ if [ "$ACESA" = true ]; then
   fi
 else
   if [ "$DK" = 0 ]; then
-    passou "tela apagada: 0 commits em ${JANELA} s (o pet espera o frame callback)"
+    passou "$MOTIVO: 0 commits em ${JANELA} s (o pet espera o frame callback)"
   else
-    falhou "tela apagada: $DK commits em ${JANELA} s (esperado 0)"
+    falhou "$MOTIVO: $DK commits em ${JANELA} s (esperado 0)"
   fi
-  falhou "commits parado com a tela acesa: NÃO VERIFICADO — tela apagada (DPMS)"
+  falhou "commits parado com a tela acesa: NÃO VERIFICADO — $MOTIVO"
 fi
 
 # --- 7. clique ---------------------------------------------------------------
@@ -295,7 +406,10 @@ fi
 
 # --- 9. troca para a produção sem fantasma, e crash ----------------------------
 echo "▸ trocando para a pilha de produção (SIGTERM no daemon de dev)"
-if [ "$ACESA" = true ] && read -r SX SY SW SH < <(campo '.sprite_disp | "\(.x) \(.y) \(.w) \(.h)"') &&
+if [ "$ESPERADO_PROD" = ativa ]; then
+  "${PROD[@]}" up -d >/dev/null 2>&1
+  manual "SIGTERM sem fantasma: fora quando a produção mostra o personagem (desenha no mesmo lugar; conferido no M1 com a _teste)"
+elif [ "$ACESA" = true ] && read -r SX SY SW SH < <(campo '.sprite_disp | "\(.x) \(.y) \(.w) \(.h)"') &&
   [ -n "$SX" ] && [ "$SX" != null ]; then
   T="$PRIVADO/troca"
   mkdir -p "$T"
@@ -325,10 +439,10 @@ if [ "$ACESA" = true ] && read -r SX SY SW SH < <(campo '.sprite_disp | "\(.x) \
   fi
 else
   "${PROD[@]}" up -d >/dev/null 2>&1
-  [ "$ACESA" != true ] && falhou "SIGTERM sem fantasma: NÃO VERIFICADO — tela apagada (DPMS)"
+  [ "$ACESA" != true ] && falhou "SIGTERM sem fantasma: NÃO VERIFICADO — $MOTIVO"
 fi
-if ! esperar_campo 20 .tela sem_personagem; then
-  falhou "produção não ficou sem_personagem (tela=$(campo .tela))"
+if ! esperar_campo 20 .tela "$ESPERADO_PROD"; then
+  falhou "produção não ficou $ESPERADO_PROD (tela=$(campo .tela))"
 else
   ID="$("${PROD[@]}" ps -q pet)"
   ANTES="$(docker inspect -f '{{.RestartCount}}' "$ID")"
@@ -341,7 +455,7 @@ else
     VOLTOU=0
     for _ in $(seq 1 150); do
       DEPOIS="$(docker inspect -f '{{.RestartCount}}' "$ID" 2>/dev/null || echo "$ANTES")"
-      if [ "$DEPOIS" -gt "$ANTES" ] && [ "$(campo .tela)" = sem_personagem ]; then
+      if [ "$DEPOIS" -gt "$ANTES" ] && [ "$(campo .tela)" = "$ESPERADO_PROD" ]; then
         VOLTOU=1
         break
       fi
@@ -373,7 +487,7 @@ echo
 echo "Resumo (artefatos em ${SAIDA#"$RAIZ"/}):"
 printf '  %s\n' "${LINHAS[@]}"
 if [ "$FALHAS" -eq 0 ]; then
-  echo "✓ verificação ao vivo do M1 passou"
+  echo "✓ verificação ao vivo passou ($QUEM)"
 else
   echo "✗ $FALHAS item(ns) falharam" >&2
   exit 1

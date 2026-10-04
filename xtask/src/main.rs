@@ -4,10 +4,19 @@
 //! `skin-teste` e `nitidez` no M1; `skin-importar`, `zeca`, `lint-skin`,
 //! `cobertura`, `contato` e `fonte` no M2.
 
+mod args;
 mod carga;
+mod cobertura;
+mod contato;
 mod fantasma;
+mod folha;
+mod fonte_mini;
+mod importar;
+mod lint;
 mod nitidez;
 mod skin_teste;
+mod zeca;
+mod zip;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -101,6 +110,50 @@ fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("carga: {e}");
+                ExitCode::FAILURE
+            }
+        },
+        Some("zeca") => match zeca::executar(&args[1..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("zeca: {e}");
+                eprintln!("{}", zeca::USO);
+                ExitCode::FAILURE
+            }
+        },
+        Some("lint-skin") => match lint::executar(&args[1..]) {
+            Ok(true) => ExitCode::SUCCESS,
+            Ok(false) => ExitCode::FAILURE,
+            Err(e) => {
+                eprintln!("lint-skin: {e}");
+                eprintln!("uso: cargo xtask lint-skin [--so-erros] <pasta> [<pasta>…]");
+                ExitCode::from(2)
+            }
+        },
+        Some("contato") => match contato::executar(&args[1..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("contato: {e}");
+                eprintln!(
+                    "uso: cargo xtask contato <pasta> [--saida <pasta>] [--escala 4] [--copia <pasta>]"
+                );
+                ExitCode::FAILURE
+            }
+        },
+        Some("cobertura") => match cobertura::executar(&args[1..]) {
+            Ok(true) => ExitCode::SUCCESS,
+            Ok(false) => ExitCode::FAILURE,
+            Err(e) => {
+                eprintln!("cobertura: {e}");
+                eprintln!("uso: cargo xtask cobertura <pasta> [--saida <arquivo.md>]");
+                ExitCode::from(2)
+            }
+        },
+        Some("skin-importar") => match importar::executar(&args[1..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("skin-importar: {e}");
+                eprintln!("{}", importar::USO);
                 ExitCode::FAILURE
             }
         },

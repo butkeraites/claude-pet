@@ -10,6 +10,9 @@ services:
     environment:
       PET_LOG: debug
       PET_DEBUG: "1"
+      # 1: o debug mostra o personagem aprovado em vez da skin _teste (para
+      # conferir o Zeca com as rotas de debug; decisão 0026).
+      PET_DEBUG_PERSONAGEM: ${PET_DEBUG_PERSONAGEM:-0}
     volumes:
       - type: bind
         source: ./skins

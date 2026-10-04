@@ -1,0 +1,9 @@
+; Chapéu tombando para a esquerda (~20°, anti-horário): espelho do
+; inclinado para a direita.
+....####...
+..##cccc#..
+.#ccccfff#.
+.#cfffaaaa#
+.#faaaa###.
+#aa####....
+.##........

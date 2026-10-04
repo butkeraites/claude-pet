@@ -1,16 +1,23 @@
-//! Quem aparece na tela (decisão 0011).
+//! Quem aparece na tela (decisões 0011 e 0026).
 //!
-//! - Com `PET_DEBUG=1`: a skin xadrez `_teste`, só para testar o motor.
+//! - Com `PET_DEBUG=1`: a skin xadrez `_teste`, só para testar o motor. Com
+//!   `PET_DEBUG_PERSONAGEM=1` junto, o debug usa o personagem de verdade,
+//!   com as mesmas regras de aprovação (para conferir o Zeca com as rotas de
+//!   debug, como a nitidez).
 //! - Sem debug: a skin configurada (`aparencia.skin`, padrão `zeca`),
-//!   procurada nas pastas de `PET_SKINS`. A aprovação de personagem (folha
-//!   de contato + snapshot em `/state`) só chega no M2; até lá nenhuma skin
-//!   está aprovada e o pet fica escondido (`tela: sem_personagem`).
+//!   procurada nas pastas de `PET_SKINS`, **só se o Renan aprovou**: a da
+//!   imagem, se a impressão digital dela é a aprovada; senão a cópia
+//!   aprovada em `/state`; senão o pet fica escondido (`tela:
+//!   sem_personagem`).
 //! - A skin de teste **nunca** vira personagem, nem configurada à mão, nem
 //!   como reserva de uma skin quebrada.
 
 use std::path::{Path, PathBuf};
 
+use pet_core::aprovacao::{Candidata, Decisao, Origem, decidir};
 use pet_core::skin::Skin;
+
+use crate::aprovacao;
 
 /// A skin xadrez de QA.
 pub const SKIN_DE_TESTE: &str = "_teste";
@@ -21,8 +28,24 @@ pub struct Escolha {
     pub skin: Option<Skin>,
     /// A skin pedida (a de teste em debug, senão a configurada).
     pub pedida: String,
+    /// De onde veio o personagem aprovado (imagem ou cópia em `/state`).
+    pub origem: Option<Origem>,
+    /// Impressão digital da skin na tela.
+    pub sha256: Option<String>,
     /// Por que não há personagem, ou o que a skin carregada reclamou.
     pub avisos: Vec<String>,
+}
+
+/// Onde procurar skins e aprovações, e o modo.
+#[derive(Debug, Clone)]
+pub struct Onde {
+    /// Pastas de skins da imagem (`PET_SKINS`), em ordem.
+    pub busca: Vec<PathBuf>,
+    /// Estado persistente (`PET_ESTADO`, o volume `/state`).
+    pub estado: PathBuf,
+    pub debug: bool,
+    /// Em debug, usar o personagem aprovado em vez da skin de teste.
+    pub debug_personagem: bool,
 }
 
 /// Primeira pasta `<busca>/<id>` com um `skin.json`.
@@ -46,10 +69,20 @@ fn carregar(pasta: &Path, avisos: &mut Vec<String>) -> Option<Skin> {
     }
 }
 
-pub fn escolher(debug: bool, configurada: &str, busca: &[PathBuf]) -> Escolha {
+fn sem_personagem(pedida: &str, avisos: Vec<String>) -> Escolha {
+    Escolha {
+        skin: None,
+        pedida: pedida.to_owned(),
+        origem: None,
+        sha256: None,
+        avisos,
+    }
+}
+
+pub fn escolher(onde: &Onde, configurada: &str) -> Escolha {
     let mut avisos = Vec::new();
-    if debug {
-        let skin = match procurar(SKIN_DE_TESTE, busca) {
+    if onde.debug && !onde.debug_personagem {
+        let skin = match procurar(SKIN_DE_TESTE, &onde.busca) {
             Some(pasta) => carregar(&pasta, &mut avisos),
             None => {
                 avisos.push(format!(
@@ -61,82 +94,160 @@ pub fn escolher(debug: bool, configurada: &str, busca: &[PathBuf]) -> Escolha {
         return Escolha {
             skin,
             pedida: SKIN_DE_TESTE.into(),
+            origem: None,
+            sha256: None,
             avisos,
         };
     }
     if configurada == SKIN_DE_TESTE {
         avisos.push("a skin de teste nunca é personagem (só com PET_DEBUG=1)".into());
-    } else {
-        match procurar(configurada, busca) {
-            Some(pasta) => avisos.push(format!(
-                "skin «{configurada}» encontrada em {}, mas ainda sem aprovação (chega no M2)",
-                pasta.display()
-            )),
-            None => avisos.push(format!(
-                "skin «{configurada}» não encontrada em PET_SKINS (o pack ainda não foi instalado)"
-            )),
-        }
+        return sem_personagem(configurada, avisos);
     }
-    Escolha {
-        skin: None,
-        pedida: configurada.to_owned(),
-        avisos,
+    let imagem = procurar(configurada, &onde.busca).map(|p| aprovacao::candidata(&p));
+    let registro = match aprovacao::ler_registro(&onde.estado, configurada) {
+        Ok(r) => r,
+        Err(e) => {
+            avisos.push(format!(
+                "aprovação ilegível ({e}): conta como sem aprovação"
+            ));
+            None
+        }
+    };
+    let snapshot = registro
+        .as_ref()
+        .and_then(|_| aprovacao::snapshot(&onde.estado, configurada));
+    match decidir(configurada, imagem, registro.as_ref(), snapshot) {
+        Decisao::Mostrar {
+            candidata,
+            origem,
+            avisos: motivo,
+        } => {
+            let Candidata { skin, sha256 } = *candidata;
+            avisos.extend(motivo);
+            avisos.extend(skin.avisos.iter().cloned());
+            Escolha {
+                skin: Some(skin),
+                pedida: configurada.to_owned(),
+                origem: Some(origem),
+                sha256: Some(sha256),
+                avisos,
+            }
+        }
+        Decisao::Esconder { avisos: motivo } => {
+            avisos.extend(motivo);
+            sem_personagem(configurada, avisos)
+        }
     }
 }
 
 #[cfg(test)]
 mod testes {
-    use super::*;
+    use std::fs;
 
-    fn skins_do_repo() -> Vec<PathBuf> {
-        vec![PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../skins")]
+    use super::*;
+    use crate::aprovacao::testes::Ambiente;
+
+    fn onde(a: &Ambiente, debug: bool, debug_personagem: bool) -> Onde {
+        Onde {
+            busca: a.busca(),
+            estado: a.estado.clone(),
+            debug,
+            debug_personagem,
+        }
     }
 
     #[test]
     fn debug_mostra_a_skin_de_teste() {
-        let e = escolher(true, "zeca", &skins_do_repo());
+        let a = Ambiente::novo("p-debug");
+        let e = escolher(&onde(&a, true, false), "zeca");
         assert_eq!(e.skin.as_ref().map(|s| s.id.as_str()), Some("_teste"));
         assert!(e.avisos.is_empty(), "{:?}", e.avisos);
+        assert_eq!(e.origem, None);
     }
 
     #[test]
-    fn sem_debug_e_sem_aprovacao_fica_escondido() {
-        let e = escolher(false, "zeca", &skins_do_repo());
+    fn sem_aprovacao_fica_escondido() {
+        let a = Ambiente::novo("p-sem");
+        let e = escolher(&onde(&a, false, false), "zeca");
         assert!(e.skin.is_none());
         assert_eq!(e.pedida, "zeca");
-        assert!(e.avisos[0].contains("não encontrada"), "{:?}", e.avisos);
+        assert!(e.avisos[0].contains("sem aprovação"), "{:?}", e.avisos);
+        // Nem o debug com personagem mostra sem aprovação.
+        assert!(escolher(&onde(&a, true, true), "zeca").skin.is_none());
+    }
+
+    #[test]
+    fn nao_instalada_avisa_para_instalar() {
+        let a = Ambiente::novo("p-nada");
+        let e = escolher(&onde(&a, false, false), "outra");
+        assert!(e.skin.is_none());
+        assert!(e.avisos[0].contains("skin-instalar"), "{:?}", e.avisos);
+    }
+
+    #[test]
+    fn aprovada_aparece_da_imagem() {
+        let a = Ambiente::novo("p-aprovada");
+        aprovacao::aprovar("zeca", &a.sha(), &a.busca(), &a.estado).unwrap();
+        let e = escolher(&onde(&a, false, false), "zeca");
+        assert_eq!(e.skin.as_ref().map(|s| s.id.as_str()), Some("zeca"));
+        assert_eq!(e.origem, Some(Origem::Imagem));
+        assert_eq!(e.sha256, Some(a.sha()));
+        // Debug com personagem: o mesmo Zeca aprovado, não a xadrez.
+        let d = escolher(&onde(&a, true, true), "zeca");
+        assert_eq!(d.skin.as_ref().map(|s| s.id.as_str()), Some("zeca"));
+    }
+
+    #[test]
+    fn imagem_mudada_ou_quebrada_usa_a_copia_aprovada() {
+        let a = Ambiente::novo("p-reserva");
+        aprovacao::aprovar("zeca", &a.sha(), &a.busca(), &a.estado).unwrap();
+        // Reconstruiu a skin: a imagem tem outra versão, ainda não aprovada.
+        let skin_json = a.skins.join("zeca/skin.json");
+        let texto = fs::read_to_string(&skin_json).unwrap();
+        fs::write(
+            &skin_json,
+            texto.replace("\"corpo_px\": 32", "\"corpo_px\": 30"),
+        )
+        .unwrap();
+        let e = escolher(&onde(&a, false, false), "zeca");
+        assert_eq!(e.origem, Some(Origem::Snapshot));
+        assert!(
+            e.avisos[0].contains("mudou depois da aprovação"),
+            "{:?}",
+            e.avisos
+        );
+        assert_eq!(e.skin.as_ref().map(|s| s.corpo_px), Some(32), "a aprovada");
+        // A da imagem quebrou: a cópia segura.
+        fs::write(a.skins.join("zeca/sheet.png"), b"lixo").unwrap();
+        assert_eq!(
+            escolher(&onde(&a, false, false), "zeca").origem,
+            Some(Origem::Snapshot)
+        );
+        // Revogou: escondido, mesmo com a cópia sumindo junto.
+        aprovacao::revogar("zeca", &a.estado).unwrap();
+        assert!(escolher(&onde(&a, false, false), "zeca").skin.is_none());
     }
 
     #[test]
     fn skin_de_teste_nunca_vira_personagem() {
-        let e = escolher(false, "_teste", &skins_do_repo());
+        let a = Ambiente::novo("p-teste");
+        let e = escolher(&onde(&a, false, false), "_teste");
         assert!(e.skin.is_none());
         assert!(e.avisos[0].contains("nunca"), "{:?}", e.avisos);
-    }
-
-    #[test]
-    fn skin_que_existe_mas_nao_foi_aprovada() {
-        // Uma "zeca" de mentira (cópia da xadrez) numa pasta temporária:
-        // achar a skin não basta para aparecer no M1.
-        let raiz = std::env::temp_dir().join(format!("claude-pet-skins-{}", std::process::id()));
-        let zeca = raiz.join("zeca");
-        std::fs::create_dir_all(&zeca).unwrap();
-        for nome in ["skin.json", "sheet.json", "sheet.png"] {
-            std::fs::copy(
-                skins_do_repo()[0].join("_teste").join(nome),
-                zeca.join(nome),
-            )
-            .unwrap();
-        }
-        let e = escolher(false, "zeca", std::slice::from_ref(&raiz));
-        let _ = std::fs::remove_dir_all(&raiz);
-        assert!(e.skin.is_none());
-        assert!(e.avisos[0].contains("sem aprovação"), "{:?}", e.avisos);
+        assert!(escolher(&onde(&a, true, true), "_teste").skin.is_none());
     }
 
     #[test]
     fn debug_sem_a_skin_de_teste_avisa() {
-        let e = escolher(true, "zeca", &[PathBuf::from("/nao/existe")]);
+        let e = escolher(
+            &Onde {
+                busca: vec![PathBuf::from("/nao/existe")],
+                estado: PathBuf::from("/nao/existe"),
+                debug: true,
+                debug_personagem: false,
+            },
+            "zeca",
+        );
         assert!(e.skin.is_none());
         assert_eq!(e.avisos.len(), 1);
     }

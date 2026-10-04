@@ -1,0 +1,13 @@
+; Chapéu de lado (270°, copa apontando para a esquerda): espelho do de lado
+; para a direita.
+...#.
+...a#
+.##a#
+#cfa#
+#cfa#
+#cfa#
+#cfa#
+#cfa#
+#cfa#
+.##a#
+...#.

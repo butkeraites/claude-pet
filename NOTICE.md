@@ -14,8 +14,10 @@ O código deste repositório é MIT (`LICENSE`). Abaixo, o que vem de fora.
 
 ## Arte e dados no repositório
 
-- `arte/zeca/` — paleta, âncoras e acessórios (chapéu-palheta, gravata)
-  desenhados para este projeto; mesma licença do código (MIT).
+- `arte/zeca/` — paleta, âncoras, trajetórias do chapéu voando, receita da
+  skin e acessórios (chapéu-palheta e as variantes da cambalhota,
+  gravata-borboleta) desenhados para este projeto; mesma licença do código
+  (MIT). Só coordenadas e cores da paleta do pack; nenhum pixel do pack.
 - `skins/_teste/` — skin xadrez de QA gerada por `cargo xtask skin-teste`;
   MIT.
 

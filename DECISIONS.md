@@ -382,3 +382,324 @@ Ao vivo com a tela apagada passaram:
 - saída confirmada;
 - `kill -9` com RestartCount 0 → 1, de volta em 471 ms;
 - "aguardando compositor" sem compositor.
+
+## 0023 — O Zeca é o Parrot 2 no visual "Malandro rosa" (2026-10-03)
+
+**Problema:** a decisão 0001 previa troca de paleta (bico amarelo, peito
+creme) e acessórios laranja. Em 2026-10-03 o Renan viu a prévia com três
+visuais sobre o pack comprado e escolheu.
+**Escolha (do Renan):**
+- o personagem se chama **Zeca** (nome confirmado) e nasce do **Parrot 2**,
+  o papagaio verde do pack *Cute Parrots!*;
+- **visual 1, "Malandro rosa":** o **bico rosa original fica** (`#E1536F` e
+  `#CE3F6F`; a troca de paleta é vazia), **chapéu-palheta** com **faixa
+  laranja** (`#FA9662`) e uma **gravata-borboleta rosa** pequena no peito
+  (o rosa do bico, com o nó em `#CE3F6F`);
+- "estilo Zé Carioca, um pouco diferente": nada de nome nem visual da Disney
+  (sem paletó, sem charuto, sem guarda-chuva; faixa laranja e gravata rosa).
+
+Como o encaixe funciona (`cargo xtask zeca`, `arte/zeca/`):
+- chapéu e gravata são grades de texto nossas (MIT), só com cores da paleta
+  do próprio `.aseprite` (a rampa nova é a da palha), contorno na tinta do
+  pack `#1D2427`;
+- âncora: o olho branco do pack (a maior mancha branca, para as bolhas do
+  sono e o risco da mordida não enganarem); chapéu em (olho − 4, olho − 6),
+  gravata em (olho + 1, olho + 6);
+- correções por tag e por quadro em `arte/zeca/ancoras.json`: no voo a
+  gravata desce para a linha do queixo, atrás do bico (encostada no bico ela
+  vira bico); a gravata some quando o peito está virado para longe (cabeça
+  baixa comendo, decolagem e pouso agachados, mergulho de cabeça para
+  baixo); comendo, o chapéu fica reto (as versões tortas comparadas lado a
+  lado ficaram piores);
+- quadros de clarão (silhueta branca do susto): sem olho, a âncora vem do
+  quadro comum com a mesma silhueta, e chapéu e gravata também ficam
+  brancos;
+- a tag `Death` fica fora da skin: o Zeca não morre.
+
+A fonte monogram, que estava na lista do M2, vai para o M6 junto com os
+balões, que são os únicos que a usam.
+**Por quê:** o bico rosa com gravata rosa amarra as cores, e o chapéu de
+faixa laranja é a marca de malandro sem copiar o personagem da Disney. O
+encaixe por dados (regra do olho mais correções) deixa cada quadro conferido
+e reproduzível sem redesenhar nada do pack.
+
+## 0024 — Chapéu voa e volta (2026-10-03)
+
+**Problema:** no mergulho a cabeça fica para baixo e a regra do olho põe o
+chapéu no meio do corpo; o susto começa num quadro de silhueta branca.
+**Escolha (pedido do Renan, "chapéu voa e volta"):** no mergulho e no susto
+o chapéu sai da cabeça e cai de volta nela, como comédia física.
+- **Variantes desenhadas à mão** (`arte/zeca/acessorios/`): a cambalhota no
+  sentido horário em 0°, ~20°, 90°, 180°, 270° e ~340°, um torto de ~10° e
+  o **amassado**, que aparece no quadro em que o chapéu cai na cabeça e
+  desamassa no seguinte.
+- **Trajetória quadro a quadro** em `arte/zeca/chapeu_voando.json`, que troca
+  os quadros da tag: corpo do pack, duração e chapéu solto (variante e
+  posição na célula) ou assentado.
+- **Susto (`hurt`, `fly_hurt`):** o chapéu pula no clarão (branco como a
+  silhueta), dá uma volta inteira enquanto o Zeca se encolhe e cai quando ele
+  se endireita. O `hurt` passa de 400 para 840 ms (o corpo encolhido segura
+  300 ms).
+- **Mergulho:** a cabeça sai de baixo do chapéu, que fica no ar e começa a
+  tombar (`dive_start`); no laço (`dive_loop`) o chapéu gira em cima dele, uma
+  volta por ciclo de 4 quadros, para o laço emendar; no `dive_end` ele
+  completa a volta e cai na cabeça quando o Zeca volta à horizontal (3
+  quadros a mais, 680 ms).
+- **Pouso (`landing`):** o chapéu se reassenta com o tranco: sobe 1 pixel e
+  amassa no impacto.
+**Por quê:** o chapéu que voa e volta transforma o quadro em que a regra
+falhava na piada. A cambalhota usa poucas variantes legíveis a 48×48, e o
+amassado vende o peso da queda.
+
+## 0025 — Folha do Zeca: nomes normalizados, tags compostas e duas variantes (2026-10-03)
+
+**Problema:** os nomes do pack têm espaço e parêntese (`Sit(End)`, `End
+Dive`), e vários estados do pet são sequências de tags (levantar e olhar,
+voo curto, voo com mergulho). O animador do M1 alterna as tags de `idle` e
+o do M3 toca a primeira tag de cada reação. E o contorno creme ficou para o
+Renan decidir vendo a folha.
+**Escolha:**
+- **Nomes:** o importador normaliza para ids (`Sit(End)` → `stand`, `End
+  Dive` → `dive_end`, `Fly Bite` → `bite`) e guarda o original no campo
+  `data` da tag, que a folha de contato mostra.
+- **Tags compostas** (`arte/zeca/zeca.toml`), com quadros repetidos
+  apontando para a mesma célula da folha (custam zero pixel):
+  `stand_look_sit` (rajada do repouso: levanta, respira em pé e senta, sem
+  pular do sentado para o em pé), `nod` (aceno T0), `short_flight` (T2) e
+  `big_flight` (T3, com o mergulho e o chapéu voando). O caminho pela tela
+  é do M6.
+- **Estados:** `idle` = pose fixa do Sit Idle com rajadas de
+  `stand_look_sit`; `working` comendo; `thinking` Sit Idle; `waiting`,
+  `alert`, `wave`, `done_small`, `giggle`, `hello` e `bye` piando; `ready` em
+  pé; `error` susto; `yawn`, `sleep` e `wake`; `dangle` voando; `land`
+  pousando. `chao` lista as tags com os pés no chão, para o lint.
+- **Tamanho:** `corpo_px` = 19, a altura da pose parada com chapéu → D = 8 no
+  eDP-1 e 13 no 4K; `toque` = a caixa dessa pose; pés em (24, 32).
+- **Duas variantes:** `zeca` e `zeca-contorno` (1 pixel de arte creme
+  `#F7E7C5` por fora, nos 8 vizinhos), ambas em `skins-locais/` e com o mesmo
+  toque e D. A escolha é `aparencia.skin`.
+**Por quê:** ids sem espaço servem de chave estável; a sequência inteira numa
+tag só funciona com os dois animadores sem mudar o core; e o contorno vira
+uma escolha de config, não um rebuild.
+
+## 0026 — Aprovação do personagem pela impressão digital, com cópia em /state (2026-10-03)
+
+**Problema:** o PLANO exige que o Zeca só vire personagem depois de o Renan
+aprovar a folha de contato e a demonstração ao vivo, que um snapshot
+aprovado sirva de reserva se a skin quebrar e que, sem aprovação, o pet fique
+escondido (nunca com a skin de teste). E a skin é reconstruída (arte nova,
+pack reinstalado): a imagem pode passar a ter algo que o Renan não viu.
+**Escolha:**
+- **Impressão digital:** o sha256 da saída do `sha256sum` dos três arquivos,
+  na ordem `skin.json`, dados, folha. No host é `sha256sum skin.json
+  sheet.json sheet.png | sha256sum`.
+- **`bin/pet skin-aprovar [id]`** (padrão: a skin configurada) calcula a
+  impressão dos arquivos do host, os mesmos da folha de contato, e manda
+  `POST /v1/comando {"cmd": "aprovar_skin", "arg": {"id": …, "sha256": …}}`
+  (o formato do `/v1/comando` do M3). O daemon recusa se:
+  - a skin da imagem tiver outra impressão (409: falta `bin/pet subir`);
+  - não carregar (422);
+  - for a `_teste` (403).
+  Senão, grava `/state/skins/<id>/` com a cópia dos três arquivos e o
+  `aprovacao.json` (id, sha256, hora), trocando a pasta inteira de uma vez. O
+  laço principal escolhe o personagem de novo e a resposta espera isso (até
+  2 s), com o personagem que ficou na tela.
+- **Quem aparece:**
+  1. a skin da imagem, se a impressão dela é a aprovada;
+  2. senão, a cópia de `/state`, se a da imagem mudou depois da aprovação,
+     sumiu ou não carrega (com o motivo em `/v1/estado.skin.avisos`);
+  3. senão, ninguém (`tela: sem_personagem`).
+  `/v1/estado.skin` mostra `origem` (`imagem` ou `snapshot`) e `sha256`.
+- **Debug:** continua com a `_teste`. `PET_DEBUG_PERSONAGEM=1` (repassada
+  pelo compose de dev) troca pelo personagem aprovado, com as mesmas regras
+  e com as rotas de debug, para conferir o Zeca na tela (nitidez, foto
+  mascarada).
+- **`bin/pet skin-revogar [id]`** manda `{"cmd": "revogar_skin", "arg":
+  "<id>"}`, que apaga a aprovação e a cópia: o pet some na hora.
+- **Reaprovar depois de reconstruir a skin:** depois de `bin/pet
+  skin-instalar` (ou de mexer em `arte/zeca/`) e de `bin/pet subir`, a
+  imagem tem uma impressão nova, que não é a aprovada. O pet continua com a
+  cópia aprovada antiga e avisa que a skin "mudou depois da aprovação". O
+  Renan olha a folha de contato nova e roda `bin/pet skin-aprovar` de novo;
+  a cópia em `/state` vira a nova. Sem a nova aprovação, nada muda na tela.
+- **A aprovação é por id:** aprovar `zeca-contorno` não muda o personagem;
+  quem escolhe é `aparencia.skin`, e o `bin/pet` avisa quando os dois
+  divergem.
+
+**Por quê:** aprova-se o que foi visto, não um nome. A cópia em `/state`
+segura o Zeca quando a imagem muda ou quebra, e o caminho por HTTP no
+loopback, com as checagens de Host e `X-Pet`, evita escrever no volume
+Docker a partir do host.
+
+## 0027 — O Zeca na tela: verificação ao vivo do M2 e quadros iguais sem commit (2026-10-03)
+
+**Problema:** o M2 só fecha com a nitidez do M1 passando com o Zeca na tela
+de verdade. E a folha do Zeca guarda cada pose repetida uma vez só (quadros
+iguais apontam para a mesma célula, decisão 0025), o que expôs commits de
+quadros idênticos: o animador comparava pelo índice do quadro.
+**Escolha:**
+- **Verificação ao vivo com o personagem:** `scripts/verificar-ao-vivo.sh
+  --personagem` sobe a pilha de dev com `PET_DEBUG_PERSONAGEM=1` (o Zeca
+  aprovado só para o teste, decisão 0026). Com a tela acesa e desbloqueada,
+  tudo passou:
+  - nitidez: 12 672 pixels opacos, nenhum fora de ±2 (maior desvio 0), 198
+    blocos 8×8 uniformes;
+  - sem pixel velho (67 968 pixels conferidos) e esconder sem fantasma
+    (80 640);
+  - parado: 1,50 commit/s (orçamento 2);
+  - container: imagem de 4,77 MB, RSS de 11,9 MiB, CPU de 0,04%;
+  - restart em 310 ms, no mesmo lugar; `kill -9` de volta em 261 ms;
+  - região de input de 102×102 lógicos, só no corpo; D = 8 no eDP-1,
+    célula em (1632, 920).
+- **Produção:** aprovar faz o Zeca aparecer na hora no canto inferior direito
+  do eDP-1 (camada no nível 3, `tela: ativa`); revogar o esconde na hora,
+  sem fantasma no canto. As fotos mascaradas ficaram em `tmp/fotos/`: têm
+  pixels do pack e nunca vão para o git nem para `docs/`.
+- **A sessão bloqueia sozinha:** no meio da sessão o lock do Omarchy
+  (quickshell) apagou e cobriu a tela. Bloqueado, o Hyprland não desenha
+  camadas nem com a tela acesa. Os scripts ao vivo passaram a detectar isso
+  (`LOCK` em `solitaryBlockedBy`) e dão NÃO VERIFICADO em vez de comparar a
+  tela de senha. A verificação rodou depois que a sessão foi desbloqueada.
+- **Quadros iguais não fazem commit:** o `Skin` ganha `canonico`, o primeiro
+  quadro com o mesmo retângulo da folha no mesmo lugar da célula. O
+  animador toca e conta trocas por ele: um passo que não muda a imagem não
+  conta no orçamento nem gera commit. O Zeca parado foi de 1,52 commit/s
+  calculado (1,50 medido) para 1,26 calculado e 1,20 medido ao vivo. A
+  `_teste`, sem quadros repetidos, não muda (0,76).
+- **Fim do M2 nesta máquina:** o Zeca está na imagem local, a aprovação de
+  teste foi revogada e a produção ficou de pé com `tela: sem_personagem`. Quem
+  aprova é o Renan, vendo a folha de contato (`bin/pet skin-aprovar zeca`).
+
+**Por quê:** a nitidez depende só do caminho D×D, mas o portão pede a prova
+com o personagem de verdade. Cada commit repinta o monitor (decisão 0005),
+então pose repetida não pode custar repintura.
+
+## 0028 — Revisão da arte do Zeca: gravata dentro do contorno, chapéu que gira no centro e cai depois do pouso (2026-10-03)
+
+**Problema:** três revisões do M2 acharam, e a máquina confirmou, defeitos
+na arte e no encaixe:
+- a gravata pintava rosa por cima do contorno de 1 pixel do pack em 27 das
+  70 células (16 tocadas por estados); no pack, toda cor que não é o branco
+  fica cercada pela tinta, e no comendo/decolando a gravata emendava no
+  contorno do bico (a "gravata que vira bico" da decisão 0023);
+- uma correção de `ancoras.json` (a gravata do `dive_start[0]`) sumia calada,
+  e índices como «01» passavam sem casar com quadro nenhum;
+- o chapéu solto era posto pelo canto: trocando entre variantes 11x5 e 5x11
+  o centro pulava 3 a 6 pixels (no laço do mergulho, um tremor de 10 Hz);
+- no mergulho o chapéu voltava para a cabeça ainda no ar (`dive_end` com
+  680 ms) e o pouso o amassava de novo, quando o pedido foi "cai de volta na
+  cabeça no pouso";
+- o Zeca parado fazia 1,20 commit/s medido (1,28 calculado): pela medida do
+  M1 (+0,58 ponto de CPU do Hyprland a 0,70 commit/s, decisão 0005), a conta
+  linear dá ~+1 ponto, no limite do orçamento.
+
+**Escolha:**
+- **Gravata no miolo do corpo:** ela só pinta pixel opaco com os 4 vizinhos
+  opacos; pixel que cairia no contorno da silhueta ou no ar não é desenhado
+  (o contorno do pack ganha) e o `cargo xtask zeca` avisa. As posições foram
+  acertadas em `ancoras.json`: respiração do sentado e do sono 1 pixel à
+  esquerda (a opção de subir 1 pixel encostava no bico), comendo/decolando
+  1 pixel à esquerda, e no voo a gravata vai para o pescoço (canto em
+  olho.x − 4, olho.y + 4), inteira dentro do contorno e longe do bico. O chapéu assentado aprovado não
+  mudou; a ponta de palha da aba, sem tinta em cima, é do desenho aprovado e
+  é a única abertura permitida.
+- **Checagens novas no `zeca`:** cor de acessório encostada no transparente
+  fora das aberturas do próprio desenho; chapéu assentado afundando no corpo
+  ou sem encostar nele; chapéu solto a menos de 4 pixels do corpo ou 2 da
+  borda; o centro do chapéu solto pulando mais de 3 pixels ou mudando de
+  sentido mais de uma vez; o contorno creme juntando manchas soltas. Com
+  `--estrito` (o `bin/pet skin-instalar` usa), aviso que não está em
+  `arte/zeca/avisos-aceitos.txt` reprova antes de gravar. Aceito hoje, com o
+  porquê no arquivo, só um: no `zeca-contorno`, o risco branco da mordida do
+  pack (tag `bite`, que nenhum estado toca) emenda no bico.
+- **Dado errado é erro:** num quadro em que a tag escondeu a peça, `x`/`y`
+  criam de novo (com a variante da regra); deslocar o que não existe, índice
+  fora da tag ou não canônico, `oculto` junto com posição, chapéu solto com
+  canto e centro juntos, ou `#000000` nas cores nossas param o `zeca`. A
+  conferência de paleta tira o índice transparente do `.aseprite` (no pack,
+  `#000000`) e o lint avisa preto puro. Tags do pack com outra direção são
+  expandidas na ordem certa.
+- **Chapéu solto pelo centro** (`cx`, `cy` em `chapeu_voando.json`): a
+  cambalhota gira em volta de um ponto fixo. Susto: sobe no clarão, gira
+  parado em cima da cabeça e cai quando ele se endireita. Susto em voo: um
+  arco (12 → 7 → 10). Mergulho: o chapéu fica para trás, gira num centro fixo
+  durante o laço, desce enquanto ele sai do mergulho, e só cai na cabeça
+  **depois do pouso** — tag nova `landing_mergulho` (corpos do `landing`, no
+  fim do `big_flight`): ele pousa, se levanta, o chapéu cai em cheio
+  (amassado) e desamassa. `dive_end` voltou aos 400 ms do pack. O pouso comum
+  (`land`, voo curto) continua com o tranco de um amassado só.
+- **Parado mais calmo:** `idle = sit_idle, sit_idle, sit_idle,
+  stand_look_sit` — três respiradas e uma levantada a cada ~18 s, 0,88
+  commit/s calculado, perto do 0,70–0,80 medido no M1; o `repouso.gif` mostra
+  20 s, um ciclo inteiro.
+- **Para o M6:** o chapéu solto mora em coordenadas da célula. Se o M6 mover
+  a célula pela tela durante as tags do mergulho (o T3 atravessando a tela),
+  o chapéu vai junto com o Zeca e a piada some: ou a célula fica parada na
+  vertical enquanto `dive_start`/`dive_loop`/`dive_end`/`landing_mergulho`
+  tocam, ou o chapéu vira uma trilha separada (variante e posição por quadro
+  nos dados da skin) que o M6 põe na tela.
+
+**Por quê:** a gravata cercada pela tinta é a regra de estilo do próprio
+pack, e o contorno da silhueta ganhando garante isso mesmo com dado errado.
+Girar em volta do centro é o que uma cambalhota faz. O chapéu caindo depois
+do pouso é o pedido do Renan ("cai de volta na cabeça no pouso") e a piada
+fica melhor com um instante de espera. O parado mais calmo cabe no custo
+medido do M1 sem depender de uma conta linear.
+
+## 0029 — Aprovação amarrada à folha de contato, config relida e troca com o pet na tela (2026-10-03)
+
+**Problema:** a revisão do M2 achou, e o código confirmou:
+- **pet congelado:** aprovar ou revogar com o pet na tela (inclusive a
+  reaprovação da decisão 0026, cópia → imagem) apagava o palco e o
+  `resolver` da camada não o refazia, porque só avisa quando monitor ou escala
+  mudam: o último quadro da skin velha ficava parado na tela, com
+  `/v1/estado.d` nulo;
+- **`zeca-contorno` inalcançável:** o daemon lia `aparencia.skin` só na
+  partida, e o `bin/pet subir` não recria o container quando só o config
+  (montado de fora) muda;
+- **aprovação sem a folha:** o `skin-aprovar` conferia host × imagem, mas nada
+  ligava a skin à folha de contato que o Renan olhou;
+- **impressão instável:** o `sheet.json` levava a versão do pet, e subir a
+  versão pediria aprovar de novo a mesma arte;
+- o `skin-instalar` descompactava com `unzip` em `/tmp` (sem teto) e não
+  usava o leitor de zip conferido do xtask; prévias e folha podiam ser
+  gravadas em pasta do git (`docs/`, `arte/`); o `verificar-ao-vivo.sh`
+  deixava a aprovação de teste se fosse interrompido e, depois da aprovação de
+  verdade, reprovaria a produção por não estar escondida.
+
+**Escolha:**
+- **Troca com o pet na tela:** com a camada pronta, o palco (D e posição) é
+  refeito na hora e o quadro novo vai com a tela toda; uma escolha igual à da
+  tela (mesmo id, impressão e origem: aprovar de novo, revogar outro id) não
+  mexe em nada. Conferido com um daemon nativo ligado ao Hyprland de verdade
+  (porta e `/state` de rascunho): aprovar, aprovar de novo, trocar para o
+  `zeca-contorno` com o pet na tela (D = 8, célula refeita) e revogar.
+- **Config relida a cada aprovação ou revogação:** para usar o contorno,
+  `aparencia.skin = "zeca-contorno"` em `config/claude-pet.toml` e `bin/pet
+  skin-aprovar zeca-contorno`, sem reiniciar.
+- **Aprova-se o que foi visto:** o `cargo xtask contato` põe a impressão
+  digital no título da folha e no `contato-<id>.sha256`; o `bin/pet
+  skin-aprovar` recusa se a folha de `tmp/previa-zeca-m2/` não existe ou é de
+  outra versão da skin. Depois de reconstruir a skin: `bin/pet skin-instalar`
+  (gera as prévias de novo), olhar, `bin/pet subir`, `bin/pet skin-aprovar`.
+- **`sheet.json` sem a versão do pet.**
+- **`skin-instalar`** passa o zip direto ao `cargo xtask zeca` (lido em
+  memória: CRC, teto de 64 MiB, sem extrair nada), monta com `--estrito` e
+  exige os estados do MVP nativos (`cargo xtask cobertura --nativos mvp`, a
+  tabela do PLANO, item 4: só com `idle` tudo caía em reserva e o portão nunca
+  reprovava).
+- **Arte de pack só fora do git:** importador, `zeca` e `contato` de uma skin
+  não redistribuível só gravam, dentro do repo, em `skins-locais/` e `tmp/`.
+  Foto do Zeca (`bin/pet foto`, verificação ao vivo) fica em `tmp/`.
+- **Scripts ao vivo:** `verificar-ao-vivo.sh --personagem` e
+  `medir-custo.sh --personagem` aprovam só para o teste quando falta aprovação
+  e revogam no fim, até numa falha; o modo normal lê do volume se o Renan já
+  aprovou e espera a produção de acordo. O `--personagem` também aprova de
+  novo com o pet na tela e confere que ele continua desenhando.
+- A GIF de prévia mostra o fundo escuro e o claro lado a lado, para escolher
+  o contorno creme vendo os dois temas em movimento.
+
+**Por quê:** a aprovação é o portão humano do personagem (decisão 0026): ela
+precisa valer para a arte da folha vista, poder trocar o personagem sem
+congelar a tela nem reiniciar, e nenhum teste pode terminar com o Zeca
+aprovado no lugar do Renan.

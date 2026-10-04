@@ -1,0 +1,6 @@
+; Gravata-borboleta (3x3), rosa com nó rosa escuro.
+; Canto superior esquerdo em (olho.x + 1, olho.y + 6): no peito, logo abaixo
+; do bico.
+o.o
+oko
+o.o

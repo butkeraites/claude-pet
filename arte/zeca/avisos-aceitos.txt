@@ -1,0 +1,8 @@
+# Avisos do `cargo xtask zeca` já olhados e aceitos: com --estrito (o
+# `bin/pet skin-instalar` usa), só aviso que NÃO está aqui reprova a arte.
+# Um por linha, o texto exato do aviso; `#` comenta. Cada um com o porquê.
+
+# zeca-contorno: o risco branco da mordida do pack (Fly Bite) fica a 3 px do
+# bico e o contorno creme junta os dois. A tag bite não é tocada por nenhum
+# estado (zeca.toml); se um dia for, o risco vira efeito separado (M6).
+bite[2]: o contorno creme juntou manchas soltas (2 → 1)

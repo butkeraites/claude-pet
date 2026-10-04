@@ -1,0 +1,8 @@
+; Chapéu levemente torto para a direita (~10°): um degrau no meio. Para o
+; chapéu que balança ao cair e ao pousar.
+...###.....
+..#ccc###..
+..#fffccc#.
+#aaaaafff#.
+.#####aaaa#
+......####.

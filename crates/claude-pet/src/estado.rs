@@ -43,13 +43,18 @@ impl Tela {
     }
 }
 
-/// Qual skin está na tela e por quê (fixo desde a partida no M1).
+/// Qual skin está na tela e por quê (muda quando o Renan aprova ou revoga).
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct InfoSkin {
     /// A skin carregada; `None` quando não há personagem.
     pub id: Option<String>,
     /// A skin pedida (a de teste em debug, senão a configurada).
     pub pedida: String,
+    /// De onde veio o personagem aprovado: `imagem` ou `snapshot` (a cópia
+    /// em `/state`).
+    pub origem: Option<pet_core::aprovacao::Origem>,
+    /// Impressão digital da skin na tela (decisão 0026).
+    pub sha256: Option<String>,
     pub avisos: Vec<String>,
 }
 
@@ -125,6 +130,11 @@ impl Compartilhado {
 
     pub fn definir_tela(&self, tela: Tela) {
         self.tela.store(tela as u8, Ordering::Relaxed);
+    }
+
+    /// Config relida (a cada aprovação; decisão 0029).
+    pub fn definir_config(&self, config: ConfigEfetiva) {
+        *self.config.write().expect("lock da config envenenado") = config;
     }
 
     pub fn definir_skin(&self, info: InfoSkin) {
@@ -216,6 +226,7 @@ mod testes {
             id: None,
             pedida: "zeca".into(),
             avisos: vec!["não encontrada".into()],
+            ..InfoSkin::default()
         });
         let estado = c.estado_json();
         assert_eq!(estado["monitor"], "eDP-1");

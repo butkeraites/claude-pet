@@ -415,6 +415,68 @@ impl Sessao {
         self.publicar();
     }
 
+    /// Troca o personagem na tela (aprovação ou revogação, decisão 0026).
+    /// Sem skin, o pet se esconde com o quadro transparente (desenhado com a
+    /// skin velha). Com skin nova, a cena velha é esquecida e o palco (D e
+    /// posição, que dependem da skin) é refeito: na hora, se a camada já
+    /// está pronta (o pet estava na tela, com ou sem outra skin), ou quando
+    /// ela ficar pronta. O quadro novo redesenha a tela toda, sem fantasma
+    /// da skin velha.
+    pub fn trocar_skin(&mut self, skin: Option<Rc<Skin>>, visivel: bool) {
+        match skin {
+            None => {
+                self.definir_visivel(false);
+                self.pet = None;
+            }
+            Some(skin) => {
+                self.cancelar_relogio();
+                self.estresse = None;
+                self.pet = Some(Pet::novo(skin, self.agora_ms()));
+                self.palco = None;
+                if let Some(superficie) = self.superficie.as_mut() {
+                    superficie.esquecer_cena();
+                }
+                self.definir_visivel(visivel);
+                self.refazer_palco();
+            }
+        }
+        self.publicar();
+    }
+
+    /// Palco do pet numa camada pronta, com o log de onde ele ficou.
+    fn montar_palco(&mut self, pronta: &superficie::Pronta) {
+        let Some(pet) = &self.pet else {
+            return;
+        };
+        let palco = pet.palco(pronta.logico, pronta.escala, pronta.buffer());
+        info!(
+            "pet «{}» com D={} e célula em ({}, {}) pixels do monitor",
+            pet.skin().id,
+            palco.d,
+            palco.x,
+            palco.y
+        );
+        self.palco = Some(palco);
+    }
+
+    /// Refaz o palco numa camada que já está pronta (o `resolver` só avisa
+    /// quando o monitor ou a escala mudam, não quando a skin muda) e desenha
+    /// já, mesmo com um frame callback pendente. Camada ainda não pronta ou
+    /// saindo: nada; o `tentar_aprontar` faz o palco quando ela ficar pronta.
+    fn refazer_palco(&mut self) {
+        let Some(pronta) = self
+            .superficie
+            .as_ref()
+            .filter(|s| !s.saindo)
+            .and_then(Superficie::pronta)
+            .cloned()
+        else {
+            return;
+        };
+        self.montar_palco(&pronta);
+        self.desenhar_com(true);
+    }
+
     /// Antes de sair do processo: quadro transparente, camada destruída e
     /// uma ida e volta com prazo, para garantir que o compositor processou
     /// tudo antes de o socket fechar (o libwayland-server descarta o que não
@@ -624,16 +686,8 @@ impl Sessao {
             pronta.logico.1,
             pronta.escala
         );
-        if let Some(pet) = &self.pet {
-            let palco = pet.palco(pronta.logico, pronta.escala, (largura, altura));
-            info!(
-                "pet «{}» com D={} e célula em ({}, {}) pixels do monitor",
-                pet.skin().id,
-                palco.d,
-                palco.x,
-                palco.y
-            );
-            self.palco = Some(palco);
+        if self.pet.is_some() {
+            self.montar_palco(&pronta);
             self.desenhar();
         }
     }

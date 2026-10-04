@@ -25,6 +25,9 @@ pub struct Ambiente {
     pub skins: Vec<PathBuf>,
     /// Modo debug (`PET_DEBUG=1`): libera rotas e a skin `_teste`.
     pub debug: bool,
+    /// Em debug, o personagem aprovado no lugar da skin `_teste`
+    /// (`PET_DEBUG_PERSONAGEM=1`; decisão 0026).
+    pub debug_personagem: bool,
 }
 
 impl Ambiente {
@@ -64,7 +67,18 @@ impl Ambiente {
                 .map(|p| PathBuf::from(p.trim()))
                 .collect(),
             debug: var("PET_DEBUG").is_some_and(|v| v.trim() == "1"),
+            debug_personagem: var("PET_DEBUG_PERSONAGEM").is_some_and(|v| v.trim() == "1"),
         })
+    }
+
+    /// Onde procurar skins e aprovações.
+    pub fn onde(&self) -> crate::personagem::Onde {
+        crate::personagem::Onde {
+            busca: self.skins.clone(),
+            estado: self.pasta_estado.clone(),
+            debug: self.debug,
+            debug_personagem: self.debug_personagem,
+        }
     }
 
     pub fn arquivo_config(&self) -> PathBuf {
@@ -104,6 +118,9 @@ mod testes {
         assert_eq!(a.escuta.port(), 27380);
         assert_eq!(a.porta_publica, 28000);
         assert!(a.debug);
+        assert!(!a.debug_personagem);
+        let p = Ambiente::ler(|n| (n == "PET_DEBUG_PERSONAGEM").then(|| "1".into())).unwrap();
+        assert!(p.debug_personagem);
     }
 
     #[test]

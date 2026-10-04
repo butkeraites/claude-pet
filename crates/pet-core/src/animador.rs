@@ -54,9 +54,14 @@ pub struct Animacao {
 
 impl Animacao {
     pub fn nova(skin: &Skin, tag: usize, inicio_ms: u64, laco: bool) -> Animacao {
+        // Quadros com a mesma imagem viram o mesmo quadro: um passo que não
+        // muda nada na tela não conta como troca nem gera commit.
         let passos: Vec<(usize, u64)> = sequencia(&skin.tags[tag])
             .into_iter()
-            .map(|q| (q, (skin.quadros[q].duracao_ms as u64).max(DURACAO_MIN_MS)))
+            .map(|q| {
+                let duracao = (skin.quadros[q].duracao_ms as u64).max(DURACAO_MIN_MS);
+                (skin.canonico[q], duracao)
+            })
             .collect();
         let total_ms = passos.iter().map(|(_, d)| d).sum();
         Animacao {
@@ -140,7 +145,7 @@ impl Repouso {
         let tags = skin.tags_do_estado("idle");
         let pose = tags
             .first()
-            .map(|&t| sequencia(&skin.tags[t])[0])
+            .map(|&t| skin.canonico[sequencia(&skin.tags[t])[0]])
             .unwrap_or(0);
         let trechos: Vec<Trecho> = tags
             .iter()
@@ -196,6 +201,7 @@ impl Repouso {
 #[cfg(test)]
 mod testes {
     use super::*;
+    use crate::skin::codificar_png;
     use crate::skin::testes::{skin_com_idle, skin_minima};
 
     fn tag(de: usize, ate: usize, direcao: Direcao) -> Tag {
@@ -309,6 +315,27 @@ mod testes {
         );
         let (media, _) = simular(&r, 600);
         assert!(media <= 2.0, "{media} commits/s");
+    }
+
+    #[test]
+    fn quadro_repetido_nao_conta_como_troca() {
+        // Quadros 0 e 2 são a mesma imagem (a folha guarda uma vez só): a
+        // rajada 0,1,2,0 só troca de verdade 0→1 e 1→0.
+        let png = codificar_png(4, 2, &[200u8; 32]).unwrap();
+        let folha = r#"{"frames":[
+            {"frame":{"x":0,"y":0,"w":2,"h":2},"spriteSourceSize":{"x":0,"y":0,"w":2,"h":2},"sourceSize":{"w":2,"h":2},"duration":100},
+            {"frame":{"x":2,"y":0,"w":2,"h":2},"spriteSourceSize":{"x":0,"y":0,"w":2,"h":2},"sourceSize":{"w":2,"h":2},"duration":100},
+            {"frame":{"x":0,"y":0,"w":2,"h":2},"spriteSourceSize":{"x":0,"y":0,"w":2,"h":2},"sourceSize":{"w":2,"h":2},"duration":100}],
+            "meta":{"size":{"w":4,"h":2},"frameTags":[{"name":"idle","from":0,"to":2}]}}"#;
+        let skin = r#"{"formato":1,"id":"rep","nome":"R","autor":"t","licenca":"MIT",
+            "redistribuivel":true,"folha":"sheet.png","dados":"sheet.json",
+            "celula":[2,2],"pe":[1,2],"toque":[0,0,2,2],"corpo_px":2,
+            "estados":{"idle":["idle"]}}"#;
+        let skin = Skin::de_partes(skin, folha, &png).unwrap();
+        let a = Animacao::nova(&skin, 0, 0, false);
+        assert_eq!(a.em(200), (0, Some(300)), "o quadro 2 toca como o 0");
+        let r = Repouso::novo(&skin, 0);
+        assert_eq!(trocas(r.pose(), &r.trechos[0].rajada), 2);
     }
 
     #[test]

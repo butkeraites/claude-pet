@@ -6,6 +6,8 @@
 set -euo pipefail
 
 RAIZ="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+# Caminhos relativos dados pelo usuário são relativos a onde ele estava.
+ORIGEM="$PWD"
 cd "$RAIZ"
 export PATH="$HOME/.cargo/bin:$PATH"
 
@@ -32,6 +34,17 @@ uso: bin/pet <comando>
   estado        mostra /v1/estado (o que o pet está vendo e pensando)
   foto          foto do pet na tela (grim no monitor inteiro, recorte exato;
                 em debug, só os pixels do pet sobre fundo neutro)
+  skin-instalar <zip|pasta>
+                instala o Zeca a partir do pack Cute Parrots! (lê o zip em
+                memória, gera skins-locais/zeca e zeca-contorno, mostra lint,
+                cobertura e as prévias em tmp/previa-zeca-m2/)
+  skin-aprovar [id]
+                aprova o personagem que você viu na folha de contato (padrão:
+                a skin configurada); só vale se a skin for a da folha e a
+                imagem tiver exatamente esses arquivos; guarda uma cópia
+                aprovada em /state
+  skin-revogar [id]
+                tira a aprovação: o pet volta a ficar escondido
   reconstruir   reconstrói a imagem com bases atualizadas e sobe de novo
   dev           modo desenvolvimento em primeiro plano (debug, sem restart)
   verificar     portão antes de todo commit: fmt, clippy, testes, compose, plugin
@@ -99,6 +112,7 @@ foto() {
 # testes podem criar um `.socket.sock` falso para provar que ninguém conecta.
 daemon_sem_socket_de_comandos() {
   local achados
+  # shellcheck disable=SC2016 # é o programa do awk: o $0 é do awk, não do shell
   achados="$(find crates/claude-pet/src -name '*.rs' -print0 |
     xargs -0 awk '/^#\[cfg\(test\)\]/ {nextfile} {print FILENAME ":" FNR ":" $0}' |
     grep -E '\.socket\.sock|hyprctl' | grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true)"
@@ -106,6 +120,189 @@ daemon_sem_socket_de_comandos() {
     printf 'o daemon cita o socket de comandos do Hyprland ou o hyprctl:\n%s\n' "$achados" >&2
     return 1
   fi
+}
+
+# Lint de todas as skins da máquina: skins/ (git) e skins-locais/ (packs).
+# Avisos não reprovam; erros sim (PLANO.md, `verificar`).
+lint_skins() {
+  local pastas=() pasta
+  for pasta in skins/*/ skins-locais/*/; do
+    [ -f "${pasta}skin.json" ] && pastas+=("${pasta%/}")
+  done
+  [ "${#pastas[@]}" -eq 0 ] && return 0
+  cargo xtask lint-skin --so-erros "${pastas[@]}"
+}
+
+# Caminho absoluto de um argumento (relativo a onde o usuário estava).
+absoluto() {
+  case "$1" in
+    /*) printf '%s' "$1" ;;
+    *) printf '%s/%s' "$ORIGEM" "$1" ;;
+  esac
+}
+
+# Onde ficam as prévias que o Renan olha antes de aprovar (fora do git).
+PREVIAS="tmp/previa-zeca-m2"
+
+# skin-instalar <zip|pasta>: o pack Cute Parrots! vira o Zeca em
+# skins-locais/ (fora do git, decisão 0011). O zip é lido em memória pelo
+# `cargo xtask zeca` (CRC conferido, teto de tamanho, sem extrair nada no
+# disco); uma pasta descompactada também serve. Rodar de novo dá o mesmo
+# resultado. A arte é montada com --estrito: aviso novo (fora de
+# arte/zeca/avisos-aceitos.txt) reprova antes de gravar. A skin só aparece na
+# tela depois de `bin/pet subir` (entra na imagem) e de `bin/pet skin-aprovar
+# zeca` (decisão 0026).
+skin_instalar() {
+  local origem variante
+  [ "$#" -eq 1 ] || {
+    echo "uso: bin/pet skin-instalar <arquivo.zip|pasta do pack>" >&2
+    return 2
+  }
+  origem="$(absoluto "$1")"
+  if [ ! -e "$origem" ]; then
+    echo "não achei $origem" >&2
+    return 1
+  fi
+  echo "▸ gerando o Zeca (sem e com contorno creme) em skins-locais/"
+  for variante in "" --contorno; do
+    # shellcheck disable=SC2086 # variante vazia some de propósito
+    cargo xtask zeca --estrito --pack "$origem" $variante || return 1
+  done
+  echo "▸ lint"
+  cargo xtask lint-skin skins-locais/zeca skins-locais/zeca-contorno || return 1
+  echo "▸ cobertura (os estados do MVP têm de ser nativos)"
+  cargo xtask cobertura skins-locais/zeca --nativos mvp || return 1
+  echo "▸ prévias"
+  for variante in zeca zeca-contorno; do
+    cargo xtask contato "skins-locais/$variante" --copia "$PREVIAS" || return 1
+  done
+  cat <<TEXTO
+
+Pronto. Veja a folha de contato e os GIFs em $RAIZ/$PREVIAS/
+(contato-zeca.png sem contorno, contato-zeca-contorno.png com contorno creme;
+nos GIFs, fundo escuro à esquerda e claro à direita).
+Para o Zeca aparecer na tela:
+  1. bin/pet subir                 # a skin entra na imagem local
+  2. bin/pet skin-aprovar zeca     # ou zeca-contorno; sem aprovação ele fica escondido
+TEXTO
+}
+
+# Impressão digital de uma skin (decisão 0026): o sha256 da saída do
+# sha256sum dos três arquivos, na ordem skin.json, dados, folha. O daemon
+# calcula igual (pet_core::aprovacao::impressao).
+impressao_da_skin() {
+  local pasta=$1 dados folha
+  dados="$(jq -r .dados "$pasta/skin.json")"
+  folha="$(jq -r .folha "$pasta/skin.json")"
+  (cd "$pasta" && sha256sum skin.json "$dados" "$folha" | sha256sum | cut -d' ' -f1)
+}
+
+# Pasta da skin no host: skins-locais/<id> (packs) ou skins/<id>.
+pasta_da_skin() {
+  local base
+  for base in skins-locais skins; do
+    if [ -f "$base/$1/skin.json" ]; then
+      printf '%s' "$base/$1"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# POST /v1/comando; deixa a resposta em RESPOSTA e o status HTTP em STATUS.
+RESPOSTA=""
+STATUS=""
+comando_pet() {
+  local saida
+  saida="$(curl -sS -m 10 -w '\n%{http_code}' -X POST -H 'X-Pet: 1' \
+    -H 'Content-Type: application/json' --data-binary "$1" "${URL}/v1/comando")" || return 1
+  STATUS="${saida##*$'\n'}"
+  RESPOSTA="${saida%$'\n'*}"
+}
+
+# A skin pedida pelo daemon (aparencia.skin), quando o id não vem.
+skin_pedida() {
+  api /v1/estado | jq -r '.skin.pedida // empty'
+}
+
+# skin-aprovar [id]: o Renan aprova o conteúdo exato que viu na folha de
+# contato. O host calcula a impressão dos arquivos em skins-locais/<id>; o
+# daemon só aprova se a skin da imagem tiver a mesma (senão, falta um
+# `bin/pet subir`) e guarda uma cópia aprovada em /state, que segura o
+# personagem se a imagem mudar ou quebrar (decisão 0026).
+skin_aprovar() {
+  local id pasta sha pedida
+  id="${1:-}"
+  if [ -z "$id" ]; then
+    id="$(skin_pedida)" || {
+      echo "o pet não respondeu em ${URL} — está de pé? (bin/pet subir)" >&2
+      return 1
+    }
+  fi
+  pasta="$(pasta_da_skin "$id")" || {
+    echo "não achei a skin «$id» em skins-locais/ nem em skins/ (bin/pet skin-instalar <zip>)" >&2
+    return 1
+  }
+  sha="$(impressao_da_skin "$pasta")"
+  # Aprova-se o que foi visto (decisão 0026): a folha de contato traz a
+  # impressão digital da skin no título e no contato-<id>.sha256; se a skin
+  # mudou depois das prévias, a folha não é mais a que vai para a tela.
+  local folha="$PREVIAS/contato-$id.png" vista
+  vista="$(cat "$PREVIAS/contato-$id.sha256" 2>/dev/null || true)"
+  if [ -z "$vista" ]; then
+    echo "não achei a folha de contato de «$id» ($folha): gere as prévias e olhe antes de aprovar" >&2
+    echo "  (bin/pet skin-instalar <zip>, ou cargo xtask contato $pasta --copia $PREVIAS)" >&2
+    return 1
+  fi
+  if [ "$vista" != "$sha" ]; then
+    echo "a skin «$id» mudou depois da folha de contato (folha: sha ${vista:0:12}; skin: sha ${sha:0:12})." >&2
+    echo "  Gere as prévias de novo e olhe antes de aprovar: cargo xtask contato $pasta --copia $PREVIAS" >&2
+    return 1
+  fi
+  echo "aprovando «$id» ($pasta, sha ${sha:0:12}), a da folha $folha"
+  if ! comando_pet "$(jq -cn --arg id "$id" --arg sha "$sha" \
+    '{cmd: "aprovar_skin", arg: {id: $id, sha256: $sha}}')"; then
+    echo "o pet não respondeu em ${URL} — está de pé? (bin/pet subir)" >&2
+    return 1
+  fi
+  if [ "$STATUS" != 200 ]; then
+    echo "não aprovou ($STATUS): $(jq -r '.erro // .' <<<"$RESPOSTA" 2>/dev/null || printf '%s' "$RESPOSTA")" >&2
+    return 1
+  fi
+  echo "aprovada: cópia em $(jq -r .snapshot <<<"$RESPOSTA") (volume do pet)"
+  jq -r '.personagem | if .id then "personagem: \(.id) (\(.origem))" else "personagem: nenhum — \(.avisos | join("; "))" end' <<<"$RESPOSTA"
+  pedida="$(skin_pedida || true)"
+  if [ -n "$pedida" ] && [ "$pedida" != "$id" ]; then
+    echo "atenção: o pet está configurado para «$pedida»; para usar «$id», ponha" \
+      "aparencia.skin = \"$id\" em config/claude-pet.toml (o pet relê o config a cada" \
+      "aprovação) e rode bin/pet skin-aprovar $id de novo" >&2
+  fi
+}
+
+# skin-revogar [id]: tira a aprovação e apaga a cópia de /state.
+skin_revogar() {
+  local id
+  id="${1:-}"
+  if [ -z "$id" ]; then
+    id="$(skin_pedida)" || {
+      echo "o pet não respondeu em ${URL} — está de pé? (bin/pet subir)" >&2
+      return 1
+    }
+  fi
+  if ! comando_pet "$(jq -cn --arg id "$id" '{cmd: "revogar_skin", arg: $id}')"; then
+    echo "o pet não respondeu em ${URL} — está de pé? (bin/pet subir)" >&2
+    return 1
+  fi
+  if [ "$STATUS" != 200 ]; then
+    echo "não revogou ($STATUS): $(jq -r '.erro // .' <<<"$RESPOSTA" 2>/dev/null || printf '%s' "$RESPOSTA")" >&2
+    return 1
+  fi
+  if [ "$(jq -r .revogada <<<"$RESPOSTA")" = true ]; then
+    echo "aprovação de «$id» revogada"
+  else
+    echo "«$id» não estava aprovada"
+  fi
+  jq -r '.personagem | if .id then "personagem: \(.id) (\(.origem))" else "personagem: nenhum (o pet fica escondido)" end' <<<"$RESPOSTA"
 }
 
 verificar() {
@@ -124,6 +321,7 @@ verificar() {
   passo "daemon sem socket de comandos" daemon_sem_socket_de_comandos
   passo "cargo clippy" cargo clippy --all-targets --quiet -- -D warnings
   passo "cargo test" cargo test --quiet
+  passo "lint-skin" lint_skins
   passo "compose" docker compose config -q
   passo "compose dev" docker compose -f docker-compose.yml -f docker-compose.dev.yml config -q
   if [ -f .claude-plugin/marketplace.json ]; then
@@ -160,6 +358,9 @@ case "$comando" in
     fi
     ;;
   foto) foto ;;
+  skin-instalar) skin_instalar "$@" ;;
+  skin-aprovar) skin_aprovar "$@" ;;
+  skin-revogar) skin_revogar "$@" ;;
   reconstruir) docker compose build --pull pet && docker compose up -d pet ;;
   dev) docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build ;;
   verificar) verificar ;;

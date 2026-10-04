@@ -5,9 +5,11 @@
 //! raster. Este crate **nunca** depende de crates Wayland (CLAUDE.md).
 
 pub mod animador;
+pub mod aprovacao;
 pub mod cena;
 pub mod confete;
 pub mod config;
+pub mod estados;
 pub mod geometria;
 pub mod raster;
 pub mod skin;

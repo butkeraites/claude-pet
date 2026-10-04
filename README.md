@@ -16,7 +16,8 @@ Pode ser arrastado com o mouse para qualquer lugar e sempre aparece no
 monitor que está em foco. Sem som.
 
 > **Estado:** em construção. O M1 (overlay nítido na tela, seguindo o
-> orçamento de custo no Hyprland) está pronto na branch `m1-overlay`. Veja
+> orçamento de custo no Hyprland) está pronto na branch `m1-overlay`; o M2
+> (o Zeca, com aprovação do personagem) está na branch `m2-zeca`. Veja
 > `PLANO.md` para os marcos e `PROGRESS.md` para o andamento.
 
 ## Requisitos
@@ -46,7 +47,18 @@ O Zeca é feito a partir do pack *Cute Parrots!* da
 [exclusiveOlive](https://exclusiveolive.itch.io/cute-parrots-pixel-art-asset-pack).
 A licença do pack não permite redistribuir os arquivos, então **eles não
 estão neste repositório**: compre/baixe o pack e rode
-`bin/pet skin-instalar <arquivo.zip>` (a partir do M2).
+
+```sh
+bin/pet skin-instalar <arquivo.zip>   # gera o Zeca e as prévias em tmp/previa-zeca-m2/
+bin/pet subir                         # a skin entra na imagem local
+bin/pet skin-aprovar zeca             # depois de ver a folha de contato
+```
+
+Sem aprovação o Zeca fica escondido, e a aprovação só vale para a skin da
+folha de contato que você viu. Para o Zeca com contorno creme, ponha
+`aparencia.skin = "zeca-contorno"` em `config/claude-pet.toml` e aprove
+`zeca-contorno`. O chapéu, a gravata e o encaixe são arte deste repositório
+(`arte/zeca/`); detalhes em `docs/SKINS.md`.
 
 ### Hooks do Claude Code
 

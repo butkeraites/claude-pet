@@ -416,6 +416,14 @@ impl Superficie {
     }
 
     /// A cena do último quadro enviado.
+    /// Esquece a cena desenhada: o próximo quadro redesenha a tela toda.
+    /// Necessário ao trocar de skin, porque o dano entre a cena velha e a
+    /// nova é calculado com a skin nova (e os quadros velhos podem nem
+    /// existir nela).
+    pub fn esquecer_cena(&mut self) {
+        self.ultima_cena = None;
+    }
+
     pub fn cena_atual(&self) -> Option<&[Elemento]> {
         self.ultima_cena.as_deref()
     }

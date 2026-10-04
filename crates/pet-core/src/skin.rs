@@ -194,6 +194,9 @@ struct SkinJson {
     nome: String,
     autor: String,
     licenca: String,
+    /// De onde veio a arte (página do pack), quando não é nossa.
+    #[serde(default)]
+    fonte: Option<String>,
     redistribuivel: bool,
     folha: String,
     dados: String,
@@ -204,6 +207,10 @@ struct SkinJson {
     #[serde(default)]
     escala_padrao: Option<u32>,
     estados: BTreeMap<String, Vec<String>>,
+    /// Tags com os pés no chão: o lint confere que os pés ficam na linha do
+    /// `pe` nos quadros delas.
+    #[serde(default)]
+    chao: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -262,14 +269,22 @@ pub struct Skin {
     pub nome: String,
     pub autor: String,
     pub licenca: String,
+    pub fonte: Option<String>,
     pub redistribuivel: bool,
     pub ancoras: Ancoras,
     pub corpo_px: u32,
     pub escala_padrao: Option<u32>,
     /// Estado semântico (`idle`, `done_small`, …) → nomes de tag.
     pub estados: BTreeMap<String, Vec<String>>,
+    /// Tags com os pés no chão (só as que existem).
+    pub chao: Vec<String>,
     pub quadros: Vec<Quadro>,
     pub tags: Vec<Tag>,
+    /// Para cada quadro, o primeiro quadro com a mesma imagem (mesmo
+    /// retângulo da folha no mesmo lugar da célula). Folhas que guardam
+    /// quadros iguais uma vez só (o Zeca) repetem poses: o animador compara
+    /// por aqui para não fazer commit de um quadro idêntico (decisão 0027).
+    pub canonico: Vec<usize>,
     pub folha: Imagem,
     pub avisos: Vec<String>,
 }
@@ -483,19 +498,40 @@ impl Skin {
         if !estados.contains_key("idle") {
             return Err(invalida("falta o estado «idle» (a pose parada)"));
         }
+        let mut chao = Vec::with_capacity(s.chao.len());
+        for nome in s.chao {
+            if tags.iter().any(|t| t.nome == nome) {
+                chao.push(nome);
+            } else {
+                avisos.push(format!("chao: tag «{nome}» não existe"));
+            }
+        }
 
+        let canonico = (0..quadros.len())
+            .map(|i| {
+                (0..i)
+                    .find(|&j| {
+                        quadros[j].origem == quadros[i].origem
+                            && quadros[j].deslocamento == quadros[i].deslocamento
+                    })
+                    .unwrap_or(i)
+            })
+            .collect();
         Ok(Skin {
             id: s.id,
             nome: s.nome,
             autor: s.autor,
             licenca: s.licenca,
+            fonte: s.fonte,
             redistribuivel: s.redistribuivel,
             ancoras: Ancoras { celula, pe, toque },
             corpo_px: s.corpo_px,
             escala_padrao: s.escala_padrao,
             estados,
+            chao,
             quadros,
             tags,
+            canonico,
             folha,
             avisos,
         })
@@ -592,6 +628,22 @@ pub(crate) mod testes {
     }
 
     #[test]
+    fn quadros_com_a_mesma_imagem_tem_o_mesmo_canonico() {
+        let folha = r#"{"frames":[
+            {"frame":{"x":0,"y":0,"w":2,"h":2},"spriteSourceSize":{"x":0,"y":0,"w":2,"h":2},"sourceSize":{"w":4,"h":4},"duration":100},
+            {"frame":{"x":2,"y":0,"w":2,"h":2},"spriteSourceSize":{"x":0,"y":0,"w":2,"h":2},"sourceSize":{"w":4,"h":4},"duration":100},
+            {"frame":{"x":0,"y":0,"w":2,"h":2},"spriteSourceSize":{"x":0,"y":0,"w":2,"h":2},"sourceSize":{"w":4,"h":4},"duration":300},
+            {"frame":{"x":0,"y":0,"w":2,"h":2},"spriteSourceSize":{"x":1,"y":0,"w":2,"h":2},"sourceSize":{"w":4,"h":4},"duration":100}],
+            "meta":{"size":{"w":4,"h":2},"frameTags":[{"name":"idle","from":0,"to":3}]}}"#;
+        let s = com_folha(folha).unwrap();
+        assert_eq!(
+            s.canonico,
+            vec![0, 1, 0, 3],
+            "o 3 está noutro lugar da célula"
+        );
+    }
+
+    #[test]
     fn premultiplica_em_bgra() {
         let s = skin_minima();
         // (3,1): R=180 G=100 B=7 A=128 → pré-multiplicado.
@@ -649,6 +701,23 @@ pub(crate) mod testes {
         let s = com_folha(folha).unwrap();
         assert_eq!(s.quadros[0].duracao_ms, 100);
         assert_eq!(s.avisos.len(), 2, "{:?}", s.avisos);
+    }
+
+    #[test]
+    fn fonte_e_chao_sao_opcionais() {
+        let png = codificar_png(4, 2, &[255u8; 32]).unwrap();
+        let folha = r#"{"frames":[{"frame":{"x":0,"y":0,"w":2,"h":2},
+            "spriteSourceSize":{"x":0,"y":0,"w":2,"h":2},"sourceSize":{"w":4,"h":4},"duration":100}],
+            "meta":{"size":{"w":4,"h":2},"frameTags":[{"name":"idle","from":0,"to":0}]}}"#;
+        let skin = r#"{"formato":1,"id":"mini","nome":"Mini","autor":"t","licenca":"MIT",
+            "fonte":"https://exemplo","redistribuivel":false,"folha":"sheet.png","dados":"sheet.json",
+            "celula":[4,4],"pe":[2,4],"toque":[0,0,4,4],"corpo_px":4,
+            "estados":{"idle":["idle"]},"chao":["idle","voo"]}"#;
+        let s = Skin::de_partes(skin, folha, &png).unwrap();
+        assert_eq!(s.fonte.as_deref(), Some("https://exemplo"));
+        assert_eq!(s.chao, vec!["idle".to_owned()]);
+        assert_eq!(s.avisos, vec!["chao: tag «voo» não existe".to_owned()]);
+        assert!(com_folha(folha).unwrap().chao.is_empty());
     }
 
     #[test]

@@ -12,8 +12,7 @@ serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 png.workspace = true
-
-[dev-dependencies]
+# Impressão digital da skin aprovada (decisão 0026).
 sha2.workspace = true
 
 [lints]
