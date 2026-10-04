@@ -359,7 +359,7 @@ impl Nucleo {
         );
         let com_janela = ov.is_some();
         let agora = self.agora_ms();
-        if !self.motor.tocar(janela(&mut ov), reacao.nome, agora) {
+        if !self.motor.reagir(janela(&mut ov), reacao.nome, agora) {
             if com_janela {
                 depurar!("reação {} sem animação na tela", reacao.nome);
             } else {

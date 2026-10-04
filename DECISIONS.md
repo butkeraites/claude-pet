@@ -2053,3 +2053,32 @@ inteiros de pixels do dispositivo) e sem nada baixado em tempo de execução.
 para pixel art; assada no binário, não depende de arquivo nem de rede, e o
 teste garante que a tabela é a do pacote. O balão em blocos inteiros fica
 nítido como o Zeca; sumir sozinho mantém o orçamento de commits parado.
+
+## 0053 — Esconder durante a proteção de tela e a soneca do botão direito (2026-10-04)
+
+**Problema:** o PLANO pede que o Zeca se esconda durante a proteção de tela
+do Omarchy (a janela `org.omarchy.screensaver`, uma por monitor, em tela
+cheia; o OVERLAY ficaria por cima dela) e que o botão direito ponha o pet
+para cochilar por 30 min, só com reações pequenas e um selo "zZ".
+**Escolha (T4.7):**
+- **Proteção de tela:** o `openwindow` do socket2 traz a classe só para virar
+  o booleano "é a proteção de tela" (decisão 0050); o `EstadoDesktop` guarda
+  os endereços dessas janelas e o `closewindow` os tira. Com alguma aberta,
+  o `quer_mostrar` do Motor é falso: o pet sai com o quadro transparente e
+  volta (camada nova, no monitor em foco) quando a última fecha. Se a fonte
+  dos eventos cai e volta, a lista recomeça vazia: uma proteção que fechou
+  no meio nunca diria que fechou. O `/v1/estado.desktop.protetor_de_tela`
+  mostra o booleano.
+- **Soneca:** o clique direito começa 30 min de soneca (o bocejo, `yawn`) ou,
+  se o pet já cochila, acorda (o despertar, `wake`; a skin `_teste` não tem
+  e fica na pose). Na soneca, as reações do cérebro ficam pequenas: o
+  pulinho (e o que vier maior no M5) vira o aceno; o tchau continua. O selo
+  "zZ" fica no alto, à direita do corpo, em letras da monogram creme com
+  sombra de tinta (legível no tema escuro e no claro), parado: só um commit
+  para aparecer e um para sumir. A soneca acaba sozinha no prazo. Não
+  persiste num restart (os comandos persistidos `soneca` e `acordar` do
+  `bin/pet` são do M7). O `/v1/estado.soneca_restante_s` mostra quanto
+  falta.
+**Por quê:** a proteção de tela é o Renan longe do computador, e o pet por
+cima dela só gastaria GPU. A soneca é o "me deixa trabalhar" de um clique, e
+o selo diz por que o pet está quieto sem pedir commit nenhum enquanto dura.

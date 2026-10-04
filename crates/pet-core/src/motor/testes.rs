@@ -1032,3 +1032,96 @@ fn arrastar_ou_viajar_tira_o_balao() {
     motor.vencer(&mut janela, 360);
     assert!(motor.balao(360).is_none(), "a viagem tira o balão");
 }
+
+// --- proteção de tela e soneca (decisão 0053) --------------------------------
+
+#[test]
+fn a_protecao_de_tela_esconde_o_pet_e_ele_volta_quando_ela_fecha() {
+    use crate::plataforma::{Alca, EventoDesktop};
+    let (mut motor, mut janela) = ligado();
+    janela.mostrou();
+    let abriu = EventoDesktop::JanelaAbriu {
+        janela: Alca("5c0ff".into()),
+        protetor: true,
+    };
+    motor.evento_desktop(Some(&mut janela), &abriu, em(1_000));
+    assert_eq!(janela.pedidos.last().unwrap(), "apagar com _teste");
+    assert!(!motor.quer_mostrar());
+    assert!(motor.painel(Some(&janela), 1_000).desktop.protetor_de_tela);
+    saiu(&mut motor, &mut janela, 1_050);
+    // Um Recriar da janela não volta com a proteção na tela.
+    motor.evento_overlay(&mut janela, EventoOverlay::Recriar, 1_100);
+    assert_ne!(janela.pedidos.last().unwrap(), "criar");
+    let fechou = EventoDesktop::JanelaFechou(Alca("5c0ff".into()));
+    motor.evento_desktop(Some(&mut janela), &fechou, em(9_000));
+    assert_eq!(janela.pedidos.last().unwrap(), "criar", "volta");
+    assert!(motor.quer_mostrar());
+}
+
+fn clique_direito(motor: &mut Motor, janela: &mut Falsa, ms: u64) {
+    let (x, y) = meio_do_corpo(janela);
+    ponteiro(
+        motor,
+        janela,
+        crate::plataforma::EventoPonteiro::Apertou {
+            botao: crate::plataforma::Botao::Direito,
+            x,
+            y,
+        },
+        ms,
+    );
+    ponteiro(
+        motor,
+        janela,
+        crate::plataforma::EventoPonteiro::Soltou {
+            botao: crate::plataforma::Botao::Direito,
+            x,
+            y,
+        },
+        ms + 40,
+    );
+}
+
+#[test]
+fn botao_direito_cochila_30_min_com_o_zz_e_so_reacoes_pequenas() {
+    let (mut motor, mut janela) = ligado();
+    janela.mostrou();
+    clique_direito(&mut motor, &mut janela, 1_000);
+    let p = motor.painel(Some(&janela), 1_040);
+    assert_eq!(p.soneca_restante_s, Some(1_800));
+    assert_eq!(p.reacao.as_deref(), Some(BOCEJO));
+    assert!(tem_glifos(&janela), "o selo zZ");
+    // O cérebro pede o pulinho: na soneca, vira o aceno.
+    assert!(motor.reagir(Some(&mut janela), crate::cerebro::PULINHO, 5_000));
+    assert_eq!(
+        motor.painel(Some(&janela), 5_000).reacao.as_deref(),
+        Some(crate::cerebro::ACENO)
+    );
+    // O tchau continua tchau (na _teste ele nem anima).
+    assert!(!motor.reagir(Some(&mut janela), crate::cerebro::TCHAU, 6_000));
+    // De novo o direito: acorda.
+    janela.mostrou();
+    clique_direito(&mut motor, &mut janela, 10_000);
+    let p = motor.painel(Some(&janela), 10_040);
+    assert_eq!(p.soneca_restante_s, None);
+    // A _teste não tem o despertar (o Zeca tem, nativo): o pet fica na pose.
+    assert_eq!(p.reacao, None);
+    janela.mostrou();
+    motor.vencer(&mut janela, 20_000);
+    assert!(!tem_glifos(&janela), "sem selo");
+    // A soneca acaba sozinha em 30 min.
+    janela.mostrou();
+    clique_direito(&mut motor, &mut janela, 30_000);
+    let fim = 30_040 + SONECA_MS;
+    assert!(motor.proximo_prazo().unwrap() <= fim);
+    janela.mostrou();
+    motor.vencer(&mut janela, fim);
+    assert_eq!(motor.painel(Some(&janela), fim).soneca_restante_s, None);
+    assert!(!tem_glifos(&janela));
+    assert!(motor.reagir(Some(&mut janela), crate::cerebro::PULINHO, fim + 1));
+    assert_eq!(
+        motor.painel(Some(&janela), fim + 1).reacao.as_deref(),
+        Some(crate::cerebro::PULINHO),
+        "acordado, o pulinho de volta"
+    );
+}

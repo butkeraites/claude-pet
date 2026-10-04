@@ -162,3 +162,18 @@ fn o_glifo_do_claude_vira_so_o_booleano() {
     let (_, eventos) = d.get("/v1/debug/eventos");
     sem_segredo("/v1/debug/eventos", &eventos);
 }
+
+#[test]
+fn a_protecao_de_tela_do_omarchy_chega_como_booleano() {
+    let h = hyprland_de_mentira(
+        "protetor",
+        "openwindow>>aaa111,1,org.omarchy.screensaver,SEGREDO-protetor\nactivewindowv2>>aaa111\n",
+    );
+    let d = Daemon::subir_com(true, &[("PET_HOST_RUNTIME", runtime(&h).as_str())]);
+    let estado = esperar(&d, "proteção de tela", |e| {
+        e["desktop"]["protetor_de_tela"] == true && e["desktop"]["janela_ativa"] == "aaa111"
+    });
+    sem_segredo("/v1/estado", &estado.to_string());
+    sem_segredo("log", &d.log());
+    assert!(d.log().contains("proteção de tela abriu"), "{}", d.log());
+}

@@ -2,6 +2,8 @@
 //! ou não, o monitor em foco, a janela ativa e a presença. Só ids opacos e
 //! booleanos: nada de título, classe ou nome de área de trabalho.
 
+use std::collections::BTreeSet;
+
 use serde::Serialize;
 
 use super::janelas::{Anel, PainelTroca};
@@ -18,6 +20,9 @@ pub struct EstadoDesktop {
     pub olhando_claude: bool,
     /// As últimas trocas de janela ativa (decisão 0050).
     pub anel: Anel,
+    /// As janelas da proteção de tela abertas (decisão 0053): com alguma, o
+    /// pet se esconde.
+    pub protetor: BTreeSet<Alca>,
 }
 
 impl EstadoDesktop {
@@ -29,7 +34,11 @@ impl EstadoDesktop {
         match evento {
             EventoDesktop::Ligado(ligado) => {
                 self.ligado = Some(*ligado);
-                if !ligado {
+                if *ligado {
+                    // Uma proteção de tela que fechou enquanto a fonte
+                    // estava fora nunca diria que fechou: recomeça sem.
+                    self.protetor.clear();
+                } else {
                     // O que vier depois de voltar é o que vale; o que se
                     // sabia pode ter mudado no meio.
                     self.olhando_claude = false;
@@ -57,8 +66,14 @@ impl EstadoDesktop {
                 if self.janela_ativa.as_ref() == Some(janela) {
                     self.janela_ativa = None;
                 }
+                self.protetor.remove(janela);
             }
-            EventoDesktop::JanelaAbriu { .. } | EventoDesktop::Monitores => {}
+            EventoDesktop::JanelaAbriu { janela, protetor } => {
+                if *protetor {
+                    self.protetor.insert(janela.clone());
+                }
+            }
+            EventoDesktop::Monitores => {}
         }
         *self != antes
     }
@@ -79,7 +94,13 @@ impl EstadoDesktop {
             protocolos: info.protocolos,
             janelas: info.janelas,
             anel: self.anel.painel(),
+            protetor_de_tela: !self.protetor.is_empty(),
         }
+    }
+
+    /// A proteção de tela está na tela.
+    pub fn protetor_ativo(&self) -> bool {
+        !self.protetor.is_empty()
     }
 }
 
@@ -101,6 +122,8 @@ pub struct PainelDesktop {
     pub janelas: usize,
     /// As últimas trocas de janela ativa: o endereço e a hora, nada mais.
     pub anel: Vec<PainelTroca>,
+    /// A proteção de tela está na tela (o pet se esconde).
+    pub protetor_de_tela: bool,
 }
 
 impl Default for PainelDesktop {
@@ -159,5 +182,35 @@ mod testes {
         // Num buraco, a semente entra (o foreign-toplevel diz a ativa).
         assert!(d.aplicar(&semente, 40));
         assert_eq!(d.janela_ativa, Some(Alca("outra".into())));
+    }
+
+    #[test]
+    fn protecao_de_tela_abre_fecha_e_recomeca_quando_a_fonte_volta() {
+        let mut d = EstadoDesktop::default();
+        let protetor = |a: &str| EventoDesktop::JanelaAbriu {
+            janela: Alca(a.into()),
+            protetor: true,
+        };
+        assert!(!d.aplicar(
+            &EventoDesktop::JanelaAbriu {
+                janela: Alca("foot".into()),
+                protetor: false
+            },
+            0
+        ));
+        assert!(!d.protetor_ativo(), "um terminal não é proteção de tela");
+        // Uma janela por monitor.
+        assert!(d.aplicar(&protetor("p1"), 0));
+        assert!(d.aplicar(&protetor("p2"), 0));
+        assert!(d.aplicar(&EventoDesktop::JanelaFechou(Alca("p1".into())), 0));
+        assert!(d.protetor_ativo(), "ainda falta uma");
+        assert!(d.aplicar(&EventoDesktop::JanelaFechou(Alca("p2".into())), 0));
+        assert!(!d.protetor_ativo());
+        // A fonte caiu e voltou: o que fechou no meio não chegou.
+        d.aplicar(&protetor("p3"), 0);
+        d.aplicar(&EventoDesktop::Ligado(false), 10);
+        assert!(d.protetor_ativo());
+        d.aplicar(&EventoDesktop::Ligado(true), 20);
+        assert!(!d.protetor_ativo());
     }
 }

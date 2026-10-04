@@ -228,6 +228,7 @@ impl Compartilhado {
             "arrastando": painel.arrastando,
             "viagem": painel.viagem,
             "balao": painel.balao,
+            "soneca_restante_s": painel.soneca_restante_s,
             "desktop": painel.desktop,
             "eventos": self.eventos_json(),
             "sessoes": do_cerebro("sessoes", json!([])),

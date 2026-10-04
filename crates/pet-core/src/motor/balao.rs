@@ -142,6 +142,40 @@ pub fn elementos(linhas: &[String], corpo: Ret, area: Ret, dt: i32) -> Vec<Eleme
     saida
 }
 
+/// O selo "zZ" da soneca (decisão 0053): as duas letras da monogram em
+/// creme com sombra de tinta (legível no tema escuro e no claro), no alto,
+/// à direita do corpo, presas na área útil. Parado: nenhum commit a mais.
+pub fn selo_zz(corpo: Ret, area: Ret, dt: i32) -> Vec<Elemento> {
+    let dt = dt.max(1);
+    let w = (2 * fonte::AVANCO) * dt;
+    let h = fonte::ALTURA * dt;
+    let x = (corpo.direita() - w / 2)
+        .min(area.direita() - w - dt)
+        .max(area.x);
+    let y = (corpo.y - h + 2 * dt).max(area.y);
+    let mut saida = Vec::with_capacity(4);
+    for (i, c) in ['z', 'Z'].into_iter().enumerate() {
+        // A segunda letra um pouco mais alta, como quem cochila.
+        let cx = x + i as i32 * fonte::AVANCO * dt;
+        let cy = y - i as i32 * 2 * dt;
+        saida.push(Elemento::Glifo {
+            c,
+            x: cx + dt,
+            y: cy + dt,
+            d: dt,
+            cor: TINTA,
+        });
+        saida.push(Elemento::Glifo {
+            c,
+            x: cx,
+            y: cy,
+            d: dt,
+            cor: FUNDO,
+        });
+    }
+    saida
+}
+
 /// Como uma sessão aparece na lista: o estado em palavras.
 pub fn estado(sessao: &ResumoSessao) -> &'static str {
     match sessao.estado {
@@ -267,6 +301,27 @@ mod testes {
         assert_eq!(dt(5), 3);
         assert_eq!(dt(8), 4);
         assert_eq!(dt(1), 1);
+    }
+
+    #[test]
+    fn selo_zz_no_alto_a_direita_e_dentro_da_area() {
+        let corpo = Ret::novo(1_782, 1_062, 114, 114);
+        let selo = selo_zz(corpo, area(), 3);
+        assert_eq!(selo.len(), 4, "duas letras com sombra");
+        for e in &selo {
+            let Elemento::Glifo { x, y, d, .. } = *e else {
+                panic!("só letras");
+            };
+            assert_eq!(d, 3);
+            assert!(x + fonte::LARGURA_MAX * d <= 1920 + 3 && y >= 0);
+            assert!(y < corpo.y, "em cima do corpo");
+        }
+        let canto = selo_zz(Ret::novo(1_850, 0, 70, 70), area(), 3);
+        assert!(
+            canto
+                .iter()
+                .all(|e| matches!(*e, Elemento::Glifo { y, .. } if y >= -6))
+        );
     }
 
     #[test]

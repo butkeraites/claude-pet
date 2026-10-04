@@ -70,6 +70,11 @@ pub const ARRASTADO: &str = "dangle";
 pub const SOLTO: &str = "land";
 /// A risadinha do clique.
 pub const RISADINHA: &str = "giggle";
+/// O bocejo de quando a soneca começa e o despertar de quando ela acaba.
+pub const BOCEJO: &str = "yawn";
+pub const DESPERTAR: &str = "wake";
+/// A soneca do botão direito (decisão 0053).
+pub const SONECA_MS: u64 = 30 * 60 * 1000;
 
 /// O que o pet publica para o `/v1/estado` (o laço publica; a entrada HTTP
 /// só lê).
@@ -105,6 +110,8 @@ pub struct Painel {
     pub viagem: Option<&'static str>,
     /// As linhas do balão na tela, se houver um.
     pub balao: Option<Vec<String>>,
+    /// Quanto falta da soneca (o botão direito), se o pet está cochilando.
+    pub soneca_restante_s: Option<u64>,
     /// O desktop: a fonte dos eventos, o monitor em foco, a janela ativa (só
     /// o endereço) e o que a conexão sabe fazer.
     pub desktop: PainelDesktop,
@@ -178,6 +185,8 @@ pub struct Motor {
     /// parede de um instante do relógio do laço (o "há quanto tempo" do
     /// balão).
     deslocamento_parede: u64,
+    /// Até quando o pet cochila (o botão direito; decisão 0053).
+    soneca_ate: Option<u64>,
 }
 
 impl Motor {
@@ -200,6 +209,7 @@ impl Motor {
             seguir: Seguir::default(),
             balao: None,
             deslocamento_parede: 0,
+            soneca_ate: None,
         }
     }
 
@@ -375,9 +385,10 @@ impl Motor {
         self.visivel = visivel;
     }
 
-    /// O pet deve aparecer agora: há personagem e ninguém mandou esconder.
+    /// O pet deve aparecer agora: há personagem, ninguém mandou esconder e
+    /// a proteção de tela não está na tela (decisão 0053).
     pub fn quer_mostrar(&self) -> bool {
-        self.visivel && self.pet.is_some()
+        self.visivel && self.pet.is_some() && !self.desktop.protetor_ativo()
     }
 
     /// Uma janela nova (o compositor conectou): o pet recomeça a animação
@@ -813,11 +824,48 @@ impl Motor {
     /// sessões abertas (levar ao terminal de uma sessão chega na T4.10); o
     /// direito, a soneca (T4.7).
     fn clique(&mut self, punho: &mut dyn Punho, botao: Botao, agora_ms: u64) {
-        if botao == Botao::Esquerdo {
-            self.tocar(Some(punho.janela()), RISADINHA, agora_ms);
-            let linhas = self.linhas_das_sessoes(agora_ms);
-            self.mostrar_balao(Some(punho.janela()), linhas, agora_ms);
+        match botao {
+            Botao::Esquerdo => {
+                self.tocar(Some(punho.janela()), RISADINHA, agora_ms);
+                let linhas = self.linhas_das_sessoes(agora_ms);
+                self.mostrar_balao(Some(punho.janela()), linhas, agora_ms);
+            }
+            Botao::Direito => self.alternar_soneca(punho.janela(), agora_ms),
+            _ => {}
         }
+    }
+
+    // --- a soneca (decisão 0053) --------------------------------------------
+
+    /// O botão direito: começa a soneca de 30 min (o bocejo e o selo "zZ")
+    /// ou, se o pet já cochila, acorda (o despertar).
+    pub fn alternar_soneca(&mut self, ov: &mut dyn Overlay, agora_ms: u64) {
+        if self.soneca(agora_ms).is_some() {
+            self.soneca_ate = None;
+            info!("soneca: acordou");
+            self.tocar(Some(&mut *ov), DESPERTAR, agora_ms);
+        } else {
+            self.soneca_ate = Some(agora_ms + SONECA_MS);
+            info!("soneca de {} min", SONECA_MS / 60_000);
+            self.tocar(Some(&mut *ov), BOCEJO, agora_ms);
+        }
+        self.desenhar(ov, agora_ms, false);
+    }
+
+    /// Até quando o pet cochila, se cochila.
+    pub fn soneca(&self, agora_ms: u64) -> Option<u64> {
+        self.soneca_ate.filter(|&ate| agora_ms < ate)
+    }
+
+    /// Uma reação do cérebro: na soneca, só as pequenas (o pulinho e o que
+    /// for maior viram o aceno discreto).
+    pub fn reagir(&mut self, ov: Option<&mut dyn Overlay>, reacao: &str, agora_ms: u64) -> bool {
+        let reacao = if self.soneca(agora_ms).is_some() && reacao != crate::cerebro::TCHAU {
+            crate::cerebro::ACENO
+        } else {
+            reacao
+        };
+        self.tocar(ov, reacao, agora_ms)
     }
 
     /// O pet está sendo arrastado.
@@ -831,7 +879,7 @@ impl Motor {
     /// ativa, a presença. Devolve se o que o `/v1/estado` mostra mudou.
     pub fn evento_desktop(
         &mut self,
-        _ov: Option<&mut dyn Overlay>,
+        ov: Option<&mut dyn Overlay>,
         evento: &EventoDesktop,
         agora: Agora,
     ) -> bool {
@@ -839,7 +887,24 @@ impl Motor {
         if let EventoDesktop::MonitorEmFoco(nome) = evento {
             self.seguir.foco(nome.clone(), agora.mono_ms);
         }
-        self.desktop.aplicar(evento, agora.parede_ms)
+        let protetor_antes = self.desktop.protetor_ativo();
+        let mudou = self.desktop.aplicar(evento, agora.parede_ms);
+        // A proteção de tela do Omarchy abriu ou fechou: o pet sai e volta
+        // (decisão 0053).
+        if self.desktop.protetor_ativo() != protetor_antes {
+            info!(
+                "proteção de tela {}",
+                if protetor_antes {
+                    "fechou: o pet volta"
+                } else {
+                    "abriu: o pet se esconde"
+                }
+            );
+            if let Some(ov) = ov {
+                self.aplicar_visibilidade(ov, agora.mono_ms);
+            }
+        }
+        mudou
     }
 
     /// O que os eventos do desktop contaram.
@@ -887,6 +952,14 @@ impl Motor {
                 None if !entrando => cena.clear(),
                 None => {}
             }
+        }
+        // O selo "zZ" da soneca, parado, enquanto ela durar.
+        if let Some(ate) = self.soneca(agora_ms)
+            && let Some(corpo) = pet.toque_no_palco(&palco)
+            && poof.is_none()
+        {
+            cena.extend(balao::selo_zz(corpo, palco.area, balao::dt(palco.d)));
+            proxima = Some(proxima.map_or(ate, |p| p.min(ate)));
         }
         // O balão em cima do corpo, até o prazo dele.
         if let Some(balao) = self.balao.as_ref().filter(|b| agora_ms < b.ate_ms)
@@ -959,6 +1032,11 @@ impl Motor {
             self.balao = None;
             self.desenhar(punho.janela(), agora_ms, false);
         }
+        if self.soneca_ate.is_some_and(|ate| agora_ms >= ate) {
+            self.soneca_ate = None;
+            info!("soneca acabou");
+            self.desenhar(punho.janela(), agora_ms, false);
+        }
         self.vencer_animacao(punho.janela(), agora_ms);
     }
 
@@ -970,6 +1048,7 @@ impl Motor {
             self.arraste.prazo(),
             self.seguir.prazo(),
             self.balao.as_ref().map(|b| b.ate_ms),
+            self.soneca_ate,
         ]
         .into_iter()
         .flatten()
@@ -1129,6 +1208,9 @@ impl Motor {
             arrastando: self.arraste.arrastando(),
             viagem: self.seguir.fase().map(FaseViagem::nome),
             balao: self.balao(agora_ms).map(|b| b.linhas.clone()),
+            soneca_restante_s: self
+                .soneca(agora_ms)
+                .map(|ate| (ate - agora_ms).div_ceil(1000)),
             desktop: painel_desktop,
         }
     }
