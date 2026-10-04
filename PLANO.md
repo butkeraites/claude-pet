@@ -594,6 +594,10 @@ M0–M3 estão na `main` (tags `v0.1.0`–`v0.3.0`). Daqui em diante:
 2. **M4 → M7**, como planejado.
 3. **Depois do M7:** T8.2 → T8.3 → T8.4 e T8.5 → T8.6 e T8.7 → T9.1 a T9.6. A T8.8 (GNOME) fica para a v1.1, salvo decisão em contrário.
 4. **Em paralelo, sem código:** T9.0 (personagem público, licença da arte e o pedido à exclusiveOlive).
+5. **Skin livre (2026-10-04, branch `skin-zeca-livre`, decisão 0065 e seguintes):** uma arte original do Zeca, sem nenhum pixel do pack, em CC0 1.0. Puxa para agora parte da T9.2 (a skin padrão livre); embutir no binário e aprovar pelo build continuam no M9.
+   - **TS.1** a arte no repositório: o gerador `arte/zeca-livre/zeca.py` com o manifesto, as notas e a licença CC0, as correções da crítica final e as transições pelo rig, e o `cargo xtask zeca-livre --conferir` (mesmos bytes a cada execução) no `bin/pet verificar`;
+   - **TS.2** a skin `zeca-livre` (redistribuível, em `skins/`) e a variante do tema escuro, com o mapa de todos os estados do core, `lint-skin` sem erro, `cobertura --nativos mvp` sem falta e as folhas de contato;
+   - **TS.3** o original como padrão do Renan (o pack instalado e aprovado, para voltar pelo config), aprovado pela folha de contato com `bin/pet skin-aprovar`, a produção refeita e a troca entre os dois no README e no `docs/SKINS.md`.
 
 A beta pública mínima é T8.0–T8.5 mais T9.0–T9.4.
 
@@ -852,7 +856,7 @@ Acrescentado em 2026-10-03 (decisões 0036 e 0038). O repositório público é n
   - *Verificação:* permissão ou licença por escrito arquivada; decisão no DECISIONS; a folha de contato do personagem novo passa pelo portão do M2 (`skin-aprovar`; `cobertura --nativos mvp` sem faltas).
 - **T9.1 Repositório público limpo.** Repositório novo, exportado sem o histórico; NOTICE e CREDITS em ordem; guarda no CI contra skin rastreada com `redistribuivel: false` e qualquer arquivo em `skins-locais/`; Dockerfile publicável; SECURITY.md, página de privacidade (só metadados), CONTRIBUTING e modelos de issue com a saída do `doutor`.
   - *Verificação:* script no CI sem arquivo derivado do pack em `git log --all --name-only`; a guarda de nomes do `bin/pet verificar` (decisão 0035) verde; uma skin plantada com `redistribuivel: false` faz o CI falhar.
-- **T9.2 Skin padrão livre embutida e «traga seu pack» no binário.** A skin original embutida e aprovada pelo build; o montador do `xtask` vira o crate `pet-arte` e o subcomando `bichinho skin instalar <zip>` (grava na pasta de dados do usuário, nunca baixa nada do itch.io).
+- **T9.2 Skin padrão livre embutida e «traga seu pack» no binário.** A skin original embutida e aprovada pelo build; o montador do `xtask` vira o crate `pet-arte` e o subcomando `bichinho skin instalar <zip>` (grava na pasta de dados do usuário, nunca baixa nada do itch.io). *Em parte puxada para a skin livre (TS.1–TS.3, decisão 0065): a arte original em CC0 com o gerador (TS.1) e a skin `zeca-livre` (TS.2) nascem na branch `skin-zeca-livre`; o que pede um pixel artist (bicos girados, ícone pequeno, pose-base em S, penas) está em `arte/zeca-livre/notas.md`.*
   - *Verificação:* CI nos três SOs com um pack sintético dá a mesma impressão sha256 (determinismo); o pack de verdade só no notebook, nunca no CI.
 - **T9.3 Instalar, iniciar com o sistema, desinstalar e `doutor`, por SO.** `bichinho configurar` (autostart e o plugin, sempre com confirmação), supervisor, instância única por usuário, menu no botão direito, porta e token por usuário no loopback, `doutor` (binário no PATH que o Claude vê, porta, token, backend e capacidades, permissões no macOS).
   - *Verificação:* contêineres Linux limpos (Arch, Ubuntu, Fedora); runners macOS e Windows instalam, `doutor` verde, desinstalam sem sobras; Mac alugado e VM sobem o pet sozinhos depois do reboot.

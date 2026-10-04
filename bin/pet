@@ -437,6 +437,18 @@ lint_skins() {
   cargo xtask lint-skin --so-erros "${pastas[@]}"
 }
 
+# A arte livre do Zeca (decisão 0065): o gerador em Python
+# (arte/zeca-livre/zeca.py) tem de dar os mesmos bytes a cada execução, e o
+# que está no git tem de ser o que sai dele agora. Sem python3, avisa e pula,
+# como o shellcheck.
+arte_livre_reproduzivel() {
+  if ! command -v "${PET_PYTHON:-python3}" >/dev/null 2>&1; then
+    echo "  (sem ${PET_PYTHON:-python3}: a conferência da arte livre ficou de fora)"
+    return 0
+  fi
+  cargo xtask zeca-livre --conferir
+}
+
 # Caminho absoluto de um argumento (relativo a onde o usuário estava).
 absoluto() {
   case "$1" in
@@ -727,6 +739,7 @@ verificar() {
   passo "cargo test" cargo test --quiet
   passo "Windows e macOS (cargo clippy --target)" outros_sistemas
   passo "lint-skin" lint_skins
+  passo "arte livre reproduzível (zeca.py)" arte_livre_reproduzivel
   passo "compose" docker compose config -q
   passo "compose dev" docker compose -f docker-compose.yml -f docker-compose.dev.yml config -q
   if [ -f .claude-plugin/marketplace.json ]; then

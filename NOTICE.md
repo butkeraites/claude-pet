@@ -18,6 +18,12 @@ O código deste repositório é MIT (`LICENSE`). Abaixo, o que vem de fora.
   skin e acessórios (chapéu-palheta e as variantes da cambalhota,
   gravata-borboleta) desenhados para este projeto; mesma licença do código
   (MIT). Só coordenadas e cores da paleta do pack; nenhum pixel do pack.
+- `arte/zeca-livre/` — o **Zeca original**: arte original feita com o Claude
+  para o projeto bichinho, desenhada do zero (nenhum pixel do pack), dedicada
+  ao domínio público pela **CC0 1.0** (a dedicação, o crédito de cortesia e o
+  texto legal em `arte/zeca-livre/LICENSE`). O gerador `zeca.py` é a fonte da
+  arte; tudo o que sai dele também é CC0. O crédito não é obrigatório, mas é
+  bem-vindo: "arte original feita com o Claude para o projeto bichinho".
 - `skins/_teste/` — skin xadrez de QA gerada por `cargo xtask skin-teste`;
   MIT.
 - `assets/fonte/monogram/` — **monogram**, a fonte de pixel dos balões, de

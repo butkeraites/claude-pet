@@ -2672,3 +2672,72 @@ o pet ao monitor certo.
 ele (o monitor, o foco, os avisos de verdade), e a troca depois do merge
 tem de manter o config dele; e uma promessa de orçamento que não tem teste
 é só uma frase.
+
+## 0065 — O Zeca original entra no repositório como arte livre (CC0), gerado e conferido, com as correções da crítica e as transições pelo rig (2026-10-04)
+
+**Problema:** o Zeca de hoje é derivado do pack *Cute Parrots!*, que não pode
+ser redistribuído (decisão 0011): fica fora do git, e o lançamento aberto
+precisa de um personagem livre (M9, T9.0 e T9.2). Uma arte original do Zeca
+foi desenhada do zero, sem nenhum pixel do pack, por um gerador em Python
+(paleta, grades de texto das peças e um rig que compõe cada quadro), e
+refinada até a nota 8,4/10 do diretor de arte, "publicável". A crítica final
+pediu duas correções rápidas (o trecho `respira` do manifesto repetia
+quadros e perdia o atraso do chapéu em uma expiração de cada duas; um confete
+caía por cima do bico no `hop_08`) e listou o que o próprio rig resolve (o
+tufo esquerdo do pouso colado no rabo; as transições da pose neutra para os
+laços de trabalho, sono, chamada e voo, que trocavam de uma vez). O resto
+(bicos girados, ícone pequeno, pose-base em S, penas) pede um pixel artist.
+O Renan viu a prancha e os GIFs e decidiu, em 2026-10-04: a arte original sai
+em **CC0 1.0**, com o crédito de cortesia "arte original feita com o Claude
+para o projeto bichinho"; na máquina dele ficam as duas skins, e a original
+é o padrão ("Ter os dois e deixar o original como default").
+
+**Escolha (TS.1):**
+- **`arte/zeca-livre/` no git:** `zeca.py` (a fonte da arte), `anims.json`
+  (o manifesto: quadros e durações, trechos do repouso, transições de cada
+  laço, gatilhos sugeridos), `notas.md` e `LICENSE` (a dedicação CC0, o
+  crédito de cortesia e o texto legal). O `NOTICE.md` ganha a seção. A regra
+  de arte do pack continua: nada derivado dele entra nesta pasta.
+- **PNG nunca editado à mão:** tudo sai do gerador. `python3 zeca.py` grava
+  quadros, folhas, GIFs e vitrine em `tmp/zeca-livre/` (fora do git);
+  `python3 zeca.py --quadros DIR` grava só os quadros dos dois visuais e o
+  manifesto, sem o ImageMagick, e sai 1 se a verificação da arte reprovar
+  (furo de fundo, recorte na borda ou solto, órfão, mais de 16 cores, margem,
+  e a regra nova abaixo, nos dois visuais).
+- **Determinismo conferido:** `cargo xtask zeca-livre` roda o gerador numa
+  pasta temporária (sem `__pycache__`, com `PYTHONHASHSEED=0`) e grava o
+  manifesto; `cargo xtask zeca-livre --conferir` não grava nada: roda duas
+  vezes, compara os bytes de tudo o que o gerador escreveu e confere que o que
+  está no git é o que sai dele agora. O `bin/pet verificar` roda o
+  `--conferir` quando há `python3` (sem ele, avisa e pula, como o
+  shellcheck). Os GIFs e a vitrine passam pelo ImageMagick, que grava data
+  nos arquivos: são prévias, fora da comparação.
+- **As correções, no gerador:** trecho `respira` = quadros 0-3 (a costura 3→0
+  é o chapéu assentando); o confete do `hop_08` saiu (os dois confetes acabam
+  no `hop_07`); o tufo esquerdo do pouso foi para trás da ponta da cauda, o
+  único lugar com folga ((1, 42) e, no quadro seguinte, (1, 41)); e uma regra
+  nova no lint: efeito sem contorno (confete, faísca e ponto do trabalho, z
+  do sono) e poeira não são pintados por cima de peça do Zeca, porque leem
+  como marca no corpo (os de contorno fechado e os adereços que ele toca, o
+  grão e a tecla, podem passar na frente). A regra achou mais um, o confete
+  pintado na ponta da asa erguida do `hop_06`, que agora passa atrás dela.
+- **Pelo rig, com as peças de sempre:** um aceno próprio (`nod`, a "tirada de
+  chapéu": a cabeça abaixa e o chapéu tomba; o respira e a ginga sobem a
+  cabeça, então o aceno não se confunde com o repouso, o problema da skin do
+  pack), o tchau de asa (`wave`), o bocejo (`yawn`), o acordar espreguiçando
+  (`wake`) e as transições de cada laço (`work_in`/`work_out`,
+  `sleep_in`/`sleep_out`, `attention_in`/`attention_out`,
+  `takeoff`/`landing`), listadas em `uso.transicoes.lacos`. Todo gesto
+  começa e termina na pose neutra. São 22 animações e 134 quadros.
+- **Para um pixel artist (T9.2):** os bicos girados, o ícone de 16/32/64 px,
+  a pose-base em S, as penas e o take do susto ficam anotados em
+  `notas.md`, seção 11.
+- **A T9.2 em parte para agora:** a skin padrão livre nasce nesta branch
+  (`skin-zeca-livre`, TS.1–TS.3). Embutir a skin no binário, aprovada pelo
+  build, e o `bichinho skin instalar` continuam no M9.
+
+**Por quê:** a arte livre só é livre de verdade se a fonte estiver no git e
+qualquer um puder refazer os mesmos bytes; o gerador é a fonte, e conferir o
+determinismo a cada commit impede que um PNG mexido à mão ou um gerador
+mudado sem regenerar passe calado. As correções e as transições cabem no rig
+sem desenho novo; o que pede desenho fica anotado em vez de improvisado.

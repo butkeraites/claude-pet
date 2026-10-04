@@ -1,0 +1,889 @@
+{
+ "celula": 48,
+ "chao_y": 44,
+ "paleta": {
+  "K": "#2B2136",
+  "A": "#2E7487",
+  "S": "#2B7D55",
+  "M": "#4DAF4B",
+  "L": "#8FD653",
+  "H": "#D3EF78",
+  "R": "#A6E8D6",
+  "W": "#FFF8EC",
+  "1": "#FFC4D0",
+  "2": "#F27FA6",
+  "3": "#B8457E",
+  "y": "#FBE7A1",
+  "Y": "#E2B864",
+  "B": "#A8743E",
+  "o": "#F59A3A",
+  "O": "#C25A2C"
+ },
+ "anel_tema_escuro": "#5E5A86",
+ "licenca": "CC0-1.0 (arte original feita com o Claude para o projeto bichinho; LICENSE ao lado do zeca.py)",
+ "uso": {
+  "tema": "Tema CLARO: use \"arquivo\" (visual padrao). Tema ESCURO: use SEMPRE \"escuro\" (frames/escuro/, anel de 1 px #5E5A86 por fora do contorno) - o contorno #2B2136 tem so 1,27:1 contra #0B0C16.",
+  "idle": "Toque em loop SO o trecho \"respira\" (quadros 0-3, 1,12 s). Sorteie a \"ginga\" (quadros 7-13) a cada 8-20 s (campo intervalo_s); em loop direto ela vira um tique a cada 3,4 s. No bichinho o orcamento de commits (ate 2/s parado) nao deixa o respira em loop: a pose neutra fica parada e o respira, o piscar e a ginga tocam em rajadas, com pelo menos 4 s entre elas.",
+  "transicoes": {
+   "regra": "As acoes (blink, chirp, peck, hop, scared) e os gestos (nod, wave, yawn, wake) comecam na pose neutra do idle e voltam a ela (o peck mostra o grao ja no 1o quadro; o scared termina com o olho malandro, que vira o olho neutro no idle). Os lacos de estado (work, fly, sleep, attention) entram e saem pela pose neutra com as transicoes abaixo: toque \"entrar\", o laco quantas vezes quiser e \"sair\".",
+   "lacos": {
+    "work": {
+     "entrar": "work_in",
+     "sair": "work_out"
+    },
+    "sleep": {
+     "entrar": "sleep_in",
+     "sair": "sleep_out"
+    },
+    "attention": {
+     "entrar": "attention_in",
+     "sair": "attention_out"
+    },
+    "fly": {
+     "entrar": "takeoff",
+     "sair": "landing"
+    }
+   }
+  }
+ },
+ "gatilhos_sugeridos": {
+  "work": "Claude Code executando (o estado mais visto)",
+  "attention": "pedindo permissao / esperando resposta",
+  "hop": "tarefa concluida",
+  "scared": "erro ou falha de teste",
+  "sleep": "ocioso por muito tempo",
+  "chirp": "notificacao / saudacao",
+  "peck": "variacao do ocioso",
+  "blink": "variacao do ocioso",
+  "fly": "entrando ou saindo da tela",
+  "idle": "parado",
+  "nod": "resposta sem trabalho (aceno discreto)",
+  "wave": "tchau / aceno",
+  "yawn": "cansado, comeco da soneca",
+  "wake": "fim da soneca"
+ },
+ "animacoes": {
+  "idle": {
+   "titulo": "idle (ginga)",
+   "loop": true,
+   "quadros": [
+    {
+     "arquivo": "frames/idle_00.png",
+     "escuro": "frames/escuro/idle_00.png",
+     "ms": 420
+    },
+    {
+     "arquivo": "frames/idle_01.png",
+     "escuro": "frames/escuro/idle_01.png",
+     "ms": 140
+    },
+    {
+     "arquivo": "frames/idle_02.png",
+     "escuro": "frames/escuro/idle_02.png",
+     "ms": 420
+    },
+    {
+     "arquivo": "frames/idle_03.png",
+     "escuro": "frames/escuro/idle_03.png",
+     "ms": 140
+    },
+    {
+     "arquivo": "frames/idle_04.png",
+     "escuro": "frames/escuro/idle_04.png",
+     "ms": 380
+    },
+    {
+     "arquivo": "frames/idle_05.png",
+     "escuro": "frames/escuro/idle_05.png",
+     "ms": 140
+    },
+    {
+     "arquivo": "frames/idle_06.png",
+     "escuro": "frames/escuro/idle_06.png",
+     "ms": 300
+    },
+    {
+     "arquivo": "frames/idle_07.png",
+     "escuro": "frames/escuro/idle_07.png",
+     "ms": 120
+    },
+    {
+     "arquivo": "frames/idle_08.png",
+     "escuro": "frames/escuro/idle_08.png",
+     "ms": 220
+    },
+    {
+     "arquivo": "frames/idle_09.png",
+     "escuro": "frames/escuro/idle_09.png",
+     "ms": 200
+    },
+    {
+     "arquivo": "frames/idle_10.png",
+     "escuro": "frames/escuro/idle_10.png",
+     "ms": 220
+    },
+    {
+     "arquivo": "frames/idle_11.png",
+     "escuro": "frames/escuro/idle_11.png",
+     "ms": 260
+    },
+    {
+     "arquivo": "frames/idle_12.png",
+     "escuro": "frames/escuro/idle_12.png",
+     "ms": 140
+    },
+    {
+     "arquivo": "frames/idle_13.png",
+     "escuro": "frames/escuro/idle_13.png",
+     "ms": 300
+    }
+   ],
+   "trechos": {
+    "respira": {
+     "quadros": [
+      0,
+      3
+     ],
+     "loop": true
+    },
+    "ginga": {
+     "quadros": [
+      7,
+      13
+     ],
+     "loop": false,
+     "intervalo_s": [
+      8,
+      20
+     ]
+    }
+   }
+  },
+  "blink": {
+   "titulo": "piscar",
+   "loop": false,
+   "quadros": [
+    {
+     "arquivo": "frames/blink_00.png",
+     "escuro": "frames/escuro/blink_00.png",
+     "ms": 500
+    },
+    {
+     "arquivo": "frames/blink_01.png",
+     "escuro": "frames/escuro/blink_01.png",
+     "ms": 50
+    },
+    {
+     "arquivo": "frames/blink_02.png",
+     "escuro": "frames/escuro/blink_02.png",
+     "ms": 80
+    },
+    {
+     "arquivo": "frames/blink_03.png",
+     "escuro": "frames/escuro/blink_03.png",
+     "ms": 60
+    },
+    {
+     "arquivo": "frames/blink_04.png",
+     "escuro": "frames/escuro/blink_04.png",
+     "ms": 500
+    }
+   ]
+  },
+  "chirp": {
+   "titulo": "piar",
+   "loop": false,
+   "quadros": [
+    {
+     "arquivo": "frames/chirp_00.png",
+     "escuro": "frames/escuro/chirp_00.png",
+     "ms": 260
+    },
+    {
+     "arquivo": "frames/chirp_01.png",
+     "escuro": "frames/escuro/chirp_01.png",
+     "ms": 120
+    },
+    {
+     "arquivo": "frames/chirp_02.png",
+     "escuro": "frames/escuro/chirp_02.png",
+     "ms": 130
+    },
+    {
+     "arquivo": "frames/chirp_03.png",
+     "escuro": "frames/escuro/chirp_03.png",
+     "ms": 110
+    },
+    {
+     "arquivo": "frames/chirp_04.png",
+     "escuro": "frames/escuro/chirp_04.png",
+     "ms": 130
+    },
+    {
+     "arquivo": "frames/chirp_05.png",
+     "escuro": "frames/escuro/chirp_05.png",
+     "ms": 110
+    },
+    {
+     "arquivo": "frames/chirp_06.png",
+     "escuro": "frames/escuro/chirp_06.png",
+     "ms": 160
+    },
+    {
+     "arquivo": "frames/chirp_07.png",
+     "escuro": "frames/escuro/chirp_07.png",
+     "ms": 320
+    }
+   ]
+  },
+  "peck": {
+   "titulo": "bicar / comer",
+   "loop": false,
+   "quadros": [
+    {
+     "arquivo": "frames/peck_00.png",
+     "escuro": "frames/escuro/peck_00.png",
+     "ms": 240
+    },
+    {
+     "arquivo": "frames/peck_01.png",
+     "escuro": "frames/escuro/peck_01.png",
+     "ms": 200
+    },
+    {
+     "arquivo": "frames/peck_02.png",
+     "escuro": "frames/escuro/peck_02.png",
+     "ms": 140
+    },
+    {
+     "arquivo": "frames/peck_03.png",
+     "escuro": "frames/escuro/peck_03.png",
+     "ms": 70
+    },
+    {
+     "arquivo": "frames/peck_04.png",
+     "escuro": "frames/escuro/peck_04.png",
+     "ms": 110
+    },
+    {
+     "arquivo": "frames/peck_05.png",
+     "escuro": "frames/escuro/peck_05.png",
+     "ms": 90
+    },
+    {
+     "arquivo": "frames/peck_06.png",
+     "escuro": "frames/escuro/peck_06.png",
+     "ms": 100
+    },
+    {
+     "arquivo": "frames/peck_07.png",
+     "escuro": "frames/escuro/peck_07.png",
+     "ms": 130
+    },
+    {
+     "arquivo": "frames/peck_08.png",
+     "escuro": "frames/escuro/peck_08.png",
+     "ms": 110
+    },
+    {
+     "arquivo": "frames/peck_09.png",
+     "escuro": "frames/escuro/peck_09.png",
+     "ms": 130
+    },
+    {
+     "arquivo": "frames/peck_10.png",
+     "escuro": "frames/escuro/peck_10.png",
+     "ms": 110
+    },
+    {
+     "arquivo": "frames/peck_11.png",
+     "escuro": "frames/escuro/peck_11.png",
+     "ms": 300
+    }
+   ]
+  },
+  "hop": {
+   "titulo": "pulo / comemorar",
+   "loop": false,
+   "quadros": [
+    {
+     "arquivo": "frames/hop_00.png",
+     "escuro": "frames/escuro/hop_00.png",
+     "ms": 220
+    },
+    {
+     "arquivo": "frames/hop_01.png",
+     "escuro": "frames/escuro/hop_01.png",
+     "ms": 120
+    },
+    {
+     "arquivo": "frames/hop_02.png",
+     "escuro": "frames/escuro/hop_02.png",
+     "ms": 70
+    },
+    {
+     "arquivo": "frames/hop_03.png",
+     "escuro": "frames/escuro/hop_03.png",
+     "ms": 90
+    },
+    {
+     "arquivo": "frames/hop_04.png",
+     "escuro": "frames/escuro/hop_04.png",
+     "ms": 120
+    },
+    {
+     "arquivo": "frames/hop_05.png",
+     "escuro": "frames/escuro/hop_05.png",
+     "ms": 110
+    },
+    {
+     "arquivo": "frames/hop_06.png",
+     "escuro": "frames/escuro/hop_06.png",
+     "ms": 80
+    },
+    {
+     "arquivo": "frames/hop_07.png",
+     "escuro": "frames/escuro/hop_07.png",
+     "ms": 100
+    },
+    {
+     "arquivo": "frames/hop_08.png",
+     "escuro": "frames/escuro/hop_08.png",
+     "ms": 100
+    },
+    {
+     "arquivo": "frames/hop_09.png",
+     "escuro": "frames/escuro/hop_09.png",
+     "ms": 100
+    },
+    {
+     "arquivo": "frames/hop_10.png",
+     "escuro": "frames/escuro/hop_10.png",
+     "ms": 160
+    },
+    {
+     "arquivo": "frames/hop_11.png",
+     "escuro": "frames/escuro/hop_11.png",
+     "ms": 300
+    }
+   ]
+  },
+  "fly": {
+   "titulo": "voar",
+   "loop": true,
+   "quadros": [
+    {
+     "arquivo": "frames/fly_00.png",
+     "escuro": "frames/escuro/fly_00.png",
+     "ms": 90
+    },
+    {
+     "arquivo": "frames/fly_01.png",
+     "escuro": "frames/escuro/fly_01.png",
+     "ms": 80
+    },
+    {
+     "arquivo": "frames/fly_02.png",
+     "escuro": "frames/escuro/fly_02.png",
+     "ms": 90
+    },
+    {
+     "arquivo": "frames/fly_03.png",
+     "escuro": "frames/escuro/fly_03.png",
+     "ms": 80
+    }
+   ]
+  },
+  "scared": {
+   "titulo": "susto",
+   "loop": false,
+   "quadros": [
+    {
+     "arquivo": "frames/scared_00.png",
+     "escuro": "frames/escuro/scared_00.png",
+     "ms": 240
+    },
+    {
+     "arquivo": "frames/scared_01.png",
+     "escuro": "frames/escuro/scared_01.png",
+     "ms": 80
+    },
+    {
+     "arquivo": "frames/scared_02.png",
+     "escuro": "frames/escuro/scared_02.png",
+     "ms": 90
+    },
+    {
+     "arquivo": "frames/scared_03.png",
+     "escuro": "frames/escuro/scared_03.png",
+     "ms": 110
+    },
+    {
+     "arquivo": "frames/scared_04.png",
+     "escuro": "frames/escuro/scared_04.png",
+     "ms": 100
+    },
+    {
+     "arquivo": "frames/scared_05.png",
+     "escuro": "frames/escuro/scared_05.png",
+     "ms": 70
+    },
+    {
+     "arquivo": "frames/scared_06.png",
+     "escuro": "frames/escuro/scared_06.png",
+     "ms": 70
+    },
+    {
+     "arquivo": "frames/scared_07.png",
+     "escuro": "frames/escuro/scared_07.png",
+     "ms": 70
+    },
+    {
+     "arquivo": "frames/scared_08.png",
+     "escuro": "frames/escuro/scared_08.png",
+     "ms": 70
+    },
+    {
+     "arquivo": "frames/scared_09.png",
+     "escuro": "frames/escuro/scared_09.png",
+     "ms": 240
+    },
+    {
+     "arquivo": "frames/scared_10.png",
+     "escuro": "frames/escuro/scared_10.png",
+     "ms": 320
+    },
+    {
+     "arquivo": "frames/scared_11.png",
+     "escuro": "frames/escuro/scared_11.png",
+     "ms": 300
+    }
+   ]
+  },
+  "sleep": {
+   "titulo": "dormir",
+   "loop": true,
+   "quadros": [
+    {
+     "arquivo": "frames/sleep_00.png",
+     "escuro": "frames/escuro/sleep_00.png",
+     "ms": 520
+    },
+    {
+     "arquivo": "frames/sleep_01.png",
+     "escuro": "frames/escuro/sleep_01.png",
+     "ms": 520
+    },
+    {
+     "arquivo": "frames/sleep_02.png",
+     "escuro": "frames/escuro/sleep_02.png",
+     "ms": 520
+    },
+    {
+     "arquivo": "frames/sleep_03.png",
+     "escuro": "frames/escuro/sleep_03.png",
+     "ms": 520
+    },
+    {
+     "arquivo": "frames/sleep_04.png",
+     "escuro": "frames/escuro/sleep_04.png",
+     "ms": 520
+    }
+   ]
+  },
+  "attention": {
+   "titulo": "chamar atenção",
+   "loop": true,
+   "quadros": [
+    {
+     "arquivo": "frames/attention_00.png",
+     "escuro": "frames/escuro/attention_00.png",
+     "ms": 120
+    },
+    {
+     "arquivo": "frames/attention_01.png",
+     "escuro": "frames/escuro/attention_01.png",
+     "ms": 80
+    },
+    {
+     "arquivo": "frames/attention_02.png",
+     "escuro": "frames/escuro/attention_02.png",
+     "ms": 110
+    },
+    {
+     "arquivo": "frames/attention_03.png",
+     "escuro": "frames/escuro/attention_03.png",
+     "ms": 110
+    },
+    {
+     "arquivo": "frames/attention_04.png",
+     "escuro": "frames/escuro/attention_04.png",
+     "ms": 80
+    },
+    {
+     "arquivo": "frames/attention_05.png",
+     "escuro": "frames/escuro/attention_05.png",
+     "ms": 120
+    },
+    {
+     "arquivo": "frames/attention_06.png",
+     "escuro": "frames/escuro/attention_06.png",
+     "ms": 110
+    },
+    {
+     "arquivo": "frames/attention_07.png",
+     "escuro": "frames/escuro/attention_07.png",
+     "ms": 110
+    },
+    {
+     "arquivo": "frames/attention_08.png",
+     "escuro": "frames/escuro/attention_08.png",
+     "ms": 110
+    },
+    {
+     "arquivo": "frames/attention_09.png",
+     "escuro": "frames/escuro/attention_09.png",
+     "ms": 160
+    }
+   ]
+  },
+  "work": {
+   "titulo": "trabalhando",
+   "loop": true,
+   "quadros": [
+    {
+     "arquivo": "frames/work_00.png",
+     "escuro": "frames/escuro/work_00.png",
+     "ms": 120
+    },
+    {
+     "arquivo": "frames/work_01.png",
+     "escuro": "frames/escuro/work_01.png",
+     "ms": 80
+    },
+    {
+     "arquivo": "frames/work_02.png",
+     "escuro": "frames/escuro/work_02.png",
+     "ms": 80
+    },
+    {
+     "arquivo": "frames/work_03.png",
+     "escuro": "frames/escuro/work_03.png",
+     "ms": 80
+    },
+    {
+     "arquivo": "frames/work_04.png",
+     "escuro": "frames/escuro/work_04.png",
+     "ms": 90
+    },
+    {
+     "arquivo": "frames/work_05.png",
+     "escuro": "frames/escuro/work_05.png",
+     "ms": 300
+    },
+    {
+     "arquivo": "frames/work_06.png",
+     "escuro": "frames/escuro/work_06.png",
+     "ms": 160
+    }
+   ]
+  },
+  "nod": {
+   "titulo": "aceno (tirada de chapéu)",
+   "loop": false,
+   "quadros": [
+    {
+     "arquivo": "frames/nod_00.png",
+     "escuro": "frames/escuro/nod_00.png",
+     "ms": 100
+    },
+    {
+     "arquivo": "frames/nod_01.png",
+     "escuro": "frames/escuro/nod_01.png",
+     "ms": 180
+    },
+    {
+     "arquivo": "frames/nod_02.png",
+     "escuro": "frames/escuro/nod_02.png",
+     "ms": 110
+    },
+    {
+     "arquivo": "frames/nod_03.png",
+     "escuro": "frames/escuro/nod_03.png",
+     "ms": 120
+    },
+    {
+     "arquivo": "frames/nod_04.png",
+     "escuro": "frames/escuro/nod_04.png",
+     "ms": 300
+    }
+   ]
+  },
+  "wave": {
+   "titulo": "tchau (asa)",
+   "loop": false,
+   "quadros": [
+    {
+     "arquivo": "frames/wave_00.png",
+     "escuro": "frames/escuro/wave_00.png",
+     "ms": 100
+    },
+    {
+     "arquivo": "frames/wave_01.png",
+     "escuro": "frames/escuro/wave_01.png",
+     "ms": 120
+    },
+    {
+     "arquivo": "frames/wave_02.png",
+     "escuro": "frames/escuro/wave_02.png",
+     "ms": 100
+    },
+    {
+     "arquivo": "frames/wave_03.png",
+     "escuro": "frames/escuro/wave_03.png",
+     "ms": 120
+    },
+    {
+     "arquivo": "frames/wave_04.png",
+     "escuro": "frames/escuro/wave_04.png",
+     "ms": 120
+    },
+    {
+     "arquivo": "frames/wave_05.png",
+     "escuro": "frames/escuro/wave_05.png",
+     "ms": 300
+    }
+   ]
+  },
+  "yawn": {
+   "titulo": "bocejo",
+   "loop": false,
+   "quadros": [
+    {
+     "arquivo": "frames/yawn_00.png",
+     "escuro": "frames/escuro/yawn_00.png",
+     "ms": 160
+    },
+    {
+     "arquivo": "frames/yawn_01.png",
+     "escuro": "frames/escuro/yawn_01.png",
+     "ms": 120
+    },
+    {
+     "arquivo": "frames/yawn_02.png",
+     "escuro": "frames/escuro/yawn_02.png",
+     "ms": 520
+    },
+    {
+     "arquivo": "frames/yawn_03.png",
+     "escuro": "frames/escuro/yawn_03.png",
+     "ms": 160
+    },
+    {
+     "arquivo": "frames/yawn_04.png",
+     "escuro": "frames/escuro/yawn_04.png",
+     "ms": 260
+    },
+    {
+     "arquivo": "frames/yawn_05.png",
+     "escuro": "frames/escuro/yawn_05.png",
+     "ms": 240
+    },
+    {
+     "arquivo": "frames/yawn_06.png",
+     "escuro": "frames/escuro/yawn_06.png",
+     "ms": 300
+    }
+   ]
+  },
+  "wake": {
+   "titulo": "acordar (espreguiça)",
+   "loop": false,
+   "quadros": [
+    {
+     "arquivo": "frames/wake_00.png",
+     "escuro": "frames/escuro/wake_00.png",
+     "ms": 200
+    },
+    {
+     "arquivo": "frames/wake_01.png",
+     "escuro": "frames/escuro/wake_01.png",
+     "ms": 100
+    },
+    {
+     "arquivo": "frames/wake_02.png",
+     "escuro": "frames/escuro/wake_02.png",
+     "ms": 360
+    },
+    {
+     "arquivo": "frames/wake_03.png",
+     "escuro": "frames/escuro/wake_03.png",
+     "ms": 120
+    },
+    {
+     "arquivo": "frames/wake_04.png",
+     "escuro": "frames/escuro/wake_04.png",
+     "ms": 120
+    },
+    {
+     "arquivo": "frames/wake_05.png",
+     "escuro": "frames/escuro/wake_05.png",
+     "ms": 300
+    }
+   ]
+  },
+  "work_in": {
+   "titulo": "entrar no trabalho",
+   "loop": false,
+   "quadros": [
+    {
+     "arquivo": "frames/work_in_00.png",
+     "escuro": "frames/escuro/work_in_00.png",
+     "ms": 120
+    },
+    {
+     "arquivo": "frames/work_in_01.png",
+     "escuro": "frames/escuro/work_in_01.png",
+     "ms": 100
+    }
+   ]
+  },
+  "work_out": {
+   "titulo": "sair do trabalho",
+   "loop": false,
+   "quadros": [
+    {
+     "arquivo": "frames/work_out_00.png",
+     "escuro": "frames/escuro/work_out_00.png",
+     "ms": 120
+    },
+    {
+     "arquivo": "frames/work_out_01.png",
+     "escuro": "frames/escuro/work_out_01.png",
+     "ms": 160
+    }
+   ]
+  },
+  "sleep_in": {
+   "titulo": "adormecer",
+   "loop": false,
+   "quadros": [
+    {
+     "arquivo": "frames/sleep_in_00.png",
+     "escuro": "frames/escuro/sleep_in_00.png",
+     "ms": 240
+    },
+    {
+     "arquivo": "frames/sleep_in_01.png",
+     "escuro": "frames/escuro/sleep_in_01.png",
+     "ms": 240
+    },
+    {
+     "arquivo": "frames/sleep_in_02.png",
+     "escuro": "frames/escuro/sleep_in_02.png",
+     "ms": 260
+    }
+   ]
+  },
+  "sleep_out": {
+   "titulo": "acordar do sono",
+   "loop": false,
+   "quadros": [
+    {
+     "arquivo": "frames/sleep_out_00.png",
+     "escuro": "frames/escuro/sleep_out_00.png",
+     "ms": 200
+    },
+    {
+     "arquivo": "frames/sleep_out_01.png",
+     "escuro": "frames/escuro/sleep_out_01.png",
+     "ms": 120
+    },
+    {
+     "arquivo": "frames/sleep_out_02.png",
+     "escuro": "frames/escuro/sleep_out_02.png",
+     "ms": 160
+    }
+   ]
+  },
+  "attention_in": {
+   "titulo": "entrar na chamada",
+   "loop": false,
+   "quadros": [
+    {
+     "arquivo": "frames/attention_in_00.png",
+     "escuro": "frames/escuro/attention_in_00.png",
+     "ms": 120
+    }
+   ]
+  },
+  "attention_out": {
+   "titulo": "sair da chamada",
+   "loop": false,
+   "quadros": [
+    {
+     "arquivo": "frames/attention_out_00.png",
+     "escuro": "frames/escuro/attention_out_00.png",
+     "ms": 140
+    },
+    {
+     "arquivo": "frames/attention_out_01.png",
+     "escuro": "frames/escuro/attention_out_01.png",
+     "ms": 160
+    }
+   ]
+  },
+  "takeoff": {
+   "titulo": "decolar",
+   "loop": false,
+   "quadros": [
+    {
+     "arquivo": "frames/takeoff_00.png",
+     "escuro": "frames/escuro/takeoff_00.png",
+     "ms": 120
+    },
+    {
+     "arquivo": "frames/takeoff_01.png",
+     "escuro": "frames/escuro/takeoff_01.png",
+     "ms": 80
+    },
+    {
+     "arquivo": "frames/takeoff_02.png",
+     "escuro": "frames/escuro/takeoff_02.png",
+     "ms": 80
+    }
+   ]
+  },
+  "landing": {
+   "titulo": "pousar",
+   "loop": false,
+   "quadros": [
+    {
+     "arquivo": "frames/landing_00.png",
+     "escuro": "frames/escuro/landing_00.png",
+     "ms": 90
+    },
+    {
+     "arquivo": "frames/landing_01.png",
+     "escuro": "frames/escuro/landing_01.png",
+     "ms": 100
+    },
+    {
+     "arquivo": "frames/landing_02.png",
+     "escuro": "frames/escuro/landing_02.png",
+     "ms": 100
+    },
+    {
+     "arquivo": "frames/landing_03.png",
+     "escuro": "frames/escuro/landing_03.png",
+     "ms": 120
+    },
+    {
+     "arquivo": "frames/landing_04.png",
+     "escuro": "frames/escuro/landing_04.png",
+     "ms": 300
+    }
+   ]
+  }
+ }
+}
