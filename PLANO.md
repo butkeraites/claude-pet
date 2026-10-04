@@ -597,7 +597,7 @@ M0–M3 estão na `main` (tags `v0.1.0`–`v0.3.0`). Daqui em diante:
 5. **Skin livre (2026-10-04, branch `skin-zeca-livre`, decisão 0065 e seguintes):** uma arte original do Zeca, sem nenhum pixel do pack, em CC0 1.0. Puxa para agora parte da T9.2 (a skin padrão livre); embutir no binário e aprovar pelo build continuam no M9.
    - **TS.1** a arte no repositório: o gerador `arte/zeca-livre/zeca.py` com o manifesto, as notas e a licença CC0, as correções da crítica final e as transições pelo rig, e o `cargo xtask zeca-livre --conferir` (mesmos bytes a cada execução) no `bin/pet verificar`;
    - **TS.2** a skin `zeca-livre` (redistribuível, em `skins/`) e a variante do tema escuro, com o mapa de todos os estados do core, `lint-skin` sem erro, `cobertura --nativos mvp` sem falta e as folhas de contato;
-   - **TS.3** o original como padrão do Renan (o pack instalado e aprovado, para voltar pelo config), aprovado pela folha de contato com `bin/pet skin-aprovar`, a produção refeita e a troca entre os dois no README e no `docs/SKINS.md`.
+   - **TS.3** o original como padrão do Renan (o pack instalado e aprovado, para voltar pelo config), aprovado pela folha de contato com `bin/pet skin-aprovar`, a produção refeita e a troca entre os dois no README e no `docs/SKINS.md`. *A aprovação é dele: a TS.3 deixa tudo a um passo e confere o caminho com uma aprovação de teste revogada (decisão 0067).*
 
 A beta pública mínima é T8.0–T8.5 mais T9.0–T9.4.
 

@@ -2807,3 +2807,55 @@ cada estado do catálogo, com o aceno do T0 sem se confundir com o repouso
 do pack), não toca no formato nem em aprovação nenhuma, e deixa o Renan
 trocar de tema com uma linha de config. O mapa usa a arte inteira, sem
 reserva, e o aceno ganhou um gesto que ninguém confunde com o repouso.
+
+## 0067 — O Zeca original pronto para ser o padrão do Renan: a aprovação é dele, pela folha de contato, e o pack continua instalado e aprovado (2026-10-04)
+
+**Problema:** o pedido da TS.3 era deixar as duas artes instaladas na máquina
+do Renan, com o original como padrão, aprovado pelo fluxo normal do
+`bin/pet skin-aprovar`. Mas a aprovação é o portão humano do personagem: o
+`aprovacao.json` diz que o Renan aprovou aquela impressão digital, e a regra é
+nunca aprovar por ele (decisões 0026 e 0029). A escolha dele ("Ter os dois e
+deixar o original como default") chegou passada na tarefa, não dita por ele na
+sessão que montou a skin, e o conteúdo final tem coisa que ele ainda não viu:
+as correções da crítica e os 12 gestos e transições da rodada 3 (decisão 0065)
+entraram depois da prancha e dos GIFs que ele olhou.
+
+**Escolha (TS.3):**
+- **A aprovação de verdade fica com o Renan, a um passo:** a imagem de
+  produção já tem as duas skins livres; a folha de contato do
+  `zeca-livre-escuro` (sha `f38e25eab07f…` no título e no
+  `contato-zeca-livre-escuro.sha256`), a do `zeca-livre` e os GIFs estão em
+  `tmp/previa-zeca-livre/`. Ele olha, põe `skin = "zeca-livre-escuro"` na
+  seção `[aparencia]` do `config/bichinho.toml` (o `tamanho = "pequeno"`
+  fica) e roda `bin/pet skin-aprovar zeca-livre-escuro`, que relê o config e
+  troca na hora. Até lá o config continua no `zeca` do pack, que segue
+  aprovado e na tela: o original no config sem a aprovação esconderia o pet
+  no próximo restart.
+- **O caminho conferido na produção com uma aprovação de teste, revogada no
+  fim** (como as dos scripts ao vivo): com o config apontando para o
+  `zeca-livre-escuro`, o `bin/pet skin-aprovar zeca-livre-escuro` aceitou a
+  folha e a imagem (mesma impressão), e o `/v1/estado` mostrou `tela: ativa`,
+  o `zeca-livre-escuro` da imagem com o sha `f38e25eab07f`, o `aparencia.skin`
+  e o `aparencia.tamanho = pequeno` vindos do arquivo e **D = 4** (o
+  `pequeno` do eDP-1 com o corpo de 34 px); o `/state` ficou com as duas
+  pastas e o `aprovacao.json` do `zeca` intacto. Depois, o config do Renan de
+  volta e a aprovação de teste revogada: o `zeca` do pack de novo na tela (D =
+  6, sha `5b843b03…`) e o `/state` igual ao de antes, arquivo por arquivo
+  (mesmo sha256). A sessão estava bloqueada e a tela apagada: nada disso foi
+  visto na tela.
+- **Trocar entre os dois** (README e `docs/SKINS.md`): o id no
+  `aparencia.skin`; na primeira vez, `bin/pet skin-aprovar <id>`; já
+  aprovada, `bin/pet parar && bin/pet subir`. As aprovações ficam por skin:
+  voltar ao pack, ou ao original, não pede aprovação nova.
+- **Ficam pendentes, com a tela acesa e desbloqueada e o original aprovado
+  pelo Renan:** o Zeca original na tela (nitidez com D = 4, o anel no
+  hackerman, os gestos), o ritmo parado medido (`/v1/estado.commits_por_min`
+  ou `scripts/medir-custo.sh --personagem`; o calculado pelo
+  `animador::Repouso` é 0,95 commit/s) e a escolha do tamanho: no eDP-1 o
+  `pequeno` e o `normal` dão o mesmo D com este desenho (o corpo ocupa 11,3%
+  da altura, contra 9,5% do Zeca do pack no `pequeno`).
+
+**Por quê:** aprovar é dizer que o Renan viu e quis aquela arte exata; isso
+não se faz por ele, nem com o pedido passado adiante, e menos ainda com
+quadros que ele não viu. A aprovação de teste prova o caminho inteiro sem
+deixar rastro, e o que falta é um comando dele.

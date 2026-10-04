@@ -15,14 +15,14 @@ no terminal:
 Pode ser arrastado com o mouse para qualquer lugar e sempre aparece no
 monitor que está em foco. Sem som.
 
-> **Estado:** em construção. Na `main`: o overlay nítido no Hyprland (M1),
-> o Zeca com aprovação do personagem (M2), hooks → reação (M3) e a costura
-> para Windows e macOS com o hook nativo (parte do M8). Na branch
-> `m4-arrastar-seguir`: arrastar, seguir o monitor ativo e o clique que leva
-> ao terminal (M4), com a conferência na tela ainda pendente. O destino é um
-> lançamento open source para Linux, macOS e Windows. O repositório de
-> desenvolvimento ainda se chama `claude-pet`. Veja `PLANO.md` para os
-> marcos e `PROGRESS.md` para o andamento.
+> **Estado:** em construção. Na `main` (`v0.4.0`): o overlay nítido no
+> Hyprland (M1), o Zeca com aprovação do personagem (M2), hooks → reação
+> (M3), a costura para Windows e macOS com o hook nativo (parte do M8) e
+> arrastar, seguir o monitor ativo e o clique que leva ao terminal (M4). Na
+> branch `skin-zeca-livre`: o Zeca original, arte livre em CC0, como skin
+> (TS.1–TS.3). O destino é um lançamento open source para Linux, macOS e
+> Windows. O repositório de desenvolvimento ainda se chama `claude-pet`.
+> Veja `PLANO.md` para os marcos e `PROGRESS.md` para o andamento.
 
 ## Requisitos
 
@@ -70,22 +70,48 @@ próxima aprovação, que relê o config.
 
 ### Arte
 
-O Zeca é feito a partir do pack *Cute Parrots!* da
-[exclusiveOlive](https://exclusiveolive.itch.io/cute-parrots-pixel-art-asset-pack).
-A licença do pack não permite redistribuir os arquivos, então **eles não
-estão neste repositório**: compre/baixe o pack e rode
+O Zeca tem duas artes, e as duas podem ficar instaladas:
+
+- **O Zeca original:** arte original feita com o Claude para o projeto
+  bichinho, em domínio público (**CC0 1.0**, `arte/zeca-livre/LICENSE`).
+  Mora no repositório (o gerador em `arte/zeca-livre/`, as skins em
+  `skins/`), em duas skins: `zeca-livre-escuro`, com um anel de 1 px por
+  fora, para tema escuro (sem ele o contorno some no fundo escuro), e
+  `zeca-livre`, para tema claro. Não precisa de pack nenhum.
+- **O Zeca do pack:** feito a partir do pack *Cute Parrots!* da
+  [exclusiveOlive](https://exclusiveolive.itch.io/cute-parrots-pixel-art-asset-pack),
+  com chapéu, gravata e encaixe deste repositório (`arte/zeca/`). A licença
+  do pack não permite redistribuir os arquivos, então **eles não estão neste
+  repositório**: compre/baixe o pack e rode `bin/pet skin-instalar
+  <arquivo.zip>` (gera `zeca` e `zeca-contorno`, com contorno creme, e as
+  prévias em `tmp/previa-zeca-m2/`).
+
+Quem aparece é o `aparencia.skin` do `config/bichinho.toml` (sem a chave, o
+`zeca`), e cada skin só aparece depois de você aprovar a folha de contato
+dela: a aprovação vale para a skin exata que você viu, e sem ela o Zeca fica
+escondido. Para o Zeca original:
 
 ```sh
-bin/pet skin-instalar <arquivo.zip>   # gera o Zeca e as prévias em tmp/previa-zeca-m2/
-bin/pet subir                         # a skin entra na imagem local
-bin/pet skin-aprovar zeca             # depois de ver a folha de contato
+bin/pet skin-livre                      # refaz as duas skins e põe as prévias em tmp/previa-zeca-livre/
+bin/pet subir                           # as skins entram na imagem local
+# olhe tmp/previa-zeca-livre/contato-zeca-livre-escuro.png e os GIFs, e então,
+# em config/bichinho.toml, na seção [aparencia]: skin = "zeca-livre-escuro"
+bin/pet skin-aprovar zeca-livre-escuro  # relê o config e troca na hora
 ```
 
-Sem aprovação o Zeca fica escondido, e a aprovação só vale para a skin da
-folha de contato que você viu. Para o Zeca com contorno creme, ponha
-`aparencia.skin = "zeca-contorno"` em `config/bichinho.toml` e aprove
-`zeca-contorno`. O chapéu, a gravata e o encaixe são arte deste repositório
-(`arte/zeca/`); detalhes em `docs/SKINS.md`.
+**Trocar de Zeca** (as aprovações ficam guardadas por skin; voltar a uma já
+aprovada não pede aprovação nova):
+
+| Para | Em `config/bichinho.toml` | Depois |
+|---|---|---|
+| o original, tema escuro | `skin = "zeca-livre-escuro"` | `bin/pet skin-aprovar zeca-livre-escuro` na primeira vez; já aprovada, `bin/pet parar && bin/pet subir` |
+| o original, tema claro | `skin = "zeca-livre"` | `bin/pet skin-aprovar zeca-livre` na primeira vez; já aprovada, `bin/pet parar && bin/pet subir` |
+| o do pack | `skin = "zeca"` (ou tire a linha) | `bin/pet skin-aprovar zeca` na primeira vez; já aprovado, `bin/pet parar && bin/pet subir` |
+
+O `bin/pet subir` sozinho não recria o container quando só o config muda: por
+isso o `parar` antes. Com o Zeca original, o `pequeno` e o `normal` dão o
+mesmo tamanho no eDP-1 (o desenho tem mais pixels; o D é sempre inteiro).
+Detalhes, estados e o gerador em `docs/SKINS.md`.
 
 ### Hooks do Claude Code
 
@@ -172,9 +198,10 @@ sessões de terminal contam (`sessoes.origens = ["cli"]` em
 `config/exemplo.toml`): `claude -p`, SDK e IDE ficam de fora.
 
 Com o Zeca aprovado, uma resposta sem trabalho (sem editar arquivo, rodar
-comando nem chamar subagente) ganha o aceno, ele levantando e sentando; uma
-resposta com trabalho ganha o pulinho, um pio; e fechar o Claude, um pio de
-tchau. Sem personagem aprovado, as reações ficam só em `bin/pet estado`
+comando nem chamar subagente) ganha o aceno; uma resposta com trabalho ganha
+o pulinho; e fechar o Claude, o tchau. No Zeca original são a tirada de
+chapéu, o pulo comemorando e o tchau com a asa; no do pack, levantar e
+sentar, um pio e um pio de tchau. Sem personagem aprovado, as reações ficam só em `bin/pet estado`
 (`ultima_reacao` e `turnos`).
 
 ### Arrastar, seguir e clicar

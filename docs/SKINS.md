@@ -274,6 +274,28 @@ A skin `_teste` só aparece com `PET_DEBUG=1`.
 - A aprovação é por id. Para usar `zeca-contorno`: ponha `aparencia.skin =
   "zeca-contorno"` em `config/bichinho.toml` e rode `bin/pet skin-aprovar
   zeca-contorno` — o pet relê o config a cada aprovação, sem reiniciar.
+
+### Trocar de Zeca
+
+As aprovações ficam guardadas por skin em `/state/skins/<id>/`: o Zeca
+original e o do pack podem estar aprovados ao mesmo tempo, e quem aparece é
+o `aparencia.skin`.
+
+1. Ponha o id em `config/bichinho.toml`, na seção `[aparencia]`: `skin =
+   "zeca-livre-escuro"` (o original, tema escuro), `"zeca-livre"` (o
+   original, tema claro), `"zeca"` ou `"zeca-contorno"` (o do pack). Sem a
+   chave, vale o `zeca`.
+2. Se a skin **ainda não foi aprovada:** olhe a folha de contato dela
+   (`tmp/previa-zeca-livre/` ou `tmp/previa-zeca-m2/`) e rode `bin/pet
+   skin-aprovar <id>`, que relê o config e troca na hora.
+3. Se ela **já está aprovada:** `bin/pet parar && bin/pet subir` (o pet lê o
+   config ao subir; o `subir` sozinho não recria o container quando só o
+   config muda). Aprovar de novo também relê o config, mas regrava a
+   aprovação com a hora nova.
+
+Sem aprovação da skin configurada, o pet fica escondido (`tela:
+sem_personagem`), e o `bin/pet skin-aprovar` de outro id avisa quando o
+config pede outra skin.
 - Para conferir o personagem com as rotas de debug (nitidez, foto
   mascarada): `scripts/verificar-ao-vivo.sh --personagem` (aprova só para o
   teste se faltar aprovação e revoga no fim) ou `PET_DEBUG_PERSONAGEM=1` na
