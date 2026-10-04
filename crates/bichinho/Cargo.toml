@@ -27,6 +27,8 @@ pet-macos.workspace = true
 
 [dev-dependencies]
 sha2.workspace = true
+# A janela de mentira do Motor, para testar o núcleo sem compositor.
+pet-core = { workspace = true, features = ["teste"] }
 
 [lints]
 workspace = true

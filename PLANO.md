@@ -561,8 +561,8 @@ claude-pet/
 
 **`verificar` roda:**
 - `cargo fmt --check`;
-- `pet-core` sem crate de Wayland, de laço de eventos ou de sistema;
-- o socket de comandos do Hyprland e o `hyprctl` fora do código de produção de todos os crates;
+- `pet-core` sem crate de Wayland, de laço de eventos ou de sistema, em todos os alvos (`cargo tree --target all`; o `libc` só pela detecção de CPU do `sha2`, decisão 0044);
+- o socket de comandos do Hyprland e o `hyprctl` fora do código de produção de todos os crates (só o item marcado com `#[cfg(test)]` fica de fora), com uma prova da própria guarda a cada rodada;
 - nenhum nome de personagem de terceiros nos arquivos nem nas mensagens de commit da branch (decisões 0035 e 0043);
 - `cargo clippy --all-targets -- -D warnings`;
 - `cargo test`;
@@ -823,6 +823,7 @@ Acrescentado em 2026-10-03 (decisão 0038), a partir de `docs/pesquisa/09-multip
 **Tarefas e verificação:**
 - **T8.0 Costura de plataforma, sem mudar o comportamento (antes do M4).** `pet_core::motor` (cérebro, pet e palco, mostrar/esconder, estresse, painel, prazos em ms) e `pet_core::plataforma` (traits `Overlay` e `Desktop` com capacidades; `Monitor`, `EventoPonteiro`, `Alca`; a `Caixa`, canal neutro com despertador do SO, no lugar do canal do calloop); o `wl/` e a descoberta vão para `crates/pet-wayland`, com o Hyprland como adaptador; `pet-windows` e `pet-macos` vazios, compilando.
   - *Verificação:* `bin/pet verificar` verde, com testes novos do Motor em relógio falso; `cargo check` para `x86_64-pc-windows-msvc` e `aarch64-apple-darwin`; com a tela acesa e desbloqueada, `scripts/verificar-ao-vivo.sh --personagem` e `scripts/medir-custo.sh` iguais ao M1 dentro do ruído.
+  - *Contrato de coordenadas* (revisão, decisão 0044): tudo o que o Motor troca com a janela está no **palco** (pixels do dispositivo do monitor, origem no canto dele): a cena, a célula, a área de toque e o ponteiro. A camada do Wayland converte o toque para coordenadas lógicas; uma janela pequena (T8.4–T8.6) subtrai a própria origem. O `Monitor` traz a descrição, a origem no desktop e a área útil (sem barra de tarefas, Dock ou painel), e a posição padrão do pet é o canto da área útil.
 - **T8.1 Hook nativo e o nome bichinho (antes do M4).** `bichinho avisar <Evento>` no lugar do `avisar.sh` (a mesma lista branca, com os validadores do `pet_core::evento`, hash do caminho editado, DND do Omarchy, `CLAUDE_CODE_ENTRYPOINT`, `PET_TESTE`, POST no 127.0.0.1 com prazo curto, sem proxy, calado, sempre 0); `hooks.json` em exec form; binário no host por `bin/pet instalar-host`; o `avisar.sh` fica de reserva até a troca. Binário, camada, compose e imagem passam a se chamar `bichinho`, com o volume da aprovação preservado.
   - *Verificação:* os canários portados para testes do subcomando (reprovam uma versão vazando de propósito); `bin/pet testar` e o gate interativo do M3 pelo hook novo; `claude -p` calado com o pet parado; aprovação do Zeca intacta depois de refazer a produção. O token por usuário no loopback vem com a instalação nativa (T9.3): o `avisar.sh` instalado não o mandaria.
 - **T8.2 Spikes de risco e CI nos três SOs.** Código descartável que abre a skin `_teste` e mede o incerto: no Windows, janela *layered* com clique pelo alfa, todas as áreas de trabalho virtuais, DPI por monitor, firewall no loopback; no macOS, `NSPanel` não ativador em todos os Spaces e sobre tela cheia, clique pelo alfa (plano B: alternar `ignoresMouseEvents`), App Nap. CI com matriz `ubuntu-24.04`, `macos-15` e `windows-2025`.

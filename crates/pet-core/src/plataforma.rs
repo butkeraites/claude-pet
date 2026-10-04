@@ -15,6 +15,25 @@
 //! A [`Caixa`] é o canal das outras threads (a entrada HTTP) para o laço:
 //! um `mpsc` limitado mais um [`Despertador`] do sistema (no Linux, o `Ping`
 //! do calloop), no lugar do canal próprio do calloop.
+//!
+//! # Coordenadas: o palco
+//!
+//! Tudo o que o Motor troca com a janela está no **palco**: pixels do
+//! dispositivo do monitor onde o pet está, com a origem no canto superior
+//! esquerdo desse monitor (decisão 0044). A cena ([`Elemento`]), a célula do
+//! pet, a área de toque pedida em [`Overlay::desenhar`] e os eventos do
+//! ponteiro ([`EventoPonteiro`]) usam sempre o palco, seja qual for a janela.
+//! Cada sistema converte para a janela dele:
+//!
+//! - a camada do Wayland cobre o monitor inteiro ([`CapOverlay::tela_inteira`]):
+//!   o palco é o próprio buffer, e a área de toque vira coordenadas lógicas da
+//!   superfície (dividida pela escala, arredondada para fora);
+//! - uma janela pequena que anda (Win32, AppKit, X11; M8) subtrai a própria
+//!   origem no palco ao desenhar e soma ao contar o ponteiro, e só mostra o
+//!   pedaço da cena que cabe nela.
+//!
+//! A posição do monitor no desktop ([`Monitor::origem`]) fica com a janela,
+//! que precisa dela para se posicionar; o Motor não vê o desktop inteiro.
 
 use std::sync::{Arc, mpsc};
 
@@ -22,16 +41,27 @@ use crate::cena::Elemento;
 use crate::geometria::Ret;
 use crate::skin::Skin;
 
-/// Um monitor pronto para desenhar: nome, tamanho lógico e escala. É o que a
-/// janela diz ao Motor quando fica pronta ou muda de monitor ou de escala.
-#[derive(Debug, Clone, PartialEq)]
+/// Um monitor pronto para desenhar. É o que a janela diz ao Motor quando fica
+/// pronta ou muda de monitor ou de escala.
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Monitor {
     /// Nome que o sistema dá (`eDP-1`), se ele disser.
     pub nome: Option<String>,
-    /// Tamanho lógico da área de desenho (no Wayland, o do monitor).
+    /// Descrição que o sistema dá (fabricante e modelo), se ele disser: é por
+    /// ela que o M4 guarda a posição do pet em cada monitor.
+    pub descricao: Option<String>,
+    /// Tamanho lógico do monitor.
     pub logico: (u32, u32),
     /// Pixels do dispositivo por pixel lógico (1.5 no eDP-1 do Renan).
     pub escala: f64,
+    /// Canto superior esquerdo do monitor no desktop, em pixels lógicos, se o
+    /// sistema disser (as janelas pequenas do M8 se posicionam por ele).
+    pub origem: Option<(i32, i32)>,
+    /// A área útil, no palco: o monitor sem a barra de tarefas, o Dock ou os
+    /// painéis que reservam espaço. `None`: o monitor inteiro. A camada do
+    /// Wayland ignora as zonas exclusivas (`exclusive_zone -1`) e o
+    /// compositor não diz a área útil, então lá é sempre o monitor inteiro.
+    pub area_util: Option<Ret>,
 }
 
 impl Monitor {
@@ -42,6 +72,21 @@ impl Monitor {
             (self.logico.1 as f64 * self.escala).round() as i32,
         )
     }
+
+    /// O palco inteiro: o monitor em pixels do dispositivo, na origem.
+    pub fn palco(&self) -> Ret {
+        let (w, h) = self.buffer();
+        Ret::novo(0, 0, w, h)
+    }
+
+    /// A área útil no palco (o monitor inteiro se o sistema não disser),
+    /// sempre dentro dele.
+    pub fn area_util(&self) -> Ret {
+        let palco = self.palco();
+        self.area_util
+            .and_then(|area| area.intersecao(&palco))
+            .unwrap_or(palco)
+    }
 }
 
 /// O que a janela do bicho sabe fazer neste sistema.
@@ -49,7 +94,8 @@ impl Monitor {
 pub struct CapOverlay {
     /// A janela cobre o monitor inteiro e o pet anda dentro do buffer (a
     /// camada do Wayland, decisão 0005); sem isto, é uma janela pequena que
-    /// anda, com um palco transitório para voo e confete (M8).
+    /// anda, e o que passa da célula do pet (o confete do estresse, os voos
+    /// do M6) espera o palco transitório do M8.
     pub tela_inteira: bool,
     /// Só a área de toque recebe clique; o resto atravessa.
     pub regiao_de_toque: bool,
@@ -107,8 +153,9 @@ pub enum Botao {
     Outro(u32),
 }
 
-/// O ponteiro sobre a janela do pet, em pixels do dispositivo relativos a
-/// ela. As coordenadas nunca vão para o log.
+/// O ponteiro sobre a janela do pet, em coordenadas do palco (pixels do
+/// dispositivo do monitor; a janela converte as dela). As coordenadas nunca
+/// vão para o log.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventoPonteiro {
     Entrou { x: i32, y: i32 },
@@ -179,8 +226,11 @@ pub enum Desenho {
 #[derive(Debug, Clone, PartialEq)]
 pub enum EventoOverlay {
     /// A janela ficou pronta para desenhar, ou mudou de monitor ou de
-    /// escala: o palco (D e posição) é refeito.
-    Pronta(Monitor),
+    /// escala: o palco (D e posição) é refeito com o [`Overlay::pronta`] de
+    /// agora. O evento não carrega o monitor: dois na mesma leva (escala e
+    /// `configure` juntos) desenhariam o primeiro com um palco que a janela
+    /// já deixou para trás.
+    Pronta,
     /// O quadro em voo foi mostrado e outro esperava: desenhe de novo.
     Redesenhar,
     /// O sistema fechou a janela (ou ela caiu num monitor que não serve): o
@@ -188,8 +238,9 @@ pub enum EventoOverlay {
     Sumiu,
     /// Hora de recriar a janela, se o pet deve aparecer.
     Recriar,
-    /// Algo do painel mudou (a janela terminou de sair).
-    Mudou,
+    /// A janela terminou de sair: escondida (quadro transparente mostrado,
+    /// ou o prazo curto venceu) e destruída.
+    Saiu,
     Ponteiro(EventoPonteiro),
 }
 
@@ -198,7 +249,9 @@ pub enum EventoOverlay {
 pub struct InfoOverlay {
     pub monitor: Option<String>,
     pub escala: Option<f64>,
-    /// Área de toque pedida por último, em coordenadas lógicas da janela.
+    /// Área de toque pedida por último, nas coordenadas da janela no sistema
+    /// dela (lógicas da superfície no Wayland): é o `regiao_entrada` do
+    /// `/v1/estado`, que os scripts ao vivo comparam com o compositor.
     pub regiao: Option<Ret>,
     /// O pet está desenhado: o sistema guarda pixels dele e a janela não
     /// está saindo.
@@ -235,14 +288,14 @@ pub trait Overlay {
     fn apagar_e_destruir(&mut self, skin: &Skin) -> bool;
     /// Destrói já (nada do pet no sistema).
     fn destruir(&mut self);
-    /// Desenha `cena` (se mudou) e pede a área de toque `regiao`, em
-    /// coordenadas lógicas da janela. Com um quadro em voo, adia, a menos que
-    /// `forcar`.
+    /// Desenha `cena` (se mudou) e pede a área de toque `toque` (`None`:
+    /// nenhum clique é do pet), as duas no palco; a janela converte para as
+    /// coordenadas dela. Com um quadro em voo, adia, a menos que `forcar`.
     fn desenhar(
         &mut self,
         cena: &[Elemento],
         skin: &Skin,
-        regiao: Option<Ret>,
+        toque: Option<Ret>,
         forcar: bool,
     ) -> Result<Desenho, String>;
     /// Esquece a cena desenhada: o próximo quadro redesenha tudo (troca de
@@ -356,6 +409,209 @@ impl<T> Caixa<T> {
     }
 }
 
+/// Uma janela de mentira para os testes: a do Motor aqui, e a do núcleo do
+/// daemon com a feature `teste` (só nos testes; o binário nunca a tem).
+#[cfg(any(test, feature = "teste"))]
+pub mod falsa {
+    use super::*;
+    use crate::geometria::para_logico_por_fora;
+
+    /// Guarda o que o Motor pediu e imita a camada do Wayland: um quadro em
+    /// voo por vez e a área de toque (pedida no palco) convertida para
+    /// coordenadas lógicas no [`Overlay::info`]. Com
+    /// [`JanelaFalsa::pequena`], imita uma janela pequena que anda (M8).
+    pub struct JanelaFalsa {
+        pub capacidades: CapOverlay,
+        pub fase: Option<Fase>,
+        pub pronta: Option<Monitor>,
+        pub em_voo: bool,
+        pub cena: Option<Vec<Elemento>>,
+        /// A área de toque pedida por último, no palco.
+        pub toque: Option<Ret>,
+        pub seq: u64,
+        /// O que o Motor pediu, em ordem (`criar`, `quadro 3`, `apagar com
+        /// _teste`, …).
+        pub pedidos: Vec<String>,
+        /// O que a janela conta ao Motor no próximo [`Overlay::eventos`].
+        pub eventos: Vec<EventoOverlay>,
+    }
+
+    impl Default for JanelaFalsa {
+        /// Como a camada do Wayland: cobre o monitor e sabe tudo.
+        fn default() -> JanelaFalsa {
+            JanelaFalsa {
+                capacidades: CapOverlay {
+                    tela_inteira: true,
+                    regiao_de_toque: true,
+                    escala_fracionaria: true,
+                    cursor: true,
+                    ritmo_do_compositor: true,
+                },
+                fase: None,
+                pronta: None,
+                em_voo: false,
+                cena: None,
+                toque: None,
+                seq: 0,
+                pedidos: Vec::new(),
+                eventos: Vec::new(),
+            }
+        }
+    }
+
+    impl JanelaFalsa {
+        /// Uma janela pequena que anda (Win32, AppKit, X11; M8): não cobre o
+        /// monitor.
+        pub fn pequena() -> JanelaFalsa {
+            JanelaFalsa {
+                capacidades: CapOverlay {
+                    tela_inteira: false,
+                    ..JanelaFalsa::default().capacidades
+                },
+                ..JanelaFalsa::default()
+            }
+        }
+
+        pub fn fase_atual(&self) -> Fase {
+            self.fase.unwrap_or(Fase::Ausente)
+        }
+
+        /// O compositor mostrou o quadro em voo.
+        pub fn mostrou(&mut self) {
+            self.em_voo = false;
+        }
+
+        /// Quantos quadros foram para a tela.
+        pub fn quadros(&self) -> usize {
+            self.pedidos
+                .iter()
+                .filter(|p| p.starts_with("quadro"))
+                .count()
+        }
+    }
+
+    impl Overlay for JanelaFalsa {
+        fn capacidades(&self) -> CapOverlay {
+            self.capacidades
+        }
+
+        fn fase(&self) -> Fase {
+            self.fase_atual()
+        }
+
+        fn pronta(&self) -> Option<Monitor> {
+            self.pronta.clone()
+        }
+
+        fn criar(&mut self) {
+            self.pedidos.push("criar".into());
+            self.fase = Some(Fase::Viva { conteudo: false });
+            self.cena = None;
+            self.em_voo = false;
+        }
+
+        fn cancelar_saida(&mut self) {
+            self.pedidos.push("cancelar".into());
+            self.fase = Some(Fase::Viva { conteudo: true });
+        }
+
+        fn apagar_e_destruir(&mut self, skin: &Skin) -> bool {
+            self.pedidos.push(format!("apagar com {}", skin.id));
+            self.fase = Some(Fase::Saindo);
+            self.cena = Some(Vec::new());
+            self.toque = None;
+            true
+        }
+
+        fn destruir(&mut self) {
+            self.pedidos.push("destruir".into());
+            self.fase = None;
+            self.cena = None;
+        }
+
+        fn desenhar(
+            &mut self,
+            cena: &[Elemento],
+            _skin: &Skin,
+            toque: Option<Ret>,
+            forcar: bool,
+        ) -> Result<Desenho, String> {
+            if self.pronta.is_none() {
+                return Err("janela ainda não está pronta".into());
+            }
+            let mudou_toque = self.toque != toque;
+            self.toque = toque;
+            if self.cena.as_deref() == Some(cena) {
+                return Ok(if mudou_toque {
+                    Desenho::SoEstado
+                } else {
+                    Desenho::SemMudanca
+                });
+            }
+            if self.em_voo && !forcar {
+                return Ok(Desenho::Adiado);
+            }
+            self.cena = Some(cena.to_vec());
+            self.em_voo = true;
+            self.seq += 1;
+            self.fase = Some(Fase::Viva {
+                conteudo: !cena.is_empty(),
+            });
+            self.pedidos.push(format!("quadro {}", self.seq));
+            Ok(Desenho::Enviado {
+                retangulos: 1,
+                area: 0,
+            })
+        }
+
+        fn esquecer_cena(&mut self) {
+            self.pedidos.push("esquecer".into());
+            self.cena = None;
+        }
+
+        fn info(&self) -> InfoOverlay {
+            let escala = self.pronta.as_ref().map(|m| m.escala);
+            InfoOverlay {
+                monitor: self.pronta.as_ref().and_then(|m| m.nome.clone()),
+                escala,
+                regiao: self
+                    .toque
+                    .map(|t| para_logico_por_fora(t, escala.unwrap_or(1.0))),
+                visivel: self.fase_atual() == Fase::Viva { conteudo: true },
+                shm_bytes: 9_216_000,
+            }
+        }
+
+        fn ultimo_quadro(&self) -> Option<UltimoQuadro> {
+            if !matches!(self.fase_atual(), Fase::Viva { .. }) {
+                return None;
+            }
+            let pronta = self.pronta.as_ref()?;
+            Some(UltimoQuadro {
+                monitor: pronta.nome.clone().unwrap_or_default(),
+                cena: self.cena.clone()?,
+                seq: self.seq,
+                idade_ms: 0,
+            })
+        }
+
+        fn proximo_prazo(&self) -> Option<u64> {
+            None
+        }
+
+        fn vencer(&mut self, _: u64) {}
+
+        fn eventos(&mut self) -> Vec<EventoOverlay> {
+            std::mem::take(&mut self.eventos)
+        }
+
+        fn encerrar(&mut self, confirmar: bool) {
+            self.pedidos.push(format!("encerrar {confirmar}"));
+            self.fase = None;
+        }
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -388,9 +644,9 @@ mod testes {
     #[test]
     fn buffer_arredonda_no_4k_e_em_escala_quebrada() {
         let m = Monitor {
-            nome: None,
             logico: (2560, 1440),
             escala: 1.5,
+            ..Monitor::default()
         };
         assert_eq!(m.buffer(), (3840, 2160));
         let q = Monitor {
@@ -399,6 +655,34 @@ mod testes {
             ..m
         };
         assert_eq!(q.buffer(), (1913, 1076));
+    }
+
+    #[test]
+    fn area_util_e_o_monitor_inteiro_ou_a_parte_dele_que_o_sistema_diz() {
+        let edp = Monitor {
+            logico: (1280, 800),
+            escala: 1.5,
+            ..Monitor::default()
+        };
+        assert_eq!(edp.palco(), Ret::novo(0, 0, 1920, 1200));
+        assert_eq!(edp.area_util(), edp.palco(), "sem área útil: o monitor");
+        // Uma barra de tarefas de 48 lógicos embaixo (72 pixels a 1,5).
+        let com_barra = Monitor {
+            area_util: Some(Ret::novo(0, 0, 1920, 1128)),
+            ..edp.clone()
+        };
+        assert_eq!(com_barra.area_util(), Ret::novo(0, 0, 1920, 1128));
+        // O que passa do monitor é cortado; fora dele, vale o monitor.
+        let torta = Monitor {
+            area_util: Some(Ret::novo(-10, 0, 5000, 600)),
+            ..edp.clone()
+        };
+        assert_eq!(torta.area_util(), Ret::novo(0, 0, 1920, 600));
+        let fora = Monitor {
+            area_util: Some(Ret::novo(3000, 0, 10, 10)),
+            ..edp
+        };
+        assert_eq!(fora.area_util(), fora.palco());
     }
 
     #[derive(Default)]

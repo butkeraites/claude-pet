@@ -211,15 +211,21 @@ testar() {
   fi
 }
 
-# O core é puro (CLAUDE.md, decisão 0040): nenhuma dependência normal,
-# direta ou transitiva, pode ser crate de Wayland, do laço de eventos ou de
-# um sistema operacional.
+# O core é puro (CLAUDE.md, decisões 0040 e 0044): nenhuma dependência
+# normal, direta ou transitiva, pode ser crate de Wayland, do laço de eventos
+# ou de um sistema operacional, em nenhum alvo (`--target all`: um crate só
+# do Windows ou do macOS também conta). A exceção é o `libc` que o `sha2`
+# puxa pela detecção de CPU (`cpufeatures`) nos alvos aarch64: só ele pode
+# depender do `libc`.
 core_sem_wayland() {
-  local proibidas
-  proibidas="$(cargo tree -p pet-core -e normal --prefix none --quiet |
-    grep -iE '^(wayland|smithay|calloop|rustix|signal-hook|nix |libc |windows|objc2|x11rb|zbus)' || true)"
-  if [ -n "$proibidas" ]; then
-    printf 'pet-core depende de:\n%s\n' "$proibidas" >&2
+  local proibidas dependentes
+  proibidas="$(cargo tree -p pet-core -e normal --target all --prefix none --quiet |
+    grep -iE '^(wayland|smithay|calloop|rustix|signal-hook|nix |windows|objc2|core-foundation|cocoa|x11rb|zbus)' |
+    sort -u || true)"
+  dependentes="$(cargo tree -p pet-core -e normal --target all --prefix none --quiet -i libc --depth 1 2>/dev/null |
+    grep -vE '^libc ' | grep -vE '^cpufeatures ' | sort -u || true)"
+  if [ -n "$proibidas" ] || [ -n "$dependentes" ]; then
+    printf 'pet-core depende de:\n%s\n' "$proibidas${dependentes:+$'\n'libc por: $dependentes}" >&2
     return 1
   fi
 }
@@ -285,21 +291,68 @@ foto() {
   fi
 }
 
-# Regra de ouro checável no código (decisão 0006): o daemon nunca abre o
-# socket de comandos do Hyprland nem chama hyprctl. Olha só o código de
-# produção de todos os crates (o que vem antes de `#[cfg(test)]`), fora de
-# comentários; os testes podem criar um `.socket.sock` falso para provar que
-# ninguém conecta.
+# Regra de ouro checável no código (decisões 0006 e 0044): o daemon nunca
+# abre o socket de comandos do Hyprland nem chama hyprctl. Olha o código de
+# produção de todos os crates, fora de comentários; os testes podem criar um
+# `.socket.sock` falso para provar que ninguém conecta.
+#
+# O awk pula só o item marcado com `#[cfg(test)]` na coluna 0: um `mod x;`
+# (uma linha) ou um bloco `… {` até a `}` da coluna 0. Antes ele parava no
+# primeiro `#[cfg(test)]` do arquivo, e um `#[cfg(test)] mod testes;` no topo
+# escondia o resto (o Motor inteiro). Qualquer outra coisa depois do atributo
+# volta a ser lida (melhor um falso alarme que um ponto cego).
+linhas_de_producao() {
+  # shellcheck disable=SC2016 # é o programa do awk: os $ são do awk
+  awk '
+    FNR == 1 { pular = 0 }
+    pular == 2 { if ($0 ~ /^}/) pular = 0; next }
+    pular == 1 {
+      if ($0 ~ /^[[:space:]]*#\[/) next
+      if ($0 ~ /;[[:space:]]*$/) { pular = 0; next }
+      if ($0 ~ /\{[[:space:]]*$/) { pular = 2; next }
+      pular = 0
+    }
+    /^#\[cfg\(test\)\]/ { pular = 1; next }
+    { print FILENAME ":" FNR ":" $0 }
+  ' "$@"
+}
+
+achados_do_socket() {
+  linhas_de_producao "$@" |
+    grep -E '\.socket\.sock|hyprctl' | grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true
+}
+
 daemon_sem_socket_de_comandos() {
-  local achados
-  # shellcheck disable=SC2016 # é o programa do awk: o $0 é do awk, não do shell
-  achados="$(find crates/*/src -name '*.rs' -print0 |
-    xargs -0 awk '/^#\[cfg\(test\)\]/ {nextfile} {print FILENAME ":" FNR ":" $0}' |
-    grep -E '\.socket\.sock|hyprctl' | grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true)"
+  local achados arquivos=()
+  while IFS= read -r -d '' arquivo; do arquivos+=("$arquivo"); done \
+    < <(find crates/*/src -name '*.rs' -print0)
+  achados="$(achados_do_socket "${arquivos[@]}")"
   if [ -n "$achados" ]; then
     printf 'o daemon cita o socket de comandos do Hyprland ou o hyprctl:\n%s\n' "$achados" >&2
     return 1
   fi
+}
+
+# A guarda de cima se prova a cada verificar: uma linha plantada depois de
+# um `#[cfg(test)] mod testes;` no topo e depois de um bloco de teste tem de
+# ser achada; a de dentro do bloco de teste, não.
+guarda_do_socket_se_prova() {
+  local pasta achados ok=0
+  pasta="$(mktemp -d)"
+  printf '%s\n' '//! Topo.' '#[cfg(test)]' 'mod testes;' '' \
+    'fn cedo() { let _ = ".socket.sock"; }' >"$pasta/cedo.rs"
+  printf '%s\n' '#[cfg(test)]' '#[allow(dead_code)]' 'mod testes {' \
+    '    const S: &str = "/run/hypr/.socket.sock";' '}' '' \
+    'fn depois() { let _ = "hyprctl"; }' >"$pasta/bloco.rs"
+  achados="$(achados_do_socket "$pasta/cedo.rs" "$pasta/bloco.rs")"
+  rm -rf "$pasta"
+  grep -q 'cedo.rs:5:' <<<"$achados" || ok=1
+  grep -q 'bloco.rs:7:' <<<"$achados" || ok=1
+  if grep -q 'bloco.rs:4:' <<<"$achados"; then ok=1; fi
+  if [ "$ok" -ne 0 ]; then
+    printf 'a guarda do socket de comandos não achou o que devia (ou achou teste):\n%s\n' "$achados" >&2
+  fi
+  return "$ok"
 }
 
 # Decisões 0035 e 0043: nenhum texto do projeto cita o personagem de
@@ -561,7 +614,8 @@ verificar() {
     fi
   }
   passo "cargo fmt" cargo fmt --all --check
-  passo "pet-core sem Wayland" core_sem_wayland
+  passo "pet-core sem Wayland nem sistema (todos os alvos)" core_sem_wayland
+  passo "guarda do socket de comandos se prova" guarda_do_socket_se_prova
   passo "daemon sem socket de comandos" daemon_sem_socket_de_comandos
   passo "nomes de terceiros" sem_nomes_de_terceiros
   passo "cargo clippy" cargo clippy --all-targets --quiet -- -D warnings

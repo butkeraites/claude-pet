@@ -9,11 +9,15 @@ use smithay_client_toolkit::reexports::client::protocol::wl_output::{Transform, 
 
 use crate::hyprland;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Monitor {
     pub nome: String,
+    /// Descrição (fabricante e modelo, `wl_output` v4), se o compositor disser.
+    pub descricao: Option<String>,
     /// Tamanho lógico (`xdg_output`), em pixels lógicos.
     pub logico: (i32, i32),
+    /// Canto superior esquerdo no desktop (`xdg_output`), em pixels lógicos.
+    pub posicao: Option<(i32, i32)>,
     /// Modo atual, em pixels do monitor, já com a rotação aplicada.
     pub modo: Option<(i32, i32)>,
 }
@@ -53,7 +57,9 @@ pub fn monitor(saidas: &OutputState, saida: &WlOutput) -> Option<Monitor> {
             .name
             .clone()
             .unwrap_or_else(|| format!("saida-{}", info.id)),
+        descricao: info.description.clone(),
         logico: info.logical_size.unwrap_or((0, 0)),
+        posicao: info.logical_position,
         modo,
     })
 }
@@ -75,6 +81,7 @@ mod testes {
             nome: nome.into(),
             logico,
             modo,
+            ..Monitor::default()
         }
     }
 

@@ -83,15 +83,24 @@ pub struct Pronta {
     pub escala: f64,
     pub origem: OrigemEscala,
     pub monitor: Option<String>,
+    /// Descrição do monitor (fabricante e modelo), se o compositor disser.
+    pub descricao: Option<String>,
+    /// Canto do monitor no desktop, em pixels lógicos, se o compositor disser.
+    pub posicao: Option<(i32, i32)>,
 }
 
 impl Pronta {
-    /// O monitor pronto, como o Motor o vê.
+    /// O monitor pronto, como o Motor o vê. A camada cobre o monitor e
+    /// ignora as zonas exclusivas (`exclusive_zone -1`): a área útil é o
+    /// monitor inteiro, como desde o M1 (decisão 0044).
     pub fn monitor(&self) -> Monitor {
         Monitor {
             nome: self.monitor.clone(),
+            descricao: self.descricao.clone(),
             logico: self.logico,
             escala: self.escala,
+            origem: self.posicao,
+            area_util: None,
         }
     }
 
@@ -149,6 +158,8 @@ impl Prontidao {
             escala,
             origem,
             monitor: monitor.map(|m| m.nome.clone()),
+            descricao: monitor.and_then(|m| m.descricao.clone()),
+            posicao: monitor.and_then(|m| m.posicao),
         })
     }
 }
@@ -517,7 +528,9 @@ mod testes {
     fn edp() -> Monitor {
         Monitor {
             nome: "eDP-1".into(),
+            descricao: Some("Painel do notebook".into()),
             logico: (1280, 800),
+            posicao: Some((0, 0)),
             modo: Some((1920, 1200)),
         }
     }
@@ -540,6 +553,12 @@ mod testes {
         assert_eq!(pronta.origem, OrigemEscala::Fracionaria);
         assert_eq!(pronta.monitor.as_deref(), Some("eDP-1"));
         assert_eq!(pronta.buffer(), (1920, 1200));
+        // O Motor recebe o monitor com a descrição e a posição, e a área útil
+        // é o monitor inteiro (a camada ignora as zonas exclusivas).
+        let monitor = pronta.monitor();
+        assert_eq!(monitor.descricao.as_deref(), Some("Painel do notebook"));
+        assert_eq!(monitor.origem, Some((0, 0)));
+        assert_eq!(monitor.area_util(), monitor.palco());
     }
 
     #[test]
@@ -599,11 +618,12 @@ mod testes {
             nome: crate::hyprland::RESERVA.into(),
             logico: (1920, 1080),
             modo: Some((1920, 1080)),
+            ..Monitor::default()
         };
         let zerado = Monitor {
             nome: "HDMI-A-1".into(),
             logico: (0, 0),
-            modo: None,
+            ..Monitor::default()
         };
         // Nem com os prazos vencidos e um monitor de reserva à mão: o enter
         // diz onde a camada está, e lá o pet não aparece.
@@ -619,6 +639,8 @@ mod testes {
             escala: 1.5,
             origem: OrigemEscala::Fracionaria,
             monitor: None,
+            descricao: None,
+            posicao: None,
         };
         assert_eq!(p.buffer(), (3840, 2160));
         let q = Pronta {

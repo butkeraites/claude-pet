@@ -15,5 +15,10 @@ png.workspace = true
 # Impressão digital da skin aprovada (decisão 0026).
 sha2.workspace = true
 
+[features]
+# A janela de mentira (`plataforma::falsa`) para os testes de outros crates
+# (o núcleo do daemon). Só entra nos testes: o binário nunca a tem.
+teste = []
+
 [lints]
 workspace = true

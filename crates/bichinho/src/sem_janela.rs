@@ -129,6 +129,7 @@ mod testes {
         let mut nucleo = Nucleo::novo(Arc::clone(&comp), onde, None, &config, Instant::now());
         let (caixa, recebe) = Caixa::nova(16, Arc::new(SemDespertador));
         let (tocou, resposta) = mpsc::sync_channel(1);
+        let olhando = Arc::clone(&comp);
         let mandar = thread::spawn(move || {
             caixa.tentar(evento("UserPromptSubmit")).unwrap();
             caixa.tentar(evento("Stop")).unwrap();
@@ -138,8 +139,14 @@ mod testes {
                     resposta: tocou,
                 })
                 .unwrap();
-            // A acomodação do Stop é de 0,8 s; depois a caixa fecha.
-            thread::sleep(Duration::from_millis(1_200));
+            // A acomodação do Stop é de 0,8 s: a caixa só fecha (e o laço
+            // termina) depois que a reação aparece no estado, ou em 10 s.
+            // Nada de prazo fixo: com a máquina carregada o laço pode
+            // acordar atrasado.
+            let limite = Instant::now() + Duration::from_secs(10);
+            while olhando.estado_json()["ultima_reacao"].is_null() && Instant::now() < limite {
+                thread::sleep(Duration::from_millis(20));
+            }
         });
         laco(&mut nucleo, &recebe);
         mandar.join().unwrap();

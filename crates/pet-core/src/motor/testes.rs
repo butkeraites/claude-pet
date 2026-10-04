@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use super::*;
 use crate::cerebro::Nivel;
-use crate::plataforma::{CapOverlay, InfoOverlay, UltimoQuadro};
+use crate::plataforma::falsa::JanelaFalsa as Falsa;
 
 const PAREDE: u64 = 1_790_000_000_000;
 
@@ -19,156 +19,7 @@ fn edp() -> Monitor {
         nome: Some("eDP-1".into()),
         logico: (1280, 800),
         escala: 1.5,
-    }
-}
-
-/// Uma janela de mentira: guarda o que o Motor pediu e imita o ritmo de um
-/// quadro em voo por vez.
-#[derive(Default)]
-struct Falsa {
-    fase: Option<Fase>,
-    pronta: Option<Monitor>,
-    em_voo: bool,
-    cena: Option<Vec<Elemento>>,
-    regiao: Option<Ret>,
-    seq: u64,
-    pedidos: Vec<String>,
-    eventos: Vec<EventoOverlay>,
-}
-
-impl Falsa {
-    fn fase_atual(&self) -> Fase {
-        self.fase.unwrap_or(Fase::Ausente)
-    }
-
-    /// O compositor mostrou o quadro em voo.
-    fn mostrou(&mut self) {
-        self.em_voo = false;
-    }
-
-    fn quadros(&self) -> usize {
-        self.pedidos
-            .iter()
-            .filter(|p| p.starts_with("quadro"))
-            .count()
-    }
-}
-
-impl Overlay for Falsa {
-    fn capacidades(&self) -> CapOverlay {
-        CapOverlay::default()
-    }
-
-    fn fase(&self) -> Fase {
-        self.fase_atual()
-    }
-
-    fn pronta(&self) -> Option<Monitor> {
-        self.pronta.clone()
-    }
-
-    fn criar(&mut self) {
-        self.pedidos.push("criar".into());
-        self.fase = Some(Fase::Viva { conteudo: false });
-        self.cena = None;
-        self.em_voo = false;
-    }
-
-    fn cancelar_saida(&mut self) {
-        self.pedidos.push("cancelar".into());
-        self.fase = Some(Fase::Viva { conteudo: true });
-    }
-
-    fn apagar_e_destruir(&mut self, skin: &Skin) -> bool {
-        self.pedidos.push(format!("apagar com {}", skin.id));
-        self.fase = Some(Fase::Saindo);
-        self.cena = Some(Vec::new());
-        self.regiao = None;
-        true
-    }
-
-    fn destruir(&mut self) {
-        self.pedidos.push("destruir".into());
-        self.fase = None;
-        self.cena = None;
-    }
-
-    fn desenhar(
-        &mut self,
-        cena: &[Elemento],
-        _skin: &Skin,
-        regiao: Option<Ret>,
-        forcar: bool,
-    ) -> Result<Desenho, String> {
-        if self.pronta.is_none() {
-            return Err("janela ainda não está pronta".into());
-        }
-        let mudou_regiao = self.regiao != regiao;
-        self.regiao = regiao;
-        if self.cena.as_deref() == Some(cena) {
-            return Ok(if mudou_regiao {
-                Desenho::SoEstado
-            } else {
-                Desenho::SemMudanca
-            });
-        }
-        if self.em_voo && !forcar {
-            return Ok(Desenho::Adiado);
-        }
-        self.cena = Some(cena.to_vec());
-        self.em_voo = true;
-        self.seq += 1;
-        self.fase = Some(Fase::Viva {
-            conteudo: !cena.is_empty(),
-        });
-        self.pedidos.push(format!("quadro {}", self.seq));
-        Ok(Desenho::Enviado {
-            retangulos: 1,
-            area: 0,
-        })
-    }
-
-    fn esquecer_cena(&mut self) {
-        self.pedidos.push("esquecer".into());
-        self.cena = None;
-    }
-
-    fn info(&self) -> InfoOverlay {
-        InfoOverlay {
-            monitor: self.pronta.as_ref().and_then(|m| m.nome.clone()),
-            escala: self.pronta.as_ref().map(|m| m.escala),
-            regiao: self.regiao,
-            visivel: self.fase_atual() == Fase::Viva { conteudo: true },
-            shm_bytes: 9_216_000,
-        }
-    }
-
-    fn ultimo_quadro(&self) -> Option<UltimoQuadro> {
-        if !matches!(self.fase_atual(), Fase::Viva { .. }) {
-            return None;
-        }
-        let pronta = self.pronta.as_ref()?;
-        Some(UltimoQuadro {
-            monitor: pronta.nome.clone().unwrap_or_default(),
-            cena: self.cena.clone()?,
-            seq: self.seq,
-            idade_ms: 0,
-        })
-    }
-
-    fn proximo_prazo(&self) -> Option<u64> {
-        None
-    }
-
-    fn vencer(&mut self, _: u64) {}
-
-    fn eventos(&mut self) -> Vec<EventoOverlay> {
-        std::mem::take(&mut self.eventos)
-    }
-
-    fn encerrar(&mut self, confirmar: bool) {
-        self.pedidos.push(format!("encerrar {confirmar}"));
-        self.fase = None;
+        ..Monitor::default()
     }
 }
 
@@ -182,7 +33,7 @@ fn ligado() -> (Motor, Falsa) {
     motor.aplicar_visibilidade(&mut janela, 0);
     assert_eq!(janela.pedidos, vec!["criar"]);
     janela.pronta = Some(edp());
-    motor.evento_overlay(&mut janela, EventoOverlay::Pronta(edp()), 0);
+    motor.evento_overlay(&mut janela, EventoOverlay::Pronta, 0);
     (motor, janela)
 }
 
@@ -314,7 +165,7 @@ fn skin_nova_sem_janela_pronta_espera_o_palco() {
     assert_eq!(janela.pedidos, vec!["esquecer", "criar"]);
     assert!(motor.painel(Some(&janela), 20).d.is_none(), "palco espera");
     janela.pronta = Some(edp());
-    motor.evento_overlay(&mut janela, EventoOverlay::Pronta(edp()), 30);
+    motor.evento_overlay(&mut janela, EventoOverlay::Pronta, 30);
     assert_eq!(janela.quadros(), 1);
 }
 
@@ -523,7 +374,7 @@ fn tamanho_pequeno_e_grande_mudam_o_d_sem_mudar_a_skin() {
     novo.conectou(0);
     novo.aplicar_visibilidade(&mut outra, 0);
     outra.pronta = Some(edp());
-    novo.evento_overlay(&mut outra, EventoOverlay::Pronta(edp()), 0);
+    novo.evento_overlay(&mut outra, EventoOverlay::Pronta, 0);
     assert_eq!(novo.painel(Some(&outra), 10).d, Some(4));
 }
 
@@ -532,9 +383,79 @@ fn regiao_que_muda_sem_pixels_novos_conta_como_commit() {
     let (mut motor, mut janela) = ligado();
     // A janela esqueceu a região (como depois de uma troca de escala): o
     // próximo quadro igual só manda o estado.
-    janela.regiao = None;
+    janela.toque = None;
     janela.mostrou();
     motor.desenhar(&mut janela, 50, false);
     assert_eq!(janela.quadros(), 1, "nenhum pixel novo");
     assert_eq!(motor.painel(Some(&janela), 60).commits_total, 2);
+}
+
+#[test]
+fn duas_prontas_na_mesma_leva_desenham_so_o_palco_de_agora() {
+    // A escala muda e o `configure` chega junto: a janela já está no monitor
+    // novo quando o Motor vê o primeiro evento. Os dois desenham com o palco
+    // de agora (D da escala 2), nunca com o da escala velha.
+    let (mut motor, mut janela) = ligado();
+    janela.mostrou();
+    janela.pronta = Some(Monitor {
+        escala: 2.0,
+        ..edp()
+    });
+    janela.cena = None; // o buffer novo: redesenha tudo
+    for _ in 0..2 {
+        motor.evento_overlay(&mut janela, EventoOverlay::Pronta, 100);
+    }
+    assert_eq!(janela.quadros(), 2, "um quadro só para as duas");
+    assert_eq!(motor.painel(Some(&janela), 110).d, Some(6), "_teste a 2,0");
+    let Some(Elemento::Sprite { d, .. }) = janela.cena.as_ref().and_then(|c| c.first().copied())
+    else {
+        panic!("sem sprite");
+    };
+    assert_eq!(d, 6, "o quadro na tela é o do palco novo");
+}
+
+#[test]
+fn janela_pequena_usa_a_area_util_e_o_acerto_e_no_palco() {
+    // Uma janela pequena (Win32, AppKit, X11) num monitor com barra de
+    // tarefas: o pet nasce acima da barra, e um clique no corpo dele, já em
+    // coordenadas do palco, acerta; ao lado, atravessa.
+    let mut motor = Motor::novo(ConfigCerebro::default());
+    motor.definir_skin(Some(skin_teste()));
+    let mut janela = Falsa::pequena();
+    motor.conectou(0);
+    motor.aplicar_visibilidade(&mut janela, 0);
+    janela.pronta = Some(Monitor {
+        origem: Some((1280, 0)),
+        area_util: Some(Ret::novo(0, 0, 1920, 1128)),
+        ..edp()
+    });
+    motor.evento_overlay(&mut janela, EventoOverlay::Pronta, 0);
+    let painel = motor.painel(Some(&janela), 10);
+    let sprite = painel.sprite_disp.unwrap();
+    // Os pés (linha 45 da célula, D = 5) a 24 pixels da barra.
+    assert_eq!(sprite.y + 45 * 5, 1128 - 24, "acima da barra de tarefas");
+    let toque = janela.toque.expect("toque pedido no palco");
+    assert_eq!(toque, Ret::novo(1756, 944, 140, 160));
+    assert!(motor.acerta_o_pet(toque.x, toque.y));
+    assert!(motor.acerta_o_pet(toque.direita() - 1, toque.baixo() - 1));
+    assert!(!motor.acerta_o_pet(toque.x - 1, toque.y));
+    assert!(!motor.acerta_o_pet(toque.x, toque.baixo()));
+    // Sem palco (janela fechada), nada acerta.
+    motor.evento_overlay(&mut janela, EventoOverlay::Sumiu, 20);
+    assert!(!motor.acerta_o_pet(toque.x, toque.y));
+}
+
+#[test]
+fn estresse_numa_janela_pequena_avisa_e_nao_comeca() {
+    let mut motor = Motor::novo(ConfigCerebro::default());
+    motor.definir_skin(Some(skin_teste()));
+    let mut janela = Falsa::pequena();
+    motor.conectou(0);
+    motor.aplicar_visibilidade(&mut janela, 0);
+    janela.pronta = Some(edp());
+    motor.evento_overlay(&mut janela, EventoOverlay::Pronta, 0);
+    janela.mostrou();
+    motor.estresse(&mut janela, 30, 5, 10);
+    assert!(!motor.painel(Some(&janela), 20).estresse);
+    assert_eq!(janela.cena.as_ref().unwrap().len(), 1, "só o pet");
 }

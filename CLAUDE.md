@@ -88,8 +88,12 @@ Fora dele, use `~/.cargo/bin/cargo`.
     palco, mostrar/esconder, estresse, painel, prazos em ms num relógio
     injetado) e os contratos de cada sistema (`pet_core::plataforma`: os
     traits `Overlay` e `Desktop`, `Monitor`, `EventoPonteiro` e a `Caixa`).
-    **Nunca** depende de crates Wayland ou de sistema — os testes ficam
-    rápidos e o `bin/pet verificar` confere;
+    Tudo o que o Motor troca com a janela está no **palco**: pixels do
+    dispositivo do monitor, origem no canto dele (decisão 0044); cada janela
+    converte para as coordenadas dela. Os testes usam a
+    `plataforma::falsa::JanelaFalsa` (feature `teste` fora do core).
+    **Nunca** depende de crates Wayland ou de sistema, em nenhum alvo — os
+    testes ficam rápidos e o `bin/pet verificar` confere;
   - `crates/pet-wayland`: a camada OVERLAY (a `Sessao` é o `Overlay` do
     Wayland), os buffers e a descoberta; o que é só do Hyprland
     (`hyprland.lock`, o monitor FALLBACK, o socket de eventos no M4) fica no

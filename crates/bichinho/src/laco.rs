@@ -152,8 +152,9 @@ pub struct Laco {
     viva: Option<Viva>,
     descoberta: Option<RegistrationToken>,
     batimento: Option<RegistrationToken>,
-    /// O timer do próximo prazo (Motor ou janela).
-    prazo: Option<RegistrationToken>,
+    /// O timer do próximo prazo (Motor ou janela) e para quando ele está
+    /// armado (ms no relógio do laço).
+    prazo: Option<(u64, RegistrationToken)>,
     /// Última razão de espera registrada no log (só loga quando muda).
     ultima_espera: Option<String>,
     caixa: mpsc::Receiver<Comando>,
@@ -192,15 +193,31 @@ impl Laco {
         }
     }
 
-    /// Depois de cada lote: os eventos da janela, o painel e o próximo prazo.
+    /// Depois de cada lote (caixa, prazo, conexão): os eventos da janela, o
+    /// painel e o próximo prazo.
     fn assentar(&mut self) {
+        self.assentar_com(true);
+    }
+
+    /// Depois de uma leva do Wayland, que chega a cada frame callback e a
+    /// cada movimento do ponteiro sobre o pet (o calloop chama de novo até a
+    /// fila esvaziar): o painel só sai se um evento mudou o pet ou a janela,
+    /// e o prazo só é rearmado se mudou. O batimento de 5 s republica de todo
+    /// jeito.
+    fn assentar_wayland(&mut self) {
+        self.assentar_com(false);
+    }
+
+    fn assentar_com(&mut self, publicar_sempre: bool) {
         let janela = self
             .viva
             .as_mut()
             .map(|viva| &mut viva.sessao as &mut dyn Overlay);
-        self.nucleo.eventos_da_janela(janela);
-        let janela = self.viva.as_ref().map(|viva| &viva.sessao as &dyn Overlay);
-        self.nucleo.publicar(janela);
+        let mudou = self.nucleo.eventos_da_janela(janela);
+        if publicar_sempre || mudou {
+            let janela = self.viva.as_ref().map(|viva| &viva.sessao as &dyn Overlay);
+            self.nucleo.publicar(janela);
+        }
         self.armar_prazo();
     }
 
@@ -250,15 +267,21 @@ impl Laco {
     }
 
     /// (Re)arma o prazo mais próximo: o do Motor (cérebro e animação) ou o
-    /// da janela. Quando vence, os comandos que já estão na caixa entram
+    /// da janela. O mesmo prazo já armado fica como está (tirar e pôr de
+    /// novo um timer que o calloop já separou para esta volta o atrasaria
+    /// uma volta). Quando vence, os comandos que já estão na caixa entram
     /// antes: chegaram antes do prazo, e um deles pode cancelar uma
     /// acomodação (decisão 0032).
     fn armar_prazo(&mut self) {
-        if let Some(token) = self.prazo.take() {
+        let janela = self.viva.as_ref().map(|viva| &viva.sessao as &dyn Overlay);
+        let proximo = self.nucleo.proximo_prazo(janela);
+        if proximo.is_some() && proximo == self.prazo.as_ref().map(|(armado, _)| *armado) {
+            return;
+        }
+        if let Some((_, token)) = self.prazo.take() {
             self.handle.remove(token);
         }
-        let janela = self.viva.as_ref().map(|viva| &viva.sessao as &dyn Overlay);
-        let Some(prazo) = self.nucleo.proximo_prazo(janela) else {
+        let Some(prazo) = proximo else {
             return;
         };
         let quando = self.nucleo.inicio() + Duration::from_millis(prazo);
@@ -277,7 +300,7 @@ impl Laco {
                 TimeoutAction::Drop
             });
         match inserido {
-            Ok(token) => self.prazo = Some(token),
+            Ok(token) => self.prazo = Some((prazo, token)),
             Err(e) => erro!("não consegui armar o prazo: {e}"),
         }
     }
@@ -374,7 +397,7 @@ impl Laco {
                 Some(viva) => fila.dispatch_pending(&mut viva.sessao),
                 None => Ok(0),
             };
-            laco.assentar();
+            laco.assentar_wayland();
             resultado
         }) {
             Ok(token) => token,

@@ -20,8 +20,6 @@
 
 mod pet;
 mod ritmo;
-#[cfg(test)]
-mod testes;
 
 use std::rc::Rc;
 
@@ -58,10 +56,10 @@ pub struct Painel {
     pub escala: Option<f64>,
     /// Pixels do monitor por pixel de arte.
     pub d: Option<i32>,
-    /// Célula do sprite em pixels do monitor, relativa ao monitor e
+    /// Célula do sprite no palco (pixels do monitor, relativa a ele) e
     /// recortada a ele (a foto e a checagem de nitidez recortam por aqui).
     pub sprite_disp: Option<Ret>,
-    /// Região clicável, em pixels lógicos da janela.
+    /// Região clicável nas coordenadas da janela (lógicas, no Wayland).
     pub regiao_entrada: Option<Ret>,
     /// O pet está desenhado na tela.
     pub visivel: bool,
@@ -117,7 +115,7 @@ pub struct Motor {
     skin: Option<Rc<Skin>>,
     /// O pet animado; só existe com uma janela (sessão com o compositor).
     pet: Option<Pet>,
-    /// Onde o pet fica na janela atual (D e posição).
+    /// Onde o pet fica no palco do monitor atual (D e posição).
     palco: Option<Palco>,
     /// O pet deve estar na tela (`/v1/comando` esconde e mostra).
     visivel: bool,
@@ -315,12 +313,7 @@ impl Motor {
         let Some(pet) = &self.pet else {
             return;
         };
-        let palco = pet.palco(
-            monitor.logico,
-            monitor.escala,
-            monitor.buffer(),
-            self.tamanho,
-        );
+        let palco = pet.palco(monitor, self.tamanho);
         info!(
             "pet «{}» com D={} (tamanho {}) e célula em ({}, {}) pixels do monitor",
             pet.skin().id,
@@ -350,8 +343,13 @@ impl Motor {
     /// Um evento da janela.
     pub fn evento_overlay(&mut self, ov: &mut dyn Overlay, evento: EventoOverlay, agora_ms: u64) {
         match evento {
-            EventoOverlay::Pronta(monitor) => {
-                if self.pet.is_some() {
+            // O palco sai do monitor de agora, não de quando o evento entrou
+            // na fila: dois na mesma leva (escala e `configure` juntos) não
+            // desenham com um palco velho no buffer novo.
+            EventoOverlay::Pronta => {
+                if self.pet.is_some()
+                    && let Some(monitor) = ov.pronta()
+                {
                     self.montar_palco(&monitor);
                     self.desenhar(ov, agora_ms, false);
                 }
@@ -368,8 +366,8 @@ impl Motor {
                 }
             }
             // O painel é publicado depois de cada lote de eventos. O
-            // ponteiro chega no M4 (arrastar e clicar).
-            EventoOverlay::Mudou | EventoOverlay::Ponteiro(_) => {}
+            // ponteiro chega no M4 (arrastar e clicar; [`Motor::acerta_o_pet`]).
+            EventoOverlay::Saiu | EventoOverlay::Ponteiro(_) => {}
         }
     }
 
@@ -402,8 +400,8 @@ impl Motor {
             let prazo = estresse.proximo_prazo();
             proxima = Some(proxima.map_or(prazo, |p| p.min(prazo)));
         }
-        let regiao = pet.regiao_de_toque(&palco);
-        match ov.desenhar(&cena, pet.skin(), regiao, forcar) {
+        let toque = pet.toque_no_palco(&palco);
+        match ov.desenhar(&cena, pet.skin(), toque, forcar) {
             Ok(Desenho::Enviado { retangulos, area }) => {
                 self.commits.contar(agora_ms);
                 if self.estresse.is_none() {
@@ -510,6 +508,14 @@ impl Motor {
             aviso!("debug: estresse pedido com o pet fora da tela");
             return;
         };
+        // Numa janela pequena (M8) o confete pela tela inteira pede o palco
+        // transitório, que ainda não existe.
+        if !ov.capacidades().tela_inteira {
+            aviso!(
+                "debug: estresse pede uma janela do tamanho do monitor (o palco transitório chega no M8)"
+            );
+            return;
+        }
         let grade = Grade {
             x: palco.x,
             y: palco.y,
@@ -524,6 +530,16 @@ impl Motor {
         });
         info!("debug: estresse com {CONFETES} confetes a {fps} fps por {segundos} s");
         self.desenhar(ov, agora_ms, false);
+    }
+
+    /// O ponto (x, y) do palco cai no corpo do pet (o clique e o arraste do
+    /// M4 começam aqui, com o [`crate::plataforma::EventoPonteiro`] já no
+    /// palco). `false` sem pet ou sem palco.
+    pub fn acerta_o_pet(&self, x: i32, y: i32) -> bool {
+        match (&self.pet, &self.palco) {
+            (Some(pet), Some(palco)) => pet.acerta(palco, x, y),
+            _ => false,
+        }
     }
 
     /// Fim do processo: esconde o pet (quadro transparente) e larga a
@@ -595,3 +611,6 @@ impl Motor {
         })
     }
 }
+
+#[cfg(test)]
+mod testes;

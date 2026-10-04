@@ -1572,3 +1572,91 @@ os três tamanhos distintos em qualquer monitor sem mexer no `normal`.
 
 **Por quê:** o plano não pode prometer o que as regras de ouro proíbem nem
 contradizer o cérebro. E o M4 precisa encontrar a costura pronta para o foco.
+
+## 0044 — Revisão da costura: o palco como sistema de coordenadas, a área útil do monitor, a janela pronta sem dado velho, o laço sem trabalho à toa e as guardas sem ponto cego (2026-10-04)
+
+**Problema:** as revisões da costura (T8.0) acharam seis falhas.
+- **Coordenadas misturadas no `Overlay`.** A cena e a célula estavam em
+  pixels do monitor, a área de toque em coordenadas lógicas da janela, e o
+  ponteiro "relativo à janela". Isso só funcionava porque a camada do Wayland
+  cobre o monitor inteiro. Numa janela pequena (Win32, AppKit, X11), o clique
+  e o arraste do M4 comparariam grandezas diferentes. Além disso:
+  - o `Monitor` não tinha origem, área útil nem descrição;
+  - a posição padrão usava o monitor inteiro, então o pet cairia na barra de
+    tarefas ou no Dock;
+  - o Motor nunca olhava as capacidades da janela.
+- **Palco velho no buffer novo.** O `EventoOverlay::Pronta(monitor)` levava o
+  monitor do momento em que entrou na fila. Quando dois chegavam na mesma
+  leva (escala e `configure` juntos), o primeiro desenhava com o palco velho
+  no buffer novo. Antes do T8.0, o código desenhava sempre com o estado de
+  agora.
+- **Nome vago.** O `EventoOverlay::Mudou` só significava "a janela terminou de
+  sair".
+- **Trabalho à toa no laço.** O laço do Linux rodava o `assentar` inteiro a
+  cada leva do Wayland: publicava o painel e tirava e punha de novo o mesmo
+  timer. A `Sessao` passava ao Motor cada movimento do ponteiro sobre o pet,
+  e o Motor os ignora. Passar o mouse por cima custava trabalho na taxa do
+  mouse, e recolocar o timer podia atrasar o prazo uma volta.
+- **Guardas com ponto cego.**
+  - A guarda do socket de comandos parava no primeiro `#[cfg(test)]` de cada
+    arquivo. No `motor/mod.rs` ele vinha na linha 23 (`mod testes;`), e as
+    574 linhas do Motor ficavam sem olhar. A decisão 0040 dizia que a guarda
+    olhava todos os crates.
+  - A guarda do core olhava só o alvo do host. No aarch64 (macOS e Linux
+    arm), o core já puxa o `libc` pelo `cpufeatures` do `sha2`.
+- **Testes faltando.** A agenda interna da camada não tinha testes, e o teste
+  do laço sem janela dependia de um `sleep` com 400 ms de folga.
+
+**Escolha (revisão do T8.0):**
+- **O palco.** Tudo o que o Motor troca com a janela fica em pixels do
+  dispositivo do monitor, com a origem no canto dele: a cena, a célula, a
+  área de toque do `Overlay::desenhar` e o `EventoPonteiro`.
+  - A camada do Wayland converte o toque para coordenadas lógicas. A conta é
+    a mesma de antes, agora dentro dela.
+  - Uma janela pequena subtrai a própria origem.
+  - O `InfoOverlay.regiao` (o `regiao_entrada` do `/v1/estado`) continua nas
+    coordenadas da janela.
+- **O `Monitor`** ganhou três campos: `descricao` (para as posições salvas do
+  M4), `origem` no desktop (para as janelas pequenas) e `area_util` no palco.
+  A posição padrão do pet é o canto inferior direito da área útil. No Wayland
+  a área útil é o monitor inteiro, porque a camada ignora as zonas
+  exclusivas; no Hyprland, nada muda.
+- **O Motor consulta as capacidades.** O estresse (confete pela tela inteira)
+  só começa com uma janela do tamanho do monitor. O
+  `Motor::acerta_o_pet(x, y)`, no palco, é por onde o clique do M4 vai
+  começar.
+- **Eventos da janela.** O `EventoOverlay::Pronta` não carrega mais o
+  monitor: o Motor refaz o palco com o `Overlay::pronta()` de agora. O
+  `Mudou` virou `Saiu`.
+- **O laço.**
+  - O prazo armado fica onde está quando não muda.
+  - Depois de uma leva do Wayland, o painel só sai se um evento mudou o pet
+    ou a janela; o batimento de 5 s republica de todo jeito.
+  - Movimentos seguidos do ponteiro viram um só na fila.
+- **A guarda do socket** pula só o item marcado com `#[cfg(test)]`: um
+  `mod x;` ou um bloco até a `}` da coluna 0. Ela se prova a cada `verificar`
+  com linhas plantadas. O `mod testes;` do Motor foi para o fim do arquivo. A
+  afirmação da 0040 sobre a guarda passa a ser verdade.
+- **A guarda do core** olha todos os alvos (`cargo tree --target all`). O
+  `libc` só pode vir do `cpufeatures`.
+- **Testes.**
+  - A janela de mentira virou `plataforma::falsa::JanelaFalsa`, com uma
+    versão pequena. Ela fica atrás da feature `teste`, que o binário nunca
+    liga.
+  - O Motor ganhou testes novos: duas `Pronta` na mesma leva, janela pequena
+    com barra de tarefas e acerto no palco, e estresse recusado na janela
+    pequena.
+  - A agenda interna da camada é uma estrutura pura, com testes da ordem de
+    vencimento e da geração.
+  - O laço sem janela espera a reação aparecer, em vez de dormir um prazo
+    fixo.
+
+Ficaram para depois, de propósito:
+- um teste do laço do calloop provando que a caixa entra antes do prazo
+  (decisão 0032). O código são três linhas, e o teste pediria montar o laço
+  com a conexão;
+- um relógio injetado no `Nucleo`.
+
+**Por quê:** a costura existe para o M4 e o M8 escreverem em cima dela. Um
+contrato que só vale no Wayland seria pago depois, com o arraste e o clique
+já escritos. E uma guarda com ponto cego dá uma garantia que não existe.

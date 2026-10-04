@@ -186,31 +186,27 @@ impl Ancoras {
     }
 }
 
-/// Posição padrão da célula (canto superior esquerdo, pixels do monitor):
-/// canto inferior direito, com a borda direita do corpo e os pés a 16
-/// pixels lógicos das bordas, presa para o corpo ficar inteiro na tela.
-pub fn posicao_padrao(tela: (i32, i32), escala: f64, d: i32, ancoras: &Ancoras) -> (i32, i32) {
+/// Posição padrão da célula (canto superior esquerdo, no palco): o canto
+/// inferior direito da área útil (o monitor sem barra de tarefas, Dock ou
+/// painel; no Wayland, o monitor inteiro), com a borda direita do corpo e os
+/// pés a 16 pixels lógicos das bordas, presa para o corpo ficar inteiro
+/// dentro dela.
+pub fn posicao_padrao(area: Ret, escala: f64, d: i32, ancoras: &Ancoras) -> (i32, i32) {
     let margem = para_dispositivo(MARGEM_LOGICA, escala);
     let toque = ancoras.toque(false);
-    let x = tela.0 - margem - toque.direita() * d;
-    let y = tela.1 - margem - ancoras.pe.1 * d;
-    prender(x, y, tela, d, ancoras, false)
+    let x = area.direita() - margem - toque.direita() * d;
+    let y = area.baixo() - margem - ancoras.pe.1 * d;
+    prender(x, y, area, d, ancoras, false)
 }
 
-/// Prende a célula para a área clicável ficar inteira dentro da tela.
-pub fn prender(
-    x: i32,
-    y: i32,
-    tela: (i32, i32),
-    d: i32,
-    ancoras: &Ancoras,
-    espelhar: bool,
-) -> (i32, i32) {
+/// Prende a célula para a área clicável ficar inteira dentro de `area` (no
+/// palco).
+pub fn prender(x: i32, y: i32, area: Ret, d: i32, ancoras: &Ancoras, espelhar: bool) -> (i32, i32) {
     let t = ancoras.toque(espelhar);
-    let x_min = -t.x * d;
-    let x_max = tela.0 - t.direita() * d;
-    let y_min = -t.y * d;
-    let y_max = tela.1 - t.baixo() * d;
+    let x_min = area.x - t.x * d;
+    let x_max = area.direita() - t.direita() * d;
+    let y_min = area.y - t.y * d;
+    let y_max = area.baixo() - t.baixo() * d;
     (
         x.min(x_max).max(x_min.min(x_max)),
         y.min(y_max).max(y_min.min(y_max)),
@@ -303,7 +299,7 @@ mod testes {
     #[test]
     fn posicao_padrao_no_canto_inferior_direito() {
         let a = ancoras();
-        let (x, y) = posicao_padrao((1920, 1200), 1.5, 5, &a);
+        let (x, y) = posicao_padrao(Ret::novo(0, 0, 1920, 1200), 1.5, 5, &a);
         // Corpo termina a 24 px (16 lógicos) da direita; pés a 24 px do chão.
         assert_eq!(x + 38 * 5, 1920 - 24);
         assert_eq!(y + 45 * 5, 1200 - 24);
@@ -312,12 +308,34 @@ mod testes {
     }
 
     #[test]
+    fn posicao_padrao_acima_da_barra_de_tarefas() {
+        // A área útil sem uma barra de 72 pixels embaixo e um painel de 60 à
+        // esquerda: o pet fica no canto dela, não em cima da barra.
+        let a = ancoras();
+        let area = Ret::novo(60, 0, 1860, 1128);
+        let (x, y) = posicao_padrao(area, 1.5, 5, &a);
+        assert_eq!(x + 38 * 5, 1920 - 24);
+        assert_eq!(y + 45 * 5, 1128 - 24, "pés acima da barra");
+        let toque = a.toque_no_monitor(x, y, 5, false);
+        assert!(
+            area.intersecao(&toque) == Some(toque),
+            "corpo inteiro na área"
+        );
+    }
+
+    #[test]
     fn prender_deixa_o_corpo_inteiro() {
         let a = ancoras();
-        assert_eq!(prender(-500, -500, (1920, 1200), 5, &a, false), (-50, -65));
-        let (x, y) = prender(5000, 5000, (1920, 1200), 5, &a, false);
+        let tela = Ret::novo(0, 0, 1920, 1200);
+        assert_eq!(prender(-500, -500, tela, 5, &a, false), (-50, -65));
+        let (x, y) = prender(5000, 5000, tela, 5, &a, false);
         let t = a.toque_no_monitor(x, y, 5, false);
         assert_eq!((t.direita(), t.baixo()), (1920, 1200));
+        // Numa área que não começa na origem, o canto dela segura o corpo.
+        let area = Ret::novo(60, 40, 1860, 1088);
+        let (x, y) = prender(-500, -500, area, 5, &a, false);
+        let t = a.toque_no_monitor(x, y, 5, false);
+        assert_eq!((t.x, t.y), (60, 40));
     }
 
     #[test]

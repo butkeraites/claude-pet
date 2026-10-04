@@ -18,7 +18,7 @@ use pet_core::cerebro::{Agora, ConfigCerebro, Reacao};
 use pet_core::config::ConfigEfetiva;
 use pet_core::evento;
 use pet_core::motor::{Motor, Tocou};
-use pet_core::plataforma::Overlay;
+use pet_core::plataforma::{EventoOverlay, Overlay};
 
 use crate::comando::{Comando, Recebido};
 use crate::estado::{Compartilhado, InfoSkin, Painel, Tela};
@@ -319,21 +319,26 @@ impl Nucleo {
         }
     }
 
-    /// Os eventos da janela, em ordem, até acabarem.
-    pub fn eventos_da_janela(&mut self, ov: Option<&mut dyn Overlay>) {
+    /// Os eventos da janela, em ordem, até acabarem. Devolve se algum deles
+    /// mudou o pet ou a janela (o ponteiro sozinho não muda nada até o M4):
+    /// só aí o laço precisa publicar o painel.
+    pub fn eventos_da_janela(&mut self, ov: Option<&mut dyn Overlay>) -> bool {
         let Some(ov) = ov else {
-            return;
+            return false;
         };
+        let mut mudou = false;
         for _ in 0..VOLTAS_DE_EVENTOS {
             let eventos = ov.eventos();
             if eventos.is_empty() {
-                return;
+                break;
             }
             let agora = self.agora_ms();
             for evento in eventos {
+                mudou |= !matches!(evento, EventoOverlay::Ponteiro(_));
                 self.motor.evento_overlay(ov, evento, agora);
             }
         }
+        mudou
     }
 
     /// Uma janela nova: o compositor conectou. (Só o laço com janela usa: o

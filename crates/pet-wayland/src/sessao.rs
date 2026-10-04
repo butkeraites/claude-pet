@@ -18,7 +18,7 @@ use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
 use pet_core::cena::Elemento;
-use pet_core::geometria::Ret;
+use pet_core::geometria::{self, Ret};
 use pet_core::plataforma::{
     Botao, CapOverlay, Desenho, EventoOverlay, EventoPonteiro, Fase, InfoOverlay, Monitor, Overlay,
     UltimoQuadro,
@@ -95,12 +95,59 @@ enum Tarefa {
     Recriar,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Agendado {
     quando_ms: u64,
     /// A geração da camada a que o prazo se refere (`None`: qualquer).
     geracao: Option<u64>,
     tarefa: Tarefa,
+}
+
+impl Agendado {
+    /// O prazo ainda vale para a camada `atual`: um prazo de uma camada que
+    /// já morreu (outra geração, ou nenhuma) se cala.
+    fn vale_para(&self, atual: Option<u64>) -> bool {
+        self.geracao.is_none() || self.geracao == atual
+    }
+}
+
+/// Os prazos internos da camada, no relógio do laço (ms): destruir depois
+/// de esconder, as reservas de escala e de `enter`, recriar depois de um
+/// `closed`. Pura, para testar sem compositor; a geração de cada prazo é
+/// conferida na hora de cumprir ([`Agendado::vale_para`]), porque cumprir um
+/// pode matar a camada dos seguintes.
+#[derive(Debug, Default)]
+struct Agenda {
+    itens: Vec<Agendado>,
+}
+
+impl Agenda {
+    fn agendar(&mut self, quando_ms: u64, geracao: Option<u64>, tarefa: Tarefa) {
+        self.itens.push(Agendado {
+            quando_ms,
+            geracao,
+            tarefa,
+        });
+    }
+
+    fn proximo(&self) -> Option<u64> {
+        self.itens.iter().map(|a| a.quando_ms).min()
+    }
+
+    /// Tira os prazos vencidos até `agora_ms`, na ordem em que vencem (no
+    /// empate, na ordem em que foram marcados, como os timers do calloop).
+    fn vencidos(&mut self, agora_ms: u64) -> Vec<Agendado> {
+        let (mut vencidos, resto): (Vec<Agendado>, Vec<Agendado>) = std::mem::take(&mut self.itens)
+            .into_iter()
+            .partition(|a| a.quando_ms <= agora_ms);
+        self.itens = resto;
+        vencidos.sort_by_key(|a| a.quando_ms);
+        vencidos
+    }
+
+    fn limpar(&mut self) {
+        self.itens.clear();
+    }
 }
 
 /// Estado da fila de eventos Wayland.
@@ -117,7 +164,7 @@ pub struct Sessao {
     superficie: Option<Superficie>,
     /// Origem do relógio do laço: os prazos internos andam nele.
     inicio: Instant,
-    agenda: Vec<Agendado>,
+    agenda: Agenda,
     eventos: Vec<EventoOverlay>,
     assentos: SeatState,
     ponteiro: Option<wl_pointer::WlPointer>,
@@ -180,7 +227,7 @@ pub fn conectar(fluxo: UnixStream, inicio: Instant) -> Result<Conexao, String> {
         conexao: conexao.clone(),
         superficie: None,
         inicio,
-        agenda: Vec::new(),
+        agenda: Agenda::default(),
         eventos: Vec::new(),
         assentos,
         ponteiro: None,
@@ -235,11 +282,7 @@ impl Sessao {
     /// Marca um prazo interno daqui a `daqui_a`.
     fn agendar(&mut self, daqui_a: Duration, geracao: Option<u64>, tarefa: Tarefa) {
         let quando_ms = self.agora_ms() + daqui_a.as_millis() as u64;
-        self.agenda.push(Agendado {
-            quando_ms,
-            geracao,
-            tarefa,
-        });
+        self.agenda.agendar(quando_ms, geracao, tarefa);
     }
 
     fn geracao(&self) -> Option<u64> {
@@ -247,7 +290,8 @@ impl Sessao {
     }
 
     /// Recalcula tamanho, escala e monitor da camada; quando mudam, conta ao
-    /// Motor ([`EventoOverlay::Pronta`]), que refaz o palco e desenha.
+    /// Motor ([`EventoOverlay::Pronta`]), que refaz o palco com o estado de
+    /// agora ([`Overlay::pronta`]) e desenha.
     fn tentar_aprontar(&mut self) {
         let Some(superficie) = self.superficie.as_mut() else {
             return;
@@ -268,7 +312,7 @@ impl Sessao {
             pronta.logico.1,
             pronta.escala
         );
-        self.eventos.push(EventoOverlay::Pronta(pronta.monitor()));
+        self.eventos.push(EventoOverlay::Pronta);
     }
 
     /// Larga a camada atual e agenda outra (output NULL: o monitor focado)
@@ -294,14 +338,14 @@ impl Sessao {
     }
 
     fn executar(&mut self, agendado: Agendado) {
-        if agendado.geracao.is_some() && agendado.geracao != self.geracao() {
+        if !agendado.vale_para(self.geracao()) {
             return;
         }
         match agendado.tarefa {
             Tarefa::Destruir => {
                 if self.superficie.as_ref().is_some_and(|s| s.saindo) {
                     self.superficie = None;
-                    self.eventos.push(EventoOverlay::Mudou);
+                    self.eventos.push(EventoOverlay::Saiu);
                 }
             }
             Tarefa::Reserva(prazo) => {
@@ -392,16 +436,23 @@ impl Overlay for Sessao {
         self.superficie = None;
     }
 
+    /// A cena e o toque chegam no palco; o palco é o buffer da camada (ela
+    /// cobre o monitor), e o toque vira a região de input em coordenadas
+    /// lógicas da superfície, arredondada para fora.
     fn desenhar(
         &mut self,
         cena: &[Elemento],
         skin: &Skin,
-        regiao: Option<Ret>,
+        toque: Option<Ret>,
         forcar: bool,
     ) -> Result<Desenho, String> {
         let Some(superficie) = self.superficie.as_mut() else {
             return Err("sem camada".into());
         };
+        let Some(escala) = superficie.pronta().map(|p| p.escala) else {
+            return Err("camada ainda não está pronta".into());
+        };
+        let regiao = toque.map(|t| geometria::para_logico_por_fora(t, escala));
         let mudou_regiao = superficie
             .definir_regiao(regiao, &self.compositor)
             .unwrap_or_else(|e| {
@@ -452,14 +503,11 @@ impl Overlay for Sessao {
     }
 
     fn proximo_prazo(&self) -> Option<u64> {
-        self.agenda.iter().map(|a| a.quando_ms).min()
+        self.agenda.proximo()
     }
 
     fn vencer(&mut self, agora_ms: u64) {
-        let (vencidos, resto): (Vec<Agendado>, Vec<Agendado>) =
-            self.agenda.iter().partition(|a| a.quando_ms <= agora_ms);
-        self.agenda = resto;
-        for agendado in vencidos {
+        for agendado in self.agenda.vencidos(agora_ms) {
             self.executar(agendado);
         }
     }
@@ -474,7 +522,7 @@ impl Overlay for Sessao {
     /// libwayland-server descarta o que não leu quando o cliente desliga).
     fn encerrar(&mut self, confirmar: bool) {
         self.superficie = None;
-        self.agenda.clear();
+        self.agenda.limpar();
         if !confirmar {
             return;
         }
@@ -523,7 +571,7 @@ impl CompositorHandler for Sessao {
         superficie.quadro_mostrado();
         if superficie.saindo {
             self.superficie = None;
-            self.eventos.push(EventoOverlay::Mudou);
+            self.eventos.push(EventoOverlay::Saiu);
         } else if superficie.pendente {
             self.eventos.push(EventoOverlay::Redesenhar);
         }
@@ -727,8 +775,10 @@ impl SeatHandler for Sessao {
 
 impl PointerHandler for Sessao {
     /// O ponteiro troca o cursor para "pegar" em cima do pet e vai ao Motor
-    /// em pixels do dispositivo (o arraste e o clique chegam no M4).
-    /// Coordenadas nunca vão para o log.
+    /// no palco: a camada cobre o monitor, então é a posição na superfície
+    /// vezes a escala (o arraste e o clique chegam no M4). Movimentos
+    /// seguidos viram um só, o último: passar o mouse por cima do pet não
+    /// enche a fila. Coordenadas nunca vão para o log.
     fn pointer_frame(
         &mut self,
         _: &Connection,
@@ -767,14 +817,111 @@ impl PointerHandler for Sessao {
                 },
                 PointerEventKind::Axis { .. } => continue,
             };
-            self.eventos.push(EventoOverlay::Ponteiro(ponteiro));
+            empilhar_ponteiro(&mut self.eventos, ponteiro);
         }
     }
+}
+
+/// Põe um evento do ponteiro na fila; um `Moveu` logo depois de outro o
+/// substitui.
+fn empilhar_ponteiro(eventos: &mut Vec<EventoOverlay>, ponteiro: EventoPonteiro) {
+    if let (
+        EventoPonteiro::Moveu { .. },
+        Some(EventoOverlay::Ponteiro(ultimo @ EventoPonteiro::Moveu { .. })),
+    ) = (ponteiro, eventos.last_mut())
+    {
+        *ultimo = ponteiro;
+        return;
+    }
+    eventos.push(EventoOverlay::Ponteiro(ponteiro));
 }
 
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    #[test]
+    fn agenda_vence_em_ordem_e_guarda_o_resto() {
+        let mut agenda = Agenda::default();
+        assert_eq!(agenda.proximo(), None);
+        agenda.agendar(250, None, Tarefa::Recriar);
+        agenda.agendar(50, Some(7), Tarefa::Destruir);
+        agenda.agendar(500, Some(7), Tarefa::Reserva(Prazo::Enter));
+        agenda.agendar(200, Some(7), Tarefa::Reserva(Prazo::Escala));
+        assert_eq!(agenda.proximo(), Some(50));
+        assert!(agenda.vencidos(49).is_empty(), "nada antes do prazo");
+        let vencidos: Vec<Tarefa> = agenda.vencidos(250).iter().map(|a| a.tarefa).collect();
+        assert_eq!(
+            vencidos,
+            vec![
+                Tarefa::Destruir,
+                Tarefa::Reserva(Prazo::Escala),
+                Tarefa::Recriar
+            ],
+            "na ordem em que vencem, não na em que foram marcados"
+        );
+        assert_eq!(agenda.proximo(), Some(500), "o resto fica");
+        // Empate: na ordem em que foram marcados.
+        agenda.agendar(500, None, Tarefa::Recriar);
+        let vencidos: Vec<Tarefa> = agenda.vencidos(1_000).iter().map(|a| a.tarefa).collect();
+        assert_eq!(
+            vencidos,
+            vec![Tarefa::Reserva(Prazo::Enter), Tarefa::Recriar]
+        );
+        agenda.agendar(10, None, Tarefa::Recriar);
+        agenda.limpar();
+        assert_eq!(agenda.proximo(), None);
+    }
+
+    #[test]
+    fn prazo_de_camada_morta_se_cala() {
+        let destruir = Agendado {
+            quando_ms: 50,
+            geracao: Some(7),
+            tarefa: Tarefa::Destruir,
+        };
+        assert!(destruir.vale_para(Some(7)));
+        assert!(!destruir.vale_para(Some(8)), "outra camada");
+        assert!(!destruir.vale_para(None), "camada nenhuma");
+        let recriar = Agendado {
+            geracao: None,
+            tarefa: Tarefa::Recriar,
+            ..destruir
+        };
+        assert!(recriar.vale_para(None) && recriar.vale_para(Some(8)));
+    }
+
+    #[test]
+    fn movimentos_seguidos_do_ponteiro_viram_um() {
+        let mut fila = Vec::new();
+        empilhar_ponteiro(&mut fila, EventoPonteiro::Entrou { x: 1, y: 1 });
+        for x in 2..50 {
+            empilhar_ponteiro(&mut fila, EventoPonteiro::Moveu { x, y: 1 });
+        }
+        empilhar_ponteiro(
+            &mut fila,
+            EventoPonteiro::Apertou {
+                botao: Botao::Esquerdo,
+                x: 49,
+                y: 1,
+            },
+        );
+        empilhar_ponteiro(&mut fila, EventoPonteiro::Moveu { x: 60, y: 2 });
+        empilhar_ponteiro(&mut fila, EventoPonteiro::Moveu { x: 61, y: 2 });
+        assert_eq!(
+            fila,
+            vec![
+                EventoOverlay::Ponteiro(EventoPonteiro::Entrou { x: 1, y: 1 }),
+                EventoOverlay::Ponteiro(EventoPonteiro::Moveu { x: 49, y: 1 }),
+                EventoOverlay::Ponteiro(EventoPonteiro::Apertou {
+                    botao: Botao::Esquerdo,
+                    x: 49,
+                    y: 1
+                }),
+                EventoOverlay::Ponteiro(EventoPonteiro::Moveu { x: 61, y: 2 }),
+            ]
+        );
+    }
 
     #[test]
     fn botoes_do_linux() {
