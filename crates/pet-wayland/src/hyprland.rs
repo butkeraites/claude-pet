@@ -20,9 +20,10 @@
 //! **O monitor FALLBACK.** Quando não sobra monitor de verdade, o Hyprland
 //! cria o output `FALLBACK`: nunca é casa do pet.
 //!
-//! **O desktop.** [`Hyprland`] implementa o [`Desktop`]; por enquanto sem
-//! capacidade nenhuma. O M4 traz o leitor do socket2 (monitor e janela
-//! ativos) e o foco pelo foreign-toplevel (decisão 0039).
+//! **O desktop.** O [`Desktop`](pet_core::plataforma::Desktop) do Wayland é a
+//! própria sessão (decisão 0043: a mesma conexão e o mesmo `wl_seat`). O que é
+//! só do Hyprland chega no M4: o leitor do socket2 (monitor e janela ativos)
+//! e o mapeamento dos toplevels para os endereços de janela (decisão 0039).
 //!
 //! [`Reconexao`]: crate::conexao::Reconexao
 
@@ -31,8 +32,6 @@ use std::io;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
-
-use pet_core::plataforma::{Alca, CapDesktop, Desktop, ErroFoco};
 
 use crate::conexao::conectar_unix;
 
@@ -192,23 +191,6 @@ pub fn procurar(
         }
     }
     Err(Espera::NenhumaViva { candidatas: total })
-}
-
-/// A ligação com o Hyprland. Por enquanto sem capacidade nenhuma: seguir o
-/// monitor e focar o terminal da sessão chegam no M4, pelo socket de eventos
-/// e pelo foreign-toplevel, nunca pelo socket de comandos (decisões 0006 e
-/// 0039).
-#[derive(Debug, Default)]
-pub struct Hyprland;
-
-impl Desktop for Hyprland {
-    fn capacidades(&self) -> CapDesktop {
-        CapDesktop::default()
-    }
-
-    fn focar(&mut self, _: &Alca) -> Result<(), ErroFoco> {
-        Err(ErroFoco::NaoSuportado)
-    }
 }
 
 #[cfg(test)]
@@ -388,14 +370,7 @@ mod testes {
     }
 
     #[test]
-    fn reserva_e_o_desktop_sem_capacidades() {
+    fn reserva() {
         assert!(eh_reserva("FALLBACK") && !eh_reserva("eDP-1"));
-        let mut h = Hyprland;
-        assert_eq!(h.capacidades(), CapDesktop::default());
-        assert_eq!(
-            h.focar(&Alca("0x55d1".into())),
-            Err(ErroFoco::NaoSuportado),
-            "o foco chega no M4, pelo foreign-toplevel"
-        );
     }
 }

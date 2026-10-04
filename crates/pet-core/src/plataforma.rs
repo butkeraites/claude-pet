@@ -123,7 +123,7 @@ pub struct CapDesktop {
 
 /// Uma janela que o desktop sabe focar. Opaca: o endereço no Hyprland, um
 /// HWND no Windows, um id de app no macOS. Nunca carrega o título.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Alca(pub String);
 
 /// Por que o desktop não focou uma janela.
@@ -137,11 +137,84 @@ pub enum ErroFoco {
     Recusado(String),
 }
 
+/// O que o desktop conta ao Motor (decisão 0043): o monitor em foco, a
+/// janela ativa (só um id opaco, nunca o título), a proteção de tela. No
+/// Hyprland vem do socket de eventos (`.socket2.sock`, numa thread que só
+/// lê) e da própria conexão Wayland; nenhum evento carrega título, classe ou
+/// nome de área de trabalho.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EventoDesktop {
+    /// A fonte dos eventos do desktop ligou (`true`) ou caiu (`false`): o que
+    /// aconteceu enquanto ela estava fora não chegou.
+    Ligado(bool),
+    /// O monitor em foco mudou (o nome que o sistema dá, `eDP-1`).
+    MonitorEmFoco(String),
+    /// A janela ativa mudou (`None`: nenhuma, uma área de trabalho vazia),
+    /// com a hora em que o desktop contou, em ms desde 1970 (o mesmo relógio
+    /// do `ts` dos hooks).
+    JanelaAtiva {
+        janela: Option<Alca>,
+        parede_ms: u64,
+    },
+    /// A janela que já estava ativa quando a conexão começou (a semente do
+    /// anel de ativações): só vale se nada mais novo chegou.
+    JanelaInicial { janela: Alca, parede_ms: u64 },
+    /// O título da janela em foco começa com um glifo do Claude Code (✳, ◐
+    /// ou ◑): o Renan está olhando um terminal do Claude. Do título só sai
+    /// este booleano.
+    OlhandoClaude(bool),
+    /// Uma janela abriu; `protetor`: é a proteção de tela do sistema.
+    JanelaAbriu { janela: Alca, protetor: bool },
+    /// Uma janela fechou.
+    JanelaFechou(Alca),
+    /// Um monitor entrou ou saiu.
+    Monitores,
+}
+
+/// O que a ligação com o desktop mostra no `/v1/estado`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct InfoDesktop {
+    /// Os protocolos que ela usa para focar janelas, ligados nesta conexão
+    /// (no Wayland: `zwlr_foreign_toplevel_manager_v1` e
+    /// `hyprland_toplevel_mapping_manager_v1`).
+    pub protocolos: Vec<String>,
+    /// Janelas que ela sabe focar agora.
+    pub janelas: usize,
+}
+
 /// A ligação com o ambiente: monitor e janela ativos, focar, discrição.
 pub trait Desktop {
     fn capacidades(&self) -> CapDesktop;
     /// Leva o foco à janela `alvo` (o terminal de uma sessão).
     fn focar(&mut self, alvo: &Alca) -> Result<(), ErroFoco>;
+    /// Os eventos acumulados desde a última vez, em ordem.
+    fn eventos(&mut self) -> Vec<EventoDesktop> {
+        Vec::new()
+    }
+    fn info(&self) -> InfoDesktop {
+        InfoDesktop::default()
+    }
+}
+
+/// O cursor por cima do pet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cursor {
+    /// A mão aberta: dá para pegar o pet.
+    Pegar,
+    /// A mão fechada: segurando o pet.
+    Agarrar,
+}
+
+/// Uma conexão com o sistema: a janela do pet e a ligação com o desktop,
+/// juntas (decisão 0043). No Wayland as duas usam a mesma conexão e o mesmo
+/// `wl_seat`, e nascem e morrem juntas a cada reconexão; o Motor pede uma de
+/// cada vez.
+pub trait Punho {
+    fn janela(&mut self) -> &mut dyn Overlay;
+    fn desktop(&mut self) -> &mut dyn Desktop;
+    /// Só para ler (o painel do `/v1/estado`, os prazos).
+    fn ver_janela(&self) -> &dyn Overlay;
+    fn ver_desktop(&self) -> &dyn Desktop;
 }
 
 /// Botão do ponteiro.
@@ -301,6 +374,9 @@ pub trait Overlay {
     /// Esquece a cena desenhada: o próximo quadro redesenha tudo (troca de
     /// skin).
     fn esquecer_cena(&mut self);
+    /// O cursor por cima do pet (pegar, ou agarrar enquanto segura). Uma
+    /// janela sem cursor próprio ([`CapOverlay::cursor`]) ignora.
+    fn cursor(&mut self, cursor: Cursor);
     fn info(&self) -> InfoOverlay;
     /// O último quadro na tela; `None` sem janela pronta, saindo ou sem
     /// quadro.
@@ -416,10 +492,69 @@ pub mod falsa {
     use super::*;
     use crate::geometria::para_logico_por_fora;
 
+    /// Um desktop de mentira: as janelas que existem, as capacidades e os
+    /// focos que o Motor pediu.
+    #[derive(Debug, Clone)]
+    pub struct DesktopFalso {
+        pub capacidades: CapDesktop,
+        /// As janelas que dá para focar.
+        pub janelas: Vec<Alca>,
+        /// Os focos pedidos, em ordem.
+        pub focos: Vec<Alca>,
+        /// O que o desktop conta ao Motor no próximo [`Desktop::eventos`].
+        pub eventos: Vec<EventoDesktop>,
+    }
+
+    impl Default for DesktopFalso {
+        /// Como o Hyprland com o foreign-toplevel: segue o foco e foca.
+        fn default() -> DesktopFalso {
+            DesktopFalso {
+                capacidades: CapDesktop {
+                    segue_foco: true,
+                    janela_ativa: true,
+                    foca_janela: true,
+                    nao_perturbe: false,
+                },
+                janelas: Vec::new(),
+                focos: Vec::new(),
+                eventos: Vec::new(),
+            }
+        }
+    }
+
+    impl Desktop for DesktopFalso {
+        fn capacidades(&self) -> CapDesktop {
+            self.capacidades
+        }
+
+        fn focar(&mut self, alvo: &Alca) -> Result<(), ErroFoco> {
+            if !self.capacidades.foca_janela {
+                return Err(ErroFoco::NaoSuportado);
+            }
+            if !self.janelas.contains(alvo) {
+                return Err(ErroFoco::JanelaSumiu);
+            }
+            self.focos.push(alvo.clone());
+            Ok(())
+        }
+
+        fn eventos(&mut self) -> Vec<EventoDesktop> {
+            std::mem::take(&mut self.eventos)
+        }
+
+        fn info(&self) -> InfoDesktop {
+            InfoDesktop {
+                protocolos: vec!["falso".into()],
+                janelas: self.janelas.len(),
+            }
+        }
+    }
+
     /// Guarda o que o Motor pediu e imita a camada do Wayland: um quadro em
     /// voo por vez e a área de toque (pedida no palco) convertida para
     /// coordenadas lógicas no [`Overlay::info`]. Com
     /// [`JanelaFalsa::pequena`], imita uma janela pequena que anda (M8).
+    /// Também é um [`Punho`], com um [`DesktopFalso`] junto.
     pub struct JanelaFalsa {
         pub capacidades: CapOverlay,
         pub fase: Option<Fase>,
@@ -429,11 +564,15 @@ pub mod falsa {
         /// A área de toque pedida por último, no palco.
         pub toque: Option<Ret>,
         pub seq: u64,
+        /// O cursor pedido por último.
+        pub cursor: Option<Cursor>,
         /// O que o Motor pediu, em ordem (`criar`, `quadro 3`, `apagar com
         /// _teste`, …).
         pub pedidos: Vec<String>,
         /// O que a janela conta ao Motor no próximo [`Overlay::eventos`].
         pub eventos: Vec<EventoOverlay>,
+        /// O desktop da mesma conexão.
+        pub desktop: DesktopFalso,
     }
 
     impl Default for JanelaFalsa {
@@ -453,8 +592,10 @@ pub mod falsa {
                 cena: None,
                 toque: None,
                 seq: 0,
+                cursor: None,
                 pedidos: Vec::new(),
                 eventos: Vec::new(),
+                desktop: DesktopFalso::default(),
             }
         }
     }
@@ -569,6 +710,10 @@ pub mod falsa {
             self.cena = None;
         }
 
+        fn cursor(&mut self, cursor: Cursor) {
+            self.cursor = Some(cursor);
+        }
+
         fn info(&self) -> InfoOverlay {
             let escala = self.pronta.as_ref().map(|m| m.escala);
             InfoOverlay {
@@ -608,6 +753,24 @@ pub mod falsa {
         fn encerrar(&mut self, confirmar: bool) {
             self.pedidos.push(format!("encerrar {confirmar}"));
             self.fase = None;
+        }
+    }
+
+    impl Punho for JanelaFalsa {
+        fn janela(&mut self) -> &mut dyn Overlay {
+            self
+        }
+
+        fn desktop(&mut self) -> &mut dyn Desktop {
+            &mut self.desktop
+        }
+
+        fn ver_janela(&self) -> &dyn Overlay {
+            self
+        }
+
+        fn ver_desktop(&self) -> &dyn Desktop {
+            &self.desktop
         }
     }
 }

@@ -18,6 +18,7 @@
 //! O que é do sistema (pixels no buffer, quadro em voo, região de input,
 //! prazos internos da janela) fica atrás do trait [`Overlay`].
 
+mod desktop;
 mod pet;
 mod ritmo;
 
@@ -32,10 +33,12 @@ use crate::confete::{Chuva, Grade};
 use crate::evento::Evento;
 use crate::geometria::{Ret, Tamanho};
 use crate::plataforma::{
-    Desenho, EventoOverlay, Fase, Monitor, Overlay, Passo, passo_de_visibilidade,
+    Desenho, EventoDesktop, EventoOverlay, Fase, Monitor, Overlay, Passo, Punho,
+    passo_de_visibilidade,
 };
 use crate::skin::Skin;
 
+pub use desktop::{EstadoDesktop, PainelDesktop};
 pub use pet::{Palco, Pet};
 pub use ritmo::{Commits, Estresse, JANELA_COMMITS_MS};
 
@@ -73,6 +76,9 @@ pub struct Painel {
     pub shm_bytes: usize,
     /// A reação tocando na tela agora (`nod`, `done_small`, …).
     pub reacao: Option<String>,
+    /// O desktop: a fonte dos eventos, o monitor em foco, a janela ativa (só
+    /// o endereço) e o que a conexão sabe fazer.
+    pub desktop: PainelDesktop,
 }
 
 /// O que um `tocar` do `/v1/comando` fez (decisão 0033).
@@ -125,6 +131,8 @@ pub struct Motor {
     proximo_quadro: Option<u64>,
     /// O tamanho do pet na tela (`aparencia.tamanho`, decisão 0042).
     tamanho: Tamanho,
+    /// O que os eventos do desktop contaram (decisão 0043).
+    desktop: EstadoDesktop,
 }
 
 impl Motor {
@@ -139,6 +147,7 @@ impl Motor {
             commits: Commits::default(),
             proximo_quadro: None,
             tamanho: Tamanho::Normal,
+            desktop: EstadoDesktop::default(),
         }
     }
 
@@ -346,8 +355,10 @@ impl Motor {
         self.desenhar(ov, agora_ms, true);
     }
 
-    /// Um evento da janela.
-    pub fn evento_overlay(&mut self, ov: &mut dyn Overlay, evento: EventoOverlay, agora_ms: u64) {
+    /// Um evento da janela. Recebe a conexão inteira ([`Punho`]): o clique
+    /// do M4 foca janelas pelo desktop.
+    pub fn evento_overlay(&mut self, punho: &mut dyn Punho, evento: EventoOverlay, agora_ms: u64) {
+        let ov = punho.janela();
         match evento {
             // O palco sai do monitor de agora, não de quando o evento entrou
             // na fila: dois na mesma leva (escala e `configure` juntos) não
@@ -375,6 +386,24 @@ impl Motor {
             // ponteiro chega no M4 (arrastar e clicar; [`Motor::acerta_o_pet`]).
             EventoOverlay::Saiu | EventoOverlay::Ponteiro(_) => {}
         }
+    }
+
+    // --- desktop -------------------------------------------------------------
+
+    /// Um evento do desktop (decisão 0043): o monitor em foco, a janela
+    /// ativa, a presença. Devolve se o que o `/v1/estado` mostra mudou.
+    pub fn evento_desktop(
+        &mut self,
+        _ov: Option<&mut dyn Overlay>,
+        evento: &EventoDesktop,
+        _agora: Agora,
+    ) -> bool {
+        self.desktop.aplicar(evento)
+    }
+
+    /// O que os eventos do desktop contaram.
+    pub fn desktop(&self) -> &EstadoDesktop {
+        &self.desktop
     }
 
     // --- desenho -------------------------------------------------------------
@@ -560,12 +589,18 @@ impl Motor {
 
     // --- o que vai para fora -------------------------------------------------
 
-    /// O painel do `/v1/estado`. Sem janela (sem compositor), o painel
-    /// vazio.
-    pub fn painel(&mut self, ov: Option<&dyn Overlay>, agora_ms: u64) -> Painel {
-        let Some(ov) = ov else {
-            return Painel::default();
+    /// O painel do `/v1/estado`. Sem conexão (sem compositor), o painel
+    /// vazio, só com o que os eventos do desktop contaram.
+    pub fn painel(&mut self, punho: Option<&dyn Punho>, agora_ms: u64) -> Painel {
+        let Some(punho) = punho else {
+            return Painel {
+                desktop: self.desktop.painel(Default::default(), Default::default()),
+                ..Painel::default()
+            };
         };
+        let ov = punho.ver_janela();
+        let desktop = punho.ver_desktop();
+        let painel_desktop = self.desktop.painel(desktop.capacidades(), desktop.info());
         let info = ov.info();
         // Pelo relógio: com a tela apagada o último quadro do estresse pode
         // nunca ser desenhado, mas o estresse acabou do mesmo jeito.
@@ -590,6 +625,7 @@ impl Motor {
                 .as_ref()
                 .and_then(|pet| pet.reacao(agora_ms))
                 .map(str::to_owned),
+            desktop: painel_desktop,
         }
     }
 

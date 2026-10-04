@@ -459,3 +459,60 @@ fn estresse_numa_janela_pequena_avisa_e_nao_comeca() {
     assert!(!motor.painel(Some(&janela), 20).estresse);
     assert_eq!(janela.cena.as_ref().unwrap().len(), 1, "só o pet");
 }
+
+#[test]
+fn desktop_conta_o_monitor_e_a_janela_ativa_no_painel_com_ou_sem_conexao() {
+    use crate::plataforma::{Alca, EventoDesktop};
+    let (mut motor, mut janela) = ligado();
+    let agora = Agora {
+        parede_ms: PAREDE,
+        mono_ms: 0,
+    };
+    assert_eq!(motor.painel(Some(&janela), 0).desktop.eventos, "sem");
+    assert!(motor.evento_desktop(Some(&mut janela), &EventoDesktop::Ligado(true), agora));
+    assert!(motor.evento_desktop(
+        Some(&mut janela),
+        &EventoDesktop::MonitorEmFoco("HDMI-A-1".into()),
+        agora
+    ));
+    assert!(motor.evento_desktop(
+        None,
+        &EventoDesktop::JanelaAtiva {
+            janela: Some(Alca("5bbf4e6128f0".into())),
+            parede_ms: PAREDE,
+        },
+        agora
+    ));
+    janela.desktop.janelas = vec![Alca("5bbf4e6128f0".into())];
+    let p = motor.painel(Some(&janela), 0).desktop;
+    assert_eq!(p.eventos, "ligado");
+    assert_eq!(p.monitor_em_foco.as_deref(), Some("HDMI-A-1"));
+    assert_eq!(p.janela_ativa.as_deref(), Some("5bbf4e6128f0"));
+    assert!(p.foca_janelas, "o desktop da conexão foca");
+    assert_eq!((p.protocolos, p.janelas), (vec!["falso".to_owned()], 1));
+    // Sem conexão (o compositor caiu), o que os eventos contaram continua.
+    let sem = motor.painel(None, 0).desktop;
+    assert_eq!(sem.janela_ativa.as_deref(), Some("5bbf4e6128f0"));
+    assert!(!sem.foca_janelas && sem.janelas == 0);
+}
+
+#[test]
+fn a_janela_falsa_e_um_punho_com_o_desktop_junto() {
+    use crate::plataforma::{Alca, Cursor, Desktop, ErroFoco, Punho};
+    let mut janela = Falsa::default();
+    janela.desktop.janelas = vec![Alca("a1".into())];
+    let punho: &mut dyn Punho = &mut janela;
+    assert_eq!(punho.desktop().focar(&Alca("a1".into())), Ok(()));
+    assert_eq!(
+        punho.desktop().focar(&Alca("a2".into())),
+        Err(ErroFoco::JanelaSumiu)
+    );
+    punho.janela().cursor(Cursor::Agarrar);
+    assert_eq!(janela.cursor, Some(Cursor::Agarrar));
+    assert_eq!(janela.desktop.focos, vec![Alca("a1".into())]);
+    janela.desktop.capacidades.foca_janela = false;
+    assert_eq!(
+        janela.desktop.focar(&Alca("a1".into())),
+        Err(ErroFoco::NaoSuportado)
+    );
+}

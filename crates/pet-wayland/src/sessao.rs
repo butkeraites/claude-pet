@@ -13,6 +13,11 @@
 //! prazos dela (destruir depois de esconder, reservas de escala e de `enter`,
 //! recriar depois de um `closed`) vencem pelo [`Overlay::vencer`], no relógio
 //! do laço.
+//!
+//! A mesma sessão é o [`Desktop`] do Wayland (decisão 0043): a janela e a
+//! ligação com o desktop usam a mesma conexão e o mesmo `wl_seat`, e nascem e
+//! morrem juntas a cada reconexão. Juntas, são o [`Punho`] que o laço entrega
+//! ao núcleo.
 
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
@@ -20,8 +25,8 @@ use std::time::{Duration, Instant};
 use pet_core::cena::Elemento;
 use pet_core::geometria::{self, Ret};
 use pet_core::plataforma::{
-    Botao, CapOverlay, Desenho, EventoOverlay, EventoPonteiro, Fase, InfoOverlay, Monitor, Overlay,
-    UltimoQuadro,
+    Alca, Botao, CapDesktop, CapOverlay, Cursor, Desenho, Desktop, ErroFoco, EventoOverlay,
+    EventoPonteiro, Fase, InfoOverlay, Monitor, Overlay, Punho, UltimoQuadro,
 };
 use pet_core::skin::Skin;
 
@@ -170,6 +175,9 @@ pub struct Sessao {
     ponteiro: Option<wl_pointer::WlPointer>,
     cursores: Option<CursorShapeManager>,
     forma_do_cursor: Option<WpCursorShapeDeviceV1>,
+    /// O serial do último `enter` do ponteiro na camada: o cursor-shape só
+    /// aceita trocar o cursor com ele.
+    serial_enter: Option<u32>,
 }
 
 /// Resultado do handshake: a conexão, a fila e o estado que ela despacha.
@@ -233,6 +241,7 @@ pub fn conectar(fluxo: UnixStream, inicio: Instant) -> Result<Conexao, String> {
         ponteiro: None,
         cursores,
         forma_do_cursor: None,
+        serial_enter: None,
     };
     Ok(Conexao {
         conexao,
@@ -474,6 +483,21 @@ impl Overlay for Sessao {
         }
     }
 
+    /// `grab` e `grabbing` do cursor-shape-v1, com o serial do último
+    /// `enter` (sem ele, ou sem o protocolo, o cursor fica como está).
+    fn cursor(&mut self, cursor: Cursor) {
+        let (Some(forma), Some(serial)) = (&self.forma_do_cursor, self.serial_enter) else {
+            return;
+        };
+        forma.set_shape(
+            serial,
+            match cursor {
+                Cursor::Pegar => Shape::Grab,
+                Cursor::Agarrar => Shape::Grabbing,
+            },
+        );
+    }
+
     fn info(&self) -> InfoOverlay {
         let superficie = self.superficie.as_ref();
         let pronta = superficie.and_then(Superficie::pronta);
@@ -530,6 +554,37 @@ impl Overlay for Sessao {
             Ok(()) => depurar!("o compositor processou o quadro transparente e a destruição"),
             Err(e) => aviso!("saindo sem confirmação do compositor: {e}"),
         }
+    }
+}
+
+/// O desktop do Wayland nesta conexão. Focar janelas pelo foreign-toplevel
+/// chega na T4.9 (decisão 0039); por enquanto, nenhuma capacidade.
+impl Desktop for Sessao {
+    fn capacidades(&self) -> CapDesktop {
+        CapDesktop::default()
+    }
+
+    fn focar(&mut self, _: &Alca) -> Result<(), ErroFoco> {
+        Err(ErroFoco::NaoSuportado)
+    }
+}
+
+/// A janela e o desktop da mesma conexão (decisão 0043).
+impl Punho for Sessao {
+    fn janela(&mut self) -> &mut dyn Overlay {
+        self
+    }
+
+    fn desktop(&mut self) -> &mut dyn Desktop {
+        self
+    }
+
+    fn ver_janela(&self) -> &dyn Overlay {
+        self
+    }
+
+    fn ver_desktop(&self) -> &dyn Desktop {
+        self
     }
 }
 
@@ -798,6 +853,7 @@ impl PointerHandler for Sessao {
             let y = (evento.position.1 * escala).round() as i32;
             let ponteiro = match &evento.kind {
                 PointerEventKind::Enter { serial } => {
+                    self.serial_enter = Some(*serial);
                     if let Some(forma) = &self.forma_do_cursor {
                         forma.set_shape(*serial, Shape::Grab);
                     }

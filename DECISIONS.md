@@ -1799,3 +1799,46 @@ em memória à toa.
 **Por quê:** uma aprovação é uma troca de personagem, e a tela tem de mudar
 uma vez só, do jeito certo. Uma opção documentada que não faz nada é pior que
 nenhuma.
+
+## 0047 — Costura do M4: o punho por conexão, os eventos do desktop e o cursor (2026-10-04)
+
+**Problema:** o clique do M4 foca a janela de uma sessão pelo desktop e toca a
+risadinha na janela, na mesma volta do laço. O laço só entregava ao núcleo a
+janela (`Option<&mut dyn Overlay>`); o `Desktop` do Hyprland era uma struct à
+parte, sem a conexão Wayland nem o `wl_seat` que o
+`zwlr_foreign_toplevel_handle_v1.activate(seat)` pede; e não havia como os
+eventos do desktop (monitor em foco, janela ativa) chegarem ao Motor, nem
+como o Motor pedir o cursor de agarrar (decisão 0043).
+**Escolha (T4.1):**
+- **`Punho`** (`pet_core::plataforma`): a janela e o desktop de uma conexão,
+  juntos, pedidos um de cada vez (`janela()`, `desktop()`, e `ver_janela()` e
+  `ver_desktop()` para só ler). O `Nucleo` recebe `Option<&mut dyn Punho>` em
+  todo lugar onde recebia a janela; o Motor recebe o punho no
+  `evento_overlay` (o clique vai focar uma janela) e a janela no resto.
+- **`EventoDesktop`** e **`Motor::evento_desktop`**: a fonte dos eventos
+  ligou ou caiu, o monitor em foco, a janela ativa (um id opaco e a hora de
+  parede em que o desktop contou, o mesmo relógio do `ts` dos hooks), a
+  semente da janela ativa na conexão nova, a presença (só o booleano do
+  primeiro glifo do título), uma janela que abriu (com a proteção de tela
+  como booleano) ou fechou, e os monitores. Nenhum evento carrega título,
+  classe ou nome de área de trabalho.
+- **`Desktop::eventos` e `Desktop::info`** (com padrão vazio): os eventos que
+  a própria conexão conta (no Wayland, a semente pelo foreign-toplevel, na
+  T4.9) entram no mesmo lote dos eventos da janela; o `/v1/estado.desktop`
+  mostra a fonte dos eventos (`sem`, `ligado`, `caiu`), o monitor em foco, o
+  endereço da janela ativa, a presença, se a conexão sabe focar janelas, os
+  protocolos ligados para isso e quantas janelas ela conhece.
+- **`Overlay::cursor`** (`Pegar`, `Agarrar`): no Wayland, `grab` e
+  `grabbing` do cursor-shape-v1, com o serial do último `enter`.
+- A **`Sessao`** do Wayland é o `Desktop` e o `Punho` da conexão; a struct
+  `Hyprland` sem capacidade saiu. A janela de mentira ganhou o
+  `DesktopFalso` e virou punho, para os testes do Motor e do núcleo.
+
+Nada muda no que o pet faz: nenhum evento do desktop chega até o leitor do
+socket2 (T4.4), e o cursor continua `grab` no `enter`.
+**Por quê:** a janela e o desktop vivem na mesma conexão no Wayland e no
+mesmo processo de interface no Windows e no macOS; entregá-los juntos, um de
+cada vez, deixa o clique decidir e agir na mesma volta sem duas referências
+mutáveis à mesma sessão. Os eventos do desktop entram no Motor como tipos
+simples, sem nada de conteúdo, e o Motor continua testável com a janela e o
+desktop de mentira.

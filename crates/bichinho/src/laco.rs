@@ -28,7 +28,7 @@ use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use pet_core::config::ConfigEfetiva;
-use pet_core::plataforma::{Caixa, Despertador, Overlay};
+use pet_core::plataforma::{Caixa, Despertador, Punho};
 use pet_wayland::conexao::{self, Reconexao};
 use pet_wayland::hyprland::{self, Espera};
 use pet_wayland::sessao::Sessao;
@@ -212,10 +212,10 @@ impl Laco {
         let janela = self
             .viva
             .as_mut()
-            .map(|viva| &mut viva.sessao as &mut dyn Overlay);
+            .map(|viva| &mut viva.sessao as &mut dyn Punho);
         let mudou = self.nucleo.eventos_da_janela(janela);
         if publicar_sempre || mudou {
-            let janela = self.viva.as_ref().map(|viva| &viva.sessao as &dyn Overlay);
+            let janela = self.viva.as_ref().map(|viva| &viva.sessao as &dyn Punho);
             self.nucleo.publicar(janela);
         }
         self.armar_prazo();
@@ -261,7 +261,7 @@ impl Laco {
             let janela = self
                 .viva
                 .as_mut()
-                .map(|viva| &mut viva.sessao as &mut dyn Overlay);
+                .map(|viva| &mut viva.sessao as &mut dyn Punho);
             self.nucleo.comando(comando, janela);
         }
     }
@@ -273,7 +273,7 @@ impl Laco {
     /// antes: chegaram antes do prazo, e um deles pode cancelar uma
     /// acomodação (decisão 0032).
     fn armar_prazo(&mut self) {
-        let janela = self.viva.as_ref().map(|viva| &viva.sessao as &dyn Overlay);
+        let janela = self.viva.as_ref().map(|viva| &viva.sessao as &dyn Punho);
         let proximo = self.nucleo.proximo_prazo(janela);
         if proximo.is_some() && proximo == self.prazo.as_ref().map(|(armado, _)| *armado) {
             return;
@@ -294,7 +294,7 @@ impl Laco {
                 let janela = laco
                     .viva
                     .as_mut()
-                    .map(|viva| &mut viva.sessao as &mut dyn Overlay);
+                    .map(|viva| &mut viva.sessao as &mut dyn Punho);
                 laco.nucleo.vencer(janela);
                 laco.assentar();
                 TimeoutAction::Drop
@@ -319,7 +319,7 @@ impl Laco {
         match self.handle.insert_source(timer, |_, _, laco| {
             laco.nucleo.comp.bater();
             if laco.viva.is_some() {
-                let janela = laco.viva.as_ref().map(|viva| &viva.sessao as &dyn Overlay);
+                let janela = laco.viva.as_ref().map(|viva| &viva.sessao as &dyn Punho);
                 laco.nucleo.publicar(janela);
             }
             TimeoutAction::ToDuration(BATIMENTO)
