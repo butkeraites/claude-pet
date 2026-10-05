@@ -2979,3 +2979,310 @@ aprovar o Zeca original como o padrão da tela do Renan.
   a ele é só trocar `aparencia.skin` no config.
 **Por quê:** os dois atos cabem ao Renan (decisões 0026, 0067 e 0069) e
 foram feitos com o conteúdo final na frente.
+
+## 0071 — Pesquisa do M5: o que o Claude Code 2.1.288 manda de verdade (2026-10-05)
+
+**Problema:** as regras do cérebro do PLANO (correntes, teto de turno de
+máquina, continuação) foram escritas a partir do d.ts do 2.1.288 e contam com
+o `source` do `UserPromptSubmit` (`system`, `loop_wakeup`, …). As decisões
+0021 e 0032 já tinham visto que ele não chega. Faltava ver, ao vivo, o que
+chega quando um agente em segundo plano termina, quando um shell em segundo
+plano continua rodando, num laço, numa pergunta e num Esc.
+**Escolha:** a pesquisa está em `docs/pesquisa/10-cerebro-m5.md` (só
+metadados, ids pseudonimizados), feita num daemon de rascunho nativo da
+branch (porta 27391, sem compositor) com sessões aninhadas do Claude Code no
+tmux mandando só para ele, e com o binário do 2.1.288 lido por `strings`. O
+que muda o desenho do M5:
+- o `source` sai compilado fora (`...!1` no lugar do espalhamento): nenhum
+  prompt traz origem;
+- cada notificação de tarefa e cada tique de um laço é um turno com
+  `prompt_id` novo e um `UserPromptSubmit` comum. A notificação tem forma
+  própria (o texto começa com `<task-notification>`, com o `<task-id>` da
+  tarefa); o tique é o texto agendado, sem embrulho;
+- o `bgi` de um subagente é o `agent_id` dele; as ferramentas do agente
+  chegam depois do Stop com o `prompt_id` de agora; o agente que acorda (o
+  shell dele acabou) manda outro `SubagentStart` com o mesmo `aid`;
+- o Stop traz `session_crons` (os agendamentos que vão acordar a sessão);
+- uma pergunta ou um plano disparam três gatilhos: `PreToolUse` e
+  `PermissionRequest` a 14–21 ms um do outro, e a `Notification`
+  `permission_prompt` 6 s depois;
+- o Esc no meio de uma ferramenta não manda nada (nem `PostToolUseFailure`,
+  nem Stop, nem `idle_prompt` em 100 s);
+- o `PostCompact` pode não vir (compactação que falha);
+- o `duration_ms` do Agent em primeiro plano é a vida do subagente (com o
+  pensar dele), e o do diálogo é 0 (a espera pelo Renan fica de fora).
+**Por quê:** o M5 decide festa e atenção a partir desses eventos; regra
+escrita contra um campo que não vem é regra morta. Ver ao vivo também achou
+um defeito do M4: a janela de cada sessão é casada em todo prompt sem `src`,
+então uma notificação ou um tique casam a sessão com a janela em foco.
+
+## 0072 — A forma do prompt e os agendamentos no fio v1: `orig` e `crn`, calculados no hook (2026-10-05)
+
+**Problema:** sem o `source`, o pet não separa o prompt do Renan de uma
+notificação de tarefa ou de um tique de laço (decisão 0071). A notificação se
+reconhece pelo começo do texto, e o tique só pelo `session_crons` do Stop;
+mas o texto do prompt e o dos agendamentos são conteúdo e nunca saem do hook.
+**Escolha:**
+- **`orig`**, só no `UserPromptSubmit`: `notificacao` quando o `prompt` é um
+  texto que começa (depois de espaços) por `<task-notification>`, `comum` para
+  qualquer outro texto; sem o campo quando o `prompt` falta ou não é texto. O
+  hook nunca guarda o prompt: o leitor em fluxo (decisão 0045) olha os
+  primeiros bytes que passam pela entrada logo depois da chave `prompt` (uma
+  janela de 64 bytes que só é comparada com a etiqueta e jogada fora) e pula
+  o resto sem guardar, como antes; a memória continua sem crescer com o
+  tamanho do prompt.
+- **`crn`**, só no Stop: quantos agendamentos o `session_crons` tem (como o
+  `bg` do `background_tasks`), até 10 000; nenhum campo de dentro deles é lido.
+- **No pet** (`pet_core::evento`): `orig` pelo validador de enum e `crn` pelo
+  de contagem; valor ruim cai sozinho, como os outros. O `avisar.sh` de
+  reserva não manda nenhum dos dois (como o `term`, decisão 0054).
+- **Sem o hook novo** (o instalado até o merge), os dois faltam e o pet não
+  quebra: sem `orig`, um prompt enquanto há agente em voo conta como
+  notificação; sem `crn`, não há tique (decisão 0073).
+- **Canários** (`tests/hook.rs`): o prompt de notificação com segredos, o
+  prompt comum com a etiqueta no meio, os agendamentos com segredos no texto,
+  o prompt de 8 MiB que começa pela etiqueta, e nenhum segredo sai em evento
+  nenhum. Uma versão que manda o começo do prompt reprova.
+- **A troca:** o plugin não muda (o mesmo `hooks.json`, o mesmo `bichinho
+  avisar`); o binário novo chega ao PATH pelo `bin/pet instalar-host` depois
+  do merge, como o `term` (decisão 0054).
+**Por quê:** um enum de dois valores e uma contagem dizem o que o pet precisa
+sem dizer nada do que o Renan escreveu; olhar só o começo, na passagem, mantém
+a regra da decisão 0045 de que o hook não guarda conteúdo e não cresce com
+ele.
+
+## 0073 — Correntes de agentes e turnos de máquina sem `source` (2026-10-05)
+
+**Problema:** o PLANO quer uma festa só para um pedido que roda em segundo
+plano (a corrente), festas normais com um servidor rodando, e um teto T1
+discreto para o que a máquina começa (notificação sem corrente, laço). Os
+eventos reais (decisão 0071) mostram três turnos para um agente em segundo
+plano, o shell do agente segurando o Stop, o agente que acorda e as
+ferramentas dele depois do Stop.
+**Escolha:**
+- **A origem de um prompt**, no cérebro, com a evidência que o Motor tem:
+  1. o `src`, se um Claude Code futuro mandar: `user` é digitado; `system`,
+     notificação; `loop_wakeup`, `schedule_wakeup` e `poll_event`, tique;
+  2. `orig = notificacao`: notificação;
+  3. com agendamento pendente (o último Stop da sessão com `crn > 0`), um
+     prompt comum é tique quando o Motor tem prova de que não foi digitado: o
+     Renan longe do teclado e do mouse (`ocioso`) ou outra janela certa em
+     foco na hora do prompt (a janela da sessão é certa e o anel diz outra);
+  4. sem `orig` (hook antigo) e com corrente aberta: notificação;
+  5. o resto é digitado.
+- **A corrente** (por sessão) abre no Stop, depois da acomodação, com agente
+  em voo (`bgt` com `subagent`, `workflow`, `teammate` ou `cloud_session`);
+  `shell`, `monitor`, `mcp_task` e `outro` nunca seguram, e `dream`,
+  `auto_mode_scan` e `memory_import` são ignorados. Enquanto aberta, todo Stop
+  da sessão é Stop da corrente: com agente em voo, o turno entra nela (os
+  contadores somam; nenhuma festa, nenhum pronto, a sessão com o selo "…");
+  sem agente em voo, ela fecha com uma festa só, pela soma (t0 do primeiro
+  turno). As ferramentas e os `SubagentStart` de um agente conhecido (o `aid`
+  já visto) depois que o turno dele fechou contam na corrente; o agente que
+  acorda não cancela acomodação nem reabre turno. Subagente conta uma vez por
+  `aid`. A corrente expira 12 h depois do último evento dela, e o
+  `SessionEnd` a fecha, sem festa.
+- **Turno de máquina** (notificação, tique ou sistema sem corrente aberta, e
+  a corrente que nasce dele): teto T1, discreto (o pulinho sem balão), sem
+  pronto; o T0 de máquina só fica no registro. Nunca casa a janela da sessão
+  (corrige a decisão 0060 para o 2.1.288) e nunca resolve o pronto de antes.
+  Uma notificação ou um prompt sem marca com corrente aberta é continuação:
+  entra na corrente.
+- **Sem o hook novo**, tudo isso degrada sem quebrar: a corrente funciona (só
+  depende do `bgt`); a notificação vira continuação quando há corrente e
+  digitado quando não há; o tique não é visto.
+**Por quê:** o fim do pedido é quando o último agente volta, e é lá que a
+festa tem de ser grande; um servidor de desenvolvimento não é um agente e
+não pode calar as festas; e o que a máquina começa sozinha não merece o voo
+nem o selo de pronto. A evidência do Motor só entra para o tique e só com
+agendamento pendente, que é onde o texto do prompt não ajuda.
+
+## 0074 — Pontuação e níveis pelo trabalho, com os pesos no config (2026-10-05)
+
+**Problema:** o M3 só separava T0 de T1. O M5 pontua (decisão 0003) e o
+PLANO pede os pesos no config, os componentes de cada turno no
+`/v1/estado.turnos` e o T3 no máximo a cada 10 min. O tempo do Agent em
+primeiro plano é a vida do subagente (decisão 0071), e entraria duas vezes
+(com as ferramentas dele, pelo `aid`) e com o pensar dele.
+**Escolha:**
+- `min_ativos` = a soma do `duration_ms` das ferramentas do turno (ou da
+  corrente), as dos subagentes inclusive, **fora** a do `Agent` e a do `Task`,
+  / 60 000. `pontuação = min(teto, por_minuto·min_ativos +
+  por_ferramenta_de_trabalho·trabalho + por_outra_ferramenta·outras +
+  por_arquivo·arquivos + por_subagente·subagentes)`.
+- T0: nenhuma ferramenta de trabalho, nenhum subagente e nenhum arquivo
+  editado (`nod`); T1 abaixo de `t2` (`done_small`); T2 de `t2` até `t3`
+  (`done_medium`); T3 de `t3` em diante (`done_big`), no máximo um a cada
+  `intervalo_t3_min` (senão T2).
+- **Config** (`[pontuacao]` no `bichinho.toml`, números com faixa; o config
+  ganha o tipo número): `por_minuto = 1.0`, `por_ferramenta_de_trabalho =
+  0.15`, `por_outra_ferramenta = 0.05`, `por_arquivo = 0.5`, `por_subagente
+  = 1.0`, `teto = 20`, `t2 = 4`, `t3 = 12`; e `celebracao.intervalo_t3_min =
+  10`. Documentados no `config/exemplo.toml`.
+- **Modos:** `proporcional`; `sempre_grande` (todo nível acima do T0 vira T3,
+  no máximo um a cada 2 min); `discreta` (teto T1; antes o M3 só acenava, e
+  agora há níveis para separar); `desligada` (nenhuma festa, nenhum tchau; os
+  avisos continuam).
+- **Registro:** cada turno no `/v1/estado.turnos` traz `min_ativos`, a
+  `pontuacao` (total e a parte de cada componente), o nível calculado e o
+  final, os tetos que valeram (`maquina`, `modo`, `intervalo_t3`), a origem do
+  turno e a corrente.
+- Exemplos (viram testes): resposta sem ferramenta de 90 s → T0; 15 Read e
+  2 WebFetch → T0 (nada de trabalho); 1 Edit num arquivo e 1 Bash de 0,9 s →
+  0,82 → T1; 10 Edit em 5 arquivos, 8 Bash e 7 Read com 3 min de ferramenta →
+  8,55 → T2; 40 Edit em 15 arquivos, 30 Bash, 50 Read e 2 subagentes com 12
+  min de ferramenta → 34,5, no teto de 20 → T3.
+**Por quê:** medir pelo que o Claude fez, nunca pelo relógio nem pelo pensar
+(decisão 0003); pesos no config deixam a semana de calibração do M7 mexer sem
+recompilar; e o registro com as partes mostra por que cada festa saiu do
+tamanho que saiu.
+
+## 0075 — Avisos: um diálogo até a sessão andar, a escalada L1–L4 com presença e os tetos (2026-10-05)
+
+**Problema:** o PLANO pede a escalada (L1 → L4) só para quem não está olhando
+o terminal do Claude, com teto, e a dedupe de 5 s com o tipo refinado. Ao
+vivo, um diálogo dispara três gatilhos em 6 s (decisão 0071), e a janela de
+5 s deixaria a notificação abrir outro aviso e recomeçar a escalada.
+**Escolha:**
+- **O tipo da espera:** pergunta (`AskUserQuestion`), plano (`ExitPlanMode`),
+  elicitação (`elicitation_dialog`, `elicitation_url_dialog`) e permissão
+  (o resto: `PermissionRequest` de outra ferramenta, `permission_prompt`,
+  `worker_permission_prompt`, `agent_needs_input`). O `PermissionRequest` da
+  pergunta e do plano é a pergunta e o plano.
+- **Um diálogo:** enquanto a sessão espera e nada andou nela (nenhum evento da
+  thread principal que não seja gatilho), um gatilho novo só refina o tipo
+  (pergunta e plano acima de elicitação, acima de permissão; nunca desce) e
+  nunca recomeça o relógio. O aviso é o mesmo, desde o primeiro gatilho.
+- **A escalada** (só visual; um relógio por aviso; quem toca é o aviso de
+  espera mais velho, os outros viram o "+N"):
+  - L1 em 0 s: a reação `alert`, o balão do tipo ("Ô, meu camarada! ‹proj›
+    precisa de você", "‹proj›: pergunta pra você", "Plano pra aprovar!
+    ‹proj›") e a base de espera;
+  - L2 a partir de 30 s, só se o Renan não está olhando um terminal do Claude
+    (`olhando_claude`) ou está sem mexer há 60 s ou mais: uma rajada (`alert`)
+    a cada 6 s, por 30 s;
+  - L3 a partir de 90 s, na mesma condição, ou na hora em que o Renan volta
+    (`ocioso` de verdadeiro para falso) com o aviso de pé: o voo até o
+    alto-centro do monitor com "!!" (no máximo 2 Hz) e de volta; até 3 voos
+    por aviso, com 60 s entre eles;
+  - L4 a partir de 5 min (o teto): a base de espera, o selo pulsando a 1 Hz e
+    uma rajada a cada 60 s, por no máximo 30 min; depois, o selo parado até
+    o Renan voltar.
+  - Olhando o terminal do Claude e mexendo, fica em L1.
+- **Saída:** qualquer evento da sessão que não seja gatilho, o clique que vê
+  o aviso, o `SessionEnd`.
+- **Tetos:** com o "não perturbe" do Omarchy (o `dnd` do último evento) ou na
+  soneca, nunca acima de L1 (sem rajada e sem voo); escondido ou na proteção
+  de tela, nada toca, e o relógio anda.
+**Por quê:** o mesmo diálogo não pode chamar o Renan duas vezes; o que chama
+atenção é o movimento que começa, e quem está olhando o terminal já viu; e
+nenhuma chamada pode virar laço sem fim (decisão 0010), nem no tempo.
+
+## 0076 — A festa e a tela: mesclagem, prioridade, selos, pronto parado, sono e discrição (2026-10-05)
+
+**Problema:** o PLANO pede uma festa só para fins de sessões diferentes até
+3 s, a festa do Stop com `sha` subindo para T2 e T3, a prioridade na tela, os
+selos das outras sessões, o pronto que vira selo, os prazos de cada estado e
+a discrição com o compartilhamento de tela, sem atrasar a primeira festa.
+**Escolha:**
+- **Mesclagem:** um fim de outra sessão (do mesmo mundo: teste com teste,
+  real com real) até 3 s depois do começo da festa de agora entra nela: o
+  nível é o maior, o balão vira "2 prontos: api, web" (nomes cortados) e a
+  reação só toca de novo se o nível subir. A primeira festa sai na hora da
+  acomodação dela. Um fim discreto (máquina, modo discreto) dentro da festa só
+  fica no registro; fora, toca o pulinho sem balão.
+- **Stop com `sha`:** o turno que reabriu (decisão 0032) só festeja de novo
+  se o nível subir, agora em todos os níveis; dentro dos 3 s ele sobe a festa
+  de agora, depois é uma festa nova no nível novo.
+- **O que a festa pede:** T0 só o aceno; T1 o pulinho e o balão "Prontinho!
+  ‹proj›"; T2 o voo curto e 12 confetes; T3 o voo grande atravessando a tela,
+  40 confetes e a faixa "PRONTO!". Com o "não perturbe", a soneca ou o pet
+  escondido, nada de voo pela tela; escondido ou na proteção de tela, a festa
+  não toca (fica no registro) e nada é repetido na volta.
+- **Prioridade na tela** (a sessão mais alta manda na base): esperando você >
+  erro > cansado > pronto > trabalhando > compactando > pensando > parado >
+  dormindo, com os estados da skin `waiting`, `error`, `sleep` (cansado, com o
+  bocejo ao entrar), `ready`, `working`, `thinking` (compactando e pensando),
+  `idle` e `sleep`.
+- **Prazos por sessão:** trabalhando, pensando e compactando voltam a parado
+  depois de 5 min sem evento da sessão (o turno continua aberto); erro e
+  cansado (o `StopFailure` com `rate_limit`) duram 60 s na tela (o aviso de
+  erro fica, como no M4).
+- **Pronto:** a base `ready` por 2 min depois da festa; depois, só a
+  bandeirinha parada, e o Zeca pode bocejar e dormir com ela. Sai como no M4
+  (clique, prompt digitado, 10 s do terminal em foco com o Renan presente, ou
+  2 h).
+- **Sono:** parado e sem nada pendente, boceja aos 3 min, dorme aos 8 min (3
+  se o Renan está longe) e entra no sono profundo aos 30 min; um evento ou um
+  clique acorda (`wake`).
+- **Selos:** "+N" (as outras sessões com aviso ou trabalhando), uma
+  bandeirinha por sessão com o pronto, na cor do projeto (FNV-1a do nome numa
+  paleta de 8), e "…" com uma corrente aberta.
+- **Compartilhamento de tela:** um evento novo do desktop,
+  `EventoDesktop::Compartilhando(bool)` (no Hyprland, o `screencast` do
+  socket2, na segunda metade do M5). Depois de 2 s compartilhando, nenhum balão
+  leva nome de projeto ("Prontinho!", "2 prontos", "sessão 1: pronto" na lista
+  do clique); um balão com nome na tela sai. Parou de compartilhar, os nomes
+  voltam.
+**Por quê:** uma festa por momento, não por sessão; o maior manda, sem
+apagar o resto, que vira selo; um pronto não pode pular para sempre, e o que
+está na tela compartilhada não pode dizer em que o Renan trabalha. O tempo de
+2 s deixa de fora as capturas de tela, que também abrem um screencast curto.
+
+## 0077 — O registro de intenções do Motor e os cenários dourados (2026-10-05)
+
+**Problema:** o M5 decide o que acontece e quando; quem desenha (balão,
+selos, voos, confete, a base segurada) é a segunda metade do M5. As decisões
+precisam ser testáveis sem tela, e cada linha da tabela do PLANO precisa de
+um cenário que reprove uma regra quebrada.
+**Escolha:**
+- **Intenções** (`pet_core::motor::intencoes`): cada decisão vira uma linha
+  normalizada, com a hora: `turno` (o registro de um turno fechado), `festa` e
+  `festa_mesclada`, `reacao` (o que o animador toca fora da festa), `base`,
+  `balao`, `selos`, `escalada`, `rajada`, `voo`, `pulso`, `discricao` e
+  `clique`. O Motor guarda as últimas 200; o `/v1/estado` mostra as últimas
+  50 (`intencoes`, com a idade) e a fotografia de agora (`tela`: base, selos,
+  escalada, festa e discrição). As reações continuam indo ao animador pelo
+  caminho do M3 (`nod`, `done_small`, `done_medium`, `done_big`, `alert`,
+  `error`, `yawn`, `wake`, `bye`); o resto espera quem desenha.
+- **Cenários** (`cenarios/<nome>.jsonl`): uma linha por passo, com o tempo
+  relativo em ms (`t`): `evento` (o corpo do fio v1, com o `ts` relativo),
+  `desktop` (`ocioso`, `olhando_claude`, `protetor`, `compartilhando`,
+  `ligado`, `janela_ativa`), `clique` e `fim`; linhas com `#` são
+  comentários, e a primeira pode trazer `config` (chaves do `bichinho.toml`).
+  O esperado (`<nome>.esperado.jsonl`) é a linha do tempo das intenções.
+- **O executor** (`pet_core::cenario`) roda o Motor com a
+  `plataforma::falsa::JanelaFalsa` num relógio falso, vencendo os prazos como o
+  laço do daemon; o teste dourado roda todos os cenários e regera com
+  `PET_ATUALIZAR_OURO=1`. Cada linha da tabela do PLANO tem um cenário e uma
+  asserção do que importa nela (além da linha do tempo), e as sequências reais
+  da pesquisa entram pseudonimizadas. Uma regra quebrada de propósito reprova.
+**Por quê:** uma linha do tempo normalizada é o contrato com quem desenha e o
+que os testes comparam; o mesmo executor serve ao teste, ao `simular` e ao
+`/v1/estado`, então o que se testa é o que roda.
+
+## 0078 — `bichinho simular` e `bin/pet eventos --salvar` (2026-10-05)
+
+**Problema:** o PLANO pede `simular <cenário>` (o cérebro com relógio falso,
+offline) e `eventos --salvar <arquivo>` (gravar um cenário de verdade com ids
+pseudonimizados), sem que dados reais do Renan acabem no git.
+**Escolha:**
+- **`bichinho simular <arquivo>`** roda o cenário no executor dos testes
+  (decisão 0077), offline, e imprime a linha do tempo das intenções (uma
+  linha JSON por intenção). O `bin/pet simular <nome|arquivo>` acha o
+  `cenarios/<nome>.jsonl`. Para o binário ter a janela de mentira, o `pet-core`
+  ganha a feature `simulacao` (a `JanelaFalsa` fica em
+  `cfg(any(test, feature = "teste", feature = "simulacao"))`); só o
+  subcomando a usa.
+- **`bichinho cenario`** lê o JSON do `/v1/debug/eventos` na entrada e escreve
+  um cenário: tempos relativos à primeira chegada, ids de sessão, turno,
+  agente e tarefa trocados por `s1`, `p1`, `a1` (o mesmo pseudônimo quando o
+  `aid` e o `bgi` são o mesmo id), pastas por `projeto-a`, hashes de arquivo e
+  nomes de ferramenta MCP por equivalentes fixos, sem os ids de terminal e
+  sem os descartados.
+- **`bin/pet eventos --salvar <arquivo>`** pega o `/v1/debug/eventos` do pet
+  da `PET_PORTA`, passa pelo `bichinho cenario` e grava no arquivo pedido;
+  recusa um pet sem debug (a produção responde 404 nessa rota).
+**Por quê:** o mesmo executor para testar e simular; e o que sai de uma
+sessão de verdade só vai para um arquivo depois de virar pseudônimo, de um pet
+de rascunho, nunca da produção.

@@ -352,6 +352,7 @@ Essa pasta do Omarchy **nunca** é montada no container, porque guarda o histór
 - Um `UserPromptSubmit` com `src=system` enquanto a corrente está aberta é **continuação**: mantém o t0 e soma os contadores.
 - O teto de "turno de máquina" (T1 discreto) vale só para `loop_wakeup`, `schedule_wakeup` e `poll_event`, ou para `system` sem corrente aberta.
 - Uma corrente de agentes expira em 12 h.
+- *Correção (2026-10-05, decisões 0071–0073):* o 2.1.288 nunca manda o `source`. A notificação de tarefa vem com `orig = notificacao` (o hook olha só o começo do prompt) e o tique é um prompt comum numa sessão com agendamento pendente (`crn`) que o Renan não digitou (longe do teclado, ou outra janela certa em foco). A corrente abre e fecha pelo `bgt` de cada Stop, e todo Stop com a corrente aberta é Stop dela.
 
 **Stop:**
 - Todo Stop é candidato a fim de turno.
@@ -362,7 +363,7 @@ Essa pasta do Omarchy **nunca** é montada no container, porque guarda o histór
 **Pontuação** (todos os pesos ficam no config; cada Stop registra os componentes em `/v1/estado.turnos`):
 
 ```
-min_ativos = soma do dur de todas as ferramentas do turno (inclusive as dos subagentes, via aid) / 60000   # nunca o tempo de pensar
+min_ativos = soma do dur de todas as ferramentas do turno (inclusive as dos subagentes, via aid), fora a do Agent/Task, / 60000   # nunca o tempo de pensar (decisão 0074)
 score = min(20, 1.0*min_ativos + 0.15*ferramentas_trabalho(Edit,Write,MultiEdit,NotebookEdit,Bash)
                 + 0.05*outras_ferramentas + 0.5*arquivos_unicos + 1.0*subagentes)
 T0  sem ferramenta de trabalho, sem subagente e sem arquivo editado -> aceno discreto
@@ -748,42 +749,40 @@ Atualizado em 2026-10-03 (decisões 0038 e 0039). O M4 nasce em cima da costura 
 
 ### M5 — Cérebro completo
 
-**Tarefas:**
-- turnos, correntes e tarefas de fundo;
-- teto de turno de máquina;
-- interrupção e `idle_prompt` fechando turno;
-- SessionEnd;
-- pontuação e níveis por trabalho;
-- mesclagem;
-- prioridade;
-- selos;
-- escalada L1–L4 com presença;
-- dedupe de aviso;
-- Stop com `sha` (o M3 já reabre o turno na continuação e só reage se o nível subir, decisão 0032; falta fundir nos níveis T2/T3);
-- DND;
-- modo discreto;
-- cenários dourados com relógio falso;
-- `simular` e `eventos --salvar`.
+Atualizado em 2026-10-05 com a pesquisa do M5 (`docs/pesquisa/10-cerebro-m5.md`, decisões 0071–0078). No 2.1.288 o `UserPromptSubmit` nunca traz o `source`: a notificação de tarefa se reconhece pelo começo do prompt, que o hook olha e resume num enum (`orig`), e o tique de laço pelos agendamentos do Stop (`crn`), com a evidência de presença do Motor (decisões 0072 e 0073). O M5 é dividido em duas metades: o cérebro decide **o que** acontece e **quando**, num registro de intenções testável (esta lista); quem desenha as intenções com o que já existe (estados da skin, balão mínimo, confete, selos no estilo do zZ) vem depois, na mesma branch. O polimento (balões 9-slice, física das partículas, o voo T3 atravessando a tela com o holofote, a variedade parada, o "voltou!") continua no M6.
 
-**Verificação:** `cargo test -p pet-core` verde. Tabelas, exemplos de pontuação e cenários:
+**Tarefas** (IDs na ordem dos commits):
+- **T5.1** pesquisa e plano: `docs/pesquisa/10-cerebro-m5.md`, estas tarefas e as decisões 0071–0078;
+- **T5.2** hook: `orig` (a forma do prompt: `notificacao` ou `comum`) no `UserPromptSubmit` e `crn` (quantos agendamentos) no Stop, calculados no `bichinho avisar` sem o texto sair dele; validadores do fio v1, canários, e o hook da branch conferido ao vivo numa sessão aninhada (decisão 0072);
+- **T5.3** registro de intenções e cenários: `pet_core::motor::intencoes`, `pet_core::cenario` (formato, executor com a `JanelaFalsa` em relógio falso, `PET_ATUALIZAR_OURO=1`), o `/v1/estado.intencoes` e `.tela`, e os primeiros cenários com o comportamento de hoje (decisão 0077);
+- **T5.4** correntes e turnos de máquina: a origem do prompt, a corrente que abre, estende e fecha pelo `bgt`, o trabalho dos agentes depois do Stop (pelo `aid`), o agente que acorda, a expiração de 12 h, o teto T1 discreto sem pronto, a janela casada só pelo prompt digitado e o hook antigo degradando sem quebrar (decisão 0073);
+- **T5.5** pontuação e níveis: o config com números (`[pontuacao]`, `celebracao.intervalo_t3_min`, documentados no `config/exemplo.toml`), T0–T3, o T3 no máximo a cada 10 min, os modos e os componentes de cada turno no `/v1/estado.turnos` (decisão 0074);
+- **T5.6** fechamentos e prazos: interrupção (com e sem `PostToolUseFailure`) e `idle_prompt` fechando sem festa, `SessionEnd` limpando tudo da sessão, os 5 min de trabalhando/pensando/compactando, os 60 s de erro e o cansado do `rate_limit` (decisões 0073 e 0076);
+- **T5.7** avisos e escalada: os tipos de espera, um diálogo até a sessão andar, L1–L4 com presença (`olhando_claude`, sem mexer há 60 s, a volta), saída, tetos do "não perturbe" e da soneca (decisão 0075);
+- **T5.8** a festa e a tela: mesclagem de 3 s, o `sha` que sobe de nível, prioridade e base, selos, pronto parado depois de 2 min, sono, proteção de tela e o compartilhamento de tela (`EventoDesktop::Compartilhando`, 2 s) (decisão 0076);
+- **T5.9** cenários reais pseudonimizados, as asserções de cada linha da tabela e a prova de que o executor pega uma regra quebrada (decisão 0077);
+- **T5.10** `bichinho simular` e `bichinho cenario`, `bin/pet simular` e `bin/pet eventos --salvar`, CLAUDE.md, README e docs (decisão 0078).
+
+**Verificação:** `bin/pet verificar` verde a cada commit e `cargo test -p pet-core` com os cenários. Tabelas, exemplos de pontuação (decisão 0074) e cenários:
 
 | Cenário | Esperado |
 |---|---|
 | `rapido` | aceno T0 |
 | `resposta-longa-sem-ferramenta` | T0 |
-| `pequeno`, `medio`, `grande` | T1, T2, T3 |
+| `pequeno`, `medio`, `grande` | T1, T2, T3 (o segundo T3 em 10 min vira T2) |
 | `dois-prontos` | uma festa só, "2 prontos" |
 | `pergunta`, `pergunta-dupla` | um aviso só |
 | `plano-lido-no-terminal` | fica em L1 |
 | `pergunta-ausente` | L1 → L2 → L3 → teto |
 | `idle-prompt-repetido` | — |
 | `servidor-em-segundo-plano` | festas normais com um dev server rodando |
-| `workflow-longo` | T3 no Stop final do turno `system` |
-| `stop-bloqueado` | — |
-| `interrompido` | — |
-| `erro-limite` | — |
-| `protetor-de-tela` | — |
+| `workflow-longo` | T3 no Stop final da corrente (a notificação que a fecha) |
+| `stop-bloqueado` | a continuação só festeja se subir de nível |
+| `interrompido` | sem festa, com e sem `PostToolUseFailure` |
+| `erro-limite` | cansado, sem festa |
+| `protetor-de-tela` | a festa não toca escondida; o pronto fica |
 | `compartilhando-tela` | balão sem nome de projeto |
+| `real-*` (da pesquisa, pseudonimizados) | o agente em segundo plano numa festa só; o servidor e a notificação do shell; o laço; a pergunta e o plano; o Esc; o `/compact` |
 
 ### M6 — Encanto e atenção (portão de "sensação")
 
