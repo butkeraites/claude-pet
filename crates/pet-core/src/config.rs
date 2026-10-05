@@ -25,13 +25,14 @@ pub enum Origem {
     Comando,
 }
 
-/// Valor de uma chave. Os tipos numéricos entram junto com a primeira chave
-/// que precisar deles.
+/// Valor de uma chave.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum Valor {
     Texto(String),
     Lista(Vec<String>),
+    /// Os pesos e os limites da pontuação (decisão 0074).
+    Numero(f64),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -44,6 +45,8 @@ enum Tipo {
     /// um array TOML; no ambiente, separados por vírgula (vazio = lista
     /// vazia).
     ListaDeIds,
+    /// Um número (inteiro ou decimal) na faixa; no ambiente, com ponto.
+    Numero { min: f64, max: f64 },
 }
 
 /// Maior lista aceita numa chave.
@@ -83,7 +86,68 @@ const CHAVES: &[Chave] = &[
         tipo: Tipo::ListaDeIds,
         padrao: "cli",
     },
+    // O T3 no máximo a cada tanto (decisão 0074).
+    Chave {
+        caminho: "celebracao.intervalo_t3_min",
+        tipo: Tipo::Numero {
+            min: 0.0,
+            max: 1440.0,
+        },
+        padrao: "10",
+    },
+    // A pontuação de cada turno pelo trabalho (decisões 0003 e 0074).
+    Chave {
+        caminho: "pontuacao.por_minuto",
+        tipo: PESO,
+        padrao: "1.0",
+    },
+    Chave {
+        caminho: "pontuacao.por_ferramenta_de_trabalho",
+        tipo: PESO,
+        padrao: "0.15",
+    },
+    Chave {
+        caminho: "pontuacao.por_outra_ferramenta",
+        tipo: PESO,
+        padrao: "0.05",
+    },
+    Chave {
+        caminho: "pontuacao.por_arquivo",
+        tipo: PESO,
+        padrao: "0.5",
+    },
+    Chave {
+        caminho: "pontuacao.por_subagente",
+        tipo: PESO,
+        padrao: "1.0",
+    },
+    Chave {
+        caminho: "pontuacao.teto",
+        tipo: LIMITE,
+        padrao: "20",
+    },
+    Chave {
+        caminho: "pontuacao.t2",
+        tipo: LIMITE,
+        padrao: "4",
+    },
+    Chave {
+        caminho: "pontuacao.t3",
+        tipo: LIMITE,
+        padrao: "12",
+    },
 ];
+
+/// Um peso da pontuação.
+const PESO: Tipo = Tipo::Numero {
+    min: 0.0,
+    max: 100.0,
+};
+/// Um limite da pontuação (o teto, o começo do T2 e o do T3).
+const LIMITE: Tipo = Tipo::Numero {
+    min: 0.0,
+    max: 1000.0,
+};
 
 /// Valor efetivo de uma chave e a camada de onde ele veio.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -109,15 +173,50 @@ pub enum ModoCelebracao {
     Desligada,
 }
 
+/// Os pesos e os limites da pontuação (decisão 0074).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct Pesos {
+    pub por_minuto: f64,
+    pub por_ferramenta_de_trabalho: f64,
+    pub por_outra_ferramenta: f64,
+    pub por_arquivo: f64,
+    pub por_subagente: f64,
+    /// A pontuação nunca passa disto.
+    pub teto: f64,
+    /// Do T2 em diante.
+    pub t2: f64,
+    /// Do T3 em diante.
+    pub t3: f64,
+}
+
+impl Default for Pesos {
+    fn default() -> Pesos {
+        Pesos {
+            por_minuto: 1.0,
+            por_ferramenta_de_trabalho: 0.15,
+            por_outra_ferramenta: 0.05,
+            por_arquivo: 0.5,
+            por_subagente: 1.0,
+            teto: 20.0,
+            t2: 4.0,
+            t3: 12.0,
+        }
+    }
+}
+
 /// Visão tipada da configuração, usada pelo resto do código.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     pub skin: String,
     /// O tamanho do pet na tela.
     pub tamanho: Tamanho,
     pub celebracao_modo: ModoCelebracao,
+    /// O T3 no máximo a cada tanto (minutos).
+    pub intervalo_t3_min: f64,
     /// Origens de sessão que o cérebro acompanha (`cli`, `sdk-cli`, …).
     pub sessoes_origens: Vec<String>,
+    /// A pontuação dos turnos.
+    pub pontuacao: Pesos,
 }
 
 impl ConfigEfetiva {
@@ -166,7 +265,43 @@ impl ConfigEfetiva {
             }
         }
 
+        // O T2 vem antes do T3: um par trocado não vale (os dois voltam ao
+        // padrão).
+        let numero = |chaves: &BTreeMap<&str, Entrada>, c: &str| match chaves[c].valor {
+            Valor::Numero(n) => n,
+            _ => f64::NAN,
+        };
+        if numero(&chaves, "pontuacao.t2") > numero(&chaves, "pontuacao.t3") {
+            avisos.push(
+                "pontuacao.t2 maior que pontuacao.t3: os dois ficam no padrão (4 e 12)".into(),
+            );
+            for caminho in ["pontuacao.t2", "pontuacao.t3"] {
+                let chave = CHAVES
+                    .iter()
+                    .find(|c| c.caminho == caminho)
+                    .expect("chave conhecida");
+                chaves.insert(
+                    caminho,
+                    Entrada {
+                        valor: validar(chave.tipo, chave.padrao).expect("padrão válido"),
+                        origem: Origem::Padrao,
+                    },
+                );
+            }
+        }
+
         ConfigEfetiva { chaves, avisos }
+    }
+
+    /// Número efetivo de uma chave numérica conhecida.
+    ///
+    /// # Panics
+    /// Se a chave não existir ou não for número (erro de programação).
+    pub fn numero(&self, caminho: &str) -> f64 {
+        match &self.chaves[caminho].valor {
+            Valor::Numero(n) => *n,
+            _ => panic!("{caminho} não é número"),
+        }
     }
 
     /// Texto efetivo de uma chave conhecida.
@@ -177,7 +312,7 @@ impl ConfigEfetiva {
     pub fn texto(&self, caminho: &str) -> &str {
         match &self.chaves[caminho].valor {
             Valor::Texto(texto) => texto,
-            Valor::Lista(_) => panic!("{caminho} é lista, não texto"),
+            _ => panic!("{caminho} não é texto"),
         }
     }
 
@@ -188,7 +323,7 @@ impl ConfigEfetiva {
     pub fn lista(&self, caminho: &str) -> &[String] {
         match &self.chaves[caminho].valor {
             Valor::Lista(itens) => itens,
-            Valor::Texto(_) => panic!("{caminho} é texto, não lista"),
+            _ => panic!("{caminho} não é lista"),
         }
     }
 
@@ -203,7 +338,18 @@ impl ConfigEfetiva {
             skin: self.texto("aparencia.skin").to_owned(),
             tamanho: Tamanho::de_texto(self.texto("aparencia.tamanho")).unwrap_or_default(),
             celebracao_modo: modo,
+            intervalo_t3_min: self.numero("celebracao.intervalo_t3_min"),
             sessoes_origens: self.lista("sessoes.origens").to_vec(),
+            pontuacao: Pesos {
+                por_minuto: self.numero("pontuacao.por_minuto"),
+                por_ferramenta_de_trabalho: self.numero("pontuacao.por_ferramenta_de_trabalho"),
+                por_outra_ferramenta: self.numero("pontuacao.por_outra_ferramenta"),
+                por_arquivo: self.numero("pontuacao.por_arquivo"),
+                por_subagente: self.numero("pontuacao.por_subagente"),
+                teto: self.numero("pontuacao.teto"),
+                t2: self.numero("pontuacao.t2"),
+                t3: self.numero("pontuacao.t3"),
+            },
         }
     }
 }
@@ -239,6 +385,9 @@ fn aplicar_arquivo(
                 }
             }
             (Tipo::ListaDeIds, _) => Err("esperava uma lista, como [\"cli\"]".to_owned()),
+            (Tipo::Numero { .. }, toml::Value::Integer(n)) => validar(chave.tipo, &n.to_string()),
+            (Tipo::Numero { .. }, toml::Value::Float(n)) => validar(chave.tipo, &n.to_string()),
+            (Tipo::Numero { .. }, _) => Err("esperava um número, como 0.5".to_owned()),
             (_, toml::Value::String(texto)) => validar(chave.tipo, texto),
             _ => Err("esperava texto entre aspas".to_owned()),
         };
@@ -332,6 +481,11 @@ fn validar(tipo: Tipo, texto: &str) -> Result<Valor, String> {
                 ))
             }
         }
+        Tipo::Numero { min, max } => match texto.parse::<f64>() {
+            Ok(n) if n.is_finite() && (min..=max).contains(&n) => Ok(Valor::Numero(n)),
+            Ok(_) => Err(format!("«{texto}» fora da faixa de {min} a {max}")),
+            Err(_) => Err(format!("«{texto}» não é um número (use ponto: 0.5)")),
+        },
     }
 }
 
@@ -464,6 +618,63 @@ mod testes {
         let c = ConfigEfetiva::carregar(Some(ruim), sem_ambiente);
         assert_eq!(c.config().tamanho, Tamanho::Normal);
         assert_eq!(c.avisos.len(), 1, "{:?}", c.avisos);
+    }
+
+    #[test]
+    fn pesos_da_pontuacao_com_faixa_e_t2_antes_do_t3() {
+        let c = ConfigEfetiva::carregar(None, sem_ambiente);
+        assert_eq!(c.config().pontuacao, Pesos::default());
+        assert_eq!(c.config().intervalo_t3_min, 10.0);
+        assert!(c.avisos.is_empty(), "{:?}", c.avisos);
+        let arquivo =
+            "[pontuacao]\npor_arquivo = 1\nt2 = 3.5\n[celebracao]\nintervalo_t3_min = 0\n";
+        let ambiente =
+            |nome: &str| (nome == "PET_PONTUACAO_POR_MINUTO").then(|| " 2.5 ".to_owned());
+        let c = ConfigEfetiva::carregar(Some(arquivo), ambiente);
+        let p = c.config().pontuacao;
+        assert_eq!((p.por_arquivo, p.t2, p.por_minuto), (1.0, 3.5, 2.5));
+        assert_eq!(c.config().intervalo_t3_min, 0.0);
+        assert_eq!(c.chaves["pontuacao.por_minuto"].origem, Origem::Ambiente);
+        assert!(c.avisos.is_empty(), "{:?}", c.avisos);
+        let json = serde_json::to_value(&c).unwrap();
+        assert_eq!(json["chaves"]["pontuacao.t2"]["valor"], 3.5);
+        for ruim in [
+            "[pontuacao]\npor_arquivo = -1\n",
+            "[pontuacao]\npor_arquivo = \"muito\"\n",
+            "[pontuacao]\nteto = 1e9\n",
+            "[celebracao]\nintervalo_t3_min = \"nan\"\n",
+        ] {
+            let c = ConfigEfetiva::carregar(Some(ruim), sem_ambiente);
+            assert_eq!(c.config().pontuacao, Pesos::default(), "{ruim}");
+            assert_eq!(c.avisos.len(), 1, "{ruim}: {:?}", c.avisos);
+        }
+        let ambiente = |nome: &str| (nome == "PET_PONTUACAO_TETO").then(|| "1,5".to_owned());
+        assert_eq!(ConfigEfetiva::carregar(None, ambiente).avisos.len(), 1);
+        // T2 depois do T3: os dois voltam ao padrão.
+        let trocado = "[pontuacao]\nt2 = 15\nt3 = 10\n";
+        let c = ConfigEfetiva::carregar(Some(trocado), sem_ambiente);
+        assert_eq!(
+            (c.config().pontuacao.t2, c.config().pontuacao.t3),
+            (4.0, 12.0)
+        );
+        assert_eq!(c.avisos.len(), 1, "{:?}", c.avisos);
+    }
+
+    #[test]
+    fn o_compose_repassa_toda_chave_do_config() {
+        // Decisão 0046: as chaves que o ambiente pode trocar só chegam ao
+        // container se o compose as repassar.
+        let compose = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docker-compose.yml"),
+        )
+        .expect("docker-compose.yml");
+        for chave in CHAVES {
+            let nome = nome_variavel(chave.caminho);
+            assert!(
+                compose.contains(&format!("      {nome}:")),
+                "{nome} falta no environment do docker-compose.yml"
+            );
+        }
     }
 
     #[test]

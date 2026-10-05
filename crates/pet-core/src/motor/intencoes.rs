@@ -43,6 +43,12 @@ pub enum Tipo {
         fim: Fim,
         #[serde(skip_serializing_if = "Option::is_none")]
         nivel: Option<Nivel>,
+        /// A pontuação do trabalho (decisão 0074), num fim por Stop.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pontuacao: Option<f64>,
+        /// O que mexeu no nível (`maquina`, `modo`, `intervalo_t3`).
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        teto: Vec<&'static str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         reacao: Option<&'static str>,
         /// De onde veio o prompt, se não foi digitado (decisão 0073).
@@ -90,6 +96,8 @@ impl Tipo {
             turno8: r.turno8.clone(),
             fim: r.fim,
             nivel: r.nivel,
+            pontuacao: r.pontuacao.map(|p| p.total),
+            teto: r.teto.clone(),
             reacao: r.reacao,
             origem: r.origem.maquina().then_some(r.origem),
             corrente: r.corrente,

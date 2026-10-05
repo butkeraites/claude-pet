@@ -83,7 +83,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use serde::Serialize;
 
-use crate::config::{Config, ModoCelebracao};
+use crate::config::{Config, ModoCelebracao, Pesos};
 use crate::evento::{self, Evento, ORIG_NOTIFICACAO};
 
 /// Acomodação depois de um Stop, e espera pelo Stop atrasado de um turno
@@ -130,6 +130,12 @@ const FIM_SEM_TCHAU: [&str; 2] = ["clear", "resume"];
 /// Ferramentas que contam como trabalho de verdade (decisão 0003).
 pub const FERRAMENTAS_DE_TRABALHO: [&str; 5] =
     ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash"];
+/// Ferramentas que lançam um subagente: o tempo delas é a vida dele, com o
+/// pensar junto, e fica fora do `min_ativos` (as ferramentas do subagente já
+/// contam pelo `aid`; decisão 0074).
+pub const FERRAMENTAS_DE_LANCAMENTO: [&str; 2] = ["Agent", "Task"];
+/// O intervalo do T3 no modo `sempre_grande` (decisão 0074).
+pub const INTERVALO_T3_SEMPRE_GRANDE_MS: u64 = 2 * 60 * 1000;
 
 /// Os tipos de tarefa em segundo plano (os rótulos normalizados do `bgt`)
 /// que são trabalho de agente: só eles abrem ou estendem uma corrente
@@ -141,6 +147,10 @@ pub const TAREFAS_DE_AGENTE: [&str; 4] = ["subagent", "workflow", "teammate", "c
 pub const ACENO: &str = "nod";
 /// Pulinho (T1).
 pub const PULINHO: &str = "done_small";
+/// Voo curto com confete (T2).
+pub const VOO_CURTO: &str = "done_medium";
+/// Voo grande atravessando a tela (T3).
+pub const VOO_GRANDE: &str = "done_big";
 /// Tchau: a última sessão acabou.
 pub const TCHAU: &str = "bye";
 
@@ -152,12 +162,16 @@ pub struct Agora {
     pub mono_ms: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ConfigCerebro {
     /// Origens aceitas (`$CLAUDE_CODE_ENTRYPOINT`); evento sem origem não
     /// conta.
     pub origens: Vec<String>,
     pub modo: ModoCelebracao,
+    /// Os pesos e os limites da pontuação (decisão 0074).
+    pub pesos: Pesos,
+    /// O T3 no máximo a cada tanto (0: sem limite).
+    pub intervalo_t3_ms: u64,
 }
 
 impl Default for ConfigCerebro {
@@ -165,6 +179,8 @@ impl Default for ConfigCerebro {
         ConfigCerebro {
             origens: vec!["cli".into()],
             modo: ModoCelebracao::Proporcional,
+            pesos: Pesos::default(),
+            intervalo_t3_ms: 10 * 60 * 1000,
         }
     }
 }
@@ -174,15 +190,50 @@ impl ConfigCerebro {
         ConfigCerebro {
             origens: config.sessoes_origens.clone(),
             modo: config.celebracao_modo,
+            pesos: config.pontuacao,
+            intervalo_t3_ms: (config.intervalo_t3_min * 60_000.0).round() as u64,
         }
     }
 }
 
-/// Nível da festa de um turno (T0 < T1).
+/// Nível da festa de um turno (decisões 0003 e 0074): T0 o aceno, T1 o
+/// pulinho, T2 o voo curto, T3 o voo grande.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum Nivel {
     T0,
     T1,
+    T2,
+    T3,
+}
+
+impl Nivel {
+    /// A reação do nível.
+    pub fn reacao(self) -> &'static str {
+        match self {
+            Nivel::T0 => ACENO,
+            Nivel::T1 => PULINHO,
+            Nivel::T2 => VOO_CURTO,
+            Nivel::T3 => VOO_GRANDE,
+        }
+    }
+}
+
+/// A pontuação de um turno (ou de uma corrente) e a parte de cada
+/// componente, com duas casas (decisão 0074).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct Pontuacao {
+    /// O tempo de ferramenta, em minutos (nunca o tempo de pensar).
+    pub min_ativos: f64,
+    pub total: f64,
+    pub minutos: f64,
+    pub trabalho: f64,
+    pub outras: f64,
+    pub arquivos: f64,
+    pub subagentes: f64,
+}
+
+fn duas_casas(x: f64) -> f64 {
+    (x * 100.0).round() / 100.0
 }
 
 fn eh_falso(b: &bool) -> bool {
@@ -192,7 +243,7 @@ fn eh_falso(b: &bool) -> bool {
 /// Uma reação para o pet tocar.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Reacao {
-    /// `nod`, `done_small` ou `bye`.
+    /// `nod`, `done_small`, `done_medium`, `done_big` ou `bye`.
     pub nome: &'static str,
     /// Os 8 primeiros caracteres do `sid`.
     pub sid8: String,
@@ -306,7 +357,7 @@ pub struct ResumoCorrente {
 }
 
 /// Os componentes de um turno fechado: o que o M5 pontua.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RegistroTurno {
     pub sid8: String,
     /// Os 8 primeiros caracteres do `prompt_id`.
@@ -344,6 +395,14 @@ pub struct RegistroTurno {
     /// outro plugin segurou o Claude). O registro é um só por turno.
     pub continuacoes: u32,
     pub fim: Fim,
+    /// A pontuação do trabalho (o do turno, ou o da corrente que fechou
+    /// nele), num fim por Stop (decisão 0074).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pontuacao: Option<Pontuacao>,
+    /// O nível pela pontuação, antes dos tetos.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nivel_calculado: Option<Nivel>,
+    /// O nível da festa.
     pub nivel: Option<Nivel>,
     /// A última reação tocada por este turno.
     pub reacao: Option<&'static str>,
@@ -351,7 +410,8 @@ pub struct RegistroTurno {
     /// soma de todos nos componentes acima).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub corrente: Option<ResumoCorrente>,
-    /// O que segurou o nível (`maquina`).
+    /// O que mexeu no nível: `maquina` (teto T1, discreto), `modo` (o
+    /// `celebracao.modo`), `intervalo_t3` (outro T3 há pouco).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub teto: Vec<&'static str>,
     /// (teste, sid, turno) inteiros, para trocar o registro de um turno que
@@ -461,7 +521,7 @@ pub struct ResumoSessao {
 }
 
 /// O que o cérebro publica no `/v1/estado`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Resumo {
     pub sessoes: Vec<ResumoSessao>,
     pub ultima_reacao: Option<Reacao>,
@@ -530,9 +590,45 @@ struct Componentes {
     /// Arquivos novos que chegaram com o conjunto cheio.
     arquivos_a_mais: u32,
     dur_ms: u64,
+    /// O tempo das ferramentas que lançam subagente (fora do `min_ativos`).
+    dur_lancamento_ms: u64,
 }
 
 impl Componentes {
+    /// A pontuação do trabalho com `pesos` (decisão 0074).
+    fn pontuar(&self, pesos: &Pesos) -> Pontuacao {
+        let ativo_ms = self.dur_ms.saturating_sub(self.dur_lancamento_ms);
+        let min_ativos = ativo_ms as f64 / 60_000.0;
+        let minutos = pesos.por_minuto * min_ativos;
+        let trabalho = pesos.por_ferramenta_de_trabalho * f64::from(self.trabalho);
+        let outras = pesos.por_outra_ferramenta * f64::from(self.outras);
+        let arquivos = pesos.por_arquivo * f64::from(self.arquivos());
+        let subagentes = pesos.por_subagente * f64::from(self.subagentes);
+        let total = (minutos + trabalho + outras + arquivos + subagentes).min(pesos.teto);
+        Pontuacao {
+            min_ativos: duas_casas(min_ativos),
+            total: duas_casas(total),
+            minutos: duas_casas(minutos),
+            trabalho: duas_casas(trabalho),
+            outras: duas_casas(outras),
+            arquivos: duas_casas(arquivos),
+            subagentes: duas_casas(subagentes),
+        }
+    }
+
+    /// O nível pela pontuação: T0 sem trabalho nenhum; senão pelos limites.
+    fn nivel_pela(&self, pontuacao: &Pontuacao, pesos: &Pesos) -> Nivel {
+        if self.nivel() == Nivel::T0 {
+            Nivel::T0
+        } else if pontuacao.total >= pesos.t3 {
+            Nivel::T3
+        } else if pontuacao.total >= pesos.t2 {
+            Nivel::T2
+        } else {
+            Nivel::T1
+        }
+    }
+
     fn arquivos(&self) -> u32 {
         u32::try_from(self.arquivos.len())
             .unwrap_or(u32::MAX)
@@ -583,7 +679,15 @@ impl Componentes {
         if !falhou && let Some(arq) = &ev.arq {
             self.guardar_arquivo(arq);
         }
-        self.dur_ms = self.dur_ms.saturating_add(ev.dur.unwrap_or(0));
+        let dur = ev.dur.unwrap_or(0);
+        self.dur_ms = self.dur_ms.saturating_add(dur);
+        if ev
+            .tool
+            .as_deref()
+            .is_some_and(|t| FERRAMENTAS_DE_LANCAMENTO.contains(&t))
+        {
+            self.dur_lancamento_ms = self.dur_lancamento_ms.saturating_add(dur);
+        }
     }
 
     /// Soma outro trabalho a este (a corrente juntando os turnos).
@@ -594,6 +698,9 @@ impl Componentes {
         self.falhas = self.falhas.saturating_add(outro.falhas);
         self.de_agentes = self.de_agentes.saturating_add(outro.de_agentes);
         self.dur_ms = self.dur_ms.saturating_add(outro.dur_ms);
+        self.dur_lancamento_ms = self
+            .dur_lancamento_ms
+            .saturating_add(outro.dur_lancamento_ms);
         for arq in &outro.arquivos {
             self.guardar_arquivo(arq);
         }
@@ -702,25 +809,42 @@ impl Corrente {
     }
 }
 
-/// O nível de um trabalho com os tetos: o de máquina segura em T1 e deixa a
-/// festa discreta (decisão 0073).
-fn nivel_com_teto(comp: &Componentes, maquina: bool) -> (Nivel, Vec<&'static str>) {
-    let nivel = comp.nivel();
+/// O nível com os tetos (decisões 0073 e 0074): o turno de máquina segura
+/// em T1 (e a festa fica discreta), o modo `discreta` também, e o
+/// `sempre_grande` leva todo nível acima do T0 ao T3. Devolve o nível e o que
+/// mexeu nele.
+fn nivel_com_teto(
+    calculado: Nivel,
+    maquina: bool,
+    modo: ModoCelebracao,
+) -> (Nivel, Vec<&'static str>) {
+    let mut nivel = calculado;
+    let mut teto = Vec::new();
     if maquina {
-        (nivel.min(Nivel::T1), vec!["maquina"])
-    } else {
-        (nivel, Vec::new())
+        nivel = nivel.min(Nivel::T1);
+        teto.push("maquina");
     }
+    match modo {
+        ModoCelebracao::Discreta if nivel > Nivel::T1 => {
+            nivel = Nivel::T1;
+            teto.push("modo");
+        }
+        ModoCelebracao::SempreGrande if !maquina && nivel > Nivel::T0 && nivel < Nivel::T3 => {
+            nivel = Nivel::T3;
+            teto.push("modo");
+        }
+        _ => {}
+    }
+    (nivel, teto)
 }
 
-/// A reação de um nível, segundo o modo de celebração; a de um turno de
-/// máquina é discreta, e o T0 de máquina não reage (decisão 0073).
+/// A reação de um nível, segundo o modo de celebração; o T0 de máquina não
+/// reage (decisão 0073), e com a celebração desligada nada reage.
 fn reacao_do_nivel(nivel: Nivel, modo: ModoCelebracao, maquina: bool) -> Option<&'static str> {
     match (nivel, modo) {
         (_, ModoCelebracao::Desligada) => None,
         (Nivel::T0, _) if maquina => None,
-        (_, ModoCelebracao::Discreta) | (Nivel::T0, _) => Some(ACENO),
-        (Nivel::T1, _) => Some(PULINHO),
+        (nivel, _) => Some(nivel.reacao()),
     }
 }
 
@@ -730,6 +854,8 @@ struct Fechamento {
     reacao: Option<Reacao>,
     /// O turno tinha reaberto: o registro troca o que ele já tinha.
     substitui: bool,
+    /// O nível da festa de antes, num turno que reabriu.
+    nivel_antes: Option<Nivel>,
     /// O fim merece o pronto (decisão 0057): um Stop que fecha um turno
     /// digitado, ou a corrente que nasceu de um.
     pronto: bool,
@@ -889,10 +1015,10 @@ impl Sessao {
         id: Option<&str>,
         t: u64,
         agora: Agora,
-        modo: ModoCelebracao,
+        cfg: &ConfigCerebro,
         fechamentos: &mut Vec<Fechamento>,
     ) -> &mut Turno {
-        self.encerrar_aberto(t, agora, modo, fechamentos);
+        self.encerrar_aberto(t, agora, cfg, fechamentos);
         self.comemorado = None;
         self.turno.insert(Turno::novo(
             id.map(str::to_owned),
@@ -910,7 +1036,7 @@ impl Sessao {
         &mut self,
         t: u64,
         agora: Agora,
-        modo: ModoCelebracao,
+        cfg: &ConfigCerebro,
         fechamentos: &mut Vec<Fechamento>,
     ) {
         let Some(aberto) = self.turno.take() else {
@@ -918,11 +1044,11 @@ impl Sessao {
         };
         if let Some(stop) = &aberto.stop {
             let fim_ms = stop.ts_ms;
-            fechamentos.push(self.fechar_turno(aberto, Fim::Stop, fim_ms, agora, modo, true));
+            fechamentos.push(self.fechar_turno(aberto, Fim::Stop, fim_ms, agora, cfg, true));
             return;
         }
         if let Some(velho) = self.trocado.take() {
-            fechamentos.push(self.fechar_trocado(velho, agora, modo));
+            fechamentos.push(self.fechar_trocado(velho, agora, cfg));
         }
         self.trocado = Some(Trocado {
             turno: aberto,
@@ -937,14 +1063,14 @@ impl Sessao {
         &mut self,
         trocado: Trocado,
         agora: Agora,
-        modo: ModoCelebracao,
+        cfg: &ConfigCerebro,
     ) -> Fechamento {
         self.fechar_turno(
             trocado.turno,
             Fim::Substituido,
             trocado.troca_ms,
             agora,
-            modo,
+            cfg,
             false,
         )
     }
@@ -955,10 +1081,10 @@ impl Sessao {
         fim: Fim,
         fim_ms: u64,
         agora: Agora,
-        modo: ModoCelebracao,
+        cfg: &ConfigCerebro,
     ) -> Option<Fechamento> {
         let turno = self.turno.take()?;
-        Some(self.fechar_turno(turno, fim, fim_ms, agora, modo, true))
+        Some(self.fechar_turno(turno, fim, fim_ms, agora, cfg, true))
     }
 
     /// Fecha um turno. Só `Fim::Stop` comemora: na primeira vez, pelo nível
@@ -974,7 +1100,7 @@ impl Sessao {
         fim: Fim,
         fim_ms: u64,
         agora: Agora,
-        modo: ModoCelebracao,
+        cfg: &ConfigCerebro,
         reabrivel: bool,
     ) -> Fechamento {
         if let Some(id) = &turno.id {
@@ -1015,11 +1141,17 @@ impl Sessao {
         }
         // Com a corrente aberta, o Stop não festeja (nem o pronto).
         let festeja = fim == Fim::Stop && corrente.is_none_or(|c| !c.aberta);
-        let (nivel_agora, teto) = if festeja {
-            let (nivel, teto) = nivel_com_teto(&comp, maquina);
-            (Some(nivel), teto)
-        } else {
-            (None, Vec::new())
+        let pontuacao = (fim == Fim::Stop).then(|| comp.pontuar(&cfg.pesos));
+        let nivel_calculado = pontuacao
+            .as_ref()
+            .filter(|_| festeja)
+            .map(|p| comp.nivel_pela(p, &cfg.pesos));
+        let (nivel_agora, teto) = match nivel_calculado {
+            Some(calculado) => {
+                let (nivel, teto) = nivel_com_teto(calculado, maquina, cfg.modo);
+                (Some(nivel), teto)
+            }
+            None => (None, Vec::new()),
         };
         let antes = turno.festa;
         let subiu = match (nivel_agora, antes) {
@@ -1029,7 +1161,7 @@ impl Sessao {
         };
         let nome = nivel_agora
             .filter(|_| subiu)
-            .and_then(|nivel| reacao_do_nivel(nivel, modo, maquina));
+            .and_then(|nivel| reacao_do_nivel(nivel, cfg.modo, maquina));
         let reacao = nome.map(|nome| Reacao {
             nome,
             sid8: evento::curto(&self.sid),
@@ -1070,6 +1202,8 @@ impl Sessao {
             sha: stop.as_ref().is_some_and(|s| s.sha),
             continuacoes: turno.continuacoes,
             fim,
+            pontuacao,
+            nivel_calculado,
             nivel,
             reacao: reacao_do_turno,
             corrente,
@@ -1090,6 +1224,7 @@ impl Sessao {
             registro,
             reacao,
             substitui: reaberto,
+            nivel_antes: antes.map(|festa| festa.nivel),
             // O fim do pedido do Renan: um turno digitado que não ficou numa
             // corrente aberta, ou a corrente que nasceu de um.
             pronto: festeja && !maquina && (fim_da_corrente || corrente.is_none()),
@@ -1128,6 +1263,8 @@ impl Sessao {
                 sha: false,
                 continuacoes: 0,
                 fim,
+                pontuacao: None,
+                nivel_calculado: None,
                 nivel: None,
                 reacao: None,
                 corrente: Some(ResumoCorrente {
@@ -1139,6 +1276,7 @@ impl Sessao {
             },
             reacao: None,
             substitui: false,
+            nivel_antes: None,
             pronto: false,
         })
     }
@@ -1221,6 +1359,9 @@ pub struct Cerebro {
     fechados_a_tirar: VecDeque<RegistroTurno>,
     ultima_reacao: Option<Reacao>,
     ignorados: BTreeMap<String, u64>,
+    /// O último T3 de cada mundo (o real, o de teste), no relógio
+    /// monotônico (decisão 0074).
+    ultimo_t3: [Option<u64>; 2],
 }
 
 /// Hora do evento: o `ts` do hook quando plausível (até 6 h da chegada);
@@ -1262,6 +1403,7 @@ impl Cerebro {
             fechados_a_tirar: VecDeque::new(),
             ultima_reacao: None,
             ignorados: BTreeMap::new(),
+            ultimo_t3: [None; 2],
         }
     }
 
@@ -1292,8 +1434,9 @@ impl Cerebro {
 
     /// Guarda os turnos fechados e devolve as reações deles. O registro de
     /// um turno que reabriu troca o de antes: um registro por turno.
-    fn registrar(&mut self, fechamentos: Vec<Fechamento>, reacoes: &mut Vec<Reacao>) {
-        for f in fechamentos {
+    fn registrar(&mut self, fechamentos: Vec<Fechamento>, reacoes: &mut Vec<Reacao>, agora: Agora) {
+        for mut f in fechamentos {
+            self.intervalo_do_t3(&mut f, agora);
             if f.substitui {
                 self.turnos.retain(|r| r.chave != f.registro.chave);
             }
@@ -1308,6 +1451,52 @@ impl Cerebro {
             if let Some(reacao) = f.reacao {
                 self.reagir(reacao, reacoes);
             }
+        }
+    }
+
+    /// O T3 no máximo a cada `intervalo_t3_ms` (2 min no `sempre_grande`),
+    /// em cada mundo (o real e o de teste; decisão 0074): cedo demais, o
+    /// voo grande vira o voo curto, e a festa de um turno que reabriu só toca
+    /// se ainda subir.
+    fn intervalo_do_t3(&mut self, f: &mut Fechamento, agora: Agora) {
+        let Some(reacao) = f.reacao.as_mut() else {
+            return;
+        };
+        if reacao.nivel != Some(Nivel::T3) {
+            return;
+        }
+        let mundo = usize::from(f.registro.teste);
+        let intervalo = if self.config.modo == ModoCelebracao::SempreGrande {
+            INTERVALO_T3_SEMPRE_GRANDE_MS
+        } else {
+            self.config.intervalo_t3_ms
+        };
+        let cedo = self.ultimo_t3[mundo].is_some_and(|ultimo| agora.mono_ms < ultimo + intervalo);
+        if !cedo {
+            self.ultimo_t3[mundo] = Some(agora.mono_ms);
+            return;
+        }
+        reacao.nivel = Some(Nivel::T2);
+        reacao.nome = VOO_CURTO;
+        f.registro.teto.push("intervalo_t3");
+        let ainda_sobe = f.nivel_antes.is_none_or(|antes| Nivel::T2 > antes);
+        let reacao_do_turno = if ainda_sobe {
+            Some(VOO_CURTO)
+        } else {
+            f.reacao = None;
+            f.registro.reacao
+        };
+        f.registro.nivel = f.nivel_antes.max(Some(Nivel::T2));
+        f.registro.reacao = reacao_do_turno;
+        // A festa guardada para uma continuação é a que tocou.
+        let (teste, sid, turno) = &f.registro.chave;
+        if let Some(sessao) = self.sessoes.get_mut(&(*teste, sid.clone()))
+            && let Some(c) = sessao.comemorado.as_mut()
+            && c.turno.id == *turno
+            && let Some(festa) = c.turno.festa.as_mut()
+        {
+            festa.nivel = f.registro.nivel.unwrap_or(Nivel::T2);
+            festa.reacao = reacao_do_turno;
         }
     }
 
@@ -1358,7 +1547,7 @@ impl Cerebro {
         if !self.sessoes.contains_key(&chave) {
             self.abrir_vaga(ev.teste);
         }
-        let modo = self.config.modo;
+        let cfg = self.config.clone();
         let mut fechamentos = Vec::new();
         let mut ignorado = None;
         let sessao = self
@@ -1414,7 +1603,7 @@ impl Cerebro {
                         // hora e pode abrir ou fechar a corrente), e só então
                         // a origem do prompt novo é decidida (decisão 0073).
                         let antes = fechamentos.len();
-                        sessao.encerrar_aberto(t, agora, modo, &mut fechamentos);
+                        sessao.encerrar_aberto(t, agora, &cfg, &mut fechamentos);
                         for f in &fechamentos[antes..] {
                             if f.pronto {
                                 sessao.aviso = Some(Aviso {
@@ -1497,7 +1686,7 @@ impl Cerebro {
                                     Fim::Interrompido,
                                     t,
                                     agora,
-                                    modo,
+                                    &cfg,
                                     false,
                                 ));
                             }
@@ -1505,7 +1694,7 @@ impl Cerebro {
                         Alvo::Fechado => ignorado = Some("turno_fechado"),
                         alvo => {
                             if matches!(alvo, Alvo::Novo) {
-                                sessao.abrir(id, t, agora, modo, &mut fechamentos);
+                                sessao.abrir(id, t, agora, &cfg, &mut fechamentos);
                             }
                             if let Some(turno) = sessao.turno.as_mut() {
                                 turno.comp.contar_ferramenta(ev, falhou);
@@ -1520,7 +1709,7 @@ impl Cerebro {
                                     Fim::Interrompido,
                                     t,
                                     agora,
-                                    modo,
+                                    &cfg,
                                 ));
                                 sessao.estado = EstadoSessao::Parada;
                             }
@@ -1549,7 +1738,7 @@ impl Cerebro {
                 Alvo::Fechado => ignorado = Some("turno_fechado"),
                 alvo => {
                     if matches!(alvo, Alvo::Novo) {
-                        sessao.abrir(id, t, agora, modo, &mut fechamentos);
+                        sessao.abrir(id, t, agora, &cfg, &mut fechamentos);
                     }
                     let nascimento = sessao.turno.as_mut().map(|turno| {
                         turno.comp.subagentes = turno.comp.subagentes.saturating_add(1);
@@ -1567,7 +1756,7 @@ impl Cerebro {
                         Alvo::Trocado => {}
                         alvo => {
                             if matches!(alvo, Alvo::Novo) {
-                                sessao.abrir(id, t, agora, modo, &mut fechamentos);
+                                sessao.abrir(id, t, agora, &cfg, &mut fechamentos);
                             }
                             if sessao.turno.as_ref().is_some_and(|t| t.stop.is_none()) {
                                 sessao.estado = EstadoSessao::Esperando;
@@ -1579,7 +1768,7 @@ impl Cerebro {
             "Notification" => match ev.nt.as_deref() {
                 Some("idle_prompt") => {
                     if sessao.turno.as_ref().is_some_and(|t| t.stop.is_none()) {
-                        fechamentos.extend(sessao.fechar(Fim::Ocioso, t, agora, modo));
+                        fechamentos.extend(sessao.fechar(Fim::Ocioso, t, agora, &cfg));
                     }
                     if sessao.turno.is_none() {
                         sessao.estado = EstadoSessao::Parada;
@@ -1607,7 +1796,7 @@ impl Cerebro {
                     if let Some(trocado) = sessao.trocado.take() {
                         let mut turno = trocado.turno;
                         turno.stop = Some(StopPendente::do_evento(ev, t, agora.mono_ms));
-                        let f = sessao.fechar_turno(turno, Fim::Stop, t, agora, modo, false);
+                        let f = sessao.fechar_turno(turno, Fim::Stop, t, agora, &cfg, false);
                         let novo_de_maquina =
                             sessao.turno.as_ref().is_some_and(|n| n.origem.maquina());
                         if f.pronto && novo_de_maquina {
@@ -1623,7 +1812,7 @@ impl Cerebro {
                 Alvo::Fechado => ignorado = Some("stop_repetido"),
                 alvo => {
                     if matches!(alvo, Alvo::Novo) {
-                        sessao.abrir(id, t, agora, modo, &mut fechamentos);
+                        sessao.abrir(id, t, agora, &cfg, &mut fechamentos);
                     }
                     if let Some(turno) = sessao.turno.as_mut() {
                         if turno.stop.is_some() {
@@ -1652,12 +1841,12 @@ impl Cerebro {
                                 Fim::Falhou,
                                 t,
                                 agora,
-                                modo,
+                                &cfg,
                                 false,
                             ));
                         }
                     }
-                    Alvo::Aberto => fechamentos.extend(sessao.fechar(Fim::Falhou, t, agora, modo)),
+                    Alvo::Aberto => fechamentos.extend(sessao.fechar(Fim::Falhou, t, agora, &cfg)),
                     Alvo::Fechado | Alvo::Novo => {}
                 }
                 sessao.estado = EstadoSessao::Erro;
@@ -1696,7 +1885,7 @@ impl Cerebro {
         if let Some(motivo) = ignorado {
             self.ignorar(motivo);
         }
-        self.registrar(fechamentos, &mut reacoes);
+        self.registrar(fechamentos, &mut reacoes, agora);
         reacoes
     }
 
@@ -1734,14 +1923,14 @@ impl Cerebro {
             self.ignorar("fim_de_sessao_desconhecida");
             return;
         };
-        let modo = self.config.modo;
+        let cfg = self.config.clone();
         let mut fechamentos = Vec::new();
         if let Some(trocado) = sessao.trocado.take() {
-            fechamentos.push(sessao.fechar_trocado(trocado, agora, modo));
+            fechamentos.push(sessao.fechar_trocado(trocado, agora, &cfg));
         }
-        fechamentos.extend(sessao.fechar(Fim::SessaoEncerrada, t, agora, modo));
+        fechamentos.extend(sessao.fechar(Fim::SessaoEncerrada, t, agora, &cfg));
         fechamentos.extend(sessao.fechar_corrente(Fim::SessaoEncerrada, t));
-        self.registrar(fechamentos, reacoes);
+        self.registrar(fechamentos, reacoes, agora);
         let sobrou = self.sessoes.keys().any(|(teste, _)| *teste == chave.0);
         if sai && !sobrou && self.config.modo != ModoCelebracao::Desligada {
             let reacao = Reacao {
@@ -1762,7 +1951,7 @@ impl Cerebro {
     /// caladas).
     pub fn tique(&mut self, agora: Agora) -> Vec<Reacao> {
         let mut reacoes = Vec::new();
-        let modo = self.config.modo;
+        let cfg = self.config.clone();
         let mut fechamentos = Vec::new();
         for sessao in self.sessoes.values_mut() {
             if sessao
@@ -1771,7 +1960,7 @@ impl Cerebro {
                 .is_some_and(|x| agora.mono_ms >= x.prazo_mono)
                 && let Some(trocado) = sessao.trocado.take()
             {
-                fechamentos.push(sessao.fechar_trocado(trocado, agora, modo));
+                fechamentos.push(sessao.fechar_trocado(trocado, agora, &cfg));
             }
             let vencida = sessao
                 .turno
@@ -1784,7 +1973,7 @@ impl Cerebro {
                     .as_ref()
                     .and_then(|t| t.stop.as_ref())
                     .map_or(agora.parede_ms, |s| s.ts_ms);
-                if let Some(f) = sessao.fechar(Fim::Stop, fim_ms, agora, modo) {
+                if let Some(f) = sessao.fechar(Fim::Stop, fim_ms, agora, &cfg) {
                     // O Claude terminou e o turno é do Renan: o pronto, com ou
                     // sem festa (decisão 0057); não com a corrente aberta nem
                     // num turno de máquina (decisão 0073).
@@ -1813,7 +2002,7 @@ impl Cerebro {
                 sessao.aviso = None;
             }
         }
-        self.registrar(fechamentos, &mut reacoes);
+        self.registrar(fechamentos, &mut reacoes, agora);
         let antes = self.sessoes.len();
         self.sessoes.retain(|(teste, _), s| {
             let vida = if *teste {
@@ -2589,7 +2778,11 @@ mod testes {
             .len();
         assert_eq!(lembrados, ARQUIVOS_POR_TURNO, "memória limitada");
         c.receber(&stop("p1"), BASE + 2, em(2));
-        assert_eq!(c.tique(em(2 + ACOMODACAO_MS))[0].nome, PULINHO);
+        assert_eq!(
+            c.tique(em(2 + ACOMODACAO_MS))[0].nome,
+            VOO_GRANDE,
+            "1524 arquivos: a pontuação no teto"
+        );
         let r = c.resumo();
         assert_eq!(registro(&r, "p1").arquivos as usize, total);
         assert_eq!(registro(&r, "p1").trabalho as usize, total + 1);
@@ -2902,18 +3095,42 @@ mod testes {
                 ..ConfigCerebro::default()
             })
         };
+        // Discreta: o teto T1 (decisão 0074; no M3 ela só acenava).
         assert_eq!(
             rodar(&mut com_modo(ModoCelebracao::Discreta), roteiro()),
-            vec![(2_800, ACENO), (4_000, TCHAU)]
+            vec![(2_800, PULINHO), (4_000, TCHAU)]
         );
         assert_eq!(
             rodar(&mut com_modo(ModoCelebracao::Desligada), roteiro()),
             vec![]
         );
+        // Sempre grande: todo nível acima do T0 vira T3.
+        let mut c = com_modo(ModoCelebracao::SempreGrande);
         assert_eq!(
-            rodar(&mut com_modo(ModoCelebracao::SempreGrande), roteiro()),
-            vec![(2_800, PULINHO), (4_000, TCHAU)],
-            "até o M5 não há nível maior"
+            rodar(&mut c, roteiro()),
+            vec![(2_800, VOO_GRANDE), (4_000, TCHAU)]
+        );
+        assert_eq!(registro(&c.resumo(), "p1").teto, vec!["modo"]);
+        // Um turno de T2 no modo discreto fica no pulinho, com o teto anotado.
+        let medio = || {
+            let mut r = vec![chega(0, prompt("p1"))];
+            for i in 0..12u64 {
+                r.push(chega(
+                    1_000 + i,
+                    ferramenta("p1", "Edit", Some(&format!("{i:012x}")), 15_000),
+                ));
+            }
+            r.push(chega(5_000, stop("p1")));
+            r.push(Ate(6_000));
+            r
+        };
+        let mut c = com_modo(ModoCelebracao::Discreta);
+        assert_eq!(rodar(&mut c, medio()), vec![(5_800, PULINHO)]);
+        let r = c.resumo();
+        let p1 = registro(&r, "p1");
+        assert_eq!(
+            (p1.nivel_calculado, p1.nivel, p1.teto.clone()),
+            (Some(Nivel::T2), Some(Nivel::T1), vec!["modo"])
         );
     }
 
@@ -3027,6 +3244,7 @@ mod testes {
         c.reconfigurar(ConfigCerebro {
             origens: vec!["sdk-cli".into()],
             modo: ModoCelebracao::Proporcional,
+            ..ConfigCerebro::default()
         });
         assert_eq!(c.config().origens, vec!["sdk-cli"]);
         assert!(c.resumo().sessoes.is_empty());
@@ -3045,6 +3263,7 @@ mod testes {
         c.reconfigurar(ConfigCerebro {
             origens: vec!["cli".into()],
             modo: ModoCelebracao::Desligada,
+            ..ConfigCerebro::default()
         });
         let saida = rodar(
             &mut c,
@@ -3765,5 +3984,185 @@ mod testes {
         assert_eq!(saida, vec![(10_800, PULINHO)]);
         assert!(c.resumo().ultima_reacao.unwrap().discreta);
         assert_eq!(aviso_de(&c), None, "sem pronto");
+    }
+
+    // --- pontuação e níveis (decisão 0074) -----------------------------------
+
+    /// `n` ferramentas `tool` de `dur` ms cada, em arquivos de `0` a `arqs-1`
+    /// (se `arqs > 0`), no turno `turno`, a partir de `t`.
+    fn varias(turno: &str, tool: &str, n: u32, dur: u64, arqs: u32, t: u64) -> Vec<Passo> {
+        (0..n)
+            .map(|i| {
+                let arq =
+                    (arqs > 0).then(|| format!("{:012x}", 0xc00000000000u64 + u64::from(i % arqs)));
+                chega(
+                    t + u64::from(i),
+                    ferramenta(turno, tool, arq.as_deref(), dur),
+                )
+            })
+            .collect()
+    }
+
+    fn turno_com(trabalho: Vec<Passo>) -> (Saida, RegistroTurno) {
+        let mut c = novo();
+        let mut roteiro = vec![chega(0, prompt("p1"))];
+        roteiro.extend(trabalho);
+        roteiro.push(chega(500_000, stop("p1")));
+        roteiro.push(Ate(510_000));
+        let saida = rodar(&mut c, roteiro);
+        let r = c.resumo();
+        (saida, registro(&r, "p1").clone())
+    }
+
+    #[test]
+    fn exemplos_de_pontuacao() {
+        // Os exemplos da decisão 0074.
+        let (saida, r) = turno_com(vec![]);
+        assert_eq!((saida, r.nivel), (vec![(500_800, ACENO)], Some(Nivel::T0)));
+        let mut leitura = varias("p1", "Read", 15, 5, 0, 1_000);
+        leitura.extend(varias("p1", "WebFetch", 2, 2_000, 0, 2_000));
+        let (saida, r) = turno_com(leitura);
+        assert_eq!(saida, vec![(500_800, ACENO)], "nada de trabalho: T0");
+        assert_eq!(r.pontuacao.unwrap().total, 0.92, "pontua, mas é T0");
+        let mut pequeno = varias("p1", "Edit", 1, 40, 1, 1_000);
+        pequeno.extend(varias("p1", "Bash", 1, 900, 0, 2_000));
+        let (saida, r) = turno_com(pequeno);
+        assert_eq!(saida, vec![(500_800, PULINHO)]);
+        let p = r.pontuacao.unwrap();
+        assert_eq!(
+            (p.total, p.min_ativos, p.trabalho, p.arquivos),
+            (0.82, 0.02, 0.3, 0.5)
+        );
+        // 10 Edit em 5 arquivos, 8 Bash e 7 Read com 3 min de ferramenta.
+        let mut medio = varias("p1", "Edit", 10, 0, 5, 1_000);
+        medio.extend(varias("p1", "Bash", 8, 22_500, 0, 2_000));
+        medio.extend(varias("p1", "Read", 7, 0, 0, 3_000));
+        let (saida, r) = turno_com(medio);
+        assert_eq!(saida, vec![(500_800, VOO_CURTO)]);
+        assert_eq!(r.pontuacao.unwrap().total, 8.55);
+        // 40 Edit em 15 arquivos, 30 Bash, 50 Read e 2 subagentes com 12 min.
+        let mut grande = varias("p1", "Edit", 40, 0, 15, 1_000);
+        grande.extend(varias("p1", "Bash", 30, 24_000, 0, 2_000));
+        grande.extend(varias("p1", "Read", 50, 0, 0, 3_000));
+        grande.push(chega(4_000, nasce("p1", "a1")));
+        grande.push(chega(4_001, nasce("p1", "a2")));
+        let (saida, r) = turno_com(grande);
+        assert_eq!(saida, vec![(500_800, VOO_GRANDE)]);
+        let p = r.pontuacao.unwrap();
+        assert_eq!((p.total, p.min_ativos), (20.0, 12.0), "no teto de 20");
+        assert_eq!(r.nivel_calculado, Some(Nivel::T3));
+    }
+
+    #[test]
+    fn o_tempo_do_agent_fica_fora_dos_minutos() {
+        // Um Agent em primeiro plano de 10 min (a vida do subagente, com o
+        // pensar dele) não vira 10 min de trabalho; as ferramentas do
+        // subagente contam pelo aid.
+        let mut trabalho = vec![chega(1_000, nasce("p1", "a1"))];
+        trabalho.push(chega(2_000, do_agente("p1", "a1", "Bash", 60_000)));
+        trabalho.push(chega(600_000 - 1, ferramenta("p1", "Agent", None, 600_000)));
+        let mut c = novo();
+        let mut roteiro = vec![chega(0, prompt("p1"))];
+        roteiro.extend(trabalho);
+        roteiro.push(chega(600_100, stop("p1")));
+        roteiro.push(Ate(610_000));
+        rodar(&mut c, roteiro);
+        let r = c.resumo();
+        let p1 = registro(&r, "p1");
+        assert_eq!(p1.dur_ms, 660_000, "o registro mostra todo o tempo");
+        assert_eq!(p1.pontuacao.unwrap().min_ativos, 1.0, "só o Bash do agente");
+    }
+
+    #[test]
+    fn o_t3_no_maximo_a_cada_10_min() {
+        let grande = |turno: &str, t: u64| {
+            let mut r = vec![chega(t, prompt(turno))];
+            for i in 0..12u64 {
+                r.push(chega(
+                    t + 1 + i,
+                    ferramenta(turno, "Edit", Some(&format!("{:012x}", t + i)), 60_000),
+                ));
+            }
+            r.push(chega(t + 1_000, stop(turno)));
+            r
+        };
+        let mut c = novo();
+        let mut roteiro = grande("p1", 0);
+        roteiro.extend(grande("p2", 60_000));
+        roteiro.extend(grande("p3", 60_000 + 10 * 60 * 1000));
+        roteiro.push(Ate(60_000 + 10 * 60 * 1000 + 5_000));
+        assert_eq!(
+            rodar(&mut c, roteiro),
+            vec![
+                (1_800, VOO_GRANDE),
+                (61_800, VOO_CURTO),
+                (60_000 + 10 * 60 * 1000 + 1_800, VOO_GRANDE)
+            ]
+        );
+        let r = c.resumo();
+        let p2 = registro(&r, "p2");
+        assert_eq!(
+            (p2.nivel_calculado, p2.nivel, p2.teto.clone()),
+            (Some(Nivel::T3), Some(Nivel::T2), vec!["intervalo_t3"])
+        );
+        // Sem limite (intervalo 0): dois T3 seguidos.
+        let mut c = Cerebro::novo(ConfigCerebro {
+            intervalo_t3_ms: 0,
+            ..ConfigCerebro::default()
+        });
+        let mut roteiro = grande("p1", 0);
+        roteiro.extend(grande("p2", 60_000));
+        roteiro.push(Ate(70_000));
+        assert_eq!(
+            rodar(&mut c, roteiro),
+            vec![(1_800, VOO_GRANDE), (61_800, VOO_GRANDE)]
+        );
+    }
+
+    #[test]
+    fn a_continuacao_so_festeja_se_subir_tambem_em_t2_e_t3() {
+        // O Stop com sha de um turno que já festejou em T1 sobe para T2 com
+        // o trabalho da continuação; outra continuação que fica em T2 não
+        // festeja de novo.
+        let mut c = novo();
+        let mut roteiro = vec![
+            chega(0, prompt("q1")),
+            chega(500, ferramenta("q1", "Edit", Some("aaaaaaaaaaa1"), 40)),
+            chega(1_000, stop("q1")),
+            Ate(2_000),
+        ];
+        for i in 0..9u64 {
+            roteiro.push(chega(
+                3_000 + i,
+                ferramenta("q1", "Edit", Some(&format!("{:012x}", 0xd0 + i)), 20_000),
+            ));
+        }
+        roteiro.push(chega(
+            6_000,
+            Evento {
+                sha: true,
+                ..stop("q1")
+            },
+        ));
+        roteiro.push(Ate(7_000));
+        roteiro.push(chega(8_000, ferramenta("q1", "Read", None, 5)));
+        roteiro.push(chega(
+            9_000,
+            Evento {
+                sha: true,
+                ..stop("q1")
+            },
+        ));
+        roteiro.push(Ate(10_000));
+        assert_eq!(
+            rodar(&mut c, roteiro),
+            vec![(1_800, PULINHO), (6_800, VOO_CURTO)]
+        );
+        let r = c.resumo();
+        let q1 = registro(&r, "q1");
+        assert_eq!(
+            (q1.nivel, q1.reacao, q1.continuacoes),
+            (Some(Nivel::T2), Some(VOO_CURTO), 2)
+        );
     }
 }

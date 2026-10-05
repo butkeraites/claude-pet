@@ -1,3 +1,3 @@
-{"t":6800,"i":"turno","sid8":"s1","turno8":"p1","fim":"stop","nivel":"T1","reacao":"done_small"}
+{"t":6800,"i":"turno","sid8":"s1","turno8":"p1","fim":"stop","nivel":"T1","pontuacao":0.65,"reacao":"done_small"}
 {"t":6800,"i":"reacao","nome":"done_small","motivo":"fim","sid8":"s1","nivel":"T1"}
 {"t":190000,"i":"turno","sid8":"s2","turno8":"q1","fim":"ocioso"}

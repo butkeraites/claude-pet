@@ -1,0 +1,6 @@
+{"t":64800,"i":"turno","sid8":"s1","turno8":"p1","fim":"stop","nivel":"T3","pontuacao":20.0,"reacao":"done_big"}
+{"t":64800,"i":"reacao","nome":"done_big","motivo":"fim","sid8":"s1","nivel":"T3"}
+{"t":428800,"i":"turno","sid8":"s1","turno8":"p2","fim":"stop","nivel":"T2","pontuacao":20.0,"teto":["intervalo_t3"],"reacao":"done_medium"}
+{"t":428800,"i":"reacao","nome":"done_medium","motivo":"fim","sid8":"s1","nivel":"T2"}
+{"t":788800,"i":"turno","sid8":"s1","turno8":"p3","fim":"stop","nivel":"T3","pontuacao":20.0,"reacao":"done_big"}
+{"t":788800,"i":"reacao","nome":"done_big","motivo":"fim","sid8":"s1","nivel":"T3"}
