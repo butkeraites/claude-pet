@@ -120,6 +120,56 @@ fn a_protecao_de_tela_do_omarchy_chega_como_booleano() {
     assert!(d.log().contains("proteção de tela abriu"), "{}", d.log());
 }
 
+/// O compartilhamento de tela (decisão 0081): o `screencast` vira o booleano
+/// e a discrição liga com 2 s de sinal; o `screencastv2`, que traz o título
+/// da janela compartilhada, nunca é lido. Duas sessões: só o fim da última
+/// desliga o sinal, e a discrição segura depois dele.
+#[test]
+fn o_compartilhamento_de_tela_chega_sem_o_titulo_da_janela() {
+    let h = HyprlandFalso::novo(
+        "tela",
+        "screencast>>1,window\n\
+         screencastv2>>1,window,SEGREDO-janela-compartilhada\n\
+         screencast>>1,monitor\n\
+         screencastv2>>1,monitor,eDP-1\n\
+         activewindowv2>>ccc111\n",
+    );
+    let d = Daemon::subir_com(true, &[("PET_HOST_RUNTIME", h.runtime().as_str())]);
+    let estado = esperar(&d, "compartilhando", |e| {
+        e["desktop"]["compartilhando"] == true && e["desktop"]["janela_ativa"] == "ccc111"
+    });
+    sem_segredo("/v1/estado", &estado.to_string());
+    // 2 s de sinal: a discrição liga (os balões sem nome de projeto).
+    let estado = esperar(&d, "a discrição", |e| {
+        e["fotografia"]["discricao"] == true
+    });
+    sem_segredo("/v1/estado", &estado.to_string());
+    // A janela para de ser compartilhada; o monitor continua.
+    h.mandar(
+        "screencast>>0,window\nscreencastv2>>0,window,SEGREDO-janela-compartilhada\n\
+         activewindowv2>>ccc222\n",
+    );
+    let estado = esperar(&d, "a janela ccc222", |e| {
+        e["desktop"]["janela_ativa"] == "ccc222"
+    });
+    assert_eq!(estado["desktop"]["compartilhando"], true, "falta o monitor");
+    // O monitor também para: o sinal desliga, e a discrição segura.
+    h.mandar("screencast>>0,monitor\nscreencastv2>>0,monitor,eDP-1\nactivewindowv2>>ccc333\n");
+    let estado = esperar(&d, "a janela ccc333", |e| {
+        e["desktop"]["janela_ativa"] == "ccc333"
+    });
+    assert_eq!(estado["desktop"]["compartilhando"], false);
+    assert_eq!(
+        estado["fotografia"]["discricao"], true,
+        "5 min depois do último sinal"
+    );
+    sem_segredo("/v1/estado", &estado.to_string());
+    let (_, eventos) = d.get("/v1/debug/eventos");
+    sem_segredo("/v1/debug/eventos", &eventos);
+    sem_segredo("log", &d.log());
+    assert!(h.comandos_intocado(), "alguém conectou no .socket.sock");
+}
+
 /// Sem a conexão Wayland (o compositor de mentira desliga na hora e o laço
 /// fica no backoff) o socket2 continua lido: um `focusedmonv2` arma o prazo
 /// de seguir o monitor, que tem de vencer mesmo sem a janela. Antes da

@@ -1839,8 +1839,14 @@ impl Motor {
         if let EventoDesktop::JanelaFechou(janela) = evento {
             self.identidades.fechou(janela);
         }
-        if let EventoDesktop::Compartilhando(compartilhando) = evento {
-            self.compartilhamento(*compartilhando, agora.mono_ms);
+        match evento {
+            EventoDesktop::Compartilhando(compartilhando) => {
+                self.compartilhamento(*compartilhando, agora.mono_ms);
+            }
+            // A fonte caiu: o fim do compartilhamento pode se perder no meio.
+            // O sinal desliga ali, e a discrição segura (decisão 0081).
+            EventoDesktop::Ligado(false) => self.compartilhamento(false, agora.mono_ms),
+            _ => {}
         }
         let protetor_antes = self.desktop.protetor_ativo();
         let ativa_antes = self.desktop.janela_ativa.clone();

@@ -409,6 +409,7 @@ As outras sessões aparecem como selos: um contador "+N", uma bandeirinha com a 
 - DND do Omarchy ligado: sem voo pela tela e sem escalada acima de L1.
 - Compartilhamento de tela ativo há mais de 2 s: balões sem nome de projeto.
   - **Nunca** usar a regra `no_screen_share` nesta camada: ela pinta de preto o monitor inteiro compartilhado.
+  - *Correção (2026-10-05, decisão 0081):* no Hyprland 0.56.2 o `screencast` segue os quadros copiados (o `0` sai meio segundo depois do último), então numa tela parada ele pisca. Os 2 s são de sinal somado num episódio, e a discrição só desliga 5 min depois do último sinal.
 
 **Timers:**
 

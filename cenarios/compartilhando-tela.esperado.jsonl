@@ -4,7 +4,7 @@
 {"t":11300,"i":"festa","sid8":"s1","nivel":"T1","reacao":"done_small"}
 {"t":11300,"i":"balao","linhas":["Prontinho! agenda-secreta"],"motivo":"festa"}
 {"t":11300,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}
-{"t":12000,"i":"discricao","ligada":true,"tirou_balao":true}
+{"t":11600,"i":"discricao","ligada":true,"tirou_balao":true}
 {"t":20000,"i":"selos","mais":1,"bandeiras":[],"corrente":false}
 {"t":25000,"i":"reacao","nome":"alert","motivo":"aviso","sid8":"s2"}
 {"t":25000,"i":"balao","linhas":["Ô, meu camarada!","sessão 1 precisa de você"],"motivo":"aviso"}
@@ -13,12 +13,21 @@
 {"t":25000,"i":"selos","mais":0,"bandeiras":[7],"corrente":false}
 {"t":30000,"i":"balao","linhas":["sessão 1: esperando você","não vi a janela dela","sessão 1: esperando você (5 s)","sessão 2: pronto (19 s)"],"motivo":"sem_foco"}
 {"t":30000,"i":"clique","resultado":"nao_focou","sid8":"s2"}
-{"t":40000,"i":"discricao","ligada":false}
 {"t":45000,"i":"escalada","sid8":"s2","nivel":0,"motivo":"andou"}
 {"t":45000,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}
 {"t":45000,"i":"selos","mais":1,"bandeiras":[],"corrente":false}
 {"t":50000,"i":"selos","mais":0,"bandeiras":[],"corrente":false}
 {"t":50800,"i":"turno","sid8":"s2","turno8":"q1","fim":"stop","nivel":"T1","pontuacao":0.16,"reacao":"done_small"}
 {"t":50800,"i":"festa","sid8":"s2","nivel":"T1","reacao":"done_small"}
-{"t":50800,"i":"balao","linhas":["Prontinho! web"],"motivo":"festa"}
+{"t":50800,"i":"balao","linhas":["Prontinho!"],"motivo":"festa"}
 {"t":50800,"i":"selos","mais":0,"bandeiras":[7],"corrente":false}
+{"t":170800,"i":"base","estado":"idle","prioridade":"parado"}
+{"t":170800,"i":"selos","mais":0,"bandeiras":[7,1],"corrente":false}
+{"t":340000,"i":"discricao","ligada":false}
+{"t":345000,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":345000,"i":"selos","mais":0,"bandeiras":[1],"corrente":false}
+{"t":346000,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
+{"t":347800,"i":"turno","sid8":"s1","turno8":"p2","fim":"stop","nivel":"T1","pontuacao":0.65,"reacao":"done_small"}
+{"t":347800,"i":"festa","sid8":"s1","nivel":"T1","reacao":"done_small"}
+{"t":347800,"i":"balao","linhas":["Prontinho! agenda-secreta"],"motivo":"festa"}
+{"t":347800,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}

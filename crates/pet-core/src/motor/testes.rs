@@ -2940,3 +2940,135 @@ fn um_fim_t0_dentro_da_festa_so_muda_o_balao() {
     let foto = motor.painel(None, 3_800).fotografia;
     assert_eq!(foto.festa.map(|f| (f.sessoes, f.ha_ms)), Some((2, 1_000)));
 }
+
+// --- o compartilhamento de tela no 0.56.2 (decisão 0081) -------------------
+
+fn compartilhar(motor: &mut Motor, sinal: bool, ms: u64) {
+    motor.evento_desktop(
+        None,
+        &crate::plataforma::EventoDesktop::Compartilhando(sinal),
+        em(ms),
+    );
+}
+
+fn discricoes(motor: &Motor) -> Vec<(u64, bool)> {
+    motor
+        .intencoes()
+        .filter_map(|i| match i.tipo {
+            intencoes::Tipo::Discricao { ligada, .. } => Some((i.t_ms, ligada)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn uma_captura_de_tela_nao_liga_a_discricao() {
+    let mut motor = Motor::novo(ConfigCerebro::default());
+    motor.acertar_relogio(em(0));
+    // O grim: o sinal aceso por 400 ms. Passado um minuto, o episódio acaba.
+    compartilhar(&mut motor, true, 1_000);
+    compartilhar(&mut motor, false, 1_400);
+    andar(&mut motor, 120_000);
+    assert!(discricoes(&motor).is_empty());
+    assert!(!motor.painel(None, 120_000).fotografia.discricao);
+    // Outra captura, mais de um minuto depois, não soma com a primeira.
+    for inicio in [130_000, 135_000, 140_000, 145_000] {
+        compartilhar(&mut motor, true, inicio);
+        compartilhar(&mut motor, false, inicio + 400);
+    }
+    andar(&mut motor, 250_000);
+    assert!(discricoes(&motor).is_empty(), "1,6 s somados");
+    // Cinco seguidas, a menos de um minuto uma da outra, somam 2 s: na
+    // dúvida, discreto (os nomes voltam 5 min depois do último sinal).
+    for inicio in [260_000, 270_000, 280_000, 290_000, 300_000] {
+        compartilhar(&mut motor, true, inicio);
+        compartilhar(&mut motor, false, inicio + 400);
+    }
+    andar(&mut motor, 700_000);
+    assert_eq!(
+        discricoes(&motor),
+        vec![(300_400, true), (300_400 + tela::SEGURA_MS, false)]
+    );
+}
+
+#[test]
+fn a_tela_parada_que_pisca_liga_e_segura_a_discricao() {
+    let (mut motor, _janela) = ligado();
+    motor.acertar_relogio(em(0));
+    // Uma chamada com a tela parada: o Hyprland manda `0` meio segundo
+    // depois do último quadro copiado e `1` no próximo desenho (600 ms de
+    // sinal a cada 5 s). A discrição liga quando o sinal soma 2 s.
+    for n in 0..11 {
+        let inicio = 10_000 + n * 5_000;
+        compartilhar(&mut motor, true, inicio);
+        andar(&mut motor, inicio + 600);
+        compartilhar(&mut motor, false, inicio + 600);
+        andar(&mut motor, inicio + 5_000);
+    }
+    assert_eq!(
+        discricoes(&motor),
+        vec![(25_200, true)],
+        "nunca desliga no `0`"
+    );
+    // Uma festa no meio: sem o nome do projeto.
+    turno_pequeno(&mut motor, "s1", "agenda-secreta", 70_000);
+    andar(&mut motor, 73_000);
+    assert_eq!(
+        motor.balao(73_000).map(|b| b.linhas.clone()),
+        Some(vec!["Prontinho!".to_owned()])
+    );
+    // O último sinal foi aos 60,6 s: os nomes voltam 5 min depois.
+    let fim = 60_600 + tela::SEGURA_MS;
+    andar(&mut motor, fim + 1_000);
+    assert_eq!(discricoes(&motor), vec![(25_200, true), (fim, false)]);
+    turno_pequeno(&mut motor, "s2", "agenda-secreta", fim + 10_000);
+    andar(&mut motor, fim + 13_000);
+    assert_eq!(
+        motor.balao(fim + 13_000).map(|b| b.linhas.clone()),
+        Some(vec!["Prontinho! agenda-secreta".to_owned()])
+    );
+}
+
+#[test]
+fn a_fonte_que_cai_desliga_o_sinal_e_a_discricao_segura() {
+    let mut motor = Motor::novo(ConfigCerebro::default());
+    motor.acertar_relogio(em(0));
+    ligar_desktop(&mut motor, 0);
+    compartilhar(&mut motor, true, 1_000);
+    andar(&mut motor, 5_000);
+    assert_eq!(discricoes(&motor), vec![(3_000, true)]);
+    // O socket2 cai: o fim do compartilhamento pode se perder no meio.
+    motor.evento_desktop(
+        None,
+        &crate::plataforma::EventoDesktop::Ligado(false),
+        em(10_000),
+    );
+    assert!(!motor.desktop().compartilhando);
+    ligar_desktop(&mut motor, 11_000);
+    andar(&mut motor, 200_000);
+    assert_eq!(discricoes(&motor).len(), 1, "segura");
+    // Voltou compartilhando: segue discreto. Parou: 5 min depois do fim.
+    compartilhar(&mut motor, true, 200_000);
+    compartilhar(&mut motor, false, 250_000);
+    andar(&mut motor, 250_000 + tela::SEGURA_MS + 1);
+    assert_eq!(
+        discricoes(&motor),
+        vec![(3_000, true), (250_000 + tela::SEGURA_MS, false)]
+    );
+    // Sem o sinal voltar, a discrição acaba sozinha (nunca fica para sempre).
+    let mut motor = Motor::novo(ConfigCerebro::default());
+    motor.acertar_relogio(em(0));
+    compartilhar(&mut motor, true, 0);
+    andar(&mut motor, 3_000);
+    motor.evento_desktop(
+        None,
+        &crate::plataforma::EventoDesktop::Ligado(false),
+        em(4_000),
+    );
+    andar(&mut motor, 4_000 + tela::SEGURA_MS);
+    assert_eq!(
+        discricoes(&motor),
+        vec![(2_000, true), (4_000 + tela::SEGURA_MS, false)]
+    );
+    assert_eq!(motor.prazo_da_discricao(5_000 + tela::SEGURA_MS), None);
+}

@@ -3357,3 +3357,54 @@ que acorda o pet, e a discrição quando a fonte dos eventos do desktop cai.
 significado; um T0 é a resposta rápida e não merece balão nem quando chega
 junto; e, na dúvida sobre o compartilhamento, o pet erra para o lado de não
 mostrar o nome do projeto.
+
+## 0081 — O compartilhamento de tela no Hyprland 0.56.2: o `screencast` que pisca com os quadros, as sessões contadas e a discrição que segura (2026-10-05)
+
+**Problema:** a decisão 0076 deixou o compartilhamento de tela para o
+socket2 (`EventoDesktop::Compartilhando`, a discrição 2 s depois e os nomes
+de volta na hora em que ele para). Lido no código-fonte do 0.56.2
+(`docs/pesquisa/11-tela-m5.md`), o `screencast>>ESTADO,TIPO` não diz se há
+uma sessão de compartilhamento, e sim se há quadros sendo copiados: o `1` sai
+num quadro copiado e o `0` meio segundo depois do último. Numa chamada com a
+tela parada o sinal pisca, e o próximo desenho pode ser o do próprio pet (a
+camada cobre o monitor): desligar a discrição no `0` mostraria o nome do
+projeto justo no quadro que volta a ser compartilhado (a festa do Stop, logo
+depois de o spinner do terminal parar). E há mais coisas no evento: várias
+sessões ao mesmo tempo sem dizer qual, o `screencastv2` com o título da
+janela compartilhada, o grim abrindo uma sessão de um quadro só, e o pet que
+liga no meio sem saber das sessões de antes.
+**Escolha:**
+- **O adaptador do Hyprland** (`pet_wayland::hyprland::eventos`) lê só o
+  `screencast>>ESTADO,TIPO`: o primeiro campo, `0` ou `1`; o tipo nem é
+  guardado. O `screencastv2` é outro nome de evento e cai no "não uso", sem
+  ser interpretado (como o `windowtitlev2`).
+- **As sessões contadas na ligação** (a `Entrega` do leitor): um `1` soma, um
+  `0` tira; só a primeira sessão manda `Compartilhando(true)`, e o fim da
+  última, `Compartilhando(false)`. Um fim sem o começo visto (uma sessão de
+  antes desta ligação) também vale como fim; uma ligação nova começa do
+  zero; depois de uma perda na caixa, a tela compartilhada é contada de novo
+  logo depois do `Ligado(false)`/`Ligado(true)` da decisão 0061. O socket2
+  continua sempre drenado, na thread dele.
+- **A discrição no Motor** (`motor::tela`): liga quando o sinal soma
+  `DISCRICAO_APOS_MS` (2 s) num episódio (os piscares de meio segundo de uma
+  tela parada somam; uma captura não chega lá); antes de ligar, sinais até
+  `JUNTA_MS` (60 s) um do outro são o mesmo episódio; ligada, só desliga
+  `SEGURA_MS` (5 min) depois do último sinal. A fonte dos eventos que cai
+  desliga o sinal ali (o `desktop.compartilhando` também), e a discrição
+  segura os 5 min: na dúvida, discreto (decisão 0080), mas nunca para sempre.
+- **Testes:** a tradução (o `screencastv2` e um estado que não é 0 nem 1 não
+  passam), as sessões contadas e a recontagem depois da perda no leitor; no
+  Motor, a captura que não liga (e cinco seguidas que somam 2 s e ligam), a
+  tela parada que pisca sem desligar com o nome de volta 5 min depois e a
+  fonte que cai; o cenário `compartilhando-tela` refeito com a captura, a
+  tela que pisca e os nomes que voltam; o canário do socket2 no daemon de
+  verdade com segredos no `screencastv2` (nada no `/v1/estado`, no log nem no
+  `/v1/debug/eventos`), duas sessões e a discrição ligada pelo laço. Duas
+  mutações reprovaram: a discrição desligando no `0` (5 testes, o dourado
+  entre eles) e o leitor sem contar as sessões (o teste dele e o canário).
+**Por quê:** o que importa é não mostrar o nome do projeto numa tela que está
+sendo vista por outros; o sinal do 0.56.2 diz "quadros saindo agora", e o
+quadro que denuncia é justamente o que o pet desenha depois de uma pausa. Os
+5 min cobrem as pausas de uma tela parada (os ritmos da base nunca passam de
+30 s sem desenhar, fora o sono profundo), e o custo do erro é pequeno: o balão
+diz "Prontinho!" sem o nome por mais alguns minutos depois da chamada.

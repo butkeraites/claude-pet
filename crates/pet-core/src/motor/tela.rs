@@ -13,7 +13,9 @@
 //!   bandeirinha;
 //! - **o sono** do pet parado e sem nada pendente ([`Sono`]);
 //! - **a discrição** do compartilhamento de tela: depois de
-//!   [`DISCRICAO_APOS_MS`] compartilhando, nenhum balão leva nome de projeto.
+//!   [`DISCRICAO_APOS_MS`] compartilhando (somados: no Hyprland 0.56.2 o sinal
+//!   pisca numa tela parada), nenhum balão leva nome de projeto, até
+//!   [`SEGURA_MS`] depois do último sinal (decisão 0081).
 //!
 //! A reação e o balão vão para a tela daqui (decisão 0079); a base, os
 //! selos, o confete, os voos e a faixa esperam quem desenha (a segunda metade
@@ -41,9 +43,18 @@ pub const SONO_MS: u64 = 8 * 60 * 1000;
 pub const SONO_LONGE_MS: u64 = 3 * 60 * 1000;
 /// … por isto: o sono profundo (sem commit nenhum).
 pub const SONO_PROFUNDO_MS: u64 = 30 * 60 * 1000;
-/// Compartilhando a tela por isto, os balões perdem os nomes (a captura de
-/// tela também abre um compartilhamento, curto).
+/// Compartilhando a tela por isto (o sinal somado num episódio), os balões
+/// perdem os nomes. Uma captura de tela acende o sinal por menos de meio
+/// segundo (decisão 0081).
 pub const DISCRICAO_APOS_MS: u64 = 2_000;
+/// Antes de a discrição ligar, os sinais até isto um do outro somam no mesmo
+/// episódio: no Hyprland 0.56.2 o sinal segue os quadros copiados, e numa
+/// tela parada ele pisca a cada desenho (o do próprio pet também).
+pub const JUNTA_MS: u64 = 60_000;
+/// Ligada, a discrição dura até isto depois do último sinal: cobre as pausas
+/// de uma tela parada (os ritmos da base nunca passam de 30 s sem desenhar,
+/// fora o sono profundo) e a fonte dos eventos que cai e volta.
+pub const SEGURA_MS: u64 = 5 * 60 * 1000;
 /// Confetes do T2 e do T3.
 pub const CONFETES_T2: u32 = 12;
 pub const CONFETES_T3: u32 = 40;
@@ -214,7 +225,13 @@ pub(super) struct Tela {
     /// evento ou clique que o acordou).
     parado_desde: Option<u64>,
     sono: Sono,
-    compartilhando_desde: Option<u64>,
+    /// O sinal do compartilhamento de tela está ligado desde aqui.
+    sinal_desde: Option<u64>,
+    /// O tempo de sinal somado no episódio (os trechos que já fecharam).
+    somado_ms: u64,
+    /// O último instante com sinal, com ele desligado agora: o episódio
+    /// acaba [`JUNTA_MS`] (ou, com a discrição, [`SEGURA_MS`]) depois.
+    ultimo_sinal: Option<u64>,
     /// A discrição do compartilhamento de tela está ligada.
     pub(super) discreto: bool,
     /// A prioridade de cada sessão na última olhada: na acomodação do Stop
@@ -232,7 +249,9 @@ impl Default for Tela {
             // O pet nasce parado: o relógio do sono começa com o do laço.
             parado_desde: Some(0),
             sono: Sono::Acordado,
-            compartilhando_desde: None,
+            sinal_desde: None,
+            somado_ms: 0,
+            ultimo_sinal: None,
             discreto: false,
             vistas: BTreeMap::new(),
         }
@@ -671,36 +690,54 @@ impl Motor {
 
     // --- a discrição do compartilhamento de tela ------------------------------
 
-    /// A tela começou ou parou de ser compartilhada. Parou: os nomes voltam
-    /// na hora; começou: a discrição liga depois de [`DISCRICAO_APOS_MS`]
-    /// ([`Self::vencer_tela`]).
+    /// O sinal do compartilhamento de tela ligou ou desligou (o desktop
+    /// contou, ou a fonte dos eventos caiu: desligado). A discrição liga com
+    /// [`DISCRICAO_APOS_MS`] de sinal somados no episódio e só desliga
+    /// [`SEGURA_MS`] depois do último sinal ([`Self::vencer_discricao`];
+    /// decisão 0081).
     pub(super) fn compartilhamento(&mut self, compartilhando: bool, agora_ms: u64) {
+        // Um episódio que acabou antes deste sinal fecha primeiro.
+        self.vencer_discricao(agora_ms);
         if compartilhando {
-            self.tela.compartilhando_desde.get_or_insert(agora_ms);
-            return;
+            self.tela.sinal_desde.get_or_insert(agora_ms);
+        } else if let Some(desde) = self.tela.sinal_desde.take() {
+            self.tela.somado_ms = self
+                .tela
+                .somado_ms
+                .saturating_add(agora_ms.saturating_sub(desde));
+            self.tela.ultimo_sinal = Some(agora_ms);
         }
-        self.tela.compartilhando_desde = None;
-        if self.tela.discreto {
-            self.tela.discreto = false;
-            self.anotar(
-                agora_ms,
-                intencoes::Tipo::Discricao {
-                    ligada: false,
-                    tirou_balao: false,
-                },
-            );
-        }
+        // Um trecho que fechou já passando dos 2 s liga agora.
+        self.vencer_discricao(agora_ms);
     }
 
-    /// Os prazos da tela que venceram: a discrição que liga (um balão na
-    /// tela sai: pode ter nome) e o pronto que vira selo, o sono.
-    pub(super) fn vencer_tela(&mut self, agora_ms: u64) -> Vec<Reacao> {
-        if !self.tela.discreto
-            && self
-                .tela
-                .compartilhando_desde
-                .is_some_and(|d| agora_ms >= d + DISCRICAO_APOS_MS)
-        {
+    /// O sinal somado no episódio até `agora_ms`.
+    fn sinal_somado(&self, agora_ms: u64) -> u64 {
+        let trecho = self
+            .tela
+            .sinal_desde
+            .map_or(0, |d| agora_ms.saturating_sub(d));
+        self.tela.somado_ms.saturating_add(trecho)
+    }
+
+    /// Quando o episódio do compartilhamento acaba (com o sinal desligado):
+    /// [`JUNTA_MS`] depois do último sinal, ou [`SEGURA_MS`] com a discrição.
+    fn fim_do_episodio(&self) -> Option<u64> {
+        if self.tela.sinal_desde.is_some() {
+            return None;
+        }
+        let segura = if self.tela.discreto {
+            SEGURA_MS
+        } else {
+            JUNTA_MS
+        };
+        self.tela.ultimo_sinal.map(|u| u + segura)
+    }
+
+    /// A discrição liga (um balão na tela sai: pode ter nome) ou o episódio
+    /// acaba (os nomes voltam).
+    fn vencer_discricao(&mut self, agora_ms: u64) {
+        if !self.tela.discreto && self.sinal_somado(agora_ms) >= DISCRICAO_APOS_MS {
             self.tela.discreto = true;
             let tirou_balao = self.balao(agora_ms).is_some();
             if tirou_balao {
@@ -718,6 +755,38 @@ impl Motor {
                 },
             );
         }
+        if self.fim_do_episodio().is_some_and(|fim| agora_ms >= fim) {
+            self.tela.ultimo_sinal = None;
+            self.tela.somado_ms = 0;
+            if self.tela.discreto {
+                self.tela.discreto = false;
+                self.anotar(
+                    agora_ms,
+                    intencoes::Tipo::Discricao {
+                        ligada: false,
+                        tirou_balao: false,
+                    },
+                );
+            }
+        }
+    }
+
+    /// O próximo prazo da discrição: a hora em que o sinal somado chega aos
+    /// 2 s, ou o fim do episódio.
+    pub(super) fn prazo_da_discricao(&self, agora_ms: u64) -> Option<u64> {
+        match self.tela.sinal_desde {
+            Some(desde) if !self.tela.discreto => {
+                Some((desde + DISCRICAO_APOS_MS.saturating_sub(self.tela.somado_ms)).max(agora_ms))
+            }
+            Some(_) => None,
+            None => self.fim_do_episodio().map(|fim| fim.max(agora_ms)),
+        }
+    }
+
+    /// Os prazos da tela que venceram: a discrição que liga ou acaba, e o
+    /// pronto que vira selo, o sono.
+    pub(super) fn vencer_tela(&mut self, agora_ms: u64) -> Vec<Reacao> {
+        self.vencer_discricao(agora_ms);
         self.observar_tela(agora_ms)
     }
 
@@ -734,12 +803,10 @@ impl Motor {
         {
             return Some(agora);
         }
-        let discricao = self
-            .tela
-            .compartilhando_desde
-            .filter(|_| !self.tela.discreto)
-            .map(|d| (d + DISCRICAO_APOS_MS).max(agora));
-        [d.proxima, discricao].into_iter().flatten().min()
+        [d.proxima, self.prazo_da_discricao(agora)]
+            .into_iter()
+            .flatten()
+            .min()
     }
 
     /// Os nomes dos projetos podem ir para os balões (sem a discrição).

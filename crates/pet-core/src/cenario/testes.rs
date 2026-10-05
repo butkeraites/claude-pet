@@ -420,19 +420,21 @@ fn compartilhando_a_tela_os_baloes_ficam_sem_nome() {
         .collect();
     assert_eq!(
         discricao,
-        vec![(12_000, true, true), (40_000, false, false)],
-        "a captura de 1 s não liga; 2 s depois de começar, o balão com nome sai"
+        vec![(11_600, true, true), (340_000, false, false)],
+        "a captura não liga; com 2 s de sinal somados o balão com nome sai; a tela \
+         parada que pisca não desliga, e os nomes voltam 5 min depois do último sinal"
     );
     for (t, linhas) in baloes(&linha) {
         let texto = linhas.join(" ");
-        if (12_000..40_000).contains(&t) {
+        if (11_600..340_000).contains(&t) {
             assert!(
                 !texto.contains("agenda") && !texto.contains("web"),
                 "{t}: {texto}"
             );
         }
     }
-    assert!(baloes(&linha).contains(&(50_800, vec!["Prontinho! web".to_owned()])));
+    assert!(baloes(&linha).contains(&(50_800, vec!["Prontinho!".to_owned()])));
+    assert!(baloes(&linha).contains(&(347_800, vec!["Prontinho! agenda-secreta".to_owned()])));
 }
 
 // --- cenários gravados (decisão 0078) ----------------------------------------

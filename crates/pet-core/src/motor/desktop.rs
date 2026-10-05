@@ -45,9 +45,11 @@ impl EstadoDesktop {
                     self.protetor.clear();
                 } else {
                     // O que vier depois de voltar é o que vale; o que se
-                    // sabia pode ter mudado no meio. O compartilhamento fica:
-                    // na dúvida, discreto.
+                    // sabia pode ter mudado no meio. O sinal do
+                    // compartilhamento também desliga: quem segura a
+                    // discrição, na dúvida, é a tela (decisão 0081).
                     self.olhando_claude = false;
+                    self.compartilhando = false;
                     self.anel.buraco(parede_ms);
                 }
             }
@@ -237,16 +239,22 @@ mod testes {
     }
 
     #[test]
-    fn compartilhamento_de_tela_e_na_duvida_continua() {
+    fn o_sinal_do_compartilhamento_desliga_com_a_fonte() {
         let mut d = EstadoDesktop::default();
         assert!(d.aplicar(&EventoDesktop::Compartilhando(true), 0));
         assert!(!d.aplicar(&EventoDesktop::Compartilhando(true), 1));
-        // A fonte caiu e voltou: o fim do compartilhamento pode ter se
-        // perdido no meio, e o pet continua discreto até saber.
+        assert!(
+            d.painel(CapDesktop::default(), InfoDesktop::default())
+                .compartilhando
+        );
+        // A fonte caiu: o sinal desliga ali (o fim pode ter se perdido no
+        // meio, e quem segura a discrição é a tela, decisão 0081).
         d.aplicar(&EventoDesktop::Ligado(false), 10);
+        assert!(!d.compartilhando);
         d.aplicar(&EventoDesktop::Ligado(true), 20);
-        assert!(d.compartilhando);
-        assert!(d.aplicar(&EventoDesktop::Compartilhando(false), 30));
+        assert!(!d.compartilhando);
+        assert!(d.aplicar(&EventoDesktop::Compartilhando(true), 30));
+        assert!(d.aplicar(&EventoDesktop::Compartilhando(false), 40));
         let p = d.painel(CapDesktop::default(), InfoDesktop::default());
         assert!(!p.compartilhando);
     }

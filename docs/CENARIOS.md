@@ -74,7 +74,7 @@ Cada linha tem `t` (ms do relógio do laço) e `i` (o tipo). O
 | `rajada` | a chamada (`alert`) de novo, na L2 e na L4 | `sid8`, `nivel` |
 | `voo` | o voo até o alto-centro do monitor e de volta | `destino` (`alto_centro`), `motivo` (`escalada`, `voltou`), `sid8` |
 | `pulso` | o selo do aviso pulsando a 1 Hz liga ou desliga (L4) | `ligado`, `sid8` |
-| `discricao` | a tela compartilhada há 2 s (ou não mais) | `ligada`, `tirou_balao` |
+| `discricao` | a tela compartilhada (2 s de sinal somados) liga; 5 min sem sinal desligam (decisão 0081) | `ligada`, `tirou_balao` |
 | `clique` | o que um clique fez | `resultado` (`focou`, `nao_focou`, `lista`, `soneca`, `nada`), `sid8` |
 
 As reações (`reacao`, `rajada`, a `reacao` de cada `festa`) já vão para o
