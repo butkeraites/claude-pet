@@ -887,7 +887,7 @@ fn sem_personagem_a_linha_do_tempo_e_a_mesma() {
 // --- a memória das sessões (decisão 0093) -----------------------------------
 
 /// Os cenários de reinício e o instante em que o pet volta em cada um.
-const REINICIOS: [(&str, u64); 14] = [
+const REINICIOS: [(&str, u64); 15] = [
     ("reinicio-sessao-parada", 60_000),
     ("reinicio-no-meio-do-turno", 75_000),
     ("reinicio-com-pergunta", 120_000),
@@ -902,6 +902,7 @@ const REINICIOS: [(&str, u64); 14] = [
     ("reinicio-compartilhando", 81_000),
     ("reinicio-depois-de-uma-pausa", 620_000),
     ("reinicio-na-acomodacao", 11_500),
+    ("reinicio-com-outro-dialogo", 140_000),
 ];
 
 /// O que tocou entre `de` e `ate`: uma reação, uma rajada, um voo, uma festa
@@ -1359,4 +1360,38 @@ fn a_espera_de_uma_noite_sai_em_12_h_e_a_sessao_fica() {
         listas(&linha),
         vec![(46_800_000, vec!["api: parado (59 min)".to_owned()])]
     );
+}
+
+// --- a revisão final do M5 (decisões 0097 e 0098) ------------------------------
+
+#[test]
+fn outro_dialogo_depois_da_volta_chama_como_no_pet_de_pe() {
+    // A resposta da pergunta se perdeu com o pet fora (2 min: a memória
+    // velha). A permissão do Bash, o primeiro evento depois da volta, é outro
+    // diálogo: chama na hora e escala, como no pet de pé (decisão 0097).
+    let linha = linha_do_tempo("reinicio-com-outro-dialogo");
+    assert_eq!(restauracao(&linha), (1, 1, 0, None));
+    assert_eq!(restauracao_extra(&linha), (true, Vec::new()));
+    assert_eq!(chamadas(&linha), 2, "a da pergunta e a do Bash");
+    assert!(baloes(&linha).contains(&(
+        150_000,
+        vec![
+            "Ô, meu camarada!".to_owned(),
+            "api precisa de você".to_owned()
+        ]
+    )));
+    assert_eq!(
+        niveis(&linha),
+        vec![
+            (10_000, 1),
+            (140_000, 1),
+            (150_000, 0),
+            (150_000, 1),
+            (180_000, 2),
+            (240_000, 3),
+            (260_000, 0)
+        ]
+    );
+    assert_eq!(so(&linha, "rajada").len(), 5);
+    assert_eq!(so(&linha, "voo").len(), 1);
 }

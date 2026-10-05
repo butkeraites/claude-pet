@@ -83,7 +83,10 @@
 //! 0094), e um evento atrasado (mais velho que o estado de agora) não mexe
 //! nele. O pronto e o erro somem sozinhos em [`VIDA_AVISO_MS`]; o "esperando
 //! você" só sai com um evento da própria sessão, visto, ou depois de
-//! [`VIDA_ESPERA_MS`] sem evento nenhum dela (decisão 0096).
+//! [`VIDA_ESPERA_MS`] sem evento nenhum dela (decisão 0096). Numa espera que
+//! a memória das sessões trouxe, um gatilho de diálogo mais de
+//! [`GATILHOS_DO_DIALOGO_MS`] depois dela é outro diálogo: a resposta pode
+//! ter se perdido com o pet fora (decisão 0097).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -128,6 +131,11 @@ pub const ERRO_DE_LIMITE: &str = "rate_limit";
 /// Um gatilho atrasado de um diálogo (até isto antes do aviso) ainda refina
 /// o tipo da espera (decisão 0075).
 pub const JANELA_DO_DIALOGO_MS: u64 = 5_000;
+/// Os gatilhos de um diálogo chegam em até uns 6 s dele (o `PreToolUse` e o
+/// `PermissionRequest` juntos, a notificação `permission_prompt` 6 s depois;
+/// lido no 2.1.288, T5.1): numa espera que a memória das sessões trouxe, um
+/// gatilho mais tarde que isto é de outro diálogo (decisão 0097).
+pub const GATILHOS_DO_DIALOGO_MS: u64 = 10_000;
 /// Arquivos diferentes lembrados por turno. Passou disso, cada arquivo novo
 /// só soma num contador: um processo local mandando `arq` sempre novo não
 /// cresce a memória.
@@ -1095,6 +1103,11 @@ struct Sessao {
     aviso: Option<Aviso>,
     /// Veio da memória das sessões e ainda não mandou evento (decisão 0093).
     restaurada: bool,
+    /// A espera que a memória das sessões trouxe: a hora (parede) em que a
+    /// sessão entrou nela, até o estado mudar. A resposta pode ter se perdido
+    /// com o pet fora, e um gatilho de diálogo mais de
+    /// [`GATILHOS_DO_DIALOGO_MS`] depois dela é de outro (decisão 0097).
+    espera_da_memoria: Option<u64>,
 }
 
 impl Sessao {
@@ -1119,6 +1132,7 @@ impl Sessao {
             contadores: Contadores::default(),
             aviso: None,
             restaurada: false,
+            espera_da_memoria: None,
         }
     }
 
@@ -1813,6 +1827,8 @@ impl Cerebro {
         let cfg = self.config.clone();
         let mut fechamentos = Vec::new();
         let mut ignorado = None;
+        // O evento é um gatilho de diálogo que põe a sessão a esperar.
+        let mut gatilho = false;
         let sessao = self
             .sessoes
             .entry(chave.clone())
@@ -2065,6 +2081,7 @@ impl Cerebro {
                             }
                             if sessao.turno.as_ref().is_some_and(|t| t.stop.is_none()) {
                                 sessao.estado = EstadoSessao::Esperando;
+                                gatilho = true;
                             }
                         }
                     }
@@ -2090,7 +2107,10 @@ impl Cerebro {
                         sessao.aviso = None;
                     }
                 }
-                Some(_) => sessao.estado = EstadoSessao::Esperando,
+                Some(_) => {
+                    sessao.estado = EstadoSessao::Esperando;
+                    gatilho = true;
+                }
                 None => ignorado = Some("notificacao_sem_tipo"),
             },
             "PreCompact" => sessao.estado = EstadoSessao::Compactando,
@@ -2174,15 +2194,26 @@ impl Cerebro {
             }
             _ => ignorado = Some("evento_desconhecido"),
         }
-        if sessao.estado != estado_antes {
+        // Outro diálogo numa espera que a memória das sessões trouxe (decisão
+        // 0097): a resposta do de antes pode ter se perdido com o pet fora, e
+        // os gatilhos de um diálogo chegam em até uns 6 s dele. Um gatilho
+        // mais tarde é a entrada numa espera nova, como no pet de pé, com a
+        // chamada dela.
+        let outro_dialogo = gatilho
+            && estado_antes == EstadoSessao::Esperando
+            && sessao
+                .espera_da_memoria
+                .is_some_and(|desde| t > desde.saturating_add(GATILHOS_DO_DIALOGO_MS));
+        if sessao.estado != estado_antes || outro_dialogo {
+            sessao.espera_da_memoria = None;
             sessao.estado_desde = t;
             sessao.estado_desde_mono = instante(agora.mono_ms);
             // Os avisos (decisão 0057): mudar de estado resolve o de antes, e
             // entrar em "esperando você" ou em erro abre um. O `idle_prompt`
-            // (repete a cada ~60 s) nunca abre e aqui não resolve (a espera
-            // que sobrou sai no ramo dele; decisão 0094); um evento atrasado,
-            // mais velho que o estado de antes (a permissão que ele pede já
-            // foi respondida), não mexe no aviso.
+            // (uma vez por turno, uns 60 s depois do fim dele) nunca abre e
+            // aqui não resolve (a espera que sobrou sai no ramo dele; decisão
+            // 0094); um evento atrasado, mais velho que o estado de antes (a
+            // permissão que ele pede já foi respondida), não mexe no aviso.
             let ocioso = ev.e == "Notification" && ev.nt.as_deref() == Some("idle_prompt");
             if !ocioso && t >= desde_antes {
                 let tipo = match sessao.estado {
@@ -2552,8 +2583,10 @@ impl Cerebro {
     /// turno, de corrente ou de festa: o turno que estava aberto não é de
     /// confiança (o Stop dele pode ter se perdido com o pet fora), e o
     /// próximo evento dele abre um turno implícito, como no M3. A sessão volta
-    /// marcada como restaurada até o próximo evento dela. Uma que o cérebro
-    /// já acompanha fica como está.
+    /// marcada como restaurada até o próximo evento dela, e a que esperava
+    /// guarda a hora da espera até o estado mudar: o diálogo seguinte pode
+    /// ser outro (decisão 0097). Uma que o cérebro já acompanha fica como
+    /// está.
     pub fn restaurar(&mut self, guardadas: &[SessaoGuardada], volta: Volta) -> Restauradas {
         let agora = volta.agora;
         let mono = instante(agora.mono_ms);
@@ -2640,6 +2673,9 @@ impl Cerebro {
             if s.aviso.is_some() {
                 r.avisos += 1;
             }
+            // A espera de antes: o próximo diálogo pode ser outro (decisão
+            // 0097).
+            s.espera_da_memoria = (s.estado == EstadoSessao::Esperando).then_some(s.estado_desde);
             s.restaurada = true;
             self.sessoes.insert(chave.clone(), s);
             r.chaves.push(chave);
@@ -5609,6 +5645,108 @@ mod testes {
         let mut d = novo();
         let r = restaurar_em(&mut d, &mexido, depois_da_volta(volta, 0));
         assert_eq!((r.chaves.len(), r.de_fora), (0, 1));
+    }
+
+    #[test]
+    fn um_dialogo_novo_numa_espera_restaurada_e_outra_espera() {
+        // Uma pergunta aos 10 s; o pet para aos 20 s e volta 2 min depois. A
+        // resposta pode ter se perdido com ele fora: o primeiro gatilho de
+        // diálogo depois da volta, mais de 10 s depois da espera de antes, é
+        // outro diálogo, com a espera nova (decisão 0097).
+        let mut a = novo();
+        rodar(
+            &mut a,
+            vec![
+                chega(1_000, prompt("p1")),
+                chega(10_000, dialogo("PreToolUse", "p1", "AskUserQuestion")),
+                chega(
+                    10_015,
+                    dialogo("PermissionRequest", "p1", "AskUserQuestion"),
+                ),
+                Ate(20_000),
+            ],
+        );
+        let m = gravada(&a, em(20_000));
+        let volta = BASE + 140_000;
+        let receber = |c: &mut Cerebro, mono: u64, mut e: Evento| {
+            e.ts = Some(volta + mono);
+            c.receber(&e, volta + mono, depois_da_volta(volta, mono));
+        };
+        let estado_de = |c: &Cerebro| {
+            let s = &c.resumo().sessoes[0];
+            (s.estado, s.estado_desde_ms - BASE)
+        };
+        let restaurado = || {
+            let mut b = novo();
+            restaurar_em(&mut b, &m, depois_da_volta(volta, 0));
+            assert_eq!(
+                espera_de(&b),
+                Some((TipoAviso::Esperando, Some(TipoEspera::Pergunta), 10_000))
+            );
+            b
+        };
+        // A permissão de um Bash aos 150 s: a espera nova, desde ela, com o
+        // estado de novo desde ela.
+        let mut b = restaurado();
+        receber(&mut b, 10_000, permissao("p1"));
+        assert_eq!(
+            espera_de(&b),
+            Some((TipoAviso::Esperando, Some(TipoEspera::Permissao), 150_000))
+        );
+        assert_eq!(estado_de(&b), (EstadoSessao::Esperando, 150_000));
+        // Os eventos de um subagente no meio não mudam o estado nem a espera:
+        // o diálogo novo depois deles também é outro.
+        let mut b = restaurado();
+        let do_agente = Evento {
+            agente: true,
+            aid: Some("x1".into()),
+            ..ferramenta("p1", "Read", None, 5)
+        };
+        receber(&mut b, 5_000, do_agente);
+        assert_eq!(espera_de(&b).map(|e| e.2), Some(10_000));
+        receber(&mut b, 10_000, permissao("p1"));
+        assert_eq!(espera_de(&b).map(|e| e.2), Some(150_000));
+        // O formulário de um servidor MCP só manda a notificação: também é
+        // outro diálogo.
+        let mut b = restaurado();
+        receber(&mut b, 10_000, notificacao("elicitation_dialog"));
+        assert_eq!(
+            espera_de(&b),
+            Some((TipoAviso::Esperando, Some(TipoEspera::Elicitacao), 150_000))
+        );
+        // A notificação do mesmo diálogo (6 s depois dele) só refina: o pet
+        // parou 2 s depois do PermissionRequest e voltou 2 s depois.
+        let curta = gravada(&a, em(12_000));
+        let mut c = novo();
+        restaurar_em(&mut c, &curta, depois_da_volta(BASE + 14_000, 0));
+        let mut n = notificacao("permission_prompt");
+        n.ts = Some(BASE + 16_000);
+        c.receber(&n, BASE + 16_000, depois_da_volta(BASE + 14_000, 2_000));
+        assert_eq!(
+            espera_de(&c),
+            Some((TipoAviso::Esperando, Some(TipoEspera::Pergunta), 10_000))
+        );
+        // A sessão andou (a resposta chegou): daí em diante, as regras do pet
+        // de pé. O diálogo seguinte abre a espera dele, e um gatilho dele 30
+        // s depois só refina.
+        let mut b = restaurado();
+        receber(&mut b, 1_000, ferramenta("p1", "AskUserQuestion", None, 0));
+        assert_eq!(espera_de(&b), None);
+        receber(&mut b, 2_000, permissao("p1"));
+        receber(&mut b, 32_000, notificacao("permission_prompt"));
+        assert_eq!(espera_de(&b).map(|e| e.2), Some(142_000));
+        // A espera vista antes da partida (o clique que tira o aviso; o
+        // estado fica "esperando"): o diálogo novo depois da volta chama.
+        let mut sem_aviso = m.clone();
+        sem_aviso.sessoes[0].aviso = None;
+        let mut d = novo();
+        restaurar_em(&mut d, &sem_aviso, depois_da_volta(volta, 0));
+        assert_eq!(espera_de(&d), None);
+        receber(&mut d, 10_000, permissao("p1"));
+        assert_eq!(
+            espera_de(&d),
+            Some((TipoAviso::Esperando, Some(TipoEspera::Permissao), 150_000))
+        );
     }
 
     #[test]

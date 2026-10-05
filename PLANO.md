@@ -397,6 +397,7 @@ As outras sessões aparecem como selos: um contador "+N", uma bandeirinha com a 
 **Escalada de "precisa de você"** (só visual):
 - Há um espaço de aviso por sessão.
 - Um segundo gatilho em até 5 s só refina o tipo, e pergunta/plano tem prioridade sobre permissão. Evita aviso duplicado para o mesmo diálogo.
+- *Acréscimo (2026-10-05, revisão final, decisão 0097):* numa espera que a memória das sessões trouxe (a resposta pode ter se perdido com o pet fora), um gatilho mais de 10 s depois dela é de outro diálogo: a espera abre de novo e chama, como no pet de pé.
 
 | Nível | Quando | O que o Zeca faz |
 |---|---|---|
@@ -801,6 +802,9 @@ Atualizado em 2026-10-05 com a pesquisa do M5 (`docs/pesquisa/10-cerebro-m5.md`,
 - **T5.25** a memória das sessões: `pet_core::memoria` (o formato com versão, só metadados das sessões reais, até 64 sessões e 256 KiB, conferido campo a campo), os instantes do laço com sinal no cérebro e na escalada (`cerebro::Instante`, `Agora::no_laco`, `cerebro::depois`), o `Cerebro::restaurar` pelas regras de sempre, o `Motor::restaurar` quieto (a `Escalada::retomada`, a intenção `restauracao`, a marca `restaurada` no `/v1/estado.sessoes`), a instância do compositor nas janelas (`Motor::definir_compositor`), no daemon a gravação de uma vez pelo laço (no batimento, quando muda, e no SIGTERM) e o boot id do Linux; o passo `reinicio` nos cenários (e no `docs/CENARIOS.md`) e os dourados de reinício, o teste do daemon de verdade e o canário; na revisão, o `idle_prompt` que tira a espera que sobrou e as horas do futuro fora da memória (decisão 0094); na segunda revisão, o sossego que volta, a memória velha (gravada há mais de 60 s) que volta quieta e sem os endereços das janelas, o tempo acordado (`*_laco_ms` e `memoria::Volta`), o pronto da acomodação, a gravação que falha e os testes do daemon com o Hyprland de mentira (decisão 0095); e todas as sessões abertas: a vida de uma semana sem evento e a espera que sai em 12 h (decisão 0096);
 - **T5.26** as docs e a conferência: o CLAUDE.md (o estado, as pegadinhas da memória e do `/reload-plugins`), o README, a conferência ao vivo num daemon de rascunho com uma sessão aninhada, e a produção refeita da branch e reiniciada com as sessões reais do Renan na lista antes e depois.
 
+**Revisão final** (a revisão final do M5 antes do merge; decisões 0097 em diante):
+- **T5.27** o diálogo novo numa espera que a memória trouxe chama, como no pet de pé (decisão 0097).
+
 **Verificação:** `bin/pet verificar` verde a cada commit e `cargo test -p pet-core` com os cenários. Tabelas, exemplos de pontuação (decisão 0074) e cenários:
 
 | Cenário | Esperado |
@@ -834,6 +838,7 @@ Atualizado em 2026-10-05 com a pesquisa do M5 (`docs/pesquisa/10-cerebro-m5.md`,
 | `reinicio-depois-de-13-h` | a sessão de 13 h não volta; a de 11 h sai na hora dela |
 | `reinicio-da-maquina`, `reinicio-com-arquivo-corrompido` | nada volta |
 | `reinicio-com-outro-compositor` | a sessão volta sem a janela de antes; o próximo prompt casa a nova |
+| `reinicio-com-outro-dialogo` | a resposta se perde com o pet fora; o diálogo seguinte, o primeiro evento depois da volta, chama na hora e escala (decisão 0097) |
 
 **Verificação da segunda metade:** o desenho não muda as intenções (os dourados e o teste que roda todos os cenários sem personagem); o orçamento em relógio falso, com o compositor mostrando cada quadro na hora (o pior caso): trabalhando por 20 min, na espera da L4 por 10 min e parado por 30 min, em média até 2 commits/s, o sono profundo sem commit nenhum, e as rajadas (o voo, o confete) curtas e sem dois quadros a menos de 34 ms; cada desenho novo em blocos inteiros (D, ou a metade dele nos selos) e dentro do monitor; o canário do socket2 com segredos no `screencastv2`; ao vivo, `bin/pet testar medio|grande|pergunta|dois-prontos` com a reação e o nível no `/v1/estado`; com a tela acesa e desbloqueada, `bin/pet foto`, a nitidez e o `scripts/medir-custo.sh`.
 

@@ -1,0 +1,18 @@
+{"cenario": "reinicio-com-outro-dialogo", "descricao": "uma pergunta com o Renan noutra janela; o pet fica 2 min fora e a resposta se perde; a espera volta quieta (vista na gravação, a memória é velha); o primeiro evento depois da volta é a permissão de um Bash, 140 s depois da pergunta: é outro diálogo, e chama como no pet de pé (a chamada, o balão, a L1, a L2 e a L3); a resposta tira a espera e o Stop festeja (decisão 0097)", "padrao": {"sid": "s1", "ent": "cli", "proj": "api"}}
+{"t": 0, "desktop": {"ligado": true}}
+{"t": 0, "desktop": {"ocioso": false}}
+{"t": 0, "desktop": {"janela_ativa": "a0a0a0"}}
+{"t": 1000, "evento": {"e": "UserPromptSubmit", "turno": "p1", "orig": "comum"}}
+{"t": 3000, "desktop": {"janela_ativa": "c0c0c0"}}
+{"t": 10000, "evento": {"e": "PreToolUse", "turno": "p1", "tool": "AskUserQuestion"}}
+{"t": 10015, "evento": {"e": "PermissionRequest", "turno": "p1", "tool": "AskUserQuestion"}}
+{"t": 20000, "reinicio": {"parado_ms": 120000}}
+# Com o pet fora, a resposta da pergunta se perde.
+{"t": 21000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "AskUserQuestion", "dur": 0}}
+{"t": 140000, "desktop": {"ligado": true}}
+{"t": 140000, "desktop": {"ocioso": false}}
+{"t": 140000, "desktop": {"janela_ativa": "c0c0c0"}}
+{"t": 150000, "evento": {"e": "PermissionRequest", "turno": "p1", "tool": "Bash"}}
+{"t": 260000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Bash", "dur": 2000}}
+{"t": 265000, "evento": {"e": "Stop", "turno": "p1", "bg": 0, "crn": 0}}
+{"t": 280000, "fim": true}

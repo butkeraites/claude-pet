@@ -4320,3 +4320,53 @@ nenhum. O fantasma que ficou (o processo morto sem o `SessionEnd`) é raro,
 quieto e vai para o fim da lista; esquecer uma sessão aberta é o contrário do
 trabalho do Zeca. A espera continua com prazo: chamar por um diálogo de 12 h
 sem evento nenhum seria pior que deixá-la no clique.
+
+## 0097 — Revisão final da memória: o diálogo novo numa espera que voltou chama (2026-10-05)
+
+**Problema:** a revisão final do M5 achou, e o `bichinho simular` reproduziu,
+um diálogo novo engolido pela espera que a memória das sessões trouxe. A
+sessão restaurada volta "esperando" sem turno aberto (decisão 0093), e a
+resposta do diálogo de antes pode ter se perdido com o pet fora. Se o primeiro
+evento dela depois da volta é o gatilho de outro diálogo (o `PermissionRequest`
+de um Bash, uma pergunta, o plano, a notificação de um formulário), o estado
+não muda: o cérebro tratava como o mesmo diálogo (decisão 0075), só refinava o
+tipo e deixava a espera de antes com a hora dela. O Motor reconhece cada espera
+pela sessão e por essa hora: nem a chamada, nem a L1 de novo; numa memória
+velha a espera de antes volta vista (decisão 0095), então nada escalava, a pose
+saía e o pet dormia com o Claude parado num diálogo que o Renan nunca viu.
+Reproduzido: uma pergunta aos 10 s, o pet 2 min fora com a resposta perdida, a
+permissão de um Bash aos 150 s: nada aos 150 s e o bocejo aos 330 s (sem o
+reinício: a chamada, o balão e a L1 aos 150 s, a L2 aos 180 s, a L3 aos 240
+s). Numa parada curta, com o diálogo de antes já visto no terminal, o mesmo.
+**Escolha:**
+- **A espera que a memória trouxe guarda a hora em que a sessão entrou nela**,
+  até o estado da sessão mudar. Os gatilhos de um diálogo chegam em até uns 6 s
+  dele (o `PreToolUse` e o `PermissionRequest` juntos, a notificação
+  `permission_prompt` 6 s depois; T5.1). Um gatilho mais de 10 s depois dela
+  (`GATILHOS_DO_DIALOGO_MS`) é outro diálogo: a sessão entra na espera de novo,
+  como no pet de pé (o estado desde ele, o aviso novo com o tipo dele), e o
+  Motor chama (a chamada, o balão, a escalada desde a L1). A espera de antes
+  sai, e a marca de vista dela junto. Um gatilho dentro dos 10 s é do mesmo
+  diálogo e só refina, como sempre.
+- Vale também para a espera vista pelo clique antes da partida (o estado
+  "esperando" sem o aviso): o diálogo novo chama.
+- A marca sai na primeira mudança de estado da sessão (a resposta, o prompt, o
+  Stop, o `idle_prompt`); os eventos de um subagente no meio não a tiram. Com o
+  pet de pé, nada muda.
+**Testes:** no cérebro, a permissão depois da volta (a espera nova, desde ela),
+o subagente no meio, o formulário que só manda a notificação, a notificação do
+mesmo diálogo 6 s depois dele (só refina), a sessão que andou (daí em diante,
+as regras de sempre) e a espera sem o aviso; o dourado novo
+`reinicio-com-outro-dialogo` (a chamada, o balão e a L1 aos 150 s, a L2 aos 180
+s, a L3 aos 240 s), e nenhum outro dourado mudou. Cinco mutações reprovaram
+(sem o outro diálogo, a janela zero, a marca que não sai na mudança de estado,
+a volta sem a marca, a notificação que não é gatilho).
+**Limites:** um gatilho do mesmo diálogo que chegasse mais de 10 s depois dele,
+logo depois da volta, chamaria de novo (uma vez: a marca sai ali). Com o pet de
+pé, um diálogo novo sem nenhum evento da sessão desde o de antes continua sendo
+o mesmo (decisão 0075; não visto no 2.1.288).
+**Por quê:** a volta não pode calar o que o pet de pé chamaria (decisão 0095),
+e o Claude parado num diálogo que o Renan nunca viu, com o pet dormindo, é o
+erro contrário ao da decisão 0090. O tempo entre os gatilhos de um diálogo é
+medido (T5.1), e a marca só vale para a espera que a memória trouxe, a única em
+que a resposta pode ter se perdido.
