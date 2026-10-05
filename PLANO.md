@@ -763,6 +763,18 @@ Atualizado em 2026-10-05 com a pesquisa do M5 (`docs/pesquisa/10-cerebro-m5.md`,
 - **T5.9** cenários reais pseudonimizados, as asserções de cada linha da tabela e a prova de que o executor pega uma regra quebrada (decisão 0077);
 - **T5.10** `bichinho simular` e `bichinho cenario`, `bin/pet simular` e `bin/pet eventos --salvar`, CLAUDE.md, README e docs (decisão 0078).
 
+**Segunda metade: a tela** (IDs na ordem dos commits). Desenha as intenções com o que já existe (os estados das duas skins, o balão mínimo, o confete, os selos no estilo do "zZ") e liga a plataforma; o polimento continua no M6. A pesquisa está em `docs/pesquisa/11-tela-m5.md`.
+- **T5.11** plano e pesquisa da tela: estas tarefas e a pesquisa (o `screencast` do Hyprland 0.56.2 lido no código-fonte, os estados das skins que a base segura);
+- **T5.12** o compartilhamento de tela pelo socket2: o adaptador do Hyprland lê só o `screencast>>ESTADO,TIPO` (nunca o `screencastv2`, que traz o título da janela compartilhada), conta as sessões e manda o `EventoDesktop::Compartilhando`; no Motor, a discrição liga com 2 s de compartilhamento somados e só desliga depois de um tempo sem sinal (o 0.56.2 manda `0` meio segundo depois do último quadro copiado); o socket2 sempre drenado e o canário com títulos no `screencastv2`;
+- **T5.13** a base segurada: o animador toca o estado da skin da base com o ritmo de cada um (o repouso de sempre; trabalhando e pensando quase parados, até 4 fps, com micro-ações sorteadas a cada 10–30 s pela semente injetada; o laço do sono até 2 fps; só a pose no sono profundo e na espera da L4), as reações por cima voltando à base;
+- **T5.14** os selos e o selo do aviso: o "!" do aviso, o "+N", o "…" e as bandeirinhas na cor do projeto, numa fileira ao lado do corpo, nítidos (blocos inteiros, a fonte monogram), sem cobrir a área de toque nem sair do monitor, parados; o pulso da L4;
+- **T5.15** o voo da escalada: até o alto-centro do monitor com o "!!" piscando a no máximo 2 Hz e de volta, até 3 vezes, nunca no arraste, numa viagem de monitor, no poof, na proteção de tela, na soneca nem com o "não perturbe", com a área de toque seguindo o pet e a posição salva intacta;
+- **T5.16** a festa na tela: T2 com o voo curto da skin, 12 confetes e o balão; T3 com o voo grande da skin, a chuva de confete (até 60 partículas; 40 nos outros) e o balão; a festa mesclada com os efeitos do nível novo; o fim de máquina e o modo discreto continuam pequenos; o voo atravessando a tela e o holofote "PRONTO!" são do M6;
+- **T5.17** o `/v1/estado.desenho` (o que a tela desenha agora: a base e o ritmo, os selos, o voo, o confete) e a seção da tela no `docs/CENARIOS.md`;
+- **T5.18** as demonstrações do `bin/pet testar` (`medio`, `grande`, `pergunta`, `dois-prontos`), só com sessões de teste, conferidas pelo `/v1/estado`;
+- **T5.19** a prova do orçamento em relógio falso (20 min trabalhando, 10 min de espera na L4, 30 min parado e o sono profundo, a rajada do T3) e a nitidez dos desenhos novos (D inteiro, pixels do dispositivo);
+- **T5.20** a produção refeita da branch com o estado do Renan intacto, as demonstrações ao vivo conferidas no `/v1/estado` e a conferência na tela (`bin/pet foto`, nitidez, custo) só com a sessão desbloqueada.
+
 **Verificação:** `bin/pet verificar` verde a cada commit e `cargo test -p pet-core` com os cenários. Tabelas, exemplos de pontuação (decisão 0074) e cenários:
 
 | Cenário | Esperado |
@@ -783,6 +795,8 @@ Atualizado em 2026-10-05 com a pesquisa do M5 (`docs/pesquisa/10-cerebro-m5.md`,
 | `protetor-de-tela` | a festa não toca escondida; o pronto fica |
 | `compartilhando-tela` | balão sem nome de projeto |
 | `real-*` (da pesquisa, pseudonimizados) | o agente em segundo plano numa festa só; o servidor e a notificação do shell; o laço; a pergunta e o plano; o Esc; o `/compact` |
+
+**Verificação da segunda metade:** o desenho não muda as intenções (os dourados e o teste que roda todos os cenários sem personagem); o orçamento em relógio falso, com o compositor mostrando cada quadro na hora (o pior caso): trabalhando por 20 min, na espera da L4 por 10 min e parado por 30 min, em média até 2 commits/s, o sono profundo sem commit nenhum, e as rajadas (o voo, o confete) curtas e sem dois quadros a menos de 34 ms; cada desenho novo em blocos inteiros (D, ou a metade dele nos selos) e dentro do monitor; o canário do socket2 com segredos no `screencastv2`; ao vivo, `bin/pet testar medio|grande|pergunta|dois-prontos` com a reação e o nível no `/v1/estado`; com a tela acesa e desbloqueada, `bin/pet foto`, a nitidez e o `scripts/medir-custo.sh`.
 
 ### M6 — Encanto e atenção (portão de "sensação")
 
