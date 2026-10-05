@@ -20,22 +20,43 @@
 //! fundo ou um número enorme num campo que o hook não lê não derruba os
 //! metadados, e a memória não cresce com o tamanho deles. Um campo da lista
 //! que não se lê cai sozinho, como um de tipo errado.
+//!
+//! **A forma do prompt e os agendamentos** (decisão 0072): do `prompt` só sai
+//! um enum (`orig`), `notificacao` quando o texto começa por
+//! `<task-notification>` (o Claude Code acordando a sessão com o aviso de uma
+//! tarefa em segundo plano) e `comum` para qualquer outro texto. O prompt
+//! nunca é guardado: a entrada deixa olhar os primeiros [`JANELA_DO_PROMPT`]
+//! bytes que passam logo depois da chave `prompt`, que só são comparados com a
+//! etiqueta e jogados fora, e o resto do texto é pulado como antes. Do
+//! `session_crons` do Stop só sai a contagem (`crn`); nada de dentro dos
+//! agendamentos é lido.
 
+use std::cell::{Cell, RefCell};
 use std::fmt;
-use std::io::Read;
+use std::io::{self, Read};
+use std::rc::Rc;
 
 use serde::Serialize;
-use serde::de::{self, Deserialize, Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
+use serde::de::{
+    self, Deserialize, DeserializeSeed, Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor,
+};
 use serde_json::value::RawValue;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
 use crate::aprovacao::hex;
 use crate::evento::{
-    MAX_CONTAGEM, MAX_DURACAO_MS, MAX_FERRAMENTA, MAX_TAREFAS, Terminal, eh_enum,
-    eh_hash_de_arquivo, eh_id, eh_nome_de_evento, eh_numero_de_terminal, eh_origem, eh_painel_tmux,
-    eh_projeto, eh_token,
+    MAX_CONTAGEM, MAX_DURACAO_MS, MAX_FERRAMENTA, MAX_TAREFAS, ORIG_COMUM, ORIG_NOTIFICACAO,
+    Terminal, eh_enum, eh_hash_de_arquivo, eh_id, eh_nome_de_evento, eh_numero_de_terminal,
+    eh_origem, eh_painel_tmux, eh_projeto, eh_token,
 };
+
+/// O começo do prompt com que o Claude Code acorda a sessão quando uma tarefa
+/// em segundo plano (um agente, um shell) termina (decisão 0071).
+pub const ETIQUETA_DE_NOTIFICACAO: &str = "<task-notification>";
+/// Quantos bytes da entrada são olhados logo depois da chave `prompt` (os
+/// dois-pontos, as aspas, uns espaços e a etiqueta cabem com folga).
+pub const JANELA_DO_PROMPT: usize = 64;
 
 /// Porta do pet quando `PET_PORTA` falta ou não serve (decisão 0008).
 pub const PORTA_PADRAO: u16 = 27380;
@@ -129,6 +150,9 @@ pub struct Fio {
     pub err: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub src: Option<String>,
+    /// A forma do prompt (decisão 0072): `notificacao` ou `comum`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub orig: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -141,6 +165,9 @@ pub struct Fio {
     pub bgt: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bgi: Option<Vec<String>>,
+    /// Quantos agendamentos (`session_crons`) o Stop listou (decisão 0072).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crn: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dur: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -224,6 +251,11 @@ pub struct Lido {
     entrada_da_ferramenta: Option<Map<String, Value>>,
     /// O `background_tasks`, se é uma lista.
     tarefas: Option<Tarefas>,
+    /// A forma do `prompt` ([`ORIG_NOTIFICACAO`] ou [`ORIG_COMUM`]), se ele é
+    /// um texto; o texto nunca fica aqui (decisão 0072).
+    forma_do_prompt: Option<&'static str>,
+    /// Quantos agendamentos o `session_crons` tem, se é uma lista.
+    agendamentos: Option<u64>,
 }
 
 /// As tarefas em segundo plano: quantas a lista tem e as primeiras válidas
@@ -234,16 +266,103 @@ struct Tarefas {
     validas: Vec<(String, String)>,
 }
 
+/// O que a [`Espia`] viu: os primeiros bytes depois da chave `prompt`, até
+/// [`JANELA_DO_PROMPT`], enquanto ligada.
+#[derive(Debug, Default)]
+struct Espiada {
+    ligada: Cell<bool>,
+    bytes: RefCell<Vec<u8>>,
+}
+
+impl Espiada {
+    /// Começa a olhar: o próximo byte lido é o primeiro da janela.
+    fn ligar(&self) {
+        self.bytes.borrow_mut().clear();
+        self.ligada.set(true);
+    }
+
+    /// Para de olhar e devolve a forma do prompt pelo que viu; a janela é
+    /// esvaziada na hora.
+    fn forma(&self) -> Option<&'static str> {
+        self.ligada.set(false);
+        let mut bytes = self.bytes.borrow_mut();
+        let forma = forma_do_prompt(&bytes);
+        bytes.clear();
+        forma
+    }
+}
+
+/// A entrada do hook, com uma janela para os primeiros bytes de um valor
+/// (decisão 0072): o leitor do JSON pega um byte de cada vez, e a espiã só
+/// guarda o que passa enquanto está ligada, até [`JANELA_DO_PROMPT`] bytes.
+struct Espia<R> {
+    dentro: R,
+    espiada: Rc<Espiada>,
+}
+
+impl<R: Read> Read for Espia<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = self.dentro.read(buf)?;
+        if self.espiada.ligada.get() {
+            let mut bytes = self.espiada.bytes.borrow_mut();
+            let pega = n.min(JANELA_DO_PROMPT.saturating_sub(bytes.len()));
+            bytes.extend_from_slice(&buf[..pega]);
+            if bytes.len() >= JANELA_DO_PROMPT {
+                self.espiada.ligada.set(false);
+            }
+        }
+        Ok(n)
+    }
+}
+
+/// A forma do prompt pelos primeiros bytes crus que vieram depois da chave
+/// (os dois-pontos, as aspas e o começo do texto, escapado como no JSON):
+/// [`ORIG_NOTIFICACAO`] se é um texto que começa (depois de espaços) por
+/// [`ETIQUETA_DE_NOTIFICACAO`], [`ORIG_COMUM`] se é outro texto, `None` se o
+/// valor não é texto.
+fn forma_do_prompt(janela: &[u8]) -> Option<&'static str> {
+    let mut i = 0;
+    while janela
+        .get(i)
+        .is_some_and(|b| matches!(b, b' ' | b'\t' | b'\n' | b'\r' | b':'))
+    {
+        i += 1;
+    }
+    if janela.get(i) != Some(&b'"') {
+        return None;
+    }
+    i += 1;
+    // Espaços no começo do texto, crus ou escapados (`\n`, `\t`, `\r`).
+    loop {
+        match (janela.get(i), janela.get(i + 1)) {
+            (Some(b' '), _) => i += 1,
+            (Some(b'\\'), Some(b'n' | b't' | b'r')) => i += 2,
+            _ => break,
+        }
+    }
+    let resto = janela.get(i..).unwrap_or_default();
+    Some(if resto.starts_with(ETIQUETA_DE_NOTIFICACAO.as_bytes()) {
+        ORIG_NOTIFICACAO
+    } else {
+        ORIG_COMUM
+    })
+}
+
 /// Lê o JSON do hook de `leitor`, em fluxo. Só o primeiro valor conta: com
 /// ele fechado, o hook não espera o fim da entrada. `null` vale como objeto
 /// vazio (como no jq); outra coisa que não um objeto é erro.
 pub fn ler_de(leitor: impl Read) -> Result<Lido, serde_json::Error> {
-    Lido::deserialize(&mut serde_json::Deserializer::from_reader(leitor))
+    let espiada = Rc::new(Espiada::default());
+    let entrada = Espia {
+        dentro: leitor,
+        espiada: Rc::clone(&espiada),
+    };
+    LeitorDoHook { espiada }.deserialize(&mut serde_json::Deserializer::from_reader(entrada))
 }
 
-/// [`ler_de`] de bytes já na memória.
+/// [`ler_de`] de bytes já na memória (o mesmo caminho, em fluxo).
 pub fn ler(entrada: &[u8]) -> Result<Lido, serde_json::Error> {
-    Lido::deserialize(&mut serde_json::Deserializer::from_slice(entrada))
+    ler_de(entrada)
 }
 
 /// O texto cru de um campo vira valor; o que não se lê (um substituto
@@ -271,6 +390,10 @@ enum Chave {
     Escalar(&'static str),
     EntradaDaFerramenta,
     Tarefas,
+    /// O `prompt`: só a forma dele, pela janela da espiã.
+    Prompt,
+    /// O `session_crons`: só a contagem.
+    Agendamentos,
     Outra,
 }
 
@@ -279,6 +402,8 @@ impl Chave {
         match nome {
             b"tool_input" => Chave::EntradaDaFerramenta,
             b"background_tasks" => Chave::Tarefas,
+            b"prompt" => Chave::Prompt,
+            b"session_crons" => Chave::Agendamentos,
             _ => ESCALARES
                 .iter()
                 .find(|e| e.as_bytes() == nome)
@@ -379,9 +504,16 @@ fn pular_objeto<'de, A: MapAccess<'de>>(mut objeto: A) -> Result<(), A::Error> {
     Ok(())
 }
 
-impl<'de> Deserialize<'de> for Lido {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Lido, D::Error> {
-        struct V;
+/// Lê o [`Lido`] com a janela da espiã para o `prompt`.
+struct LeitorDoHook {
+    espiada: Rc<Espiada>,
+}
+
+impl<'de> DeserializeSeed<'de> for LeitorDoHook {
+    type Value = Lido;
+
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<Lido, D::Error> {
+        struct V(Rc<Espiada>);
 
         impl<'de> Visitor<'de> for V {
             type Value = Lido;
@@ -409,12 +541,60 @@ impl<'de> Deserialize<'de> for Lido {
                         Chave::Tarefas => {
                             lido.tarefas = objeto.next_value::<ListaDeTarefas>()?.0;
                         }
+                        Chave::Prompt => {
+                            // A janela começa logo depois da chave: os
+                            // dois-pontos, as aspas e o começo do texto. O
+                            // texto passa sem ser guardado (o `IgnoredAny`
+                            // não junta os bytes dele).
+                            self.0.ligar();
+                            let pulou = objeto.next_value::<IgnoredAny>();
+                            let forma = self.0.forma();
+                            pulou?;
+                            lido.forma_do_prompt = forma;
+                        }
+                        Chave::Agendamentos => {
+                            lido.agendamentos = objeto.next_value::<Contagem>()?.0;
+                        }
                         Chave::Outra => {
                             objeto.next_value::<IgnoredAny>()?;
                         }
                     }
                 }
                 Ok(lido)
+            }
+        }
+
+        d.deserialize_any(V(self.espiada))
+    }
+}
+
+/// Quantos itens uma lista tem, sem olhar nenhum; `None` se não é lista.
+struct Contagem(Option<u64>);
+
+impl<'de> Deserialize<'de> for Contagem {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Contagem, D::Error> {
+        struct V;
+
+        impl<'de> Visitor<'de> for V {
+            type Value = Contagem;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("uma lista")
+            }
+
+            simples_valem!(Contagem(None));
+
+            fn visit_map<A: MapAccess<'de>>(self, objeto: A) -> Result<Self::Value, A::Error> {
+                pular_objeto(objeto)?;
+                Ok(Contagem(None))
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut lista: A) -> Result<Self::Value, A::Error> {
+                let mut n: u64 = 0;
+                while lista.next_element::<IgnoredAny>()?.is_some() {
+                    n = n.saturating_add(1);
+                }
+                Ok(Contagem(Some(n)))
             }
         }
 
@@ -654,6 +834,13 @@ pub fn montar(lido: &Lido, ctx: &Contexto, arq: Option<&str>) -> Fio {
         } else {
             None
         },
+        orig: if e == "UserPromptSubmit" {
+            lido.forma_do_prompt
+                .filter(|f| eh_enum(f))
+                .map(str::to_owned)
+        } else {
+            None
+        },
         reason: if e == "SessionEnd" {
             texto(campo("reason"), eh_enum)
         } else {
@@ -677,6 +864,10 @@ pub fn montar(lido: &Lido, ctx: &Contexto, arq: Option<&str>) -> Fio {
             .filter(|&n| n <= MAX_CONTAGEM),
         bgt: (stop && !validas.is_empty()).then(|| validas.iter().map(|t| t.0.clone()).collect()),
         bgi: (stop && !validas.is_empty()).then(|| validas.iter().map(|t| t.1.clone()).collect()),
+        crn: lido
+            .agendamentos
+            .filter(|_| stop)
+            .filter(|&n| n <= MAX_CONTAGEM),
         dur: if e == "PostToolUse" || e == "PostToolUseFailure" {
             natural(campo("duration_ms"), MAX_DURACAO_MS)
         } else {
@@ -1024,16 +1215,30 @@ mod testes {
             "notification_type": "idle_prompt", "error": "rate_limit", "source": "user",
             "reason": "logout", "is_interrupt": true, "stop_hook_active": true,
             "duration_ms": 12.9, "background_tasks": [{"id": "t1", "type": "shell"}],
-            "cwd": "/home/x/meu-projeto", "prompt": "SEGREDO"
+            "cwd": "/home/x/meu-projeto", "prompt": "SEGREDO",
+            "session_crons": [{"id": "c1", "schedule": "* * * * *", "recurring": true,
+                               "prompt": "SEGREDO-agendado"}]
         });
         let stop = montado("Stop", entrada.clone());
         assert_eq!(stop["sha"], true);
         assert_eq!(
-            (stop["bg"].clone(), stop["bgt"].clone()),
-            (json!(1), json!(["shell"]))
+            (stop["bg"].clone(), stop["bgt"].clone(), stop["crn"].clone()),
+            (json!(1), json!(["shell"]), json!(1))
         );
-        for ausente in ["tool", "nt", "err", "src", "reason", "intr", "dur", "arq"] {
+        for ausente in [
+            "tool", "nt", "err", "src", "orig", "reason", "intr", "dur", "arq",
+        ] {
             assert!(stop.get(ausente).is_none(), "{ausente} em {stop}");
+        }
+        let prompt = montado("UserPromptSubmit", entrada.clone());
+        assert_eq!(prompt["orig"], "comum");
+        assert!(prompt.get("crn").is_none(), "{prompt}");
+        for e in ["SessionStart", "PostToolUse", "Notification", "SessionEnd"] {
+            let v = montado(e, entrada.clone());
+            assert!(
+                v.get("orig").is_none() && v.get("crn").is_none(),
+                "{e}: {v}"
+            );
         }
         let falha = montado("PostToolUseFailure", entrada.clone());
         assert_eq!(
@@ -1054,6 +1259,121 @@ mod testes {
         assert_eq!(montado("UserPromptSubmit", entrada.clone())["src"], "user");
         assert_eq!(stop["proj"], "meu-projeto");
         assert!(!stop.to_string().to_lowercase().contains("segredo"));
+    }
+
+    /// A forma do prompt de um JSON de hook (o `orig` do `UserPromptSubmit`).
+    fn orig(texto: &str) -> Option<String> {
+        let corpo = corpo(texto.as_bytes(), &ctx("UserPromptSubmit"));
+        let v: Value = serde_json::from_str(&corpo).unwrap();
+        assert!(!corpo.to_lowercase().contains("segredo"), "vazou: {corpo}");
+        v.get("orig").and_then(Value::as_str).map(str::to_owned)
+    }
+
+    #[test]
+    fn a_forma_do_prompt_so_pelo_comeco() {
+        let notificacao = Some("notificacao".to_owned());
+        let comum = Some("comum".to_owned());
+        // O começo de uma notificação de verdade (decisão 0071), com o
+        // resultado da tarefa (conteúdo) logo depois.
+        let real = json!({
+            "session_id": "s1",
+            "prompt": "<task-notification>\n<task-id>a15a73f9648bd8474</task-id>\n\
+                       <status>completed</status>\n<result>SEGREDO-resultado</result>\n\
+                       </task-notification>",
+        });
+        assert_eq!(orig(&real.to_string()), notificacao);
+        for (texto, esperado) in [
+            (r#"{"prompt":"<task-notification>"}"#, &notificacao),
+            (
+                r#"{"prompt" : "  \n\t<task-notification>SEGREDO"}"#,
+                &notificacao,
+            ),
+            (r#"{"prompt":"SEGREDO <task-notification>"}"#, &comum),
+            (r#"{"prompt":"<task-notif"}"#, &comum),
+            (r#"{"prompt":"\u003ctask-notification>"}"#, &comum),
+            (r#"{"prompt":""}"#, &comum),
+            (
+                r#"{"prompt":"SEGREDO","session_id":"<task-notification>"}"#,
+                &comum,
+            ),
+            (r#"{"prompt":null}"#, &None),
+            (r#"{"prompt":["<task-notification>"]}"#, &None),
+            (r#"{"prompt":{"texto":"<task-notification>"}}"#, &None),
+            (r#"{"session_id":"s1"}"#, &None),
+            // Só a chave de cima: um `prompt` de dentro de outro campo não conta.
+            (
+                r#"{"tool_input":{"prompt":"<task-notification>"},"x":{"prompt":"SEGREDO"}}"#,
+                &None,
+            ),
+            // Chave repetida: vale a última, como no jq.
+            (
+                r#"{"prompt":"<task-notification>","prompt":"SEGREDO"}"#,
+                &comum,
+            ),
+        ] {
+            assert_eq!(&orig(texto), esperado, "{texto}");
+        }
+        // Espaços demais antes da etiqueta passam da janela: comum.
+        let longe = format!(
+            r#"{{"prompt":"{}<task-notification>"}}"#,
+            " ".repeat(JANELA_DO_PROMPT)
+        );
+        assert_eq!(orig(&longe), comum);
+        // Só no UserPromptSubmit.
+        let v: Value =
+            serde_json::from_str(&corpo(br#"{"prompt":"<task-notification>"}"#, &ctx("Stop")))
+                .unwrap();
+        assert!(v.get("orig").is_none(), "{v}");
+    }
+
+    #[test]
+    fn o_prompt_nunca_fica_guardado() {
+        // O que foi lido não tem nada do prompt, só a forma.
+        let texto = json!({"prompt": "<task-notification>SEGREDO-1 SEGREDO-2"}).to_string();
+        let l = ler(texto.as_bytes()).unwrap();
+        let guardado = format!("{l:?}");
+        assert!(!guardado.contains("SEGREDO"), "{guardado}");
+        assert_eq!(l.forma_do_prompt, Some(ORIG_NOTIFICACAO));
+        // A janela da espiã nunca passa de JANELA_DO_PROMPT bytes e sai vazia,
+        // lendo de um em um (como o leitor do JSON) ou em blocos.
+        let grande = vec![b'a'; 100_000];
+        for bloco in [1usize, 7, 4096] {
+            let espiada = Rc::new(Espiada::default());
+            let mut espia = Espia {
+                dentro: &grande[..],
+                espiada: Rc::clone(&espiada),
+            };
+            espiada.ligar();
+            let mut buf = vec![0u8; bloco];
+            while espia.read(&mut buf).unwrap() > 0 {
+                assert!(espiada.bytes.borrow().len() <= JANELA_DO_PROMPT);
+            }
+            assert_eq!(espiada.bytes.borrow().len(), JANELA_DO_PROMPT, "{bloco}");
+            assert!(!espiada.ligada.get(), "desliga sozinha com a janela cheia");
+            assert_eq!(espiada.forma(), None, "não é texto");
+            assert!(espiada.bytes.borrow().is_empty(), "esvaziada");
+        }
+    }
+
+    #[test]
+    fn agendamentos_contados_sem_ler_nada_deles() {
+        let crn = |agendamentos: Value| {
+            let entrada = json!({"session_id": "s1", "session_crons": agendamentos});
+            let corpo = corpo(entrada.to_string().as_bytes(), &ctx("Stop"));
+            assert!(!corpo.to_lowercase().contains("segredo"), "{corpo}");
+            serde_json::from_str::<Value>(&corpo).unwrap()["crn"].clone()
+        };
+        let um = json!({"id": "SEGREDO-id", "schedule": "* * * * *", "recurring": true,
+                        "prompt": "SEGREDO-prompt-agendado"});
+        assert_eq!(crn(json!([um.clone(), um.clone(), 3, null])), json!(4));
+        assert_eq!(crn(json!([])), json!(0), "sem agendamento: 0");
+        assert_eq!(crn(json!("SEGREDO")), Value::Null, "não é lista");
+        assert_eq!(crn(json!({"a": um})), Value::Null);
+        assert_eq!(
+            crn(json!(vec![json!(1); 10_001])),
+            Value::Null,
+            "teto do pet"
+        );
     }
 
     #[test]

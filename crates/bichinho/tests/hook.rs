@@ -594,6 +594,9 @@ fn campos_de_cada_evento() {
         json!(["mcp_task", "auto_mode_scan", "shell", "outro"])
     );
     assert_eq!(stop["bgi"], json!(["task-1", "task-2", "task-3", "task-4"]));
+    // Dos agendamentos só a contagem (decisão 0072).
+    assert_eq!(stop["crn"], 1);
+    assert!(stop.get("orig").is_none());
 
     let bash = rodar("PostToolUse Bash");
     assert_eq!(bash["tool"], "Bash");
@@ -620,7 +623,10 @@ fn campos_de_cada_evento() {
     assert_eq!(rodar("StopFailure")["err"], "rate_limit");
     assert_eq!(rodar("SessionEnd")["reason"], "prompt_input_exit");
     assert_eq!(rodar("SessionStart")["src"], "startup");
-    assert_eq!(rodar("UserPromptSubmit")["src"], "user");
+    let prompt = rodar("UserPromptSubmit");
+    assert_eq!(prompt["src"], "user");
+    assert_eq!(prompt["orig"], "comum", "um prompt digitado");
+    assert!(prompt.get("crn").is_none());
     assert_eq!(rodar("Notification permissão")["nt"], "permission_prompt");
     assert_eq!(rodar("PreToolUse plano")["tool"], "ExitPlanMode");
     assert_eq!(rodar("SubagentStart")["aid"], "agent-def456");
@@ -1030,6 +1036,52 @@ fn entrada_enorme_sai_0_calada() {
         "levou {:?}",
         inicio.elapsed()
     );
+}
+
+#[test]
+fn a_notificacao_de_tarefa_so_vira_o_orig() {
+    // Decisão 0072: o Claude Code acorda a sessão com o aviso de uma tarefa em
+    // segundo plano num prompt que começa por <task-notification>, com o
+    // resultado da tarefa (conteúdo) dentro. Só o enum sai; o texto, nunca,
+    // nem num prompt de 8 MiB.
+    let banca = Banca::nova();
+    let captor = Captor::novo(true);
+    let notificacao = "<task-notification>\n<task-id>SEGREDO-tarefa</task-id>\n\
+                       <status>completed</status>\n<summary>SEGREDO-resumo</summary>\n\
+                       <result>SEGREDO-resultado</result>\n</task-notification>";
+    let grande = format!(
+        "{notificacao}{}",
+        " SEGREDO-enorme".repeat(8 * 1024 * 1024 / 15)
+    );
+    for (nome, prompt, esperado) in [
+        ("notificação", notificacao.to_owned(), "notificacao"),
+        ("notificação de 8 MiB", grande, "notificacao"),
+        (
+            "etiqueta no meio",
+            format!("SEGREDO-antes {notificacao}"),
+            "comum",
+        ),
+    ] {
+        let entrada = com("UserPromptSubmit", json!({"prompt": prompt})).to_string();
+        let inicio = Instant::now();
+        let pedido = rodar_e_pegar(
+            &banca,
+            &captor,
+            nome,
+            "UserPromptSubmit",
+            entrada.as_bytes(),
+            |_| {},
+        );
+        sem_segredo(nome, &pedido.bruto);
+        let corpo = json_do(&pedido, nome);
+        assert_eq!(corpo["orig"], esperado, "{nome}");
+        assert_eq!(corpo["sid"], SID, "{nome}");
+        assert!(
+            inicio.elapsed() < Duration::from_secs(3),
+            "{nome}: levou {:?}",
+            inicio.elapsed()
+        );
+    }
 }
 
 #[test]

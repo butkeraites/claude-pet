@@ -15,7 +15,10 @@
 //! - lê o JSON em fluxo e guarda só os campos da lista branca (decisão 0045):
 //!   a memória não cresce com o tamanho do prompt ou da saída de uma
 //!   ferramenta, e no Linux o processo não deixa core dump (que levaria a
-//!   entrada para o disco).
+//!   entrada para o disco);
+//! - do prompt só sai a forma dele (`orig`: a notificação de uma tarefa em
+//!   segundo plano ou um prompt comum), pelos primeiros bytes que passam, e do
+//!   `session_crons` do Stop só a contagem (`crn`; decisão 0072).
 //!
 //! Ambiente: `PET_PORTA` (porta do pet, padrão 27380), `PET_TESTE=1` (evento
 //! sintético do `bin/pet testar`: o pet o isola das sessões reais e o
