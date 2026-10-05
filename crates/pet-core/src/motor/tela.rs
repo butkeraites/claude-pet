@@ -639,7 +639,15 @@ impl Motor {
             self.anotar(agora_ms, intencoes::Tipo::Selos(d.selos));
         }
         self.sincronizar_base(agora_ms);
+        // Os selos, o aviso e a base que mudaram vão para a tela já (sem
+        // mudança, a janela não faz commit).
+        self.redesenhar_ja(agora_ms);
         reacoes
+    }
+
+    /// Os selos anunciados (o que a fileira desenha; decisão 0083).
+    pub(super) fn selos_na_tela(&self) -> &Selos {
+        &self.tela.selos
     }
 
     /// A base que o pet deve segurar agora (decisão 0082): o estado da skin

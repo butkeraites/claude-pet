@@ -3459,3 +3459,47 @@ movimento grande fica no começo de cada estado (as reações) e o resto respira
 dentro do orçamento, até parar de vez no sono profundo. Sortear as
 micro-ações tira a cara de relógio do trabalho; a semente injetada mantém o
 núcleo puro e os testes repetíveis.
+
+## 0083 — Os selos ao lado do corpo e o selo do aviso que pulsa uma vez por segundo (2026-10-05)
+
+**Problema:** o Motor anuncia os selos das outras sessões (decisão 0076: o
+"+N", as bandeirinhas dos prontos na cor do projeto, o "…" da corrente) e o
+pulso da L4 (decisão 0075: "pose de espera + selo pulsando a 1 Hz"), mas
+nada disso ia para a tela. Os selos têm de ser nítidos (blocos inteiros, a
+fonte dos balões), parados (o orçamento, decisão 0005), sem cobrir a área de
+toque nem sair do monitor, e legíveis no tema escuro e no claro. A espera do
+Zeca original já tem um «!» desenhado na arte, à direita da cabeça; a do Zeca
+do pack, não (`docs/pesquisa/11-tela-m5.md`). E um pulso de 1 Hz de ciclo
+inteiro (aceso e apagado a cada meio segundo) seria 2 commits/s só ele, mais
+a rajada de cada minuto: acima dos 2/s da espera.
+**Escolha:**
+- **A fileira** (`motor::selos`): ao lado do corpo, na altura da cabeça, à
+  esquerda (o pet mora no canto inferior direito) ou à direita sem espaço;
+  sem caber nos dois lados, o lado maior, e as bandeirinhas mais novas saem;
+  presa na área útil. Do corpo para fora: o selo do aviso, o "+N" (até
+  "+99"), o "…" e as bandeirinhas (até 8, da mais velha para a mais nova). Um
+  pixel do selo vale `dt` (a metade do D, a mesma dos balões e do "zZ"), em
+  blocos inteiros e opacos; nada na área de toque (só o pet recebe o clique,
+  e a área não muda).
+- **Os desenhos:** o "+N" e o "…" na monogram, creme com a sombra de tinta,
+  como o "zZ"; a bandeirinha com o mastro creme, o pano na cor do projeto e a
+  sombra de tinta; o selo do aviso, um «!» de 6 por 14 pixels com a borda de
+  tinta e o recheio amarelo (#FFD23F), fora da cabeça para não cair em cima
+  do «!» da arte e para existir no pack.
+- **A paleta dos projetos** (as 8 cores de `tela::cor`): vermelho #E5394B,
+  laranja #F28C28, amarelo #FFD23F, verde #4CC35A, turquesa #2EC4B6, azul
+  #3A86FF, roxo #9B5DE5 e rosa #FF7AB6 (vivas no tema escuro; a sombra de
+  tinta dá a borda no claro).
+- **O pulso da L4:** o selo do aviso troca de cor (amarelo, vermelho) uma vez
+  por segundo, contado do começo do pulso: um commit por segundo. Com a pose
+  parada da L4 (decisão 0082) e a rajada de cada minuto, a espera no teto
+  fica em ~1,4 commit/s.
+- **Quando:** o selo do aviso aparece com o aviso que o pet chama (a L1) e sai
+  com ele; a fileira some no poof da viagem. O Motor pede o próximo quadro a
+  cada mudança da tela (`redesenhar_ja` no fim de cada `observar_tela` e da
+  escalada); sem mudança, a janela não faz commit.
+**Por quê:** os selos dizem o que as outras sessões estão fazendo sem tirar a
+base de quem manda, e ao lado do corpo eles não brigam com o balão (em cima)
+nem com o "zZ" e o coração (nos cantos de cima). O selo do aviso fora da
+cabeça funciona nas duas skins, e a troca a cada segundo ainda é um
+batimento que o olho pega de canto, dentro do orçamento da espera.

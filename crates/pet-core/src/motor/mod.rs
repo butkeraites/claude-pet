@@ -38,6 +38,7 @@ mod pet;
 mod poof;
 pub mod posicoes;
 mod ritmo;
+pub mod selos;
 pub mod tela;
 pub mod viagem;
 
@@ -113,6 +114,9 @@ pub const CORACAO_MS: u64 = 1_200;
 pub const SUSTO: &str = "error";
 /// A chamada de um aviso de espera (a L1) e as rajadas dela (decisão 0075).
 pub const CHAMADA: &str = "alert";
+/// O selo do aviso pulsa na L4 trocando de cor a cada tanto: um commit por
+/// segundo (decisão 0083).
+pub const PULSO_MS: u64 = 1_000;
 
 /// O que o pet publica para o `/v1/estado` (o laço publica; a entrada HTTP
 /// só lê).
@@ -334,6 +338,8 @@ pub struct Motor {
     tela: tela::Tela,
     /// O sorteio de cada pet novo (as micro-ações da base; decisão 0082).
     sorteio: Sorteio,
+    /// Desde quando o selo do aviso pulsa (a L4; decisão 0083).
+    pulso_desde: Option<u64>,
 }
 
 impl Motor {
@@ -374,6 +380,7 @@ impl Motor {
             relogio_ms: 0,
             tela: tela::Tela::default(),
             sorteio: Sorteio::default(),
+            pulso_desde: None,
         }
     }
 
@@ -511,6 +518,42 @@ impl Motor {
         let mut sessoes = self.cerebro.resumo_das_sessoes();
         sessoes.sort_by_key(|s| (s.teste, std::cmp::Reverse(s.ultimo_evento_ms)));
         sessoes
+    }
+
+    // --- os selos e o selo do aviso (decisão 0083) ---------------------------
+
+    /// O que mudou na tela (os selos, o aviso, o pulso, a base) vai para o
+    /// próximo quadro, já. Sem mudança de verdade, a janela não faz commit.
+    pub(super) fn redesenhar_ja(&mut self, agora_ms: u64) {
+        if self.pet.is_some() {
+            self.proximo_quadro = Some(self.proximo_quadro.map_or(agora_ms, |p| p.min(agora_ms)));
+        }
+    }
+
+    /// A fileira de selos de agora: o "!" do aviso de espera que o pet chama
+    /// (no pulso da L4, aceso nos segundos ímpares), o "+N", o "…" e as
+    /// bandeirinhas.
+    fn fileira(&self, agora_ms: u64) -> selos::Fileira {
+        let anunciados = self.selos_na_tela();
+        let aviso = self.chamando.as_ref().map(|_| match self.pulso_desde {
+            Some(desde) if (agora_ms.saturating_sub(desde) / PULSO_MS) % 2 == 1 => {
+                selos::Aviso::Aceso
+            }
+            _ => selos::Aviso::Normal,
+        });
+        selos::Fileira {
+            aviso,
+            mais: anunciados.mais,
+            corrente: anunciados.corrente,
+            bandeiras: anunciados.bandeiras.clone(),
+        }
+    }
+
+    /// A próxima troca de cor do selo do aviso, se ele pulsa.
+    fn proxima_troca_do_pulso(&self, agora_ms: u64) -> Option<u64> {
+        let desde = self.pulso_desde.filter(|_| self.chamando.is_some())?;
+        let passos = agora_ms.saturating_sub(desde) / PULSO_MS;
+        Some(desde + (passos + 1) * PULSO_MS)
     }
 
     // --- posições salvas (decisão 0049) --------------------------------------
@@ -774,6 +817,7 @@ impl Motor {
 
     /// A escalada acabou: o pulso desliga e o nível volta a 0.
     fn encerrar_escalada(&mut self, c: Chamando, motivo: &'static str, agora_ms: u64) {
+        self.pulso_desde = None;
         if c.escalada.pulso {
             self.anotar(
                 agora_ms,
@@ -836,15 +880,20 @@ impl Motor {
                     motivo: if volta { "voltou" } else { "escalada" },
                     sid8: Some(sid8.clone()),
                 },
-                escalada::Passo::Pulso(ligado) => intencoes::Tipo::Pulso {
-                    ligado,
-                    sid8: sid8.clone(),
-                },
+                escalada::Passo::Pulso(ligado) => {
+                    self.pulso_desde = ligado.then_some(agora_ms);
+                    intencoes::Tipo::Pulso {
+                        ligado,
+                        sid8: sid8.clone(),
+                    }
+                }
             };
             self.anotar(agora_ms, tipo);
         }
-        // O teto (a L4) segura só a pose da espera (decisão 0082).
+        // O teto (a L4) segura só a pose da espera (decisão 0082), e o selo
+        // do aviso pulsa (decisão 0083).
         self.sincronizar_base(agora_ms);
+        self.redesenhar_ja(agora_ms);
         reacoes
     }
 
@@ -1988,6 +2037,24 @@ impl Motor {
                 }
                 None if !entrando => cena.clear(),
                 None => {}
+            }
+        }
+        // Os selos ao lado do corpo (decisão 0083), parados; o do aviso
+        // pulsa na L4, uma troca por segundo.
+        if poof.is_none()
+            && let Some(corpo) = pet.toque_no_palco(&palco)
+        {
+            let fileira = self.fileira(agora_ms);
+            if !fileira.vazia() {
+                cena.extend(selos::elementos(
+                    &fileira,
+                    corpo,
+                    palco.area,
+                    balao::dt(palco.d),
+                ));
+            }
+            if let Some(prazo) = self.proxima_troca_do_pulso(agora_ms) {
+                proxima = Some(proxima.map_or(prazo, |p| p.min(prazo)));
             }
         }
         // O selo "zZ" da soneca, parado, enquanto ela durar.

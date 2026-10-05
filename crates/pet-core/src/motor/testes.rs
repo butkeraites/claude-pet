@@ -984,11 +984,13 @@ fn prompt_em(motor: &mut Motor, sid: &str, proj: &str, ms: u64) {
     motor.evento(&ev, PAREDE + ms, em(ms));
 }
 
+/// Há letras na cena (o texto do balão, o "zZ"): os selos ao lado do corpo
+/// só têm o "+", algarismos e o "…" (decisão 0083).
 fn tem_glifos(janela: &Falsa) -> bool {
-    janela
-        .cena
-        .as_ref()
-        .is_some_and(|c| c.iter().any(|e| matches!(e, Elemento::Glifo { .. })))
+    janela.cena.as_ref().is_some_and(|c| {
+        c.iter()
+            .any(|e| matches!(e, Elemento::Glifo { c, .. } if c.is_alphabetic()))
+    })
 }
 
 #[test]
@@ -1296,11 +1298,13 @@ fn pendentes(motor: &Motor) -> Vec<(String, TipoAviso)> {
         .collect()
 }
 
-fn tem_blocos(janela: &Falsa) -> bool {
-    janela
-        .cena
-        .as_ref()
-        .is_some_and(|c| c.iter().any(|e| matches!(e, Elemento::Bloco { .. })))
+/// O vermelho do coração da risadinha na cena (os selos usam outro).
+fn tem_coracao(janela: &Falsa) -> bool {
+    const VERMELHO_DO_CORACAO: [u8; 4] = [0x4F, 0x3B, 0xE2, 0xFF];
+    janela.cena.as_ref().is_some_and(|c| {
+        c.iter()
+            .any(|e| matches!(e, Elemento::Bloco { cor, .. } if *cor == VERMELHO_DO_CORACAO))
+    })
 }
 
 fn alcas(nomes: &[&str]) -> Vec<crate::plataforma::Alca> {
@@ -1347,7 +1351,7 @@ fn clique_leva_ao_terminal_do_aviso_mais_urgente_e_o_seguinte_ao_proximo() {
     let p = motor.painel(Some(&janela), 8_000);
     assert_eq!(p.reacao.as_deref(), Some(RISADINHA));
     assert_eq!(p.focando.as_deref(), Some("f00d02"));
-    assert!(tem_blocos(&janela), "o coração na cena");
+    assert!(tem_coracao(&janela), "o coração na cena");
     assert_eq!(pendentes(&motor).len(), 2, "o aviso espera a confirmação");
     // O socket2 conta que o foot2 ficou ativo: o aviso de B sai.
     ativou(&mut motor, Some("f00d02"), 8_100);
@@ -1360,7 +1364,7 @@ fn clique_leva_ao_terminal_do_aviso_mais_urgente_e_o_seguinte_ao_proximo() {
     // O coração sai no prazo dele.
     janela.mostrou();
     motor.vencer(&mut janela, 8_000 + CORACAO_MS);
-    assert!(!tem_blocos(&janela), "sem coração");
+    assert!(!tem_coracao(&janela), "sem coração");
     // O clique seguinte vai a A.
     janela.mostrou();
     let clicou = motor.clicar(&mut janela, Botao::Esquerdo, 10_000);
@@ -3174,4 +3178,147 @@ fn no_teto_da_escalada_a_espera_fica_so_na_pose() {
     };
     mandar(&mut motor, rodou, 400_000);
     assert_eq!(base_do_pet(&motor), ("working".into(), Ritmo::Quieto));
+}
+
+// --- os selos e o selo do aviso (decisão 0083) --------------------------------
+
+/// As cores dos blocos da cena.
+fn cores_na_cena(janela: &Falsa) -> Vec<[u8; 4]> {
+    janela
+        .cena
+        .as_ref()
+        .map(|c| {
+            c.iter()
+                .filter_map(|e| match e {
+                    Elemento::Bloco { cor, .. } => Some(*cor),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// O texto dos glifos da cena, sem a sombra repetida.
+fn caracteres_na_cena(janela: &Falsa) -> String {
+    janela
+        .cena
+        .as_ref()
+        .map(|c| {
+            c.iter()
+                .filter_map(|e| match e {
+                    Elemento::Glifo { c, cor, .. } if *cor != [0x2A, 0x1B, 0x1D, 0xFF] => Some(*c),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn os_selos_das_outras_sessoes_vao_para_a_tela_ao_lado_do_corpo() {
+    let (mut motor, mut janela) = ligado();
+    motor.acertar_relogio(em(0));
+    olhando(&mut motor, true, 0);
+    ocioso(&mut motor, false, 0);
+    // C termina (pronto), A trabalha, B pensa.
+    turno_pequeno(&mut motor, "sessao-c", "lab", 0);
+    andar(&mut motor, 3_000);
+    mandar(
+        &mut motor,
+        hook_de("sessao-a", "api", "UserPromptSubmit", 4_000),
+        4_000,
+    );
+    let bash = Evento {
+        tool: Some("Bash".into()),
+        dur: Some(10),
+        ..hook_de("sessao-a", "api", "PostToolUse", 5_000)
+    };
+    mandar(&mut motor, bash, 5_000);
+    mandar(
+        &mut motor,
+        hook_de("sessao-b", "web", "UserPromptSubmit", 6_000),
+        6_000,
+    );
+    // Depois dos 2 min do pronto: a base é o trabalho de A, o "+1" é B e a
+    // bandeirinha é o pronto de C.
+    janela.mostrou();
+    quadros_entre(
+        &mut motor,
+        &mut janela,
+        6_000,
+        3_000 + tela::PRONTO_NA_BASE_MS + 10,
+    );
+    let foto = motor
+        .painel(None, 3_000 + tela::PRONTO_NA_BASE_MS + 10)
+        .fotografia;
+    assert_eq!(foto.selos.mais, 1);
+    assert_eq!(foto.selos.bandeiras, vec![tela::cor("lab")]);
+    assert!(cores_na_cena(&janela).contains(&selos::PALETA[usize::from(tela::cor("lab"))]));
+    assert_eq!(caracteres_na_cena(&janela), "+1");
+    // Nada em cima da área de toque, tudo dentro do monitor.
+    let toque = janela.toque.expect("o toque no corpo");
+    for e in janela.cena.as_ref().unwrap().iter().skip(1) {
+        if let Elemento::Bloco { ret, .. } = e {
+            assert!(
+                ret.intersecao(&toque).is_none(),
+                "{ret:?} sobre o corpo {toque:?}"
+            );
+            assert!(ret.x >= 0 && ret.y >= 0 && ret.direita() <= 1920 && ret.baixo() <= 1200);
+        }
+    }
+}
+
+#[test]
+fn o_selo_do_aviso_aparece_na_chamada_e_pulsa_uma_troca_por_segundo_na_l4() {
+    let (mut motor, mut janela) = ligado();
+    motor.acertar_relogio(em(0));
+    olhando(&mut motor, false, 0);
+    ocioso(&mut motor, false, 0);
+    mandar(
+        &mut motor,
+        hook_de("s1", "api", "UserPromptSubmit", 1_000),
+        1_000,
+    );
+    hook_em(&mut motor, "s1", "api", "PermissionRequest", 2_000);
+    janela.mostrou();
+    quadros_entre(&mut motor, &mut janela, 2_000, 3_000);
+    let amarelo = [0x3F, 0xD2, 0xFF, 0xFF];
+    let vermelho = [0x4B, 0x39, 0xE5, 0xFF];
+    assert!(cores_na_cena(&janela).contains(&amarelo), "o «!» na L1");
+    // Na L4 (5 min), a pose parada e o selo trocando de cor a cada segundo:
+    // um commit por segundo.
+    let l4 = 2_000 + escalada::L4_APOS_MS;
+    quadros_entre(&mut motor, &mut janela, 3_000, l4 + 500);
+    assert!(
+        motor
+            .painel(None, l4 + 500)
+            .fotografia
+            .escalada
+            .unwrap()
+            .pulso
+    );
+    let quadros = quadros_entre(&mut motor, &mut janela, l4 + 500, l4 + 10_500);
+    assert_eq!(quadros.len(), 10, "{quadros:?}");
+    assert!(quadros.windows(2).all(|j| j[1] - j[0] == PULSO_MS));
+    let mut cores = Vec::new();
+    for t in [l4 + 10_600, l4 + 11_600] {
+        quadros_entre(&mut motor, &mut janela, t - 100, t);
+        let na_cena = cores_na_cena(&janela);
+        cores.push((na_cena.contains(&amarelo), na_cena.contains(&vermelho)));
+    }
+    assert_eq!(
+        cores,
+        vec![(true, false), (false, true)],
+        "alterna: amarelo nos segundos pares desde o começo do pulso, vermelho nos ímpares"
+    );
+    // Respondida, o selo sai.
+    let rodou = Evento {
+        tool: Some("Bash".into()),
+        dur: Some(10),
+        ..hook_de("s1", "api", "PostToolUse", l4 + 20_000)
+    };
+    mandar(&mut motor, rodou, l4 + 20_000);
+    quadros_entre(&mut motor, &mut janela, l4 + 20_000, l4 + 21_000);
+    let na_cena = cores_na_cena(&janela);
+    assert!(!na_cena.contains(&amarelo) && !na_cena.contains(&vermelho));
 }
