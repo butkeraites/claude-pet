@@ -89,7 +89,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{Config, ModoCelebracao, Pesos};
 use crate::evento::{self, Evento, ORIG_NOTIFICACAO};
-use crate::memoria::{AvisoGuardado, SessaoGuardada};
+use crate::memoria::{AvisoGuardado, SessaoGuardada, Volta};
 
 /// Acomodação depois de um Stop, e espera pelo Stop atrasado de um turno
 /// trocado.
@@ -220,8 +220,12 @@ pub fn instante(mono_ms: u64) -> Instante {
 /// O prazo `dura_ms` depois de `desde`, no relógio do laço; um prazo de antes
 /// da partida já venceu (0).
 pub fn depois(desde: Instante, dura_ms: u64) -> u64 {
-    let dura = i64::try_from(dura_ms).unwrap_or(i64::MAX);
-    u64::try_from(desde.saturating_add(dura)).unwrap_or(0)
+    u64::try_from(desde.saturating_add(duracao(dura_ms))).unwrap_or(0)
+}
+
+/// Uma duração em ms como [`Instante`], para somar a um instante.
+pub fn duracao(ms: u64) -> Instante {
+    i64::try_from(ms).unwrap_or(i64::MAX)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2449,10 +2453,14 @@ impl Cerebro {
 
     // --- a memória das sessões (decisão 0093) ---------------------------------
 
-    /// As sessões reais para a memória das sessões (decisão 0093), só com
-    /// metadados e sem a janela (quem sabe dela é o Motor). As de teste
-    /// nunca vão.
-    pub fn guardar(&self) -> Vec<SessaoGuardada> {
+    /// As sessões reais para a memória das sessões (decisão 0093), em
+    /// `agora`, só com metadados e sem a janela (quem sabe dela é o Motor):
+    /// cada instante também no relógio do laço, o tempo acordado (decisão
+    /// 0095). As de teste nunca vão. A sessão na acomodação de um Stop que vai
+    /// dar o pronto já leva o pronto (decisão 0095): o turno aberto não volta,
+    /// e uma parada nos 0,8 s da acomodação perderia o pronto que o Stop
+    /// trouxe.
+    pub fn guardar(&self, agora: Agora) -> Vec<SessaoGuardada> {
         self.sessoes
             .values()
             .filter(|s| !s.teste)
@@ -2462,52 +2470,78 @@ impl Cerebro {
                 ent: s.ent.clone(),
                 estado: s.estado,
                 estado_desde_ms: s.estado_desde,
+                estado_desde_laco_ms: Some(s.estado_desde_mono),
                 ultimo_evento_ms: s.ultimo_parede,
+                ultimo_evento_laco_ms: Some(s.ultimo_mono),
                 agendamentos: s.agendamentos,
-                aviso: s.aviso.map(|a| AvisoGuardado {
-                    tipo: a.tipo,
-                    espera: a.espera,
-                    desde_ms: a.desde_ms,
-                    nivel: None,
-                    vista_ms: None,
-                }),
+                aviso: self
+                    .pronto_na_acomodacao(s, agora)
+                    .or(s.aviso)
+                    .map(|a| AvisoGuardado {
+                        tipo: a.tipo,
+                        espera: a.espera,
+                        desde_ms: a.desde_ms,
+                        desde_laco_ms: Some(a.desde_mono),
+                        nivel: None,
+                        vista_ms: None,
+                        vista_laco_ms: None,
+                    }),
                 janela: None,
             })
             .collect()
     }
 
-    /// Restaura as sessões que a memória guardou (decisão 0093), em `agora`:
+    /// O pronto que a acomodação do Stop da sessão `s` vai dar: o mesmo
+    /// fechamento que o [`Self::tique`] faria no fim dela, numa cópia.
+    fn pronto_na_acomodacao(&self, s: &Sessao, agora: Agora) -> Option<Aviso> {
+        let ts_ms = s.turno.as_ref()?.stop.as_ref()?.ts_ms;
+        let mut copia = s.clone();
+        let f = copia.fechar(Fim::Stop, ts_ms, agora, &self.config)?;
+        f.pronto.then(|| Aviso {
+            tipo: TipoAviso::Pronto,
+            espera: None,
+            desde_ms: ts_ms,
+            desde_mono: instante(agora.mono_ms),
+        })
+    }
+
+    /// Restaura as sessões que a memória guardou (decisão 0093), na `volta`:
     /// o relógio do laço recomeçou com o processo, e cada prazo é contado de
-    /// novo a partir das horas de parede de antes ([`Agora::no_laco`]). Volta
-    /// só o que ainda vale pelas regras de sempre: a sessão com o último
-    /// evento há menos de [`VIDA_SESSAO_MS`] e de uma origem aceita (as mais
-    /// novas primeiro, até [`MAX_SESSOES`]); o estado, com o prazo dele (o
-    /// pensando, o trabalhando e o compactando até [`ATIVA_SEM_EVENTO_MS`]
-    /// depois do último evento, o erro e o cansado até [`ERRO_NA_TELA_MS`];
-    /// vencido, parada); o pronto e o erro até [`VIDA_AVISO_MS`]; o
-    /// "esperando você" enquanto a sessão vive. Uma hora além da janela do
-    /// `ts` dos hooks ([`JANELA_TS_MS`]) deixa a sessão de fora. Nada de
+    /// novo a partir dos instantes de antes, pelo tempo acordado até a
+    /// gravação mais a parada do pet ([`Volta::instante`], decisão 0095; num
+    /// arquivo sem o relógio do laço, pela parede). Volta só o que ainda vale
+    /// pelas regras de sempre: a sessão com o último evento há menos de
+    /// [`VIDA_SESSAO_MS`] e de uma origem aceita (as mais novas primeiro, até
+    /// [`MAX_SESSOES`]); o estado, com o prazo dele (o pensando, o trabalhando
+    /// e o compactando até [`ATIVA_SEM_EVENTO_MS`] depois do último evento, o
+    /// erro e o cansado até [`ERRO_NA_TELA_MS`]; vencido, parada); o pronto e
+    /// o erro até [`VIDA_AVISO_MS`]; o "esperando você" enquanto a sessão
+    /// vive. Uma hora além da janela do `ts` dos hooks ([`JANELA_TS_MS`]), ou
+    /// um instante do laço depois da gravação, deixa a sessão de fora. Nada de
     /// turno, de corrente ou de festa: o turno que estava aberto não é de
     /// confiança (o Stop dele pode ter se perdido com o pet fora), e o
     /// próximo evento dele abre um turno implícito, como no M3. A sessão volta
     /// marcada como restaurada até o próximo evento dela. Uma que o cérebro
     /// já acompanha fica como está.
-    pub fn restaurar(&mut self, guardadas: &[SessaoGuardada], agora: Agora) -> Restauradas {
+    pub fn restaurar(&mut self, guardadas: &[SessaoGuardada], volta: Volta) -> Restauradas {
+        let agora = volta.agora;
+        let mono = instante(agora.mono_ms);
         let mut r = Restauradas::default();
         let mut ordem: Vec<&SessaoGuardada> = guardadas.iter().collect();
         ordem.sort_by_key(|g| std::cmp::Reverse(g.ultimo_evento_ms));
         for g in ordem {
             let chave = (false, g.sid.clone());
-            let idade = agora.parede_ms.saturating_sub(g.ultimo_evento_ms);
-            if idade >= VIDA_SESSAO_MS {
+            let ultimo = volta.instante(g.ultimo_evento_laco_ms, g.ultimo_evento_ms);
+            if mono >= ultimo.saturating_add(duracao(VIDA_SESSAO_MS)) {
                 r.expiradas += 1;
                 continue;
             }
             let origem = g.ent.as_deref().unwrap_or("desconhecida");
             let reais = self.sessoes.keys().filter(|(teste, _)| !teste).count();
-            // Uma hora mais adiante que a janela do `ts` dos hooks (6 h) não
-            // é de verdade (o relógio voltou, o arquivo mexido): os prazos
-            // sairiam do relógio do laço.
+            // Uma hora mais adiante que a janela do `ts` dos hooks (6 h), ou
+            // um instante do laço depois da gravação, não é de verdade (o
+            // relógio voltou, o arquivo mexido): os prazos sairiam do relógio
+            // do laço.
             let limite = agora.parede_ms.saturating_add(JANELA_TS_MS);
             let do_futuro = [
                 Some(g.ultimo_evento_ms),
@@ -2518,7 +2552,15 @@ impl Cerebro {
             ]
             .into_iter()
             .flatten()
-            .any(|ms| ms > limite);
+            .any(|ms| ms > limite)
+                || [
+                    g.ultimo_evento_laco_ms,
+                    g.estado_desde_laco_ms,
+                    g.aviso.and_then(|a| a.desde_laco_ms),
+                    g.aviso.and_then(|a| a.vista_laco_ms),
+                ]
+                .into_iter()
+                .any(|x| volta.depois_da_gravacao(x));
             if self.sessoes.contains_key(&chave)
                 || !self.config.origens.iter().any(|o| o == origem)
                 || reais >= MAX_SESSOES
@@ -2532,31 +2574,32 @@ impl Cerebro {
             s.ent.clone_from(&g.ent);
             s.agendamentos = g.agendamentos;
             s.ultimo_parede = g.ultimo_evento_ms;
-            s.ultimo_mono = agora.no_laco(g.ultimo_evento_ms);
+            s.ultimo_mono = ultimo;
             // O prazo do estado, contado de antes: vencido, a sessão volta
             // parada desde a hora em que ele venceu.
+            let desde = volta.instante(g.estado_desde_laco_ms, g.estado_desde_ms);
             let fim_do_estado = match g.estado {
                 EstadoSessao::Pensando | EstadoSessao::Trabalhando | EstadoSessao::Compactando => {
-                    Some(g.ultimo_evento_ms.saturating_add(ATIVA_SEM_EVENTO_MS))
+                    Some(ultimo.saturating_add(duracao(ATIVA_SEM_EVENTO_MS)))
                 }
                 EstadoSessao::Erro | EstadoSessao::Cansado => {
-                    Some(g.estado_desde_ms.saturating_add(ERRO_NA_TELA_MS))
+                    Some(desde.saturating_add(duracao(ERRO_NA_TELA_MS)))
                 }
                 EstadoSessao::Parada | EstadoSessao::Esperando => None,
             };
-            (s.estado, s.estado_desde) = match fim_do_estado {
-                Some(fim) if agora.parede_ms >= fim => (EstadoSessao::Parada, fim),
-                _ => (g.estado, g.estado_desde_ms),
+            (s.estado, s.estado_desde, s.estado_desde_mono) = match fim_do_estado {
+                Some(fim) if mono >= fim => (EstadoSessao::Parada, agora.na_parede(fim), fim),
+                _ => (g.estado, g.estado_desde_ms, desde),
             };
-            s.estado_desde_mono = agora.no_laco(s.estado_desde);
             s.aviso = g.aviso.and_then(|a| {
+                let desde_mono = volta.instante(a.desde_laco_ms, a.desde_ms);
                 let vivo = a.tipo == TipoAviso::Esperando
-                    || agora.parede_ms.saturating_sub(a.desde_ms) < VIDA_AVISO_MS;
+                    || mono < desde_mono.saturating_add(duracao(VIDA_AVISO_MS));
                 vivo.then(|| Aviso {
                     tipo: a.tipo,
                     espera: a.espera.filter(|_| a.tipo == TipoAviso::Esperando),
                     desde_ms: a.desde_ms,
-                    desde_mono: agora.no_laco(a.desde_ms),
+                    desde_mono,
                 })
             });
             if s.aviso.is_some() {
@@ -5103,6 +5146,20 @@ mod testes {
         }
     }
 
+    /// A memória que o cérebro `c` grava em `agora`, com o relógio do laço
+    /// (como o Motor grava).
+    fn gravada(c: &Cerebro, agora: Agora) -> crate::memoria::Memoria {
+        let mut m = crate::memoria::Memoria::nova(agora.parede_ms, None);
+        m.laco_ms = Some(agora.mono_ms);
+        m.sessoes = c.guardar(agora);
+        m
+    }
+
+    /// Restaura `m` no cérebro `c` em `agora`.
+    fn restaurar_em(c: &mut Cerebro, m: &crate::memoria::Memoria, agora: Agora) -> Restauradas {
+        c.restaurar(&m.sessoes, Volta::de(m, agora))
+    }
+
     #[test]
     fn a_memoria_volta_com_o_relogio_do_laco_do_zero_e_a_parede_adiante() {
         // O pet A roda 10 min: s1 termina um turno aos 100 s (o pronto) e
@@ -5140,14 +5197,14 @@ mod testes {
                 Ate(600_000),
             ],
         );
-        let guardadas = a.guardar();
-        assert_eq!(guardadas.len(), 2, "a de teste nunca vai");
+        let guardadas = gravada(&a, em(600_000));
+        assert_eq!(guardadas.sessoes.len(), 2, "a de teste nunca vai");
         // O pet B parte 30 s depois: o relógio do laço do zero, a parede
         // adiante.
         let volta = BASE + 630_000;
         let em = |mono| depois_da_volta(volta, mono);
         let mut b = novo();
-        let r = b.restaurar(&guardadas, em(0));
+        let r = restaurar_em(&mut b, &guardadas, em(0));
         assert_eq!(
             (r.chaves.len(), r.avisos, r.expiradas, r.de_fora),
             (2, 1, 0, 0)
@@ -5167,8 +5224,8 @@ mod testes {
         );
         assert_eq!(
             s1.aviso.map(|a| (a.tipo, a.desde_ms, a.desde_mono)),
-            Some((TipoAviso::Pronto, BASE + 100_000, -530_000)),
-            "o pronto de 530 s antes da partida"
+            Some((TipoAviso::Pronto, BASE + 100_000, -529_200)),
+            "o pronto do fim da acomodação, 529,2 s antes da partida (decisão 0095)"
         );
         let s2r = sessao(&b, "bbbbbbbb");
         assert_eq!(
@@ -5190,7 +5247,7 @@ mod testes {
             (EstadoSessao::Parada, BASE + 800_000)
         );
         // O pronto some 2 h depois de antes, não da partida.
-        let fim_do_pronto = VIDA_AVISO_MS - 530_000;
+        let fim_do_pronto = VIDA_AVISO_MS - 529_200;
         assert_eq!(b.proximo_prazo(), Some(fim_do_pronto));
         b.tique(em(fim_do_pronto - 1));
         assert!(sessao(&b, "aaaaaaaa").aviso.is_some());
@@ -5229,8 +5286,9 @@ mod testes {
             vec![chega(0, prompt("p1")), chega(5_000, stop("p1")), Ate(6_000)],
         );
         let volta = BASE + 60_000;
+        let m = gravada(&a, em(6_000));
         let mut b = novo();
-        b.restaurar(&a.guardar(), depois_da_volta(volta, 0));
+        restaurar_em(&mut b, &m, depois_da_volta(volta, 0));
         assert!(b.resumo().sessoes[0].restaurada);
         // O prompt digitado tira o pronto e a marca; o Stop festeja.
         let mut p2 = prompt("p2");
@@ -5249,7 +5307,7 @@ mod testes {
         );
         // O SessionEnd tira a restaurada, com o tchau de sempre.
         let mut c = novo();
-        c.restaurar(&a.guardar(), depois_da_volta(volta, 0));
+        restaurar_em(&mut c, &m, depois_da_volta(volta, 0));
         let fim_da_sessao = Evento {
             reason: Some("prompt_input_exit".into()),
             ..ev("SessionEnd")
@@ -5270,11 +5328,21 @@ mod testes {
             ent: Some("cli".into()),
             estado: EstadoSessao::Parada,
             estado_desde_ms: ultimo,
+            estado_desde_laco_ms: None,
             ultimo_evento_ms: ultimo,
+            ultimo_evento_laco_ms: None,
             agendamentos: None,
             aviso: None,
             janela: None,
         }
+    }
+
+    /// Uma memória só com as horas de parede (a da decisão 0093), gravada em
+    /// `gravada_ms`.
+    fn so_parede(sessoes: Vec<SessaoGuardada>, gravada_ms: u64) -> crate::memoria::Memoria {
+        let mut m = crate::memoria::Memoria::nova(gravada_ms, None);
+        m.sessoes = sessoes;
+        m
     }
 
     #[test]
@@ -5286,8 +5354,10 @@ mod testes {
             tipo,
             espera: (tipo == TipoAviso::Esperando).then_some(TipoEspera::Plano),
             desde_ms: desde,
+            desde_laco_ms: None,
             nivel: None,
             vista_ms: None,
+            vista_laco_ms: None,
         };
         let mut lista = vec![
             guardada("velha", antes(13 * H)),
@@ -5347,7 +5417,7 @@ mod testes {
         let mut viva = prompt("p1");
         viva.sid = Some("ja-acompanhada".into());
         c.receber(&viva, volta, depois_da_volta(volta, 0));
-        let r = c.restaurar(&lista, depois_da_volta(volta, 0));
+        let r = restaurar_em(&mut c, &so_parede(lista, volta), depois_da_volta(volta, 0));
         assert_eq!((r.expiradas, r.de_fora), (1, 6));
         let estado = |sid: &str| {
             c.resumo()
@@ -5418,9 +5488,92 @@ mod testes {
             .map(|i| guardada(&format!("s{i}"), antes(1_000 + i)))
             .collect();
         let mut c = novo();
-        let r = c.restaurar(&lista, depois_da_volta(volta, 0));
+        let r = restaurar_em(&mut c, &so_parede(lista, volta), depois_da_volta(volta, 0));
         assert_eq!((r.chaves.len(), r.de_fora), (MAX_SESSOES, 2));
         assert!(!c.tem_sessao(&(false, format!("s{}", MAX_SESSOES + 1))));
         assert!(c.tem_sessao(&(false, "s0".into())));
+    }
+
+    #[test]
+    fn a_maquina_suspensa_nao_conta_na_volta_como_no_pet_que_nao_reiniciou() {
+        // O pet A: um turno com o pronto aos 100 s; a máquina dorme mais que a
+        // vida da sessão (o relógio do laço para; a parede, não) e acorda; o
+        // pet grava 1 h de relógio do laço depois do Stop (decisão 0095).
+        const H: u64 = 60 * 60 * 1000;
+        let mut a = novo();
+        rodar(
+            &mut a,
+            vec![
+                chega(50_000, prompt("p1")),
+                chega(60_000, ferramenta("p1", "Edit", Some("aaaaaaaaaaaa"), 40)),
+                chega(100_000, stop("p1")),
+                Ate(101_000),
+            ],
+        );
+        let acordado = Agora {
+            parede_ms: BASE + 100_000 + H + VIDA_SESSAO_MS + H,
+            mono_ms: 100_000 + H,
+        };
+        // O pet que não reinicia conta só o tempo acordado: a sessão e o
+        // pronto ficam.
+        a.tique(acordado);
+        assert!(a.tem_sessao(&(false, SID.into())));
+        assert_eq!(aviso_de(&a), Some(TipoAviso::Pronto));
+        let m = gravada(&a, acordado);
+        // O pet B parte 20 s depois, e devolve o mesmo.
+        let volta = acordado.parede_ms + 20_000;
+        let mut b = novo();
+        let r = restaurar_em(&mut b, &m, depois_da_volta(volta, 0));
+        assert_eq!((r.chaves.len(), r.expiradas), (1, 0));
+        assert_eq!(aviso_de(&b), Some(TipoAviso::Pronto));
+        // O pronto some 2 h (acordado) depois do fim da acomodação de antes,
+        // mais os 20 s da parada.
+        assert_eq!(b.proximo_prazo(), Some(VIDA_AVISO_MS - (H - 800) - 20_000));
+        // Pela parede (o arquivo da decisão 0093), a sessão teria morrido.
+        let mut so_parede = m.clone();
+        so_parede.laco_ms = None;
+        let mut c = novo();
+        let r = restaurar_em(&mut c, &so_parede, depois_da_volta(volta, 0));
+        assert_eq!((r.chaves.len(), r.expiradas), (0, 1));
+        // Um instante do laço depois da gravação não é de verdade (o arquivo
+        // mexido): a sessão fica de fora.
+        let mut mexido = m.clone();
+        mexido.sessoes[0].ultimo_evento_laco_ms = Some(instante(acordado.mono_ms) + 1);
+        let mut d = novo();
+        let r = restaurar_em(&mut d, &mexido, depois_da_volta(volta, 0));
+        assert_eq!((r.chaves.len(), r.de_fora), (0, 1));
+    }
+
+    #[test]
+    fn a_parada_na_acomodacao_do_stop_guarda_o_pronto_que_ele_trouxe() {
+        // O Stop chegou e a acomodação de 0,8 s ainda corre quando o pet
+        // para: o pronto vai na memória (o turno aberto não volta, decisão
+        // 0095). O de um turno de máquina, não.
+        for (prompt_do_turno, pronto) in [(prompt("p1"), true), (aviso_de_tarefa("p1"), false)] {
+            let mut a = novo();
+            rodar(
+                &mut a,
+                vec![
+                    chega(1_000, prompt_do_turno),
+                    chega(5_000, ferramenta("p1", "Edit", Some("aaaaaaaaaaaa"), 40)),
+                    chega(10_000, stop("p1")),
+                    Ate(10_500),
+                ],
+            );
+            assert_eq!(aviso_de(&a), None, "na acomodação, ainda sem o pronto");
+            let m = gravada(&a, em(10_500));
+            let aviso = m.sessoes[0].aviso;
+            assert_eq!(
+                aviso.map(|a| (a.tipo, a.desde_ms, a.desde_laco_ms)),
+                pronto.then_some((TipoAviso::Pronto, BASE + 10_000, Some(10_500))),
+            );
+            let mut b = novo();
+            restaurar_em(&mut b, &m, depois_da_volta(BASE + 11_500, 0));
+            assert_eq!(aviso_de(&b), pronto.then_some(TipoAviso::Pronto));
+            // A cópia não mexeu no cérebro de antes: a festa e o pronto saem
+            // na hora deles.
+            assert_eq!(a.tique(em(10_800)).len(), 1);
+            assert_eq!(aviso_de(&a), pronto.then_some(TipoAviso::Pronto));
+        }
     }
 }

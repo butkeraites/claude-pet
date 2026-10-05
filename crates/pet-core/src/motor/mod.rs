@@ -57,7 +57,7 @@ use crate::cerebro::{
 use crate::confete::{self, Chuva, Grade};
 use crate::evento::Evento;
 use crate::geometria::{Ret, Tamanho};
-use crate::memoria::{Lida, Memoria, Recusa};
+use crate::memoria::{Lida, Memoria, Recusa, Sossego, Volta};
 use crate::plataforma::{
     Alca, Botao, Cursor, Desenho, ErroFoco, EventoDesktop, EventoOverlay, EventoPonteiro, Fase,
     Monitor, Overlay, Passo, Punho, passo_de_visibilidade,
@@ -318,6 +318,9 @@ struct Chamando {
     /// decisão 0090): daí em diante, nada passa da L1. De antes da partida
     /// num aviso restaurado (decisão 0093).
     vista_ms: Option<cerebro::Instante>,
+    /// A mesma hora, na parede, anotada quando ele viu (a memória das
+    /// sessões a grava sem refazer a conta a cada batimento; decisão 0095).
+    vista_parede: Option<u64>,
 }
 
 /// O sprite como deveria estar na tela: o RGBA exato, em pixels do monitor,
@@ -348,6 +351,9 @@ pub struct Restauracao {
     /// As que ficaram de fora: expiradas, de outra origem, repetidas, além
     /// do teto ou com um campo ruim no arquivo.
     pub de_fora: usize,
+    /// A memória era velha (decisão 0095): as esperas voltaram vistas e as
+    /// janelas sem o endereço.
+    pub velha: bool,
 }
 
 /// O pet inteiro, sem sistema. Os tempos são milissegundos do relógio
@@ -445,6 +451,11 @@ pub struct Motor {
     volta_por_mostrar: Option<u64>,
     /// O confete da festa na tela, se há um (decisão 0085).
     efeito: Option<EfeitoFesta>,
+    /// As esperas que voltaram de uma memória velha (decisão 0095), com o
+    /// aviso (a hora de parede em que abriu) e a gravação (no relógio do laço
+    /// e na parede): dadas como vistas na gravação, nunca passam da L1,
+    /// também quando a vez delas chega depois.
+    esperas_velhas: BTreeMap<janelas::Chave, (u64, cerebro::Instante, u64)>,
 }
 
 impl Motor {
@@ -490,6 +501,7 @@ impl Motor {
             voo_quadros: 0,
             volta_por_mostrar: None,
             efeito: None,
+            esperas_velhas: BTreeMap::new(),
         }
     }
 
@@ -1057,6 +1069,7 @@ impl Motor {
             return;
         };
         c.vista_ms = Some(cerebro::instante(agora_ms));
+        c.vista_parede = Some(agora_ms + self.deslocamento_parede);
         let (sid8, nivel) = (c.sid8.clone(), c.escalada.nivel);
         info!("o aviso de espera da sessão {sid8} foi visto no terminal dela");
         self.anotar(
@@ -1086,6 +1099,12 @@ impl Motor {
         let mut reacoes = Vec::new();
         let mut chamados = BTreeMap::new();
         let mut novos = Vec::new();
+        // Uma espera da memória velha que já saiu não volta mais.
+        self.esperas_velhas.retain(|chave, (desde, _, _)| {
+            esperando
+                .iter()
+                .any(|p| p.chave == *chave && p.aviso.desde_ms == *desde)
+        });
         for p in &esperando {
             let antes = self.chamados.get(&p.chave).copied();
             chamados.insert(p.chave.clone(), (p.aviso.desde_ms, p.aviso.espera));
@@ -1140,6 +1159,10 @@ impl Motor {
                         motivo: if novo { "aviso" } else { "vez" },
                     },
                 );
+                let velha = self
+                    .esperas_velhas
+                    .get(&p.chave)
+                    .filter(|(desde, _, _)| *desde == p.aviso.desde_ms);
                 self.chamando = Some(Chamando {
                     chave: p.chave.clone(),
                     sid8: p.sid8.clone(),
@@ -1147,7 +1170,8 @@ impl Motor {
                     espera: p.aviso.espera,
                     desde_ms: p.aviso.desde_ms,
                     escalada: Escalada::nova(p.aviso.desde_mono),
-                    vista_ms: None,
+                    vista_ms: velha.map(|(_, laco, _)| *laco),
+                    vista_parede: velha.map(|(_, _, parede)| *parede),
                 });
             }
         }
@@ -1437,10 +1461,20 @@ impl Motor {
     /// A memória das sessões de agora, para o daemon gravar em `/state`: as
     /// sessões reais do cérebro, com a janela de cada uma (o endereço e a
     /// instância do compositor) e, no aviso de espera que o pet chama, o
-    /// nível da escalada e quando o Renan viu o diálogo. Só metadados.
+    /// nível da escalada e quando o Renan viu o diálogo; o relógio do laço da
+    /// gravação e o sossego (o "não perturbe", a soneca e a discrição; decisão
+    /// 0095). Só metadados.
     pub fn memoria(&self, agora: Agora, boot: Option<String>) -> Memoria {
         let mut memoria = Memoria::nova(agora.parede_ms, boot);
-        memoria.sessoes = self.cerebro.guardar();
+        memoria.laco_ms = Some(agora.mono_ms);
+        let (discricao, sinal) = self.discricao_guardada();
+        memoria.sossego = Sossego {
+            nao_perturbe: self.nao_perturbe,
+            soneca_ate_laco_ms: self.soneca(agora.mono_ms).map(cerebro::instante),
+            discricao,
+            discricao_sinal_laco_ms: sinal,
+        };
+        memoria.sessoes = self.cerebro.guardar(agora);
         for g in &mut memoria.sessoes {
             let chave = (false, g.sid.clone());
             g.janela = self.identidades.guardada(&chave);
@@ -1449,7 +1483,8 @@ impl Motor {
                 && c.desde_ms == aviso.desde_ms
             {
                 aviso.nivel = Some(c.escalada.nivel);
-                aviso.vista_ms = c.vista_ms.map(|v| agora.na_parede(v));
+                aviso.vista_ms = c.vista_parede;
+                aviso.vista_laco_ms = c.vista_ms;
             }
         }
         memoria
@@ -1457,12 +1492,17 @@ impl Motor {
 
     /// Restaura a memória das sessões na partida do pet (decisão 0093), em
     /// `agora` (o relógio do laço recomeçou do zero; a parede andou), se ela
-    /// é desta partida da máquina (o boot id `boot`): as sessões e os avisos
-    /// que ainda valem ([`Cerebro::restaurar`]) e a janela de cada uma. Tudo
-    /// quieto: nenhuma reação, festa, balão nem chamada de novo; a entrada no
-    /// erro e o aviso de espera contam como já vistos, e a escalada do mais
-    /// velho segue do tempo que passou ([`Escalada::retomada`]). A tela
-    /// anuncia a base e os selos de agora. Nada de turno nem corrente.
+    /// é desta partida da máquina (o boot id `boot`): o sossego de antes (o
+    /// "não perturbe", a soneca e a discrição que ainda valem; decisão 0095),
+    /// as sessões e os avisos que ainda valem ([`Cerebro::restaurar`]) e a
+    /// janela de cada uma. Tudo quieto: nenhuma reação, festa, balão nem
+    /// chamada de novo; a entrada no erro e o aviso de espera contam como já
+    /// vistos, e a escalada do mais velho segue do tempo que passou
+    /// ([`Escalada::retomada`]). A memória velha ([`Volta::velha`], decisão
+    /// 0095) dá as esperas como vistas na gravação (nada passa da L1) e traz as
+    /// janelas sem o endereço: a resposta, o Stop, o `idle_prompt` e uma janela
+    /// fechada podem ter se perdido na parada. A tela anuncia a base e os
+    /// selos de agora. Nada de turno nem corrente.
     pub fn restaurar(
         &mut self,
         lida: &Lida,
@@ -1474,7 +1514,11 @@ impl Motor {
             self.recusar_memoria(recusa, agora.mono_ms);
             return Err(recusa);
         }
-        let r = self.cerebro.restaurar(&lida.memoria.sessoes, agora);
+        let volta = Volta::de(&lida.memoria, agora);
+        let velha = volta.velha();
+        // O sossego antes de a escalada seguir: ela olha o teto da L1.
+        let sossego = self.restaurar_sossego(&lida.memoria.sossego, volta);
+        let r = self.cerebro.restaurar(&lida.memoria.sessoes, volta);
         let guardada = |chave: &janelas::Chave| {
             lida.memoria
                 .sessoes
@@ -1484,7 +1528,7 @@ impl Motor {
         let mut janelas = 0;
         for chave in &r.chaves {
             if let Some(j) = guardada(chave).and_then(|g| g.janela.as_ref()) {
-                self.identidades.restaurar(chave.clone(), j);
+                self.identidades.restaurar(chave.clone(), j, velha);
                 if self
                     .identidades
                     .de(chave)
@@ -1505,6 +1549,12 @@ impl Motor {
             if let Some(a) = s.aviso.filter(|a| a.tipo == TipoAviso::Esperando) {
                 self.chamados
                     .insert(s.chave.clone(), (a.desde_ms, a.espera));
+                if velha {
+                    self.esperas_velhas.insert(
+                        s.chave.clone(),
+                        (a.desde_ms, volta.gravacao(), volta.gravada_ms),
+                    );
+                }
             }
         }
         // A escalada do aviso de espera mais velho segue do tempo que passou.
@@ -1522,6 +1572,15 @@ impl Motor {
                 antes.and_then(|a| a.nivel),
                 agora.mono_ms,
             );
+            // O diálogo que o Renan já tinha visto continua visto; numa
+            // memória velha, a espera conta como vista na gravação.
+            let vista = antes
+                .and_then(|a| a.vista_ms.map(|w| (volta.instante(a.vista_laco_ms, w), w)))
+                .or_else(|| {
+                    self.esperas_velhas
+                        .get(&p.chave)
+                        .map(|(_, laco, parede)| (*laco, *parede))
+                });
             self.anotar(
                 agora.mono_ms,
                 intencoes::Tipo::Escalada {
@@ -1538,7 +1597,8 @@ impl Motor {
                 espera: p.aviso.espera,
                 desde_ms: p.aviso.desde_ms,
                 escalada,
-                vista_ms: antes.and_then(|a| a.vista_ms).map(|v| agora.no_laco(v)),
+                vista_ms: vista.map(|(laco, _)| laco),
+                vista_parede: vista.map(|(_, parede)| parede),
             });
         }
         let restauracao = Restauracao {
@@ -1546,6 +1606,7 @@ impl Motor {
             avisos: r.avisos,
             janelas,
             de_fora: r.expiradas + r.de_fora + lida.descartadas,
+            velha,
         };
         self.anotar(
             agora.mono_ms,
@@ -1553,6 +1614,8 @@ impl Motor {
                 sessoes: u32::try_from(restauracao.sessoes).unwrap_or(u32::MAX),
                 avisos: u32::try_from(restauracao.avisos).unwrap_or(u32::MAX),
                 de_fora: u32::try_from(restauracao.de_fora).unwrap_or(u32::MAX),
+                velha,
+                sossego,
                 motivo: None,
             },
         );
@@ -1564,6 +1627,37 @@ impl Motor {
         Ok(restauracao)
     }
 
+    /// O sossego de antes da partida (decisão 0095): o "não perturbe" do
+    /// último evento (vale até o próximo, como no pet que não reinicia), a
+    /// soneca e a discrição do compartilhamento de tela que ainda valem, pelo
+    /// tempo acordado mais a parada. Devolve o que voltou.
+    fn restaurar_sossego(&mut self, s: &Sossego, volta: Volta) -> Vec<&'static str> {
+        let agora_ms = volta.agora.mono_ms;
+        let mut voltou = Vec::new();
+        if s.nao_perturbe {
+            self.nao_perturbe = true;
+            voltou.push("nao_perturbe");
+        }
+        if let Some(ate) = s.soneca_ate_laco_ms {
+            let ate = cerebro::depois(volta.instante(Some(ate), volta.gravada_ms), 0);
+            if ate > agora_ms {
+                self.soneca_ate = Some(ate);
+                voltou.push("soneca");
+            }
+        }
+        if s.discricao {
+            // Sem o último sinal, ele ainda estava aceso na gravação.
+            let sinal = match s.discricao_sinal_laco_ms {
+                Some(x) => volta.instante(Some(x), volta.gravada_ms),
+                None => volta.gravacao(),
+            };
+            if self.restaurar_discricao(sinal, agora_ms) {
+                voltou.push("discricao");
+            }
+        }
+        voltou
+    }
+
     /// A memória das sessões não pôde voltar (o arquivo ruim, de outra
     /// versão, outra partida da máquina): fica nas intenções.
     pub fn recusar_memoria(&mut self, recusa: Recusa, agora_ms: u64) {
@@ -1573,6 +1667,8 @@ impl Motor {
                 sessoes: 0,
                 avisos: 0,
                 de_fora: 0,
+                velha: false,
+                sossego: Vec::new(),
                 motivo: Some(recusa.motivo()),
             },
         );

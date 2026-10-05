@@ -1,0 +1,15 @@
+{"cenario": "reinicio-com-nao-perturbe", "descricao": "uma pergunta com o Renan longe e o não perturbe do Omarchy ligado (o dnd dos eventos): só a L1; o pet reinicia e o não perturbe volta com a memória (vale até o próximo evento, como no pet que não reinicia): nem rajada, nem voo, nem pulso; quando um evento chega sem o dnd, a escalada segue do tempo que passou (decisão 0095)", "padrao": {"sid": "s1", "ent": "cli", "proj": "api", "dnd": true}}
+{"t": 0, "desktop": {"ligado": true}}
+{"t": 0, "desktop": {"ocioso": false}}
+{"t": 0, "desktop": {"janela_ativa": "a0a0a0"}}
+{"t": 1000, "evento": {"e": "UserPromptSubmit", "turno": "p1", "orig": "comum"}}
+{"t": 5000, "desktop": {"janela_ativa": "c0c0c0"}}
+{"t": 6000, "desktop": {"ocioso": true}}
+{"t": 10000, "evento": {"e": "PermissionRequest", "turno": "p1", "tool": "AskUserQuestion"}}
+{"t": 60000, "reinicio": {"parado_ms": 5000}}
+{"t": 65000, "desktop": {"ligado": true}}
+{"t": 65000, "desktop": {"ocioso": true}}
+{"t": 65000, "desktop": {"janela_ativa": "c0c0c0"}}
+# O Renan desliga o não perturbe; o pet só sabe no próximo evento, de outra sessão.
+{"t": 400000, "evento": {"e": "SessionStart", "sid": "s2", "proj": "web", "src": "startup", "dnd": false}}
+{"t": 520000, "fim": true}

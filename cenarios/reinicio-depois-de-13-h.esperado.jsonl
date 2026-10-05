@@ -3,7 +3,7 @@
 {"t":1801000,"i":"base","estado":"sleep","prioridade":"dormindo","profundo":true}
 {"t":7201000,"i":"reacao","nome":"wake","motivo":"acordou"}
 {"t":7201000,"i":"base","estado":"idle","prioridade":"parado"}
-{"t":46810000,"i":"restauracao","sessoes":1,"de_fora":1}
+{"t":46810000,"i":"restauracao","sessoes":1,"de_fora":1,"velha":true}
 {"t":46820000,"i":"reacao","nome":"giggle","motivo":"clique"}
 {"t":46820000,"i":"balao","linhas":["api: parado (11 h)"],"motivo":"lista"}
 {"t":46820000,"i":"clique","resultado":"lista"}

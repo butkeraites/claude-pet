@@ -4166,3 +4166,109 @@ restaurava sessões com prazos fora do relógio do laço.
 passou, e o `idle_prompt` é a prova, mandada pela própria sessão, de que não
 há diálogo na tela: o primeiro evento depois de um turno perdido. E nada lido
 do disco pode pôr um prazo fora do relógio do laço.
+
+## 0095 — Segunda revisão da memória das sessões: o sossego volta, a memória velha volta quieta e o tempo é o acordado (2026-10-05)
+
+**Problema:** três revisões adversariais da memória (decisões 0093 e 0094),
+conferidas antes de mexer:
+- **O sossego se perdia.** O "não perturbe", a soneca e a discrição da tela
+  compartilhada seguram a escalada na L1 (decisões 0075, 0081 e 0091), mas
+  moravam só na memória do processo. Depois de um reinício, a espera que
+  voltava subia aos voos da L3 e às rajadas da L4 com o pulso por cima dos
+  três: reproduzido no `bichinho simular` (o "não perturbe" em todo evento, a
+  soneca aos 12 s, a tela compartilhada até 16 s; o pet parando aos 60 s).
+- **A memória de qualquer idade valia.** O `gravada_ms` nunca era lido. Uma
+  memória velha (a produção de volta à `main` e de novo à branch, um `bin/pet
+  parar` e um `subir` horas depois, gravações falhando por muito tempo)
+  trazia a espera de um diálogo que acabou na parada, e o `idle_prompt` que a
+  tiraria (decisão 0094) também se perde quando a parada passa de uns 60 s:
+  10 min fora deram 25 min de L4 por uma pergunta já respondida (reproduzido).
+  O endereço de uma janela que fechou na parada pode ser o de outra (decisão
+  0093: focar a janela errada é pior que o balão).
+- **A volta contava a parede; o pet de pé conta o tempo acordado.** O relógio
+  do laço (o `Instant` do Linux) não anda com a máquina suspensa, e as vidas
+  do pet que não reinicia (a da sessão, a de 2 h do pronto) contam só o tempo
+  acordado. A volta contava pela parede: depois de uma noite suspensa, a
+  primeira atualização tirava as sessões que o pet de pé ainda listava, o
+  sintoma relatado pelo Renan (nesta máquina, 14,3 h suspensas desde o boot).
+- **Menores:** o pronto de um Stop nos 0,8 s da acomodação se perdia numa
+  parada ali; a hora em que o Renan viu o diálogo era refeita pela conta
+  parede menos relógio do laço a cada gravação (oscila 1 ms e pula com uma
+  suspensão), e o arquivo era regravado sem mudança; a gravação que falhava
+  deixava o temporário; a leitura que falhava não ficava nas intenções; e
+  nenhum teste do daemon pegava a descoberta sem o compositor (`laco.rs`) nem
+  a gravação da saída (o batimento podia gravar antes dela).
+
+**Escolha:**
+- **O sossego volta** (`memoria::Sossego`, no arquivo só quando há): o "não
+  perturbe" do último evento (vale até o próximo evento, como no pet de pé),
+  o fim da soneca e a discrição (com o último sinal, ou o sinal ainda aceso
+  na gravação), postos antes de a escalada seguir; a soneca e a discrição só
+  se ainda valem, contadas de antes. A intenção `restauracao` diz o que
+  voltou (`sossego`), e a discrição desliga 5 min depois do último sinal de
+  antes, com a intenção de sempre.
+- **A memória velha** é a gravada há mais de 60 s pela parede
+  (`MEMORIA_VELHA_MS`, o tempo do `idle_prompt`), ou adiante disso (o relógio
+  voltou). As sessões voltam todas (o Renan quer ver as abertas), mas as
+  esperas voltam dadas como vistas na hora da gravação: nada passa da L1, e a
+  pose de espera sai 2 min depois dela, como a de um diálogo visto (numa
+  parada longa, já saiu); o selo "!" e o clique ficam, também para a espera
+  que ganha a vez depois. As janelas voltam sem o endereço (os ids de terminal
+  ficam; o próximo prompt digitado casa de novo). A intenção `restauracao`
+  leva `velha`, e o log diz. Para a parada medir até quando o pet sabia: a
+  saída grava sempre (o log diz "gravada(s) na saída"), e o batimento regrava
+  a memória que não mudou a cada 30 s (`REFRESCO_MEMORIA_MS`, só com algo a
+  lembrar), então a parada de um crash fica abaixo dos 60 s. Isto corrige o
+  limite escrito na decisão 0094: a espera respondida com o pet fora só segue
+  escalando até o `idle_prompt` numa parada curta; numa longa, volta quieta.
+- **O tempo acordado:** cada instante vai também no relógio do laço de quem
+  gravou (`ultimo_evento_laco_ms`, `estado_desde_laco_ms`, `desde_laco_ms` e
+  `vista_laco_ms` do aviso, com o `laco_ms` da gravação), e a volta conta o
+  tempo acordado até a gravação mais a parada pela parede (`memoria::Volta`).
+  Um prazo restaurado é o do pet que não reiniciou, até ao milissegundo (o
+  pronto conta do fim da acomodação, como no pet de pé). As horas de parede
+  ficam para o `/v1/estado` e o balão; um arquivo sem o relógio do laço (o da
+  decisão 0093) conta pela parede. Um instante do laço depois da gravação
+  deixa a sessão de fora, como as horas do futuro (decisão 0094). Tudo segue
+  na versão 1 do arquivo: os campos novos são opcionais.
+- **O pronto da acomodação** vai na memória: o mesmo fechamento que o tique
+  faria no fim dela, numa cópia da sessão (nada muda no cérebro).
+- **A hora em que o Renan viu o diálogo** vai como foi anotada, na parede e
+  no relógio do laço: a memória que não mudou grava igual.
+- **A gravação que falha** tira o temporário e deixa o arquivo de antes; o
+  aviso sai uma vez, e o batimento seguinte tenta de novo. A leitura que
+  falha fica nas intenções (`erro_de_leitura`).
+- **Testes:** no formato, o sossego e o relógio do laço de ida e volta, os
+  ruins valendo como nenhum, e a `Volta` (o tempo acordado mais a parada, a
+  parede sem o relógio do laço, a memória velha dos dois lados); no cérebro,
+  a máquina suspensa por mais que a vida da sessão (o pet de pé e a volta
+  igual; pela parede, a sessão teria morrido), o instante depois da gravação
+  e o pronto da acomodação (o de um turno de máquina, não); no Motor, o
+  sossego (cada um segura a escalada, e sem ele ela sobe), a memória velha
+  (as duas esperas vistas, as janelas sem endereço, e uma espera nova de
+  agora escalando) e a memória que grava igual com a parede andando
+  diferente; os dourados `reinicio-com-nao-perturbe`, `reinicio-na-soneca`,
+  `reinicio-compartilhando`, `reinicio-depois-de-uma-pausa` e
+  `reinicio-na-acomodacao` (o `reinicio-depois-de-13-h` ganha o `velha`, e
+  nenhum outro dourado mudou); no daemon, o refresco e a saída, a gravação
+  que falha, a leitura que falha e, no binário de verdade com o Hyprland de
+  mentira, a janela de outra instância que sai na descoberta e a gravação da
+  saída pelo log. 18 mutações reprovaram (cada parte do sossego, a memória
+  nunca velha, a espera velha que escala na volta ou na vez, a janela velha
+  que fica, a volta pela parede, o pronto da acomodação, a vista pela conta
+  da parede, o instante depois da gravação, a saída que só grava com
+  mudança, o refresco, o temporário que fica, a leitura sem intenção, a
+  descoberta sem o compositor e a saída sem gravar).
+- **Limites:** numa memória velha, a espera volta vista mesmo que o Renan
+  não tenha respondido (o pet não tem como saber): fica o selo e o clique; o
+  "não perturbe" que volta vale até o próximo evento, como no pet de pé; uma
+  suspensão da máquina com o pet fora conta como parada; o intervalo do T3
+  continua sem memória (decisão 0093).
+
+**Por quê:** a volta não pode fazer o que o pet de pé não faria: escalar por
+cima do "não perturbe", da soneca ou da tela compartilhada, chamar por um
+diálogo que pode ter acabado numa parada longa, focar um endereço que pode
+ser de outra janela, nem esquecer as sessões que uma suspensão não esqueceria.
+Medir a idade da memória pela saída e pelo refresco deixa a parada curta de
+uma atualização igual a antes, e quieta só o que a parada longa pode ter
+mudado.

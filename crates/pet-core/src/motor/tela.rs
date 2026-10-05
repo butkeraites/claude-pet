@@ -244,8 +244,9 @@ pub(super) struct Tela {
     /// O tempo de sinal somado no episódio (os trechos que já fecharam).
     somado_ms: u64,
     /// O último instante com sinal, com ele desligado agora: o episódio
-    /// acaba [`JUNTA_MS`] (ou, com a discrição, [`SEGURA_MS`]) depois.
-    ultimo_sinal: Option<u64>,
+    /// acaba [`JUNTA_MS`] (ou, com a discrição, [`SEGURA_MS`]) depois. De
+    /// antes da partida numa discrição que a memória trouxe (decisão 0095).
+    ultimo_sinal: Option<cerebro::Instante>,
     /// A discrição do compartilhamento de tela está ligada.
     pub(super) discreto: bool,
     /// A prioridade de cada sessão na última olhada: na acomodação do Stop
@@ -802,7 +803,7 @@ impl Motor {
                 .tela
                 .somado_ms
                 .saturating_add(agora_ms.saturating_sub(desde));
-            self.tela.ultimo_sinal = Some(agora_ms);
+            self.tela.ultimo_sinal = Some(cerebro::instante(agora_ms));
         }
         // Um trecho que fechou já passando dos 2 s liga agora.
         self.vencer_discricao(agora_ms);
@@ -828,7 +829,36 @@ impl Motor {
         } else {
             JUNTA_MS
         };
-        self.tela.ultimo_sinal.map(|u| u + segura)
+        self.tela.ultimo_sinal.map(|u| cerebro::depois(u, segura))
+    }
+
+    /// A discrição para a memória das sessões (decisão 0095): se está ligada
+    /// e o último sinal, com o sinal apagado (aceso, a gravação conta como o
+    /// último).
+    pub(super) fn discricao_guardada(&self) -> (bool, Option<cerebro::Instante>) {
+        let apagado = self.tela.sinal_desde.is_none();
+        (
+            self.tela.discreto,
+            self.tela
+                .ultimo_sinal
+                .filter(|_| self.tela.discreto && apagado),
+        )
+    }
+
+    /// A discrição que a memória das sessões trouxe (decisão 0095), com o
+    /// último sinal em `sinal` (relógio do laço): liga se ainda segura em
+    /// `agora_ms`, até [`SEGURA_MS`] depois do sinal de antes, quieta (nem o
+    /// balão, que não há, nem a intenção da discrição que liga). Devolve se
+    /// ligou.
+    pub(super) fn restaurar_discricao(&mut self, sinal: cerebro::Instante, agora_ms: u64) -> bool {
+        if agora_ms >= cerebro::depois(sinal, SEGURA_MS) {
+            return false;
+        }
+        self.tela.discreto = true;
+        self.tela.sinal_desde = None;
+        self.tela.somado_ms = 0;
+        self.tela.ultimo_sinal = Some(sinal);
+        true
     }
 
     /// A discrição liga (um balão na tela sai: pode ter nome) ou o episódio

@@ -170,15 +170,22 @@ pub enum Tipo {
     },
     /// A memória das sessões na partida do pet (decisão 0093): quantas
     /// sessões e avisos voltaram e quantas ficaram de fora (expiradas, de
-    /// outra origem, com um campo ruim), ou o `motivo` de nada voltar
-    /// (`maquina_reiniciou`, `sem_boot`, `arquivo_ruim`, `versao`, `grande`).
-    /// Nada toca: nem reação, nem festa, nem balão.
+    /// outra origem, com um campo ruim), se a memória era velha (`velha`,
+    /// gravada há mais de 60 s: as esperas voltam vistas e as janelas sem o
+    /// endereço), o sossego que voltou (`nao_perturbe`, `soneca`,
+    /// `discricao`; decisão 0095), ou o `motivo` de nada voltar
+    /// (`maquina_reiniciou`, `sem_boot`, `arquivo_ruim`, `versao`, `grande`,
+    /// `erro_de_leitura`). Nada toca: nem reação, nem festa, nem balão.
     Restauracao {
         sessoes: u32,
         #[serde(skip_serializing_if = "eh_zero")]
         avisos: u32,
         #[serde(skip_serializing_if = "eh_zero")]
         de_fora: u32,
+        #[serde(skip_serializing_if = "eh_falso")]
+        velha: bool,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        sossego: Vec<&'static str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         motivo: Option<&'static str>,
     },

@@ -887,7 +887,7 @@ fn sem_personagem_a_linha_do_tempo_e_a_mesma() {
 // --- a memória das sessões (decisão 0093) -----------------------------------
 
 /// Os cenários de reinício e o instante em que o pet volta em cada um.
-const REINICIOS: [(&str, u64); 9] = [
+const REINICIOS: [(&str, u64); 14] = [
     ("reinicio-sessao-parada", 60_000),
     ("reinicio-no-meio-do-turno", 75_000),
     ("reinicio-com-pergunta", 120_000),
@@ -897,6 +897,11 @@ const REINICIOS: [(&str, u64); 9] = [
     ("reinicio-da-maquina", 150_000),
     ("reinicio-com-outro-compositor", 50_000),
     ("reinicio-com-arquivo-corrompido", 25_000),
+    ("reinicio-com-nao-perturbe", 65_000),
+    ("reinicio-na-soneca", 65_000),
+    ("reinicio-compartilhando", 81_000),
+    ("reinicio-depois-de-uma-pausa", 620_000),
+    ("reinicio-na-acomodacao", 11_500),
 ];
 
 /// O que tocou entre `de` e `ate`: uma reação, uma rajada, um voo, uma festa
@@ -929,6 +934,7 @@ fn restauracao(linha: &[Intencao]) -> (u32, u32, u32, Option<&'static str>) {
             avisos,
             de_fora,
             motivo,
+            ..
         } => (sessoes, avisos, de_fora, motivo),
         _ => unreachable!(),
     }
@@ -1199,4 +1205,124 @@ fn com_o_pet_fora_do_ar_so_um_evento_se_perde() {
     .unwrap();
     let e = rodar(&c, None).unwrap_err();
     assert!(e.contains("fora do ar"), "{e}");
+}
+
+// --- a revisão da memória (decisão 0095) --------------------------------------
+
+/// O que a restauração anotou além das contas: (velha, sossego).
+fn restauracao_extra(linha: &[Intencao]) -> (bool, Vec<&'static str>) {
+    match &so(linha, "restauracao")[0].tipo {
+        Tipo::Restauracao { velha, sossego, .. } => (*velha, sossego.clone()),
+        _ => unreachable!(),
+    }
+}
+
+/// As rajadas, os voos e o pulso que liga entre `de` e `ate`.
+fn barulho_entre(linha: &[Intencao], de: u64, ate: u64) -> Vec<&Intencao> {
+    linha
+        .iter()
+        .filter(|x| {
+            (de..ate).contains(&x.t_ms)
+                && matches!(
+                    x.tipo,
+                    Tipo::Rajada { .. } | Tipo::Voo { .. } | Tipo::Pulso { ligado: true, .. }
+                )
+        })
+        .collect()
+}
+
+#[test]
+fn o_sossego_volta_com_a_memoria_e_segura_a_escalada_ate_acabar() {
+    // O "não perturbe" até o próximo evento (aos 400 s, sem o dnd), a soneca
+    // até 30 min depois do clique (1 812 s) e a discrição até 5 min depois do
+    // último sinal (316 s): nada acima da L1 até lá; depois, a L4 do aviso de
+    // antes, na hora (decisão 0095).
+    for (nome, sossego, fim) in [
+        ("reinicio-com-nao-perturbe", "nao_perturbe", 400_000),
+        ("reinicio-na-soneca", "soneca", 1_812_000),
+        ("reinicio-compartilhando", "discricao", 316_000),
+    ] {
+        let linha = linha_do_tempo(nome);
+        assert_eq!(restauracao(&linha), (1, 1, 0, None), "{nome}");
+        assert_eq!(restauracao_extra(&linha), (false, vec![sossego]), "{nome}");
+        let antes = barulho_entre(&linha, 0, fim);
+        assert!(antes.is_empty(), "{nome}: {antes:?}");
+        assert!(
+            niveis(&linha).contains(&(fim, 4)),
+            "{nome}: {:?}",
+            niveis(&linha)
+        );
+        assert!(!barulho_entre(&linha, fim, u64::MAX).is_empty(), "{nome}");
+    }
+    // Na discrição, a festa de outra sessão sai sem o nome do projeto.
+    let linha = linha_do_tempo("reinicio-compartilhando");
+    assert!(baloes(&linha).contains(&(110_800, vec!["Prontinho!".to_owned()])));
+    assert!(
+        so(&linha, "discricao")
+            .iter()
+            .any(|x| x.t_ms == 316_000 && matches!(x.tipo, Tipo::Discricao { ligada: false, .. }))
+    );
+}
+
+#[test]
+fn a_memoria_velha_volta_com_a_espera_quieta_e_sem_a_janela() {
+    // 10 min fora: a resposta, o Stop e o idle_prompt se perderam. A espera
+    // volta dada como vista (nada acima da L1, sem a pose), e o clique não
+    // foca a janela de antes, que pode ser de outra agora (decisão 0095).
+    let linha = linha_do_tempo("reinicio-depois-de-uma-pausa");
+    assert_eq!(restauracao(&linha), (1, 1, 0, None));
+    assert_eq!(restauracao_extra(&linha), (true, Vec::new()));
+    assert!(barulho_entre(&linha, 0, u64::MAX).is_empty());
+    assert!(
+        !so(&linha, "base").iter().any(|x| x.t_ms >= 620_000
+            && matches!(
+                x.tipo,
+                Tipo::Base {
+                    estado: "waiting",
+                    ..
+                }
+            )),
+        "a pose de espera não volta"
+    );
+    assert!(
+        baloes(&linha)
+            .iter()
+            .any(|(t, linhas)| *t == 630_000 && linhas.iter().any(|l| l == "não vi a janela dela"))
+    );
+    // O prompt seguinte tira a espera e casa a janela: o clique no pronto
+    // dele foca.
+    let cliques: Vec<(u64, &str)> = so(&linha, "clique")
+        .iter()
+        .map(|x| match &x.tipo {
+            Tipo::Clique { resultado, .. } => (x.t_ms, *resultado),
+            _ => unreachable!(),
+        })
+        .collect();
+    assert_eq!(cliques, vec![(630_000, "nao_focou"), (1_815_000, "focou")]);
+}
+
+#[test]
+fn a_parada_na_acomodacao_do_stop_traz_o_pronto_sem_festa() {
+    let linha = linha_do_tempo("reinicio-na-acomodacao");
+    assert_eq!(restauracao(&linha), (1, 1, 0, None));
+    assert!(
+        festas(&linha).is_empty(),
+        "a festa ficou na acomodação perdida"
+    );
+    assert!(so(&linha, "base").iter().any(|x| x.t_ms == 11_500
+        && matches!(
+            x.tipo,
+            Tipo::Base {
+                estado: "ready",
+                ..
+            }
+        )));
+    assert!(so(&linha, "clique").iter().any(|x| x.t_ms == 20_000
+        && matches!(
+            x.tipo,
+            Tipo::Clique {
+                resultado: "focou",
+                ..
+            }
+        )));
 }
