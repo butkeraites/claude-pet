@@ -25,10 +25,11 @@
 //!
 //! **A base** (M5, decisão 0082): o repouso não é mais só o do `idle`. O
 //! Motor diz o estado da skin que a tela segura (`waiting`, `working`,
-//! `sleep`, …) e o [`Ritmo`] dele: o repouso de sempre, quase parado
-//! (trabalhando e pensando: até 4 fps e uma micro-ação sorteada a cada 10–30
-//! s), o laço do sono (até 2 fps) ou só a pose (nenhum commit). As reações
-//! tocam por cima e voltam à base.
+//! `sleep`, …) e o [`Ritmo`] dele: o repouso de sempre, o atento (a espera
+//! na L1 e o erro: o repouso com metade dos commits, decisão 0091), quase
+//! parado (trabalhando e pensando: até 4 fps e uma micro-ação sorteada a cada
+//! 10–30 s), o laço do sono (até 2 fps) ou só a pose (nenhum commit). As
+//! reações tocam por cima e voltam à base.
 //!
 //! Tudo aqui recebe o relógio de fora (milissegundos) e o sorteio com a
 //! semente de fora, para os testes não dependerem de tempo real nem de sorte.
@@ -43,6 +44,10 @@ pub const PAUSA_MS: u64 = 4000;
 pub const DURACAO_MIN_MS: u64 = 34;
 /// Teto da média de commits com o pet parado (decisão 0005).
 pub const COMMITS_POR_S_PARADO: u64 = 2;
+/// Teto da média do ritmo atento (a espera na L1 e o erro): a metade do
+/// parado, porque a chamada, as rajadas e o balão tocam por cima dele e a
+/// soma tem de caber nos 2 por segundo (decisão 0091).
+pub const COMMITS_POR_S_ATENTO: u64 = 1;
 /// Duração mínima de um quadro no ritmo quieto: até 4 fps (trabalhando e
 /// pensando, PLANO "Movimento").
 pub const DURACAO_MIN_QUIETO_MS: u64 = 250;
@@ -63,8 +68,12 @@ pub const NUNCA: u64 = u64::MAX;
 pub enum Ritmo {
     /// A pose fixa e rajadas das tags do estado, com a pausa de pelo menos
     /// [`PAUSA_MS`] e até [`COMMITS_POR_S_PARADO`] commits/s (o parado do M1,
-    /// o pronto, o erro, a espera).
+    /// o pronto).
     Repouso,
+    /// Como o repouso, com até [`COMMITS_POR_S_ATENTO`] commit/s: a espera na
+    /// L1 e o erro, que têm a chamada, as rajadas e o balão por cima
+    /// (decisão 0091).
+    Atento,
     /// Quase parado: quadros de pelo menos [`DURACAO_MIN_QUIETO_MS`] e uma
     /// micro-ação a cada [`MICRO_MIN_MS`]–[`MICRO_MAX_MS`], sorteada
     /// (trabalhando, pensando, compactando).
@@ -80,6 +89,7 @@ impl Ritmo {
     pub fn nome(self) -> &'static str {
         match self {
             Ritmo::Repouso => "repouso",
+            Ritmo::Atento => "atento",
             Ritmo::Quieto => "quieto",
             Ritmo::Laco => "laco",
             Ritmo::Parado => "parado",
@@ -239,9 +249,9 @@ fn trocas(pose: usize, rajada: &Animacao) -> u64 {
 }
 
 /// Pausa antes de uma rajada: pelo menos [`PAUSA_MS`] e o bastante para o
-/// trecho inteiro ficar em até [`COMMITS_POR_S_PARADO`] commits/s.
-fn pausa_para(pose: usize, rajada: &Animacao) -> u64 {
-    let minimo_do_trecho = (trocas(pose, rajada) * 1000).div_ceil(COMMITS_POR_S_PARADO);
+/// trecho inteiro ficar em até `por_s` commits/s.
+fn pausa_para(pose: usize, rajada: &Animacao, por_s: u64) -> u64 {
+    let minimo_do_trecho = (trocas(pose, rajada) * 1000).div_ceil(por_s.max(1));
     PAUSA_MS.max(minimo_do_trecho.saturating_sub(rajada.duracao_ms()))
 }
 
@@ -286,17 +296,24 @@ impl Repouso {
         };
         let modo = match (base.ritmo, tags.first()) {
             (_, None) | (Ritmo::Parado, _) => Modo::Parado,
-            (Ritmo::Repouso, _) => rajadas(
-                tags.iter()
-                    .map(|&t| {
-                        let rajada = Animacao::nova(skin, t, 0, false);
-                        Trecho {
-                            pausa_ms: pausa_para(pose, &rajada),
-                            rajada,
-                        }
-                    })
-                    .collect(),
-            ),
+            (Ritmo::Repouso | Ritmo::Atento, _) => {
+                let por_s = if base.ritmo == Ritmo::Atento {
+                    COMMITS_POR_S_ATENTO
+                } else {
+                    COMMITS_POR_S_PARADO
+                };
+                rajadas(
+                    tags.iter()
+                        .map(|&t| {
+                            let rajada = Animacao::nova(skin, t, 0, false);
+                            Trecho {
+                                pausa_ms: pausa_para(pose, &rajada, por_s),
+                                rajada,
+                            }
+                        })
+                        .collect(),
+                )
+            }
             (Ritmo::Quieto, _) => rajadas(
                 (0..TRECHOS_SORTEADOS)
                     .map(|k| {
@@ -305,7 +322,7 @@ impl Repouso {
                             Animacao::nova_com_piso(skin, tag, 0, false, DURACAO_MIN_QUIETO_MS);
                         let sorteada = sorteio.entre(MICRO_MIN_MS, MICRO_MAX_MS);
                         Trecho {
-                            pausa_ms: sorteada.max(pausa_para(pose, &rajada)),
+                            pausa_ms: sorteada.max(pausa_para(pose, &rajada, COMMITS_POR_S_PARADO)),
                             rajada,
                         }
                     })

@@ -16,7 +16,6 @@
 {"t":45000,"i":"escalada","sid8":"s2","nivel":0,"motivo":"andou"}
 {"t":45000,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}
 {"t":45000,"i":"selos","mais":1,"bandeiras":[],"corrente":false}
-{"t":50000,"i":"selos","mais":0,"bandeiras":[],"corrente":false}
 {"t":50800,"i":"turno","sid8":"s2","turno8":"q1","fim":"stop","nivel":"T1","pontuacao":0.16,"reacao":"done_small"}
 {"t":50800,"i":"festa","sid8":"s2","nivel":"T1","reacao":"done_small"}
 {"t":50800,"i":"balao","linhas":["Prontinho!"],"motivo":"festa"}

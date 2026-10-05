@@ -417,9 +417,10 @@ impl Motor {
             return None;
         }
         // Na soneca, só as reações pequenas (decisão 0053): o aceno, sem
-        // confete, voo nem faixa. Com o "não perturbe", sem voo.
+        // confete, voo nem faixa. Com o "não perturbe" ou a tela
+        // compartilhada (decisão 0091), sem voo.
         let soneca = self.soneca(agora_ms).is_some();
-        let sem_voo = self.nao_perturbe;
+        let sem_voo = self.nao_perturbe || self.tela.discreto;
         let mundo = usize::from(r.teste);
         if self.na_festa(r.teste, agora_ms) {
             let f = self.tela.festas[mundo].as_mut().expect("na festa");
@@ -560,12 +561,10 @@ impl Motor {
             .map(|s| (vistas[&s.chave], s))
             .max_by_key(|(p, s)| (*p, !s.teste, chamando == Some(&s.chave), s.ultimo_evento_ms));
         let prioridade = lider.map_or(Prioridade::Parado, |(p, _)| p);
-        // A espera que segura a base já é a prioridade; um erro pendente
-        // ainda segura o sono.
-        let pendente = sessoes
-            .iter()
-            .any(|s| s.aviso.is_some_and(|a| a.tipo == TipoAviso::Erro));
-        let parado = prioridade == Prioridade::Parado && !pendente;
+        // A espera que segura a base já é a prioridade; o erro fica na tela
+        // os 60 s dele e não segura o sono depois, como o pronto (decisão
+        // 0091): o aviso dele continua para o clique.
+        let parado = prioridade == Prioridade::Parado;
         let longe = self.desktop.ocioso == Some(true);
         let sono = if parado {
             let desde = self.tela.parado_desde.unwrap_or(agora_ms);
@@ -608,21 +607,13 @@ impl Motor {
                 }
                 continue;
             }
+            // Ocupada pela prioridade que ela segura: na acomodação do Stop, a
+            // de antes, e o "+N" não pisca antes da bandeirinha (decisão
+            // 0091); uma espera sem aviso (vista) não conta.
             match s.aviso.map(|a| a.tipo) {
                 Some(TipoAviso::Pronto) => prontos.push(s),
                 Some(_) => mais += 1,
-                None if matches!(
-                    s.estado,
-                    EstadoSessao::Trabalhando
-                        | EstadoSessao::Compactando
-                        | EstadoSessao::Pensando
-                        | EstadoSessao::Esperando
-                        | EstadoSessao::Erro
-                        | EstadoSessao::Cansado
-                ) =>
-                {
-                    mais += 1
-                }
+                None if vistas[&s.chave] >= Prioridade::Pensando => mais += 1,
                 None => {}
             }
         }
@@ -705,9 +696,11 @@ impl Motor {
             Prioridade::Trabalhando | Prioridade::Compactando | Prioridade::Pensando => {
                 Ritmo::Quieto
             }
-            // No teto da escalada, só a pose: o selo do aviso pulsa e a
-            // rajada vem a cada minuto (decisão 0075).
-            Prioridade::Esperando if self.nivel_da_escalada() >= 4 => Ritmo::Parado,
+            // Da L2 em diante, só a pose: quem anda são as rajadas, os voos
+            // e o pulso do selo; na L1 e no erro, o repouso atento, com a
+            // chamada e o balão por cima (decisões 0082 e 0091).
+            Prioridade::Esperando if self.nivel_da_escalada() >= 2 => Ritmo::Parado,
+            Prioridade::Esperando | Prioridade::Erro => Ritmo::Atento,
             _ => Ritmo::Repouso,
         };
         Base {
@@ -826,6 +819,9 @@ impl Motor {
     fn vencer_discricao(&mut self, agora_ms: u64) {
         if !self.tela.discreto && self.sinal_somado(agora_ms) >= DISCRICAO_APOS_MS {
             self.tela.discreto = true;
+            // Discreto como o "não perturbe": um voo no ar volta para a casa
+            // (decisão 0091).
+            self.voltar_do_voo(agora_ms);
             let tirou_balao = self.balao(agora_ms).is_some();
             if tirou_balao {
                 self.balao = None;

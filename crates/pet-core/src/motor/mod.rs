@@ -669,6 +669,7 @@ impl Motor {
             || self.seguir.em_viagem()
             || self.soneca(agora_ms).is_some()
             || self.nao_perturbe
+            || self.tela.discreto
             || self.estresse.is_some()
         {
             return false;
@@ -893,6 +894,12 @@ impl Motor {
             if !nova_entrada {
                 continue;
             }
+            // Escondido ou na proteção de tela, nem a linha nem o balão
+            // (decisões 0079 e 0091): a entrada fica vista, e nada se repete
+            // na volta.
+            if !self.na_tela() {
+                continue;
+            }
             let (mut nome, motivo, linha) = match s.estado {
                 EstadoSessao::Erro => (
                     SUSTO,
@@ -973,7 +980,9 @@ impl Motor {
         escalada::Contexto {
             chama,
             chama_em: chama_em.filter(|_| !chama),
-            teto_l1: self.nao_perturbe || self.soneca(agora_ms).is_some(),
+            // A tela compartilhada é discreta como o "não perturbe": nada
+            // acima da L1 (decisões 0010 e 0091).
+            teto_l1: self.nao_perturbe || self.tela.discreto || self.soneca(agora_ms).is_some(),
             visivel: self.na_tela(),
         }
     }

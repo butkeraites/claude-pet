@@ -398,6 +398,8 @@ As outras sessões aparecem como selos: um contador "+N", uma bandeirinha com a 
 | L3 | +90 s, ou quando você volta | voa até o alto-centro do monitor, bate as asas com "!!" (pisca a 2 Hz no máximo) e volta; até 3 vezes |
 | L4 | 5 min ou mais (teto) | pose de espera + selo pulsando a 1 Hz; uma rajada a cada 60 s |
 
+*Correção (2026-10-05, decisões 0083 e 0091):* o selo da L4 troca de cor uma vez por segundo (o ciclo inteiro em 2 s: um ciclo por segundo estouraria o orçamento da espera), e da L2 em diante a espera fica só na pose, com as rajadas, os voos e o pulso por cima; na L1, o repouso atento, de até 1 commit/s.
+
 **Saída da escalada:** qualquer evento da própria sessão ou um clique no aviso exibido.
 
 *Correção (2026-10-05, revisão, decisão 0090):* "olhando o terminal do Claude" é olhar o terminal da sessão que espera, quando a janela dela é certa (o de outra sessão não vale); 5 s nele com o Renan presente contam como o diálogo visto, e daí nada passa da L1 (o Esc numa pergunta e o plano recusado não mandam evento nenhum no 2.1.288, e são feitos ali). A pose de espera vem do aviso e dura até o teto da escalada, ou 2 min depois de o diálogo ser visto; o clique que vê o aviso a solta, e o pet pode dormir com o selo "!". Os voos da volta têm a conta deles (até 3), fora dos 3 da L3, e esperam o pet aparecer na tela (a proteção de tela que fecha depois do primeiro toque, a sessão bloqueada).
@@ -413,6 +415,7 @@ As outras sessões aparecem como selos: um contador "+N", uma bandeirinha com a 
 - Compartilhamento de tela ativo há mais de 2 s: balões sem nome de projeto.
   - **Nunca** usar a regra `no_screen_share` nesta camada: ela pinta de preto o monitor inteiro compartilhado.
   - *Correção (2026-10-05, decisão 0081):* no Hyprland 0.56.2 o `screencast` segue os quadros copiados (o `0` sai meio segundo depois do último), então numa tela parada ele pisca. Os 2 s são de sinal somado num episódio, e a discrição só desliga 5 min depois do último sinal.
+  - *Correção (2026-10-05, revisão, decisão 0091):* a tela compartilhada é discreta também como o "não perturbe" (decisão 0010): nada acima de L1 e nenhum voo, nem o da festa.
 
 **Timers:**
 
@@ -781,7 +784,8 @@ Atualizado em 2026-10-05 com a pesquisa do M5 (`docs/pesquisa/10-cerebro-m5.md`,
 
 **Revisão** (as três revisões adversariais do M5; IDs na ordem dos commits, decisões 0089 em diante):
 - **T5.21** as correntes: os agentes que nascem depois do Stop são da corrente, o pedido digitado com a corrente aberta festeja sozinho e a continuação depois do fim da corrente pontua a soma dela (decisão 0089);
-- **T5.22** a espera e a escalada: a pose pelo aviso (o clique e o teto a soltam), o diálogo visto no terminal da sessão, olhar o terminal da sessão que espera e não o de outra, os voos da volta com a conta deles e só com o pet na tela (a proteção de tela, a sessão bloqueada), e a janela que fecha no meio do voo (decisão 0090).
+- **T5.22** a espera e a escalada: a pose pelo aviso (o clique e o teto a soltam), o diálogo visto no terminal da sessão, olhar o terminal da sessão que espera e não o de outra, os voos da volta com a conta deles e só com o pet na tela (a proteção de tela, a sessão bloqueada), e a janela que fecha no meio do voo (decisão 0090);
+- **T5.23** a tela: o orçamento da espera (o ritmo atento na L1 e no erro, só a pose da L2 em diante), o "+N" que não pisca na acomodação, o erro e o cansado que não tocam escondidos, o erro que não segura o sono, a tela compartilhada discreta como o "não perturbe" e o `scripts/medir-custo.sh` com o pet acordado e as fases do M5 (decisão 0091).
 
 **Verificação:** `bin/pet verificar` verde a cada commit e `cargo test -p pet-core` com os cenários. Tabelas, exemplos de pontuação (decisão 0074) e cenários:
 

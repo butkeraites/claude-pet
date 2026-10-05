@@ -73,7 +73,7 @@ Cada linha tem `t` (ms do relógio do laço) e `i` (o tipo). O
 | `escalada` | a escalada do aviso de espera mais velho | `sid8`, `nivel` (1 a 4; 0 no fim), `espera` (no começo), `motivo` (`aviso`, `vez`, `tempo`, `voltou`, `andou`, `visto`, `sessao_saiu`, `outro_aviso`; `vista`, com o nível de agora, quando o Renan viu o diálogo 5 s no terminal da sessão: nada mais passa da L1, decisão 0090) |
 | `rajada` | a chamada (`alert`) de novo, na L2 e na L4 | `sid8`, `nivel` |
 | `voo` | o voo até o alto-centro do monitor e de volta | `destino` (`alto_centro`), `motivo` (`escalada`, até 3 na L3; `voltou`, até 3 da volta do Renan, com a conta deles, decisão 0090), `sid8` |
-| `pulso` | o selo do aviso pulsando a 1 Hz liga ou desliga (L4) | `ligado`, `sid8` |
+| `pulso` | o selo do aviso pulsando (uma troca de cor por segundo) liga ou desliga (L4) | `ligado`, `sid8` |
 | `discricao` | a tela compartilhada (2 s de sinal somados) liga; 5 min sem sinal desligam (decisão 0081) | `ligada`, `tirou_balao` |
 | `clique` | o que um clique fez | `resultado` (`focou`, `nao_focou`, `lista`, `soneca`, `nada`), `sid8` |
 
@@ -100,13 +100,13 @@ personagem confere). Com o personagem na tela:
 
 | Intenção | O que a janela mostra |
 |---|---|
-| `base` | o animador segura o estado da skin no ritmo dele (decisão 0082): `repouso` (parado, pronto, erro, espera até a L3: a pose e rajadas, até 2 commits/s), `quieto` (trabalhando, pensando: até 4 fps, uma micro-ação sorteada a cada 10–30 s), `laco` (dormindo, cansado: até 2 fps) e `parado` (`profundo`, e a espera na L4: só a pose, nenhum commit) |
+| `base` | o animador segura o estado da skin no ritmo dele (decisões 0082 e 0091): `repouso` (parado, pronto: a pose e rajadas, até 2 commits/s), `atento` (a espera na L1 e o erro: o mesmo, até 1 commit/s, com a chamada e o balão por cima), `quieto` (trabalhando, pensando: até 4 fps, uma micro-ação sorteada a cada 10–30 s), `laco` (dormindo, cansado: até 2 fps) e `parado` (`profundo`, e a espera da L2 em diante: só a pose, com as rajadas, os voos e o pulso por cima) |
 | `selos` | a fileira ao lado do corpo, na altura da cabeça (decisão 0083): o "+N", o "…" e as bandeirinhas na cor do projeto, em blocos da metade do D, fora da área de toque e dentro do monitor |
 | `escalada` | o «!» amarelo do aviso na fileira, da L1 até o aviso sair |
 | `pulso` | o «!» trocando de cor (amarelo, vermelho) uma vez por segundo |
 | `voo` (`alto_centro`) | o voo da casa ao alto-centro com o "!!" piscando abaixo de 2 Hz e de volta, ~4,2 s em passos de 34 ms, a área de toque junto, sem gravar posição (decisão 0084) |
 | `festa` e `festa_mesclada` | a reação do nível (o `done_medium` e o `done_big` são voos dentro da célula), o balão, e o confete: a fonte de 12 no T2, a chuva de 40 pela tela no T3, em passos de 34 ms, até 4,5 s (decisão 0085) |
-| `discricao` | os balões sem nome de projeto (o sinal do `screencast` somando 2 s; 5 min depois do último sinal, os nomes voltam; decisão 0081) |
+| `discricao` | os balões sem nome de projeto (o sinal do `screencast` somando 2 s; 5 min depois do último sinal, os nomes voltam; decisão 0081), e, como no "não perturbe", nada acima da L1 e nenhum voo (decisão 0091) |
 
 O `/v1/estado.desenho` diz o que a janela está desenhando agora (só
 metadados; vazio sem o pet na tela): `base` e `ritmo` (do animador),

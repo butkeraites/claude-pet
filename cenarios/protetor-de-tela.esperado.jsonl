@@ -3,5 +3,14 @@
 {"t":20800,"i":"turno","sid8":"s1","turno8":"p1","fim":"stop","nivel":"T1","pontuacao":0.65,"reacao":"done_small"}
 {"t":20800,"i":"festa","sid8":"s1","nivel":"T1","reacao":"done_small","escondida":true}
 {"t":20800,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}
+{"t":21000,"i":"selos","mais":1,"bandeiras":[],"corrente":false}
+{"t":22000,"i":"turno","sid8":"s2","turno8":"q1","fim":"falhou"}
+{"t":22000,"i":"base","estado":"sleep","prioridade":"cansado","sid8":"s2"}
+{"t":22000,"i":"selos","mais":0,"bandeiras":[7],"corrente":false}
+{"t":23000,"i":"selos","mais":1,"bandeiras":[7],"corrente":false}
+{"t":24000,"i":"turno","sid8":"s3","turno8":"r1","fim":"falhou"}
+{"t":24000,"i":"base","estado":"error","prioridade":"erro","sid8":"s3"}
+{"t":84000,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}
+{"t":84000,"i":"selos","mais":2,"bandeiras":[],"corrente":false}
 {"t":140800,"i":"base","estado":"idle","prioridade":"parado"}
-{"t":140800,"i":"selos","mais":0,"bandeiras":[7],"corrente":false}
+{"t":140800,"i":"selos","mais":1,"bandeiras":[7],"corrente":false}

@@ -3846,3 +3846,67 @@ escalada: ensina o Renan a ignorar o pet. O diálogo dispensado não manda
 nada, mas é dispensado no terminal da sessão, e isso o desktop vê; quem viu o
 diálogo e foi embora sabe dele, e o selo parado basta. A volta é o momento em
 que a chamada mais vale, e só vale se aparecer na tela.
+
+## 0091 — Revisão da tela: o orçamento da espera, o "+N" na acomodação, o erro escondido e o sono, a tela compartilhada como o "não perturbe" e a medição ao vivo com o pet acordado (2026-10-05)
+
+**Problema:** as revisões adversariais do M5 (lentes da tela e das regras)
+acharam:
+- **A espera passava do orçamento.** A base de espera ficava no repouso, no
+  teto de 2 commits/s (as tags de espera do Zeca original são densas,
+  decisão 0082), e a escalada tocava por cima: medido em relógio falso com o
+  Zeca original (D = 4), 2,85 commits/s nos 5 primeiros minutos de um aviso
+  com o Renan longe e 2,0 com ele lendo no terminal. A prova da decisão 0088
+  só tinha medido a L4.
+- **O "+N" piscava na acomodação do Stop:** ele contava as sessões pelo
+  estado cru, e a sessão que parava saía dele 0,8 s antes de a bandeirinha
+  aparecer (a base já segurava a prioridade de antes, decisão 0080).
+- **O susto do erro e o bocejo do cansado tocavam escondidos** (na proteção
+  de tela, com o pet escondido), com a intenção anotada, contra a decisão
+  0079.
+- **O erro segurava o sono por 2 h:** ele fica 60 s na tela, mas o aviso dele
+  (2 h) bloqueava o sono, com o pet acordado no repouso sem nada que dissesse
+  por quê.
+- **A tela compartilhada só tirava os nomes:** a decisão 0010 diz que o "não
+  perturbe" e o compartilhamento de tela "deixam tudo discreto", e o PLANO
+  estreitou isso sem decisão; as rajadas, os voos ao alto-centro e o voo da
+  festa apareciam para quem assistia.
+- **O `scripts/medir-custo.sh` media o sono como "parado":** ele sobe uma
+  pilha de dev nova e pede para ninguém mexer; aos 3 min o pet do M5 boceja e
+  dorme (decisão 0076), e as fases "parado" depois disso mediam o laço do
+  sono (no limite dos 2,0 da faixa). E não havia fase do M5.
+**Escolha:**
+- **O ritmo atento** (`animador::Ritmo::Atento`): o repouso com até
+  `COMMITS_POR_S_ATENTO` (1) commit/s, para a espera na L1 e o erro, que têm a
+  chamada, as rajadas e o balão por cima. Da L2 em diante, a espera fica só
+  na pose: quem anda são as rajadas, os voos e o pulso do selo. Medido em
+  relógio falso com o Zeca original: a espera chamando a 1,42 commit/s nos 5
+  primeiros minutos e 1,39 em 15; lida no terminal da sessão, 0,95 em 10
+  min; o erro, 1,02 nos 60 s dele (a skin de teste, menos). O teste novo do
+  orçamento reprova as duas metades (a pose parada só na L4; a L1 no repouso
+  de sempre).
+- **O "+N"** conta a sessão pela prioridade que ela segura: na acomodação, a
+  de antes, e ele muda só quando a bandeirinha aparece. Uma espera sem aviso
+  (vista) não conta.
+- **Escondido**, a entrada no erro e no cansado não toca nem anota, e fica
+  vista: nada se repete na volta.
+- **O erro não segura o sono:** depois dos 60 s dele na tela, como o pronto
+  (corrige a decisão 0080); o aviso continua para o clique e o "+N".
+- **A tela compartilhada é discreta como o "não perturbe"** (decisão 0010):
+  além dos balões sem nome, nada passa da L1, nada voa (nem a escalada nem a
+  festa), e um voo no ar volta para a casa quando a discrição liga; o
+  confete fica, como no "não perturbe" (decisão 0080).
+- **A medição ao vivo** (`scripts/medir-custo.sh`): antes de cada fase
+  "parado", uma sessão de teste (`PET_TESTE=1`) manda um `SessionStart` pelo
+  hook de dentro da imagem, com o pet escondido (o despertar não toca), e a
+  fase só vale com `fotografia.sono` acordado e `desenho.base` `idle` no
+  começo e no fim (uma sessão real do Renan trabalhando no meio para a
+  medida). Duas fases novas: `trabalhando` (uma sessão de teste, até 1
+  commit/s) e `dormindo` (o laço do sono depois de o pet dormir sozinho, de
+  0,3 a 2 por segundo). O sono profundo (aos 30 min) fica com o teste em
+  relógio falso. Não rodado aqui: a sessão estava bloqueada.
+**Por quê:** a camada do tamanho do monitor só vale com o orçamento (decisão
+0005), e o que pega o olho na espera é o movimento que começa (a chamada, a
+rajada, o voo), não a base que respira por baixo dele. O "+N" que pisca é
+movimento sem significado; o que toca escondido ou dorme acordado engana; e
+quem compartilha a tela numa chamada não quer o pet voando pela tela dos
+outros.

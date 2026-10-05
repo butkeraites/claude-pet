@@ -76,7 +76,8 @@ pub enum Passo {
     /// O voo até o alto-centro do monitor e de volta; `volta`: porque o
     /// Renan voltou.
     Voo { volta: bool },
-    /// O selo pulsando (1 Hz) liga ou desliga.
+    /// O selo pulsando (uma troca de cor por segundo; decisão 0083) liga ou
+    /// desliga.
     Pulso(bool),
 }
 

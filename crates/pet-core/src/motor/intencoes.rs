@@ -110,7 +110,8 @@ pub enum Tipo {
         #[serde(skip_serializing_if = "Option::is_none")]
         sid8: Option<String>,
     },
-    /// O selo do aviso pulsando a 1 Hz (a L4) liga ou desliga.
+    /// O selo do aviso pulsando (a L4: uma troca de cor por segundo, decisão
+    /// 0083) liga ou desliga.
     Pulso { ligado: bool, sid8: String },
     /// A festa de um fim (decisão 0076): a reação, o confete, o voo (`curto`
     /// no T2, `atravessar` no T3) e a faixa "PRONTO!" (T3). `escondida`: o

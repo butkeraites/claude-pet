@@ -506,12 +506,21 @@ fn com_a_protecao_de_tela_a_festa_nao_toca_e_o_pronto_fica() {
     assert_eq!(
         ultimo_selo,
         Some(Tipo::Selos(crate::motor::Selos {
-            mais: 0,
+            mais: 1,
             bandeiras: vec![crate::motor::tela::cor("api")],
             corrente: false
         })),
-        "e vira a bandeirinha"
+        "e vira a bandeirinha (o +1 é o erro de outra sessão)"
     );
+    // O erro e o cansado de outras sessões, escondidos, também não tocaram
+    // nem deixaram balão (decisão 0091).
+    assert!(so(&linha, "base").iter().any(|x| matches!(
+        x.tipo,
+        Tipo::Base {
+            estado: "error",
+            ..
+        }
+    )));
 }
 
 #[test]
