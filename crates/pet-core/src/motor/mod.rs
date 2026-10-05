@@ -677,7 +677,11 @@ impl Motor {
             self.voo = None;
             if let Some(pet) = self.pet.as_mut() {
                 pet.largar(agora_ms);
-                pet.tocar(SOLTO, agora_ms);
+                // O pouso só na hora: com a tela apagada o voo não andou, e o
+                // pet não pousa do nada quando ela acende.
+                if agora_ms < voo.fim_ms() + 1_000 {
+                    pet.tocar(SOLTO, agora_ms);
+                }
             }
         }
     }
@@ -752,11 +756,22 @@ impl Motor {
         self.redesenhar_ja(agora_ms);
     }
 
-    /// Os pedaços de confete na tela agora (0 sem festa).
-    pub fn confete_na_tela(&self) -> usize {
-        self.efeito
-            .as_ref()
-            .map_or(0, |e| e.confete.na_tela().count())
+    /// Os pedaços de confete na tela em `agora_ms`, pelo relógio (0 sem
+    /// festa): os passos que venceram andam numa cópia, como a janela vai
+    /// mostrar (com a tela apagada, o desenho espera o compositor).
+    pub fn confete_na_tela(&self, agora_ms: u64) -> usize {
+        let Some(efeito) = self.efeito.as_ref().filter(|e| agora_ms < e.fim_ms) else {
+            return 0;
+        };
+        let mut confete = efeito.confete.clone();
+        let devidos = agora_ms.saturating_sub(efeito.inicio_ms) / PASSO_CONFETE_MS;
+        for _ in efeito.passos..devidos {
+            if confete.acabou() {
+                break;
+            }
+            confete.passo();
+        }
+        confete.na_tela().count()
     }
 
     // --- posições salvas (decisão 0049) --------------------------------------
@@ -2712,7 +2727,7 @@ impl Motor {
                     motivo: v.motivo,
                 })
             }),
-            confete: self.confete_na_tela(),
+            confete: self.confete_na_tela(agora_ms),
         }
     }
 

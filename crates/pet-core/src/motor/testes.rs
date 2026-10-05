@@ -3602,7 +3602,7 @@ fn a_festa_t2_solta_a_fonte_e_a_t3_a_chuva_a_ate_30_quadros_por_segundo() {
     while t < festa + 6_000 {
         horas.extend(quadros_como_o_laco(&mut motor, &mut janela, t, t + 100));
         t += 100;
-        if acabou.is_none() && motor.confete_na_tela() == 0 {
+        if acabou.is_none() && motor.confete_na_tela(t) == 0 {
             acabou = Some(t);
         }
     }
@@ -3643,7 +3643,7 @@ fn a_festa_t2_solta_a_fonte_e_a_t3_a_chuva_a_ate_30_quadros_por_segundo() {
             <= 135,
         "até 30 por segundo por 4,5 s"
     );
-    assert_eq!(motor.confete_na_tela(), 0);
+    assert_eq!(motor.confete_na_tela(festa + 6_000), 0);
 }
 
 #[test]
@@ -3655,7 +3655,7 @@ fn sem_confete_na_soneca_e_numa_janela_pequena_e_o_nivel_que_sobe_troca_a_fonte_
     motor.alternar_soneca(&mut janela, 0);
     turno_de(&mut motor, "s1", "api", 1_000, 240_000);
     quadros_entre(&mut motor, &mut janela, 0, 3_000);
-    assert_eq!(motor.confete_na_tela(), 0);
+    assert_eq!(motor.confete_na_tela(3_000), 0);
     // Numa janela pequena (o palco transitório é do M8), nada pela tela.
     let mut motor = Motor::novo(ConfigCerebro::default());
     motor.definir_skin(Some(skin_teste()));
@@ -3667,7 +3667,7 @@ fn sem_confete_na_soneca_e_numa_janela_pequena_e_o_nivel_que_sobe_troca_a_fonte_
     motor.acertar_relogio(em(0));
     turno_de(&mut motor, "s1", "api", 1_000, 240_000);
     quadros_entre(&mut motor, &mut janela, 0, 3_000);
-    assert_eq!(motor.confete_na_tela(), 0);
+    assert_eq!(motor.confete_na_tela(3_000), 0);
     assert!(pedacos_na_cena(&janela).is_empty());
     // A festa mesclada que sobe do T2 ao T3: a chuva no lugar da fonte.
     let (mut motor, mut janela) = ligado();

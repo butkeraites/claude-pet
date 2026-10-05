@@ -3618,3 +3618,39 @@ nome, nada sem janela) e no núcleo do daemon (o `desenho` no
 decidiu agora, e o desenho diz o que a janela está fazendo com isso: com a
 tela fora do alcance, é a terceira linha que fecha a conta (e o
 `commits_total`, que só anda com a tela acesa).
+
+## 0087 — As demonstrações do `bin/pet testar` para a tela do M5 (2026-10-05)
+
+**Problema:** o `bin/pet testar` só tinha o `rapido` (o aceno) e o `pequeno`
+(o pulinho). A segunda metade do M5 precisa de demonstrações ao vivo do que
+a tela faz (o voo curto com o confete, a chuva do T3, a chamada da pergunta,
+a festa de duas sessões), conferidas pelo `/v1/estado` com a sessão
+bloqueada, sem nunca mexer nas sessões reais do Renan nem nas aprovações.
+**Escolha:**
+- **Cenários novos**, todos com `PET_TESTE=1` pelo hook de verdade (o mundo
+  de teste, que some em 60 s e nunca se mistura com o real; o T3 do mundo de
+  teste não segura o do real): `medio` (uma edição e 4 min de Bash: 4,8
+  pontos, `done_medium` e a festa com 12 confetes), `grande` (12 min de Bash:
+  12,8 pontos, `done_big` e a chuva de 40; um segundo `grande` em 10 min vira
+  T2, e o `testar` diz isso e espera o `done_medium`), `pergunta` (o
+  `AskUserQuestion`: o aviso de espera do tipo pergunta, a chamada `alert` e a
+  L1; depois a resposta e o Stop, que acabam a escalada e dão o aceno) e
+  `dois-prontos` (duas sessões, `demo-api` e `demo-web`, terminando uma logo
+  depois da outra: uma festa só, a mesclada, e o balão "2 prontos: demo-api,
+  demo-web").
+- **O que mostra:** o turno (a reação, o nível, a pontuação, os tetos e os
+  contadores), as intenções da sessão de teste (a festa, a escalada, a
+  chamada) e o `/v1/estado.desenho`, só metadados; o veredito no fim. Cada
+  demonstração espera a festa de antes passar (até 4 s, pela
+  `fotografia.festa`): um fim até 3 s depois de outra festa entraria nela.
+- **O desenho pelo relógio:** o `desenho.confete` conta os pedaços na hora do
+  painel (os passos andam numa cópia), e o voo que acabou com a tela apagada
+  não pousa do nada quando ela acende: o `/v1/estado` diz o que a janela vai
+  mostrar mesmo sem quadros.
+- **Testes** (`tests/testar.rs`, com o daemon de verdade e o hook nativo):
+  `medio`, `grande` e o segundo `grande` virando T2; `pergunta` e
+  `dois-prontos`, só com sessões de teste e sem o texto do prompt no
+  `/v1/estado`.
+**Por quê:** com a tela do Renan quase sempre bloqueada, a demonstração que
+vale é a que se confere sozinha pelo `/v1/estado`; e um teste no mundo de
+teste pode rodar na produção a qualquer hora sem tocar no que é dele.
