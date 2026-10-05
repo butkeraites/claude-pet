@@ -1,0 +1,6 @@
+{"t":6000,"i":"turno","sid8":"s1","turno8":"p1","fim":"falhou"}
+{"t":6000,"i":"reacao","nome":"yawn","motivo":"cansado","sid8":"s1"}
+{"t":6000,"i":"balao","linhas":["Cansei..."],"motivo":"cansado"}
+{"t":25000,"i":"turno","sid8":"s2","turno8":"q1","fim":"falhou"}
+{"t":25000,"i":"reacao","nome":"error","motivo":"erro","sid8":"s2"}
+{"t":25000,"i":"balao","linhas":["Deu ruim... web"],"motivo":"erro"}

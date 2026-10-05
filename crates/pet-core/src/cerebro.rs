@@ -103,6 +103,14 @@ pub const VIDA_CORRENTE_MS: u64 = 12 * 60 * 60 * 1000;
 pub const TURNOS_GUARDADOS: usize = 20;
 /// O pronto e o erro somem sozinhos depois disto (decisão 0057).
 pub const VIDA_AVISO_MS: u64 = 2 * 60 * 60 * 1000;
+/// Trabalhando, pensando ou compactando sem evento da sessão por isto, a
+/// sessão volta a parada (o turno continua aberto; decisão 0076).
+pub const ATIVA_SEM_EVENTO_MS: u64 = 5 * 60 * 1000;
+/// O erro e o cansado ficam isto na tela (o aviso de erro fica, como no M4;
+/// decisão 0076).
+pub const ERRO_NA_TELA_MS: u64 = 60_000;
+/// O erro do `StopFailure` que deixa o Zeca cansado: o limite de uso.
+pub const ERRO_DE_LIMITE: &str = "rate_limit";
 /// Arquivos diferentes lembrados por turno. Passou disso, cada arquivo novo
 /// só soma num contador: um processo local mandando `arq` sempre novo não
 /// cresce a memória.
@@ -430,6 +438,9 @@ pub enum EstadoSessao {
     Esperando,
     Compactando,
     Erro,
+    /// O turno acabou no limite de uso (`StopFailure` com `rate_limit`;
+    /// decisão 0076).
+    Cansado,
 }
 
 /// O que uma sessão pede ao Renan (decisão 0057), do menos ao mais urgente:
@@ -901,6 +912,8 @@ struct Sessao {
     estado: EstadoSessao,
     /// Hora (parede) do evento que pôs a sessão no estado de agora.
     estado_desde: u64,
+    /// O mesmo, no relógio monotônico (os prazos do estado).
+    estado_desde_mono: u64,
     turno: Option<Turno>,
     trocado: Option<Trocado>,
     comemorado: Option<Comemorado>,
@@ -929,6 +942,7 @@ impl Sessao {
             ent: None,
             estado: EstadoSessao::Parada,
             estado_desde: agora.parede_ms,
+            estado_desde_mono: agora.mono_ms,
             turno: None,
             trocado: None,
             comemorado: None,
@@ -1337,6 +1351,21 @@ impl Sessao {
             self.agentes.pop_front();
         }
         self.agentes.push_back((aid.to_owned(), turno));
+    }
+
+    /// Quando o estado de agora volta sozinho a parado (decisão 0076):
+    /// trabalhando, pensando e compactando 5 min depois do último evento da
+    /// sessão; erro e cansado 60 s depois de entrar.
+    fn prazo_do_estado(&self) -> Option<u64> {
+        match self.estado {
+            EstadoSessao::Pensando | EstadoSessao::Trabalhando | EstadoSessao::Compactando => {
+                Some(self.ultimo_mono + ATIVA_SEM_EVENTO_MS)
+            }
+            EstadoSessao::Erro | EstadoSessao::Cansado => {
+                Some(self.estado_desde_mono + ERRO_NA_TELA_MS)
+            }
+            EstadoSessao::Parada | EstadoSessao::Esperando => None,
+        }
     }
 
     fn resumo_da_corrente(&self) -> Option<ResumoCorrente> {
@@ -1849,12 +1878,17 @@ impl Cerebro {
                     Alvo::Aberto => fechamentos.extend(sessao.fechar(Fim::Falhou, t, agora, &cfg)),
                     Alvo::Fechado | Alvo::Novo => {}
                 }
-                sessao.estado = EstadoSessao::Erro;
+                sessao.estado = if ev.err.as_deref() == Some(ERRO_DE_LIMITE) {
+                    EstadoSessao::Cansado
+                } else {
+                    EstadoSessao::Erro
+                };
             }
             _ => ignorado = Some("evento_desconhecido"),
         }
         if sessao.estado != estado_antes {
             sessao.estado_desde = t;
+            sessao.estado_desde_mono = agora.mono_ms;
             // Os avisos (decisão 0057): mudar de estado resolve o de antes, e
             // entrar em "esperando você" ou em erro abre um. O `idle_prompt`
             // (repete a cada ~60 s) nunca abre nem resolve; um evento
@@ -1864,7 +1898,7 @@ impl Cerebro {
             if !ocioso && t >= desde_antes {
                 let tipo = match sessao.estado {
                     EstadoSessao::Esperando => Some(TipoAviso::Esperando),
-                    EstadoSessao::Erro => Some(TipoAviso::Erro),
+                    EstadoSessao::Erro | EstadoSessao::Cansado => Some(TipoAviso::Erro),
                     _ => None,
                 };
                 // Um turno de máquina não resolve o pronto de antes: o Renan
@@ -2001,6 +2035,11 @@ impl Cerebro {
             {
                 sessao.aviso = None;
             }
+            if sessao.prazo_do_estado().is_some_and(|p| agora.mono_ms >= p) {
+                sessao.estado = EstadoSessao::Parada;
+                sessao.estado_desde = agora.parede_ms;
+                sessao.estado_desde_mono = agora.mono_ms;
+            }
         }
         self.registrar(fechamentos, &mut reacoes, agora);
         let antes = self.sessoes.len();
@@ -2071,6 +2110,7 @@ impl Cerebro {
                     trocado,
                     aviso,
                     corrente,
+                    s.prazo_do_estado(),
                 ]
             })
             .flatten()
@@ -3214,7 +3254,8 @@ mod testes {
         let mut c = novo();
         assert_eq!(c.proximo_prazo(), None);
         c.receber(&prompt("p1"), BASE, em(0));
-        assert_eq!(c.proximo_prazo(), Some(VIDA_SESSAO_MS));
+        // Pensando sem evento volta a parada em 5 min (decisão 0076).
+        assert_eq!(c.proximo_prazo(), Some(ATIVA_SEM_EVENTO_MS));
         c.receber(&stop("p1"), BASE + 1_000, em(1_000));
         assert_eq!(c.proximo_prazo(), Some(1_000 + ACOMODACAO_MS));
         assert!(c.tique(em(1_799)).is_empty());
@@ -4164,5 +4205,103 @@ mod testes {
             (q1.nivel, q1.reacao, q1.continuacoes),
             (Some(Nivel::T2), Some(VOO_CURTO), 2)
         );
+    }
+
+    // --- prazos do estado e o cansado (decisão 0076) -------------------------
+
+    #[test]
+    fn trabalhando_sem_evento_volta_a_parado_em_5_min_com_o_turno_aberto() {
+        let mut c = novo();
+        let estado = |c: &Cerebro| {
+            (
+                c.resumo().sessoes[0].estado,
+                c.resumo().sessoes[0].turno_aberto,
+            )
+        };
+        rodar(
+            &mut c,
+            vec![
+                chega(0, prompt("p1")),
+                chega(1_000, ferramenta("p1", "Bash", None, 10)),
+                Ate(1_000 + ATIVA_SEM_EVENTO_MS - 1),
+            ],
+        );
+        assert_eq!(estado(&c), (EstadoSessao::Trabalhando, true));
+        rodar(&mut c, vec![Ate(1_000 + ATIVA_SEM_EVENTO_MS)]);
+        assert_eq!(estado(&c), (EstadoSessao::Parada, true), "o turno continua");
+        // Um build de 10 min: o PostToolUse dele chega e a sessão volta a
+        // trabalhar; o Stop festeja com tudo (10,3 pontos: T2).
+        let saida = rodar(
+            &mut c,
+            vec![
+                chega(601_000, ferramenta("p1", "Bash", None, 600_000)),
+                chega(602_000, stop("p1")),
+                Ate(603_000),
+            ],
+        );
+        assert_eq!(saida, vec![(602_800, VOO_CURTO)]);
+        // Compactando também tem prazo: o PostCompact pode não vir.
+        let mut c = novo();
+        rodar(
+            &mut c,
+            vec![chega(0, prompt("p1")), chega(1_000, ev("PreCompact"))],
+        );
+        assert_eq!(c.resumo().sessoes[0].estado, EstadoSessao::Compactando);
+        rodar(&mut c, vec![Ate(1_000 + ATIVA_SEM_EVENTO_MS)]);
+        assert_eq!(c.resumo().sessoes[0].estado, EstadoSessao::Parada);
+        // Esperando você não volta sozinho.
+        let mut c = novo();
+        rodar(
+            &mut c,
+            vec![
+                chega(0, prompt("p1")),
+                chega(1_000, permissao("p1")),
+                Ate(10 * ATIVA_SEM_EVENTO_MS),
+            ],
+        );
+        assert_eq!(c.resumo().sessoes[0].estado, EstadoSessao::Esperando);
+    }
+
+    #[test]
+    fn o_limite_de_uso_cansa_e_o_erro_fica_60_s_na_tela() {
+        let falha = |turno: &str, err: &str| Evento {
+            turno: Some(turno.into()),
+            err: Some(err.into()),
+            ..ev("StopFailure")
+        };
+        let mut c = novo();
+        let saida = rodar(
+            &mut c,
+            vec![
+                chega(0, prompt("p1")),
+                chega(1_000, edit_teste("p1")),
+                chega(2_000, falha("p1", ERRO_DE_LIMITE)),
+                Ate(2_000 + ERRO_NA_TELA_MS - 1),
+            ],
+        );
+        assert!(saida.is_empty(), "sem festa: {saida:?}");
+        let s = &c.resumo().sessoes[0];
+        assert_eq!(s.estado, EstadoSessao::Cansado);
+        assert_eq!(s.aviso.unwrap().tipo, TipoAviso::Erro, "o aviso de erro");
+        rodar(&mut c, vec![Ate(2_000 + ERRO_NA_TELA_MS)]);
+        let s = &c.resumo().sessoes[0];
+        assert_eq!(s.estado, EstadoSessao::Parada);
+        assert_eq!(
+            s.aviso.unwrap().tipo,
+            TipoAviso::Erro,
+            "o aviso fica (sai visto ou em 2 h)"
+        );
+        assert_eq!(registro(&c.resumo(), "p1").fim, Fim::Falhou);
+        // Outro erro da API: erro, também 60 s.
+        let mut c = novo();
+        rodar(
+            &mut c,
+            vec![
+                chega(0, prompt("p1")),
+                chega(500, falha("p1", "overloaded")),
+            ],
+        );
+        assert_eq!(c.resumo().sessoes[0].estado, EstadoSessao::Erro);
+        assert_eq!(c.proximo_prazo(), Some(500 + ERRO_NA_TELA_MS));
     }
 }

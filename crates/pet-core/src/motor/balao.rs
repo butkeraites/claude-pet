@@ -253,6 +253,7 @@ pub fn estado(sessao: &ResumoSessao) -> (&'static str, u64) {
         EstadoSessao::Esperando => "esperando você",
         EstadoSessao::Compactando => "compactando",
         EstadoSessao::Erro => "erro",
+        EstadoSessao::Cansado => "cansado",
     };
     (palavra, sessao.estado_desde_ms)
 }
@@ -262,6 +263,14 @@ pub fn estado(sessao: &ResumoSessao) -> (&'static str, u64) {
 pub fn linhas_sem_foco(proj: Option<&str>, tipo: TipoAviso, motivo: &str) -> Vec<String> {
     let nome = fonte::cortar(proj.unwrap_or("sem pasta"), MAX_PROJETO);
     vec![format!("{nome}: {}", tipo.nome()), motivo.to_owned()]
+}
+
+/// Uma frase com o nome do projeto no fim, se há um ("Deu ruim... api").
+pub fn com_projeto(frase: &str, proj: Option<&str>) -> String {
+    match proj {
+        Some(proj) => format!("{frase} {}", fonte::cortar(proj, MAX_PROJETO)),
+        None => frase.to_owned(),
+    }
 }
 
 /// "há quanto tempo", curto: 40 s, 3 min, 2 h.

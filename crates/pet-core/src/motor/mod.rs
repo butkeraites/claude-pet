@@ -35,6 +35,7 @@ pub mod posicoes;
 mod ritmo;
 pub mod viagem;
 
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use serde::Serialize;
@@ -42,7 +43,8 @@ use serde::Serialize;
 use crate::animador;
 use crate::cena::{self, Elemento};
 use crate::cerebro::{
-    self, Agora, Cerebro, ConfigCerebro, Evidencia, Pendencia, Reacao, Resumo, TipoAviso,
+    self, Agora, Cerebro, ConfigCerebro, EstadoSessao, Evidencia, Pendencia, Reacao, Resumo,
+    TipoAviso,
 };
 use crate::confete::{Chuva, Grade};
 use crate::evento::Evento;
@@ -98,6 +100,8 @@ pub const OCIOSO_MS: u64 = 5_000;
 pub const VOLTA_DO_CICLO_MS: u64 = 15_000;
 /// O coração da risadinha do clique que leva ao terminal.
 pub const CORACAO_MS: u64 = 1_200;
+/// O susto de quando um turno acaba num erro da API (decisão 0076).
+pub const SUSTO: &str = "error";
 
 /// O que o pet publica para o `/v1/estado` (o laço publica; a entrada HTTP
 /// só lê).
@@ -278,6 +282,10 @@ pub struct Motor {
     cerebro_mudou: bool,
     /// As decisões, normalizadas (decisão 0077).
     intencoes: intencoes::Registro,
+    /// O estado de cada sessão da última vez que o Motor olhou o cérebro
+    /// (e desde quando): a entrada no erro e no cansado toca uma vez só
+    /// (decisão 0076).
+    estados_vistos: BTreeMap<janelas::Chave, (EstadoSessao, u64)>,
 }
 
 impl Motor {
@@ -310,6 +318,7 @@ impl Motor {
             coracao_ate: None,
             cerebro_mudou: false,
             intencoes: intencoes::Registro::default(),
+            estados_vistos: BTreeMap::new(),
         }
     }
 
@@ -336,7 +345,8 @@ impl Motor {
     }
 
     /// Os turnos que o cérebro fechou viram intenções, e as reações dele
-    /// também, já com a soneca (só as pequenas; decisão 0053): o que volta é
+    /// também, já com a soneca (só as pequenas; decisão 0053), mais as do
+    /// que o Motor vê nas sessões ([`Self::observar_cerebro`]): o que volta é
     /// o que o animador deve tocar.
     fn depois_do_cerebro(&mut self, mut reacoes: Vec<Reacao>, agora_ms: u64) -> Vec<Reacao> {
         for registro in self.cerebro.tirar_turnos_fechados() {
@@ -366,6 +376,7 @@ impl Motor {
                 },
             );
         }
+        reacoes.extend(self.observar_cerebro(agora_ms));
         reacoes
     }
 
@@ -482,6 +493,63 @@ impl Motor {
 
     pub fn reconfigurar_cerebro(&mut self, config: ConfigCerebro) {
         self.cerebro.reconfigurar(config);
+    }
+
+    /// O que mudou nas sessões desde a última olhada e pede uma reação: a
+    /// entrada no erro (o susto e "Deu ruim...") e no cansado (o bocejo e
+    /// "Cansei..."), uma vez por entrada (decisão 0076).
+    fn observar_cerebro(&mut self, agora_ms: u64) -> Vec<Reacao> {
+        let resumo = self.cerebro.resumo();
+        let mut reacoes = Vec::new();
+        let mut vistos = BTreeMap::new();
+        for s in &resumo.sessoes {
+            let agora_dela = (s.estado, s.estado_desde_ms);
+            let nova_entrada = self.estados_vistos.get(&s.chave) != Some(&agora_dela);
+            vistos.insert(s.chave.clone(), agora_dela);
+            if !nova_entrada {
+                continue;
+            }
+            let (mut nome, motivo, linha) = match s.estado {
+                EstadoSessao::Erro => (
+                    SUSTO,
+                    "erro",
+                    balao::com_projeto("Deu ruim...", s.proj.as_deref()),
+                ),
+                EstadoSessao::Cansado => (BOCEJO, "cansado", "Cansei...".to_owned()),
+                _ => continue,
+            };
+            // Na soneca, só as reações pequenas (decisão 0053).
+            if self.soneca(agora_ms).is_some() {
+                nome = cerebro::ACENO;
+            }
+            self.anotar(
+                agora_ms,
+                intencoes::Tipo::Reacao {
+                    nome: nome.to_owned(),
+                    motivo,
+                    sid8: Some(s.sid8.clone()),
+                    nivel: None,
+                },
+            );
+            self.anotar(
+                agora_ms,
+                intencoes::Tipo::Balao {
+                    linhas: vec![linha],
+                    motivo,
+                },
+            );
+            reacoes.push(Reacao {
+                nome,
+                sid8: s.sid8.clone(),
+                proj: s.proj.clone(),
+                ts: self.parede(agora_ms),
+                nivel: None,
+                teste: s.teste,
+                discreta: false,
+            });
+        }
+        self.estados_vistos = vistos;
+        reacoes
     }
 
     /// Um evento do Claude Code, no relógio da chegada (decisão 0032).

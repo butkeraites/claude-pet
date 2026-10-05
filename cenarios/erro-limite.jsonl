@@ -1,0 +1,7 @@
+{"cenario": "erro-limite", "descricao": "o turno acaba no limite de uso (StopFailure com rate_limit): o Zeca cansa (o bocejo e 'Cansei...'), sem festa, por 60 s; o aviso de erro fica para o clique; noutra sessão, um erro da API dá o susto e 'Deu ruim...'", "padrao": {"ent": "cli"}}
+{"t": 0, "evento": {"e": "UserPromptSubmit", "sid": "s1", "proj": "api", "turno": "p1", "orig": "comum"}}
+{"t": 3000, "evento": {"e": "PostToolUse", "sid": "s1", "proj": "api", "turno": "p1", "tool": "Edit", "dur": 30, "arq": "aaaaaaaaaaa1"}}
+{"t": 6000, "evento": {"e": "StopFailure", "sid": "s1", "proj": "api", "turno": "p1", "err": "rate_limit"}}
+{"t": 20000, "evento": {"e": "UserPromptSubmit", "sid": "s2", "proj": "web", "turno": "q1", "orig": "comum"}}
+{"t": 25000, "evento": {"e": "StopFailure", "sid": "s2", "proj": "web", "turno": "q1", "err": "overloaded"}}
+{"t": 100000, "fim": true}
