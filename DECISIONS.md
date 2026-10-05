@@ -3319,3 +3319,41 @@ do M5, decisão 0077); e o que fazem a soneca e o pet escondido com a L1.
 escaladas ao mesmo tempo seriam barulho; quem só leu o plano por 10 s não
 "voltou" de lugar nenhum; e o balão já existe desde o M4 — deixá-lo para
 depois faria a intenção dizer uma coisa e a tela outra.
+
+## 0080 — A tela na implementação: a fotografia, a acomodação, o T0, o sono e a discrição (2026-10-05)
+
+**Problema:** ao implementar a festa e a tela (decisão 0076, T5.8), o
+`/v1/estado.tela` da decisão 0077 já existia com outro sentido (o estado da
+aprovação: `ativa`, `sem_personagem`), e alguns casos ficaram em aberto: a
+base no 0,8 s da acomodação, o T0 numa festa mesclada, a festa na soneca, o
+que acorda o pet, e a discrição quando a fonte dos eventos do desktop cai.
+**Escolha:**
+- **`/v1/estado.fotografia`** é a fotografia de agora: a base (o estado da
+  skin, a prioridade e a sessão que manda), o sono, os selos, a escalada
+  (sessão, nível, tipo da espera e pulso), a festa dos últimos 3 s e a
+  discrição. O `tela` continua sendo o da aprovação.
+- **Na acomodação do Stop**, a sessão segura a prioridade que tinha: a base
+  não pisca parada antes da festa.
+- **O T0 é uma festa sem balão** (só o aceno). Um fim que entra numa festa
+  (do mesmo mundo; uma festa por mundo) só toca se subir o nível, e o balão
+  "N prontos: …" só sai com a festa no T1 ou acima.
+- **Na soneca**, a festa é o aceno, sem confete, voo nem faixa (o balão
+  fica); **com o "não perturbe"**, nenhum voo (o curto também); **escondido**,
+  a intenção `festa` com `escondida` e nada mais.
+- **O sono:** o relógio começa com o Motor (o pet nasce parado) e recomeça a
+  cada evento de uma sessão que o cérebro acompanha (os dos agentes também:
+  um workflow em segundo plano mantém o pet acordado) e a cada clique; um
+  evento acorda com o despertar, o clique acorda sem ele (a risadinha toca
+  por cima). O pronto não impede o sono; a espera e o erro, sim.
+- **Os selos:** o "+N" conta as outras sessões com aviso de espera ou de erro
+  ou ocupadas (pensando, trabalhando, compactando, esperando, no erro,
+  cansadas); até 8 bandeirinhas, da mais velha para a mais nova, na cor do
+  FNV-1a do nome do projeto (ou do `sid8`, sem pasta).
+- **A discrição** continua ligada se a fonte dos eventos do desktop cai e
+  volta (o fim do compartilhamento pode ter se perdido no meio); o balão da
+  chamada diz "sessão N precisa de você" (a posição na lista do clique).
+**Por quê:** o nome `tela` no `/v1/estado` já é lido pelos scripts e pelo
+`bin/pet`; a base que pisca antes da festa seria um movimento sem
+significado; um T0 é a resposta rápida e não merece balão nem quando chega
+junto; e, na dúvida sobre o compartilhamento, o pet erra para o lado de não
+mostrar o nome do projeto.

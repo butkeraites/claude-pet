@@ -5,8 +5,9 @@
 //! cenários dourados comparam (`pet_core::cenario`). As reações (`reacao`,
 //! `rajada`) já vão para a tela pelo animador do M3, e os balões (`balao`)
 //! pelo balão do M4: a linha e a tela saem da mesma chamada. O resto (a base
-//! segurada, os selos, os voos, o pulso, o confete) espera quem desenha, e
-//! está aqui para os testes e o `/v1/estado` lerem.
+//! segurada, os selos, os voos, o pulso, o confete, a faixa) espera quem
+//! desenha, e está aqui para os testes e o `/v1/estado` lerem (as intenções
+//! e a fotografia de agora, `fotografia`).
 //!
 //! Só metadados: o id curto da sessão (`sid8`), o do turno, o nome da pasta
 //! do projeto nos balões (como o balão do M4 já mostra) e enums. Nada de
@@ -16,6 +17,7 @@ use std::collections::VecDeque;
 
 use serde::Serialize;
 
+use super::tela::{Prioridade, Selos};
 use crate::cerebro::{Fim, Nivel, OrigemTurno, RegistroTurno, ResumoCorrente, TipoEspera};
 
 /// Intenções guardadas para o `/v1/estado` (as mais novas).
@@ -109,6 +111,63 @@ pub enum Tipo {
     },
     /// O selo do aviso pulsando a 1 Hz (a L4) liga ou desliga.
     Pulso { ligado: bool, sid8: String },
+    /// A festa de um fim (decisão 0076): a reação, o confete, o voo (`curto`
+    /// no T2, `atravessar` no T3) e a faixa "PRONTO!" (T3). `escondida`: o
+    /// pet escondido ou a proteção de tela, nada tocou (fica no registro).
+    Festa {
+        sid8: String,
+        nivel: Nivel,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reacao: Option<&'static str>,
+        #[serde(skip_serializing_if = "eh_zero")]
+        confete: u32,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        voo: Option<&'static str>,
+        #[serde(skip_serializing_if = "eh_falso")]
+        faixa: bool,
+        #[serde(skip_serializing_if = "eh_falso")]
+        escondida: bool,
+    },
+    /// Um fim que entrou na festa de agora, até 3 s depois do começo dela
+    /// (decisão 0076): `sessoes` na festa, o nível dela e, só se ele subiu, a
+    /// reação e os efeitos do nível novo.
+    FestaMesclada {
+        sid8: String,
+        sessoes: u32,
+        nivel: Nivel,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reacao: Option<&'static str>,
+        #[serde(skip_serializing_if = "eh_zero")]
+        confete: u32,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        voo: Option<&'static str>,
+        #[serde(skip_serializing_if = "eh_falso")]
+        faixa: bool,
+    },
+    /// A base que o pet segura (decisão 0076): o estado da skin da sessão mais
+    /// alta na prioridade (`sid8`), ou o sono (`profundo`: o sono profundo,
+    /// sem commit nenhum).
+    Base {
+        estado: &'static str,
+        prioridade: Prioridade,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        sid8: Option<String>,
+        #[serde(skip_serializing_if = "eh_falso")]
+        profundo: bool,
+    },
+    /// Os selos das outras sessões (decisão 0076).
+    Selos(Selos),
+    /// A discrição do compartilhamento de tela liga (2 s depois de começar)
+    /// ou desliga; `tirou_balao`: havia um balão na tela, e ele saiu.
+    Discricao {
+        ligada: bool,
+        #[serde(skip_serializing_if = "eh_falso")]
+        tirou_balao: bool,
+    },
+}
+
+fn eh_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 fn eh_falso(b: &bool) -> bool {

@@ -1,0 +1,7 @@
+{"t":0,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":3000,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
+{"t":20800,"i":"turno","sid8":"s1","turno8":"p1","fim":"stop","nivel":"T1","pontuacao":0.65,"reacao":"done_small"}
+{"t":20800,"i":"festa","sid8":"s1","nivel":"T1","reacao":"done_small","escondida":true}
+{"t":20800,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}
+{"t":140800,"i":"base","estado":"idle","prioridade":"parado"}
+{"t":140800,"i":"selos","mais":0,"bandeiras":[7],"corrente":false}

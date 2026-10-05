@@ -1,6 +1,9 @@
+{"t":0,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":30000,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
 {"t":60000,"i":"reacao","nome":"alert","motivo":"aviso","sid8":"s1"}
 {"t":60000,"i":"balao","linhas":["api: pergunta pra você"],"motivo":"aviso"}
 {"t":60000,"i":"escalada","sid8":"s1","nivel":1,"espera":"pergunta","motivo":"aviso"}
+{"t":60000,"i":"base","estado":"waiting","prioridade":"esperando","sid8":"s1"}
 {"t":90000,"i":"escalada","sid8":"s1","nivel":2,"motivo":"tempo"}
 {"t":90000,"i":"rajada","sid8":"s1","nivel":2}
 {"t":96000,"i":"rajada","sid8":"s1","nivel":2}
@@ -45,5 +48,8 @@
 {"t":2100000,"i":"rajada","sid8":"s1","nivel":4}
 {"t":2160000,"i":"pulso","ligado":false,"sid8":"s1"}
 {"t":3020000,"i":"escalada","sid8":"s1","nivel":0,"motivo":"andou"}
+{"t":3020000,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
 {"t":3030800,"i":"turno","sid8":"s1","turno8":"p1","fim":"stop","nivel":"T1","pontuacao":0.27,"reacao":"done_small"}
-{"t":3030800,"i":"reacao","nome":"done_small","motivo":"fim","sid8":"s1","nivel":"T1"}
+{"t":3030800,"i":"festa","sid8":"s1","nivel":"T1","reacao":"done_small"}
+{"t":3030800,"i":"balao","linhas":["Prontinho! api"],"motivo":"festa"}
+{"t":3030800,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}

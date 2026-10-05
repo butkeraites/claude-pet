@@ -1,0 +1,18 @@
+{"cenario": "dois-prontos", "descricao": "duas sessões reais terminam com 1,5 s entre as festas: uma festa só, que sobe do T1 para o T2 com o balão 2 prontos; uma sessão de teste no meio festeja à parte (outro mundo), e uma terceira real, 4 s depois do começo, é outra festa", "padrao": {"ent": "cli"}}
+{"t": 0, "evento": {"e": "UserPromptSubmit", "sid": "s1", "proj": "api", "turno": "p1", "orig": "comum"}}
+{"t": 500, "evento": {"e": "UserPromptSubmit", "sid": "s2", "proj": "web", "turno": "q1", "orig": "comum"}}
+{"t": 800, "evento": {"e": "UserPromptSubmit", "sid": "s3", "proj": "lab", "turno": "r1", "orig": "comum"}}
+{"t": 900, "evento": {"e": "UserPromptSubmit", "sid": "t1", "proj": "api", "turno": "x1", "orig": "comum", "teste": true}}
+{"t": 4000, "evento": {"e": "PostToolUse", "sid": "s1", "proj": "api", "turno": "p1", "tool": "Edit", "dur": 30, "arq": "aaaaaaaaaaa1"}}
+{"t": 5000, "evento": {"e": "PostToolUse", "sid": "s2", "proj": "web", "turno": "q1", "tool": "Edit", "dur": 30, "arq": "bbbbbbbbbbb1"}}
+{"t": 5100, "evento": {"e": "PostToolUse", "sid": "s2", "proj": "web", "turno": "q1", "tool": "Edit", "dur": 30, "arq": "bbbbbbbbbbb2"}}
+{"t": 5200, "evento": {"e": "PostToolUse", "sid": "s2", "proj": "web", "turno": "q1", "tool": "Edit", "dur": 30, "arq": "bbbbbbbbbbb3"}}
+{"t": 5300, "evento": {"e": "PostToolUse", "sid": "s2", "proj": "web", "turno": "q1", "tool": "Edit", "dur": 30, "arq": "bbbbbbbbbbb4"}}
+{"t": 5400, "evento": {"e": "PostToolUse", "sid": "s2", "proj": "web", "turno": "q1", "tool": "Bash", "dur": 150000}}
+{"t": 6000, "evento": {"e": "PostToolUse", "sid": "s3", "proj": "lab", "turno": "r1", "tool": "Edit", "dur": 30, "arq": "ccccccccccc1"}}
+{"t": 6500, "evento": {"e": "PostToolUse", "sid": "t1", "proj": "api", "turno": "x1", "tool": "Edit", "dur": 30, "arq": "ddddddddddd1", "teste": true}}
+{"t": 10000, "evento": {"e": "Stop", "sid": "s1", "proj": "api", "turno": "p1", "bg": 0, "crn": 0}}
+{"t": 10400, "evento": {"e": "Stop", "sid": "t1", "proj": "api", "turno": "x1", "bg": 0, "crn": 0, "teste": true}}
+{"t": 11500, "evento": {"e": "Stop", "sid": "s2", "proj": "web", "turno": "q1", "bg": 0, "crn": 0}}
+{"t": 14000, "evento": {"e": "Stop", "sid": "s3", "proj": "lab", "turno": "r1", "bg": 0, "crn": 0}}
+{"t": 20000, "fim": true}

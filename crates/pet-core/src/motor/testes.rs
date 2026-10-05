@@ -288,7 +288,11 @@ fn painel_sem_janela_e_vazio_e_desconectar_zera() {
     assert_eq!(motor.painel(Some(&janela), 10).commits_total, 1);
     motor.desconectou();
     assert!(!motor.quer_mostrar());
-    assert_eq!(motor.proximo_prazo(), None);
+    assert_eq!(
+        motor.proximo_prazo(),
+        Some(tela::BOCEJO_MS),
+        "só o relógio do sono (decisão 0076)"
+    );
     let mut nova = Falsa::default();
     motor.conectou(500);
     assert_eq!(
@@ -2351,12 +2355,21 @@ fn o_tique_do_laco_pela_janela_certa_fora_de_foco() {
 
 // --- avisos de espera e a escalada (decisão 0075) ---------------------------
 
-/// As intenções desde `t` (inclusive), em JSON, sem as do turno e da festa.
+/// As intenções desde `t` (inclusive), em JSON, sem as do turno, da festa
+/// e da tela (a base e os selos).
 fn chamadas_desde(motor: &Motor, t: u64) -> Vec<String> {
     motor
         .intencoes()
         .filter(|i| i.t_ms >= t)
-        .filter(|i| !matches!(i.tipo, intencoes::Tipo::Turno { .. }))
+        .filter(|i| {
+            !matches!(
+                i.tipo,
+                intencoes::Tipo::Turno { .. }
+                    | intencoes::Tipo::Base { .. }
+                    | intencoes::Tipo::Selos(_)
+                    | intencoes::Tipo::Festa { .. }
+            )
+        })
         .map(|i| {
             // O "t" é sempre o primeiro campo: fora ele, na ordem da linha.
             let linha = serde_json::to_string(i).unwrap();
@@ -2635,4 +2648,295 @@ fn o_tipo_refinado_troca_o_balao_sem_chamar_de_novo() {
         vec![r#"{"i":"balao","linhas":["api: pergunta pra você"],"motivo":"aviso_refinado"}"#]
     );
     assert_eq!(motor.nivel_da_escalada(), 1);
+}
+
+// --- a festa e a tela (decisão 0076) ----------------------------------------
+
+fn hook_de(sid: &str, proj: &str, e: &str, ms: u64) -> Evento {
+    Evento {
+        e: e.into(),
+        sid: Some(sid.into()),
+        turno: Some(format!("{sid}-p")),
+        ent: Some("cli".into()),
+        proj: Some(proj.into()),
+        ts: Some(PAREDE + ms),
+        ..Evento::default()
+    }
+}
+
+fn mandar(motor: &mut Motor, ev: Evento, ms: u64) -> Vec<&'static str> {
+    nomes(&motor.evento(&ev, PAREDE + ms, em(ms)))
+}
+
+/// Vence os prazos do cérebro até `ate`, como o laço; as reações com a hora.
+fn andar(motor: &mut Motor, ate: u64) -> Vec<(u64, &'static str)> {
+    let mut saida = Vec::new();
+    let mut voltas = 0;
+    while let Some(p) = motor.prazo_do_cerebro().filter(|p| *p <= ate) {
+        voltas += 1;
+        assert!(voltas < 1_000, "prazo que não anda em {p}");
+        for r in motor.tique(em(p)) {
+            saida.push((p, r.nome));
+        }
+    }
+    motor.acertar_relogio(em(ate));
+    saida
+}
+
+/// Um turno com uma edição: o T1 na acomodação.
+fn turno_pequeno(motor: &mut Motor, sid: &str, proj: &str, ms: u64) {
+    mandar(motor, hook_de(sid, proj, "UserPromptSubmit", ms), ms);
+    let edit = Evento {
+        tool: Some("Edit".into()),
+        arq: Some(format!("{sid:0>12}")),
+        dur: Some(30),
+        ..hook_de(sid, proj, "PostToolUse", ms + 1_000)
+    };
+    mandar(motor, edit, ms + 1_000);
+    mandar(motor, hook_de(sid, proj, "Stop", ms + 2_000), ms + 2_000);
+}
+
+fn bases(motor: &Motor) -> Vec<(u64, &'static str, bool)> {
+    motor
+        .intencoes()
+        .filter_map(|i| match i.tipo {
+            intencoes::Tipo::Base {
+                estado, profundo, ..
+            } => Some((i.t_ms, estado, profundo)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn parado_boceja_dorme_e_um_evento_acorda() {
+    let (mut motor, _janela) = ligado();
+    motor.acertar_relogio(em(0));
+    ocioso(&mut motor, false, 0);
+    assert_eq!(
+        andar(&mut motor, 40 * 60_000),
+        vec![(tela::BOCEJO_MS, BOCEJO)],
+        "o bocejo aos 3 min; o sono é a base, sem reação"
+    );
+    assert_eq!(
+        bases(&motor),
+        vec![
+            (tela::SONO_MS, "sleep", false),
+            (tela::SONO_PROFUNDO_MS, "sleep", true)
+        ]
+    );
+    assert_eq!(motor.prazo_do_cerebro(), None, "no sono profundo, nada");
+    // Um evento acorda: o despertar antes de tudo, e o relógio recomeça.
+    let t = 40 * 60_000;
+    assert_eq!(
+        mandar(&mut motor, hook_de("s1", "api", "UserPromptSubmit", t), t),
+        vec![DESPERTAR]
+    );
+    assert_eq!(bases(&motor).last(), Some(&(t, "thinking", false)));
+    // Longe do teclado, dorme aos 3 min, logo depois do bocejo.
+    let (mut motor, _janela) = ligado();
+    motor.acertar_relogio(em(0));
+    ocioso(&mut motor, true, 0);
+    assert_eq!(
+        andar(&mut motor, 4 * 60_000),
+        vec![(tela::BOCEJO_MS, BOCEJO)]
+    );
+    assert_eq!(bases(&motor), vec![(tela::SONO_LONGE_MS, "sleep", false)]);
+    // O clique acorda sem o despertar (a risadinha toca por cima).
+    let (mut motor, mut janela) = ligado();
+    motor.acertar_relogio(em(0));
+    andar(&mut motor, 10 * 60_000);
+    janela.mostrou();
+    motor.clicar(&mut janela, Botao::Esquerdo, 10 * 60_000);
+    assert_eq!(bases(&motor).last(), Some(&(10 * 60_000, "idle", false)));
+    assert!(
+        !motor
+            .intencoes()
+            .any(|i| matches!(&i.tipo, intencoes::Tipo::Reacao { nome, .. } if nome == DESPERTAR))
+    );
+    // Um aviso pendente (o erro, a espera) não deixa dormir; o pronto deixa.
+    let (mut motor, _janela) = ligado();
+    motor.acertar_relogio(em(0));
+    turno_pequeno(&mut motor, "s1", "api", 1_000);
+    andar(&mut motor, 60 * 60_000);
+    assert!(
+        bases(&motor).iter().any(|(_, e, _)| *e == "sleep"),
+        "com o pronto"
+    );
+    let (mut motor, _janela) = ligado();
+    motor.acertar_relogio(em(0));
+    mandar(
+        &mut motor,
+        hook_de("s1", "api", "UserPromptSubmit", 1_000),
+        1_000,
+    );
+    mandar(
+        &mut motor,
+        hook_de("s1", "api", "StopFailure", 2_000),
+        2_000,
+    );
+    andar(&mut motor, 60 * 60_000);
+    assert!(
+        !bases(&motor).iter().any(|(_, e, _)| *e == "sleep"),
+        "com o erro"
+    );
+}
+
+#[test]
+fn a_base_e_da_sessao_mais_alta_e_as_outras_viram_selos() {
+    let (mut motor, _janela) = ligado();
+    motor.acertar_relogio(em(0));
+    olhando(&mut motor, true, 0);
+    ocioso(&mut motor, false, 0);
+    // C termina (pronto), A trabalha, B espera.
+    turno_pequeno(&mut motor, "sessao-c", "lab", 0);
+    andar(&mut motor, 3_000);
+    mandar(
+        &mut motor,
+        hook_de("sessao-a", "api", "UserPromptSubmit", 4_000),
+        4_000,
+    );
+    let edit = Evento {
+        tool: Some("Bash".into()),
+        dur: Some(10),
+        ..hook_de("sessao-a", "api", "PostToolUse", 5_000)
+    };
+    mandar(&mut motor, edit, 5_000);
+    mandar(
+        &mut motor,
+        hook_de("sessao-b", "web", "UserPromptSubmit", 6_000),
+        6_000,
+    );
+    hook_em(&mut motor, "sessao-b", "web", "PermissionRequest", 7_000);
+    let foto = motor.painel(None, 7_000).fotografia;
+    assert_eq!(
+        (foto.base, foto.sid8.as_deref()),
+        ("waiting", Some("sessao-b"))
+    );
+    assert_eq!(
+        foto.selos,
+        Selos {
+            mais: 1,
+            bandeiras: vec![tela::cor("lab")],
+            corrente: false
+        }
+    );
+    assert_eq!(foto.escalada.as_ref().map(|e| e.nivel), Some(1));
+    // B respondida: o pronto de C ainda segura a base (até 2 min).
+    let rodou = Evento {
+        tool: Some("Bash".into()),
+        dur: Some(10),
+        ..hook_de("sessao-b", "web", "PostToolUse", 8_000)
+    };
+    mandar(&mut motor, rodou, 8_000);
+    let foto = motor.painel(None, 8_000).fotografia;
+    assert_eq!(
+        (foto.base, foto.sid8.as_deref()),
+        ("ready", Some("sessao-c"))
+    );
+    assert_eq!(foto.selos.mais, 2, "A e B trabalhando");
+    assert!(
+        foto.selos.bandeiras.is_empty(),
+        "o pronto de C está na base"
+    );
+    // Passados 2 min, o pronto vira a bandeirinha e a base é o trabalho.
+    andar(&mut motor, 3_000 + tela::PRONTO_NA_BASE_MS);
+    let foto = motor
+        .painel(None, 3_000 + tela::PRONTO_NA_BASE_MS)
+        .fotografia;
+    assert_eq!(foto.base, "working");
+    assert_eq!(foto.selos.bandeiras, vec![tela::cor("lab")]);
+    assert!(foto.escalada.is_none());
+}
+
+#[test]
+fn a_festa_com_o_nao_perturbe_a_soneca_e_o_modo_discreto() {
+    let grande = |motor: &mut Motor, ms: u64, dnd: bool| {
+        let com = |e: Evento| Evento { dnd, ..e };
+        mandar(motor, com(hook_de("s1", "api", "UserPromptSubmit", ms)), ms);
+        let sub = Evento {
+            agente: false,
+            aid: Some("x1".into()),
+            ..com(hook_de("s1", "api", "SubagentStart", ms + 100))
+        };
+        mandar(motor, sub, ms + 100);
+        for i in 0..20 {
+            let edit = Evento {
+                tool: Some("Edit".into()),
+                arq: Some(format!("{i:0>12}")),
+                dur: Some(60_000),
+                ..com(hook_de("s1", "api", "PostToolUse", ms + 1_000 + i))
+            };
+            mandar(motor, edit, ms + 1_000 + i);
+        }
+        mandar(
+            motor,
+            com(hook_de("s1", "api", "Stop", ms + 2_000)),
+            ms + 2_000,
+        );
+        andar(motor, ms + 3_000)
+    };
+    let festa = |motor: &Motor| {
+        motor
+            .intencoes()
+            .filter_map(|i| match &i.tipo {
+                intencoes::Tipo::Festa {
+                    reacao,
+                    voo,
+                    confete,
+                    faixa,
+                    ..
+                } => Some((*reacao, *voo, *confete, *faixa)),
+                _ => None,
+            })
+            .last()
+    };
+    // Com o "não perturbe": o T3 sem o voo pela tela.
+    let (mut motor, _janela) = ligado();
+    motor.acertar_relogio(em(0));
+    assert_eq!(
+        grande(&mut motor, 0, true),
+        vec![(2_800, cerebro::VOO_GRANDE)]
+    );
+    assert_eq!(festa(&motor), Some((Some("done_big"), None, 40, true)));
+    // Na soneca: o aceno, sem confete, voo nem faixa.
+    let (mut motor, mut janela) = ligado();
+    motor.acertar_relogio(em(0));
+    motor.alternar_soneca(&mut janela, 0);
+    assert_eq!(grande(&mut motor, 0, false), vec![(2_800, cerebro::ACENO)]);
+    assert_eq!(festa(&motor), Some((Some("nod"), None, 0, false)));
+    // No modo discreto: o pulinho sem balão, e o segundo fim dentro de uma
+    // festa só fica no registro.
+    let config = ConfigCerebro {
+        modo: crate::config::ModoCelebracao::Discreta,
+        ..ConfigCerebro::default()
+    };
+    let mut motor = Motor::novo(config);
+    motor.acertar_relogio(em(0));
+    turno_pequeno(&mut motor, "s1", "api", 0);
+    assert_eq!(andar(&mut motor, 3_000), vec![(2_800, cerebro::PULINHO)]);
+    assert!(motor.balao(3_000).is_none(), "sem balão");
+    assert!(festa(&motor).is_none(), "não é festa");
+}
+
+#[test]
+fn um_fim_t0_dentro_da_festa_so_muda_o_balao() {
+    let (mut motor, _janela) = ligado();
+    motor.acertar_relogio(em(0));
+    turno_pequeno(&mut motor, "s1", "api", 0);
+    mandar(
+        &mut motor,
+        hook_de("s2", "web", "UserPromptSubmit", 500),
+        500,
+    );
+    assert_eq!(andar(&mut motor, 2_800), vec![(2_800, cerebro::PULINHO)]);
+    // s2 responde sem ferramenta (T0) 1 s depois: entra na festa, sem tocar.
+    mandar(&mut motor, hook_de("s2", "web", "Stop", 3_000), 3_000);
+    assert!(andar(&mut motor, 3_800).is_empty());
+    assert_eq!(
+        motor.balao(3_800).map(|b| b.linhas.clone()),
+        Some(vec!["2 prontos: api, web".to_owned()])
+    );
+    let foto = motor.painel(None, 3_800).fotografia;
+    assert_eq!(foto.festa.map(|f| (f.sessoes, f.ha_ms)), Some((2, 1_000)));
 }

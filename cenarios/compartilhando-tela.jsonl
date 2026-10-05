@@ -1,0 +1,14 @@
+{"cenario": "compartilhando-tela", "descricao": "uma captura de tela (compartilhamento de 1 s) não muda nada; compartilhando de verdade, a discrição liga em 2 s e tira o balão com nome, e a chamada, a lista do clique e a festa saem sem nome de projeto; parou de compartilhar, os nomes voltam", "padrao": {"ent": "cli"}}
+{"t": 0, "evento": {"e": "UserPromptSubmit", "sid": "s1", "proj": "agenda-secreta", "turno": "p1", "orig": "comum"}}
+{"t": 2000, "desktop": {"compartilhando": true}}
+{"t": 3000, "desktop": {"compartilhando": false}}
+{"t": 6000, "evento": {"e": "PostToolUse", "sid": "s1", "proj": "agenda-secreta", "turno": "p1", "tool": "Edit", "dur": 30, "arq": "aaaaaaaaaaa1"}}
+{"t": 10000, "desktop": {"compartilhando": true}}
+{"t": 10500, "evento": {"e": "Stop", "sid": "s1", "proj": "agenda-secreta", "turno": "p1", "bg": 0, "crn": 0}}
+{"t": 20000, "evento": {"e": "UserPromptSubmit", "sid": "s2", "proj": "web", "turno": "q1", "orig": "comum"}}
+{"t": 25000, "evento": {"e": "PermissionRequest", "sid": "s2", "proj": "web", "turno": "q1", "tool": "Bash"}}
+{"t": 30000, "clique": "esquerdo"}
+{"t": 40000, "desktop": {"compartilhando": false}}
+{"t": 45000, "evento": {"e": "PostToolUse", "sid": "s2", "proj": "web", "turno": "q1", "tool": "Bash", "dur": 900}}
+{"t": 50000, "evento": {"e": "Stop", "sid": "s2", "proj": "web", "turno": "q1", "bg": 0, "crn": 0}}
+{"t": 60000, "fim": true}

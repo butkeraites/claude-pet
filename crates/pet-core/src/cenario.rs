@@ -8,8 +8,8 @@
 //! - `{"t": 1200, "evento": {…}}`: um evento do fio v1, como o hook manda
 //!   (`v` é opcional; o `ts`, se houver, também é relativo);
 //! - `{"t": 5000, "desktop": {"ocioso": true}}`: um evento do desktop
-//!   (`ocioso`, `olhando_claude`, `protetor`, `ligado`, `janela_ativa` com o
-//!   id da janela ou `null`, `monitor`);
+//!   (`ocioso`, `olhando_claude`, `protetor`, `compartilhando`, `ligado`,
+//!   `janela_ativa` com o id da janela ou `null`, `monitor`);
 //! - `{"t": 9000, "clique": "esquerdo"}` (ou `"direito"`);
 //! - `{"t": 60000, "fim": true}`: o relógio anda até aqui e o cenário acaba.
 //!
@@ -85,6 +85,7 @@ pub enum Desktop {
     Ocioso(bool),
     OlhandoClaude(bool),
     Protetor(bool),
+    Compartilhando(bool),
     Ligado(bool),
     JanelaAtiva(Option<String>),
     Monitor(String),
@@ -271,6 +272,7 @@ fn passo(objeto: &Map<String, Value>, padrao: &Map<String, Value>) -> Result<Pas
                 "ocioso" => Desktop::Ocioso(booleano()?),
                 "olhando_claude" => Desktop::OlhandoClaude(booleano()?),
                 "protetor" => Desktop::Protetor(booleano()?),
+                "compartilhando" => Desktop::Compartilhando(booleano()?),
                 "ligado" => Desktop::Ligado(booleano()?),
                 "janela_ativa" => Desktop::JanelaAtiva(match valor {
                     Value::Null => None,
@@ -415,6 +417,7 @@ impl Execucao {
                     Desktop::Protetor(false) => {
                         EventoDesktop::JanelaFechou(Alca(JANELA_DO_PROTETOR.into()))
                     }
+                    Desktop::Compartilhando(v) => EventoDesktop::Compartilhando(*v),
                     Desktop::Ligado(v) => EventoDesktop::Ligado(*v),
                     Desktop::JanelaAtiva(janela) => {
                         let janela = janela.clone().map(Alca);

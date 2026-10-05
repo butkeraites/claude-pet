@@ -164,14 +164,16 @@ fn o_executor_vence_os_prazos_como_o_laco() {
     )
     .unwrap();
     let linha = rodar(&c, Some(skin_teste())).unwrap();
-    let reacoes: Vec<(u64, String)> = linha
+    let festas: Vec<(u64, &str)> = linha
         .iter()
         .filter_map(|i| match &i.tipo {
-            crate::motor::intencoes::Tipo::Reacao { nome, .. } => Some((i.t_ms, nome.clone())),
+            crate::motor::intencoes::Tipo::Festa {
+                reacao: Some(nome), ..
+            } => Some((i.t_ms, *nome)),
             _ => None,
         })
         .collect();
-    assert_eq!(reacoes, vec![(30_800, "nod".to_owned())]);
+    assert_eq!(festas, vec![(30_800, "nod")]);
     // Sem personagem, o cérebro decide igual.
     assert_eq!(
         linhas(&rodar(&c, None).unwrap()),
@@ -217,7 +219,12 @@ fn pergunta_e_pergunta_dupla_sao_um_aviso_so() {
     for nome in ["pergunta", "pergunta-dupla"] {
         let linha = linha_do_tempo(nome);
         assert_eq!(chamadas(&linha), 1, "{nome}: uma chamada");
-        let baloes: Vec<_> = so(&linha, "balao");
+        let baloes: Vec<_> = so(&linha, "balao")
+            .into_iter()
+            .filter(
+                |x| matches!(&x.tipo, Tipo::Balao { motivo, .. } if motivo.starts_with("aviso")),
+            )
+            .collect();
         assert_eq!(baloes.len(), 1, "{nome}: um balão");
         assert!(
             matches!(&baloes[0].tipo, Tipo::Balao { linhas, .. } if linhas[0].ends_with("pergunta pra você")),
@@ -324,4 +331,106 @@ fn com_o_nao_perturbe_nunca_passa_de_l1() {
         vec![1, 0]
     );
     assert!(so(&linha, "rajada").is_empty() && so(&linha, "voo").is_empty());
+}
+
+/// As linhas dos balões, com o instante.
+fn baloes(linha: &[Intencao]) -> Vec<(u64, Vec<String>)> {
+    linha
+        .iter()
+        .filter_map(|x| match &x.tipo {
+            Tipo::Balao { linhas, .. } => Some((x.t_ms, linhas.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn dois_prontos_sao_uma_festa_so() {
+    let linha = linha_do_tempo("dois-prontos");
+    let festas: Vec<(u64, String)> = so(&linha, "festa")
+        .iter()
+        .map(|x| match &x.tipo {
+            Tipo::Festa { sid8, .. } => (x.t_ms, sid8.clone()),
+            _ => unreachable!(),
+        })
+        .collect();
+    assert_eq!(
+        festas,
+        vec![
+            (10_800, "s1".to_owned()),
+            (11_200, "t1".to_owned()),
+            (14_800, "s3".to_owned())
+        ],
+        "a de teste à parte; a terceira real depois dos 3 s é outra"
+    );
+    let mescladas = so(&linha, "festa_mesclada");
+    assert_eq!(mescladas.len(), 1);
+    assert!(matches!(
+        &mescladas[0].tipo,
+        Tipo::FestaMesclada { sid8, sessoes: 2, nivel: crate::cerebro::Nivel::T2, reacao: Some("done_medium"), confete: 12, .. } if sid8 == "s2"
+    ));
+    assert!(baloes(&linha).contains(&(12_300, vec!["2 prontos: api, web".to_owned()])));
+}
+
+#[test]
+fn com_a_protecao_de_tela_a_festa_nao_toca_e_o_pronto_fica() {
+    let linha = linha_do_tempo("protetor-de-tela");
+    assert!(so(&linha, "festa").iter().all(|x| matches!(
+        x.tipo,
+        Tipo::Festa {
+            escondida: true,
+            ..
+        }
+    )));
+    assert!(so(&linha, "reacao").is_empty(), "nada toca, nem na volta");
+    assert!(baloes(&linha).is_empty());
+    let bases: Vec<(u64, &str)> = so(&linha, "base")
+        .iter()
+        .map(|x| match x.tipo {
+            Tipo::Base { estado, .. } => (x.t_ms, estado),
+            _ => unreachable!(),
+        })
+        .collect();
+    assert!(bases.contains(&(20_800, "ready")), "o pronto segura a base");
+    assert!(bases.contains(&(140_800, "idle")), "por 2 min");
+    let ultimo_selo = so(&linha, "selos").last().map(|x| x.tipo.clone());
+    assert_eq!(
+        ultimo_selo,
+        Some(Tipo::Selos(crate::motor::Selos {
+            mais: 0,
+            bandeiras: vec![crate::motor::tela::cor("api")],
+            corrente: false
+        })),
+        "e vira a bandeirinha"
+    );
+}
+
+#[test]
+fn compartilhando_a_tela_os_baloes_ficam_sem_nome() {
+    let linha = linha_do_tempo("compartilhando-tela");
+    let discricao: Vec<(u64, bool, bool)> = so(&linha, "discricao")
+        .iter()
+        .map(|x| match x.tipo {
+            Tipo::Discricao {
+                ligada,
+                tirou_balao,
+            } => (x.t_ms, ligada, tirou_balao),
+            _ => unreachable!(),
+        })
+        .collect();
+    assert_eq!(
+        discricao,
+        vec![(12_000, true, true), (40_000, false, false)],
+        "a captura de 1 s não liga; 2 s depois de começar, o balão com nome sai"
+    );
+    for (t, linhas) in baloes(&linha) {
+        let texto = linhas.join(" ");
+        if (12_000..40_000).contains(&t) {
+            assert!(
+                !texto.contains("agenda") && !texto.contains("web"),
+                "{t}: {texto}"
+            );
+        }
+    }
+    assert!(baloes(&linha).contains(&(50_800, vec!["Prontinho! web".to_owned()])));
 }

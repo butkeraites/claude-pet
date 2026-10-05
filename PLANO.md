@@ -759,7 +759,7 @@ Atualizado em 2026-10-05 com a pesquisa do M5 (`docs/pesquisa/10-cerebro-m5.md`,
 - **T5.5** pontuação e níveis: o config com números (`[pontuacao]`, `celebracao.intervalo_t3_min`, documentados no `config/exemplo.toml`), T0–T3, o T3 no máximo a cada 10 min, os modos e os componentes de cada turno no `/v1/estado.turnos` (decisão 0074);
 - **T5.6** fechamentos e prazos: interrupção (com e sem `PostToolUseFailure`) e `idle_prompt` fechando sem festa, `SessionEnd` limpando tudo da sessão, os 5 min de trabalhando/pensando/compactando, os 60 s de erro e o cansado do `rate_limit` (decisões 0073 e 0076);
 - **T5.7** avisos e escalada: os tipos de espera, um diálogo até a sessão andar, L1–L4 com presença (`olhando_claude`, sem mexer há 60 s, a volta), saída, tetos do "não perturbe" e da soneca (decisões 0075 e 0079);
-- **T5.8** a festa e a tela: mesclagem de 3 s, o `sha` que sobe de nível, prioridade e base, selos, pronto parado depois de 2 min, sono, proteção de tela, o compartilhamento de tela (`EventoDesktop::Compartilhando`, 2 s) e a fotografia de agora no `/v1/estado.tela` (decisão 0076);
+- **T5.8** a festa e a tela: mesclagem de 3 s, o `sha` que sobe de nível, prioridade e base, selos, pronto parado depois de 2 min, sono, proteção de tela, o compartilhamento de tela (`EventoDesktop::Compartilhando`, 2 s) e a fotografia de agora no `/v1/estado.fotografia` (decisões 0076 e 0080);
 - **T5.9** cenários reais pseudonimizados, as asserções de cada linha da tabela e a prova de que o executor pega uma regra quebrada (decisão 0077);
 - **T5.10** `bichinho simular` e `bichinho cenario`, `bin/pet simular` e `bin/pet eventos --salvar`, CLAUDE.md, README e docs (decisão 0078).
 

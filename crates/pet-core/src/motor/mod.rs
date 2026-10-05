@@ -38,6 +38,7 @@ mod pet;
 mod poof;
 pub mod posicoes;
 mod ritmo;
+pub mod tela;
 pub mod viagem;
 
 use std::collections::BTreeMap;
@@ -65,6 +66,7 @@ pub use balao::Balao;
 pub use desktop::{EstadoDesktop, PainelDesktop};
 pub use pet::{Palco, Pet};
 pub use posicoes::{Fracao, Posicoes};
+pub use tela::{PainelTela, Prioridade, Selos, Sono};
 pub use viagem::{Pouso, Seguir};
 
 use escalada::Escalada;
@@ -157,6 +159,9 @@ pub struct Painel {
     /// As últimas decisões do Motor, da mais nova para a mais velha (decisão
     /// 0077).
     pub intencoes: Vec<intencoes::NoPainel>,
+    /// A fotografia da tela de agora: a base, os selos, a escalada, a festa
+    /// e a discrição (decisões 0076, 0077 e 0080).
+    pub fotografia: PainelTela,
 }
 
 /// O que um `tocar` do `/v1/comando` fez (decisão 0033).
@@ -220,6 +225,8 @@ struct Chamando {
     chave: janelas::Chave,
     sid8: String,
     proj: Option<String>,
+    /// O tipo da espera anunciado (sobe com o gatilho do mesmo diálogo).
+    espera: Option<TipoEspera>,
     /// Quando o aviso abriu (ms desde 1970): outro aviso da mesma sessão é
     /// outra escalada.
     desde_ms: u64,
@@ -321,6 +328,9 @@ pub struct Motor {
     /// O instante mais novo do relógio do laço que o Motor viu (os prazos
     /// calculados sem um `agora`).
     relogio_ms: u64,
+    /// A festa, a base, os selos, o sono e a discrição anunciados (decisão
+    /// 0076).
+    tela: tela::Tela,
 }
 
 impl Motor {
@@ -359,6 +369,7 @@ impl Motor {
             ausente_desde: None,
             nao_perturbe: false,
             relogio_ms: 0,
+            tela: tela::Tela::default(),
         }
     }
 
@@ -385,39 +396,19 @@ impl Motor {
     }
 
     /// Os turnos que o cérebro fechou viram intenções, e as reações dele
-    /// também, já com a soneca (só as pequenas; decisão 0053), mais as do
-    /// que o Motor vê nas sessões ([`Self::observar_cerebro`]): o que volta é
-    /// o que o animador deve tocar.
-    fn depois_do_cerebro(&mut self, mut reacoes: Vec<Reacao>, agora_ms: u64) -> Vec<Reacao> {
+    /// viram festas ([`Self::festejar`], com a mesclagem e a soneca; decisão
+    /// 0076), mais o que o Motor vê nas sessões: a entrada no erro e no
+    /// cansado ([`Self::observar_cerebro`]), os avisos de espera
+    /// ([`Self::observar_avisos`]) e a base, os selos e o sono
+    /// ([`Self::observar_tela`]). O que volta é o que o animador deve tocar.
+    fn depois_do_cerebro(&mut self, reacoes: Vec<Reacao>, agora_ms: u64) -> Vec<Reacao> {
         for registro in self.cerebro.tirar_turnos_fechados() {
             self.anotar(agora_ms, intencoes::Tipo::do_turno(&registro));
         }
-        let cochilando = self.soneca(agora_ms).is_some();
-        for reacao in &mut reacoes {
-            if cochilando && reacao.nome != cerebro::TCHAU {
-                reacao.nome = cerebro::ACENO;
-            }
-            let motivo = if reacao.nome == cerebro::TCHAU {
-                "tchau"
-            } else {
-                "fim"
-            };
-            self.anotar(
-                agora_ms,
-                intencoes::Tipo::Reacao {
-                    nome: reacao.nome.to_owned(),
-                    motivo: if reacao.discreta {
-                        "fim_discreto"
-                    } else {
-                        motivo
-                    },
-                    sid8: Some(reacao.sid8.clone()),
-                    nivel: reacao.nivel,
-                },
-            );
-        }
+        let mut reacoes = self.festejar(reacoes, agora_ms);
         reacoes.extend(self.observar_cerebro(agora_ms));
         reacoes.extend(self.observar_avisos(agora_ms, None));
+        reacoes.extend(self.observar_tela(agora_ms));
         reacoes
     }
 
@@ -473,20 +464,36 @@ impl Motor {
 
     /// As sessões abertas, uma por linha (projeto, estado e há quanto
     /// tempo), as reais antes das de teste, a mais recente primeiro.
+    /// Na discrição do compartilhamento de tela, cada sessão é "sessão N"
+    /// (decisão 0076).
     pub fn linhas_das_sessoes(&self, agora_ms: u64) -> Vec<String> {
         let agora = self.parede(agora_ms);
-        let mut sessoes = self.cerebro.resumo().sessoes;
-        sessoes.sort_by_key(|s| (s.teste, std::cmp::Reverse(s.ultimo_evento_ms)));
+        let sessoes = self.sessoes_da_lista();
         if sessoes.is_empty() {
             return vec!["nenhuma sessão do Claude aberta".into()];
         }
+        let nomes = self.nomes_visiveis();
         sessoes
             .iter()
-            .map(|s| {
+            .enumerate()
+            .map(|(i, s)| {
                 let (estado, desde) = balao::estado(s);
-                balao::linha_da_sessao(s.proj.as_deref(), estado, desde, agora, s.teste)
+                let rotulo = if nomes {
+                    s.proj.clone()
+                } else {
+                    Some(format!("sessão {}", i + 1))
+                };
+                balao::linha_da_sessao(rotulo.as_deref(), estado, desde, agora, s.teste)
             })
             .collect()
+    }
+
+    /// As sessões na ordem da lista do clique: as reais antes das de teste,
+    /// a de evento mais novo primeiro.
+    fn sessoes_da_lista(&self) -> Vec<cerebro::ResumoSessao> {
+        let mut sessoes = self.cerebro.resumo_das_sessoes();
+        sessoes.sort_by_key(|s| (s.teste, std::cmp::Reverse(s.ultimo_evento_ms)));
+        sessoes
     }
 
     // --- posições salvas (decisão 0049) --------------------------------------
@@ -541,10 +548,10 @@ impl Motor {
     /// entrada no erro (o susto e "Deu ruim...") e no cansado (o bocejo e
     /// "Cansei..."), uma vez por entrada (decisão 0076).
     fn observar_cerebro(&mut self, agora_ms: u64) -> Vec<Reacao> {
-        let resumo = self.cerebro.resumo();
+        let sessoes = self.cerebro.resumo_das_sessoes();
         let mut reacoes = Vec::new();
         let mut vistos = BTreeMap::new();
-        for s in &resumo.sessoes {
+        for s in &sessoes {
             let agora_dela = (s.estado, s.estado_desde_ms);
             let nova_entrada = self.estados_vistos.get(&s.chave) != Some(&agora_dela);
             vistos.insert(s.chave.clone(), agora_dela);
@@ -555,7 +562,10 @@ impl Motor {
                 EstadoSessao::Erro => (
                     SUSTO,
                     "erro",
-                    balao::com_projeto("Deu ruim...", s.proj.as_deref()),
+                    balao::com_projeto(
+                        "Deu ruim...",
+                        self.rotulo(&s.chave, s.proj.as_deref()).as_deref(),
+                    ),
                 ),
                 EstadoSessao::Cansado => (BOCEJO, "cansado", "Cansei...".to_owned()),
                 _ => continue,
@@ -650,7 +660,11 @@ impl Motor {
             match antes {
                 Some((desde, espera)) if desde == p.aviso.desde_ms => {
                     if p.aviso.espera > espera {
-                        let linhas = balao::linhas_da_espera(p.aviso.espera, p.proj.as_deref());
+                        if let Some(c) = self.chamando.as_mut().filter(|c| c.chave == p.chave) {
+                            c.espera = p.aviso.espera;
+                        }
+                        let nome = self.rotulo(&p.chave, p.proj.as_deref());
+                        let linhas = balao::linhas_da_espera(p.aviso.espera, nome.as_deref());
                         self.balao_decidido(linhas, "aviso_refinado", agora_ms);
                     }
                 }
@@ -698,6 +712,7 @@ impl Motor {
                     chave: p.chave.clone(),
                     sid8: p.sid8.clone(),
                     proj: p.proj.clone(),
+                    espera: p.aviso.espera,
                     desde_ms: p.aviso.desde_ms,
                     escalada: Escalada::nova(p.aviso.desde_mono),
                 });
@@ -726,7 +741,8 @@ impl Motor {
                 nivel: None,
             },
         );
-        let linhas = balao::linhas_da_espera(p.aviso.espera, p.proj.as_deref());
+        let rotulo = self.rotulo(&p.chave, p.proj.as_deref());
+        let linhas = balao::linhas_da_espera(p.aviso.espera, rotulo.as_deref());
         self.balao_decidido(linhas, "aviso", agora_ms);
         Some(Reacao {
             nome,
@@ -849,9 +865,21 @@ impl Motor {
         self.acertar_relogio(agora);
         // O "não perturbe" do Omarchy vem em todo evento (decisão 0075).
         self.nao_perturbe = ev.dnd;
+        // Um evento de uma sessão que o cérebro acompanha acorda o pet
+        // (decisão 0076).
+        let aceito = ev.sid.is_some()
+            && ev
+                .ent
+                .as_deref()
+                .is_some_and(|e| self.cerebro.config().origens.iter().any(|o| o == e));
+        let mut reacoes = if aceito {
+            self.acordar(agora.mono_ms, true)
+        } else {
+            Vec::new()
+        };
         let evidencia = self.evidencia(ev, recebido_ms);
-        let reacoes = self.cerebro.receber_com(ev, recebido_ms, agora, evidencia);
-        let reacoes = self.depois_do_cerebro(reacoes, agora.mono_ms);
+        let do_cerebro = self.cerebro.receber_com(ev, recebido_ms, agora, evidencia);
+        reacoes.extend(self.depois_do_cerebro(do_cerebro, agora.mono_ms));
         if let Some(origem) = janelas::origem(&ev.e, ev.src.as_deref())
             && let Some(sid) = &ev.sid
         {
@@ -908,6 +936,7 @@ impl Motor {
         self.esquecer_janelas_sem_sessao();
         self.ver_pelo_foco(agora.mono_ms);
         reacoes.extend(self.vencer_escalada(agora.mono_ms));
+        reacoes.extend(self.vencer_tela(agora.mono_ms));
         reacoes
     }
 
@@ -917,12 +946,13 @@ impl Motor {
     }
 
     /// Quando chamar [`Self::tique`]: os prazos do cérebro, o do pronto
-    /// visto pelo foco e o da escalada.
+    /// visto pelo foco, o da escalada e os da tela.
     pub fn prazo_do_cerebro(&self) -> Option<u64> {
         [
             self.cerebro.proximo_prazo(),
             self.prazo_visto_pelo_foco(),
             self.prazo_da_escalada(),
+            self.prazo_da_tela(),
         ]
         .into_iter()
         .flatten()
@@ -1488,6 +1518,8 @@ impl Motor {
     /// mostra as sessões; sem aviso, só as sessões. O direito, a soneca
     /// (decisão 0053).
     pub fn clicar(&mut self, punho: &mut dyn Punho, botao: Botao, agora_ms: u64) -> Clicou {
+        // O clique acorda o pet (a risadinha ou a soneca tocam por cima).
+        self.acordar(agora_ms, false);
         let clicou = match botao {
             Botao::Esquerdo => self.clique_esquerdo(punho, agora_ms),
             Botao::Direito => {
@@ -1508,6 +1540,7 @@ impl Motor {
             Clicou::Nada { .. } => ("nada", None),
         };
         self.anotar(agora_ms, intencoes::Tipo::Clique { resultado, sid8 });
+        self.observar_tela(agora_ms);
         clicou
     }
 
@@ -1561,7 +1594,14 @@ impl Motor {
             tipo.nome(),
             alvo.sid8
         );
-        self.balao_sem_foco(punho.janela(), alvo.proj.as_deref(), tipo, motivo, agora_ms);
+        self.balao_sem_foco(
+            punho.janela(),
+            &alvo.chave,
+            alvo.proj.as_deref(),
+            tipo,
+            motivo,
+            agora_ms,
+        );
         Clicou::NaoFocou {
             sid8: alvo.sid8,
             aviso: tipo,
@@ -1640,12 +1680,14 @@ impl Motor {
     fn balao_sem_foco(
         &mut self,
         ov: &mut dyn Overlay,
+        chave: &janelas::Chave,
         proj: Option<&str>,
         tipo: TipoAviso,
         motivo: &str,
         agora_ms: u64,
     ) {
-        let mut linhas = balao::linhas_sem_foco(proj, tipo, motivo);
+        let nome = self.rotulo(chave, proj);
+        let mut linhas = balao::linhas_sem_foco(nome.as_deref(), tipo, motivo);
         linhas.extend(self.linhas_das_sessoes(agora_ms));
         self.mostrar_balao_por(Some(ov), linhas, "sem_foco", agora_ms);
     }
@@ -1657,6 +1699,7 @@ impl Motor {
         if tipo.is_some() {
             self.cerebro_mudou = true;
             self.observar_avisos(agora_ms, Some(chave));
+            self.observar_tela(agora_ms);
         }
         self.ciclo.retain(|c| c != chave);
         tipo
@@ -1795,6 +1838,9 @@ impl Motor {
         }
         if let EventoDesktop::JanelaFechou(janela) = evento {
             self.identidades.fechou(janela);
+        }
+        if let EventoDesktop::Compartilhando(compartilhando) = evento {
+            self.compartilhamento(*compartilhando, agora.mono_ms);
         }
         let protetor_antes = self.desktop.protetor_ativo();
         let ativa_antes = self.desktop.janela_ativa.clone();
@@ -2033,6 +2079,7 @@ impl Motor {
         {
             self.balao_sem_foco(
                 punho.janela(),
+                &focando.chave,
                 focando.proj.as_deref(),
                 focando.tipo,
                 "não consegui focar a janela dela",
@@ -2204,10 +2251,12 @@ impl Motor {
     /// vazio, só com o que os eventos do desktop contaram.
     pub fn painel(&mut self, punho: Option<&dyn Punho>, agora_ms: u64) -> Painel {
         let intencoes = self.intencoes.painel(agora_ms);
+        let fotografia = self.painel_da_tela(agora_ms);
         let Some(punho) = punho else {
             return Painel {
                 desktop: self.desktop.painel(Default::default(), Default::default()),
                 intencoes,
+                fotografia,
                 ..Painel::default()
             };
         };
@@ -2247,6 +2296,7 @@ impl Motor {
             desktop: painel_desktop,
             focando: self.focando.last().map(|f| f.janela.0.clone()),
             intencoes,
+            fotografia,
         }
     }
 

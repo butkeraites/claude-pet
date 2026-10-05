@@ -1,4 +1,7 @@
+{"t":0,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
 {"t":10000,"i":"reacao","nome":"alert","motivo":"aviso","sid8":"s1"}
 {"t":10000,"i":"balao","linhas":["api: pergunta pra você"],"motivo":"aviso"}
 {"t":10000,"i":"escalada","sid8":"s1","nivel":1,"espera":"pergunta","motivo":"aviso"}
+{"t":10000,"i":"base","estado":"waiting","prioridade":"esperando","sid8":"s1"}
 {"t":900000,"i":"escalada","sid8":"s1","nivel":0,"motivo":"andou"}
+{"t":900000,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}

@@ -1,6 +1,10 @@
+{"t":0,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
 {"t":2210,"i":"reacao","nome":"alert","motivo":"aviso","sid8":"s1"}
 {"t":2210,"i":"balao","linhas":["projeto-a: pergunta pra você"],"motivo":"aviso"}
 {"t":2210,"i":"escalada","sid8":"s1","nivel":1,"espera":"pergunta","motivo":"aviso"}
+{"t":2210,"i":"base","estado":"waiting","prioridade":"esperando","sid8":"s1"}
 {"t":18970,"i":"escalada","sid8":"s1","nivel":0,"motivo":"andou"}
+{"t":18970,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
 {"t":20535,"i":"turno","sid8":"s1","turno8":"p1","fim":"stop","nivel":"T0","pontuacao":0.05,"reacao":"nod"}
-{"t":20535,"i":"reacao","nome":"nod","motivo":"fim","sid8":"s1","nivel":"T0"}
+{"t":20535,"i":"festa","sid8":"s1","nivel":"T0","reacao":"nod"}
+{"t":20535,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}

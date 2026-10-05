@@ -2212,32 +2212,36 @@ impl Cerebro {
 
     pub fn resumo(&self) -> Resumo {
         Resumo {
-            sessoes: self
-                .sessoes
-                .values()
-                .map(|s| ResumoSessao {
-                    sid8: evento::curto(&s.sid),
-                    proj: s.proj.clone(),
-                    ent: s.ent.clone(),
-                    teste: s.teste,
-                    estado: s.estado,
-                    estado_desde_ms: s.estado_desde,
-                    turno_aberto: s.turno.is_some(),
-                    acomodando: s.turno.as_ref().is_some_and(|t| t.stop.is_some()),
-                    ultimo_evento_ms: s.ultimo_parede,
-                    contadores: s.contadores.clone(),
-                    aviso: s.aviso,
-                    corrente: s.resumo_da_corrente(),
-                    agendamentos: s.agendamentos,
-                    janela: None,
-                    chave: (s.teste, s.sid.clone()),
-                })
-                .collect(),
+            sessoes: self.resumo_das_sessoes(),
             ultima_reacao: self.ultima_reacao.clone(),
             turnos: self.turnos.iter().rev().cloned().collect(),
             ignorados: self.ignorados.clone(),
             origens: self.config.origens.clone(),
         }
+    }
+
+    /// Só as sessões do [`Self::resumo`] (o Motor olha a tela a cada passo).
+    pub fn resumo_das_sessoes(&self) -> Vec<ResumoSessao> {
+        self.sessoes
+            .values()
+            .map(|s| ResumoSessao {
+                sid8: evento::curto(&s.sid),
+                proj: s.proj.clone(),
+                ent: s.ent.clone(),
+                teste: s.teste,
+                estado: s.estado,
+                estado_desde_ms: s.estado_desde,
+                turno_aberto: s.turno.is_some(),
+                acomodando: s.turno.as_ref().is_some_and(|t| t.stop.is_some()),
+                ultimo_evento_ms: s.ultimo_parede,
+                contadores: s.contadores.clone(),
+                aviso: s.aviso,
+                corrente: s.resumo_da_corrente(),
+                agendamentos: s.agendamentos,
+                janela: None,
+                chave: (s.teste, s.sid.clone()),
+            })
+            .collect()
     }
 }
 

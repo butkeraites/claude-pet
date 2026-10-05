@@ -1,4 +1,16 @@
+{"t":2000,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":5000,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
 {"t":8800,"i":"turno","sid8":"s1","turno8":"p1","fim":"stop","pontuacao":3.05,"corrente":{"aberta":true,"turnos":1}}
+{"t":8800,"i":"base","estado":"idle","prioridade":"parado"}
+{"t":8800,"i":"selos","mais":0,"bandeiras":[],"corrente":true}
+{"t":600500,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":602000,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
 {"t":603800,"i":"turno","sid8":"s1","turno8":"p2","fim":"stop","pontuacao":0.05,"origem":"notificacao","corrente":{"aberta":true,"turnos":2}}
+{"t":603800,"i":"base","estado":"idle","prioridade":"parado"}
+{"t":1201000,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":1203000,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
 {"t":1213800,"i":"turno","sid8":"s1","turno8":"p3","fim":"stop","nivel":"T3","pontuacao":20.0,"reacao":"done_big","origem":"sistema","corrente":{"aberta":false,"turnos":3}}
-{"t":1213800,"i":"reacao","nome":"done_big","motivo":"fim","sid8":"s1","nivel":"T3"}
+{"t":1213800,"i":"festa","sid8":"s1","nivel":"T3","reacao":"done_big","confete":40,"voo":"atravessar","faixa":true}
+{"t":1213800,"i":"balao","linhas":["Prontinho! api"],"motivo":"festa"}
+{"t":1213800,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}
+{"t":1213800,"i":"selos","mais":0,"bandeiras":[],"corrente":false}

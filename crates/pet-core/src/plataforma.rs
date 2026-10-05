@@ -173,6 +173,10 @@ pub enum EventoDesktop {
     /// voltou a mexer (`false`; também o estado de partida de uma conexão
     /// que sabe contar). Sem isto, não se sabe (decisão 0062).
     Ocioso(bool),
+    /// A tela começou (`true`) ou parou (`false`) de ser compartilhada (no
+    /// Hyprland, o `screencast` do socket2). Depois de 2 s compartilhando,
+    /// os balões perdem os nomes dos projetos (decisão 0076).
+    Compartilhando(bool),
 }
 
 /// O que a ligação com o desktop mostra no `/v1/estado`.

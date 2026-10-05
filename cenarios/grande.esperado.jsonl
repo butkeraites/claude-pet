@@ -1,6 +1,24 @@
+{"t":0,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":2000,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
 {"t":64800,"i":"turno","sid8":"s1","turno8":"p1","fim":"stop","nivel":"T3","pontuacao":20.0,"reacao":"done_big"}
-{"t":64800,"i":"reacao","nome":"done_big","motivo":"fim","sid8":"s1","nivel":"T3"}
+{"t":64800,"i":"festa","sid8":"s1","nivel":"T3","reacao":"done_big","confete":40,"voo":"atravessar","faixa":true}
+{"t":64800,"i":"balao","linhas":["Prontinho! api"],"motivo":"festa"}
+{"t":64800,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}
+{"t":184800,"i":"base","estado":"idle","prioridade":"parado"}
+{"t":184800,"i":"selos","mais":0,"bandeiras":[7],"corrente":false}
+{"t":364000,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":364000,"i":"selos","mais":0,"bandeiras":[],"corrente":false}
+{"t":366000,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
 {"t":428800,"i":"turno","sid8":"s1","turno8":"p2","fim":"stop","nivel":"T2","pontuacao":20.0,"teto":["intervalo_t3"],"reacao":"done_medium"}
-{"t":428800,"i":"reacao","nome":"done_medium","motivo":"fim","sid8":"s1","nivel":"T2"}
+{"t":428800,"i":"festa","sid8":"s1","nivel":"T2","reacao":"done_medium","confete":12,"voo":"curto"}
+{"t":428800,"i":"balao","linhas":["Prontinho! api"],"motivo":"festa"}
+{"t":428800,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}
+{"t":548800,"i":"base","estado":"idle","prioridade":"parado"}
+{"t":548800,"i":"selos","mais":0,"bandeiras":[7],"corrente":false}
+{"t":724000,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":724000,"i":"selos","mais":0,"bandeiras":[],"corrente":false}
+{"t":726000,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
 {"t":788800,"i":"turno","sid8":"s1","turno8":"p3","fim":"stop","nivel":"T3","pontuacao":20.0,"reacao":"done_big"}
-{"t":788800,"i":"reacao","nome":"done_big","motivo":"fim","sid8":"s1","nivel":"T3"}
+{"t":788800,"i":"festa","sid8":"s1","nivel":"T3","reacao":"done_big","confete":40,"voo":"atravessar","faixa":true}
+{"t":788800,"i":"balao","linhas":["Prontinho! api"],"motivo":"festa"}
+{"t":788800,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}

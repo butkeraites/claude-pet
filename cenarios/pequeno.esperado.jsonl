@@ -1,2 +1,6 @@
+{"t":0,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":8000,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
 {"t":15800,"i":"turno","sid8":"s1","turno8":"p1","fim":"stop","nivel":"T1","pontuacao":0.87,"reacao":"done_small"}
-{"t":15800,"i":"reacao","nome":"done_small","motivo":"fim","sid8":"s1","nivel":"T1"}
+{"t":15800,"i":"festa","sid8":"s1","nivel":"T1","reacao":"done_small"}
+{"t":15800,"i":"balao","linhas":["Prontinho! api"],"motivo":"festa"}
+{"t":15800,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}

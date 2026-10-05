@@ -1,6 +1,12 @@
+{"t":0,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":4000,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
 {"t":6000,"i":"reacao","nome":"alert","motivo":"aviso","sid8":"s1"}
 {"t":6000,"i":"balao","linhas":["api: pergunta pra você"],"motivo":"aviso"}
 {"t":6000,"i":"escalada","sid8":"s1","nivel":1,"espera":"pergunta","motivo":"aviso"}
+{"t":6000,"i":"base","estado":"waiting","prioridade":"esperando","sid8":"s1"}
 {"t":25000,"i":"escalada","sid8":"s1","nivel":0,"motivo":"andou"}
+{"t":25000,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
 {"t":33800,"i":"turno","sid8":"s1","turno8":"p1","fim":"stop","nivel":"T1","pontuacao":0.75,"reacao":"done_small"}
-{"t":33800,"i":"reacao","nome":"done_small","motivo":"fim","sid8":"s1","nivel":"T1"}
+{"t":33800,"i":"festa","sid8":"s1","nivel":"T1","reacao":"done_small"}
+{"t":33800,"i":"balao","linhas":["Prontinho! api"],"motivo":"festa"}
+{"t":33800,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}
