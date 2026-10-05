@@ -240,6 +240,15 @@ que acaba também acorda a sessão com um turno de notificação (no transcript,
   `unknown`, `max_output_tokens`, `cloud_credential_error`.
 - **PostToolUse.duration_ms** exclui o tempo do pedido de permissão e o dos
   hooks.
+- **A notificação `permission_prompt`** é um temporizador (uns 6 s) armado
+  quando o diálogo aparece e cancelado quando ele é respondido: um diálogo
+  respondido antes disso não manda a notificação (lido na implementação do
+  T5.7).
+- **O `idle_prompt`** só sai depois de um turno completo, uma vez por turno,
+  e nunca com um diálogo na tela, com a consulta em andamento, com um
+  agente em segundo plano rodando ou com um despertar de laço pendente (o
+  mesmo temporizador olha tudo isso antes de mandar). Por isso uma pergunta
+  esperando o Renan nunca é fechada por ele (lido no T5.7).
 
 ## Consequências para o M5
 
