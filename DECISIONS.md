@@ -2956,3 +2956,26 @@ como aprovação: a aprovação se revoga, a CC0 não, depois de publicada.
 **Por quê:** a dedicação precisa dizer quem renuncia, e o ato que não volta
 atrás não pode valer menos que o que volta: as duas coisas ficam prontas a um
 passo, e as duas são dele.
+
+## 0070 — Renan confirma a CC0 e aprova o Zeca original como padrão (2026-10-05)
+
+**Problema:** as decisões 0067 e 0069 deixaram dois atos para o Renan antes
+do merge da `skin-zeca-livre`: confirmar a dedicação CC0 do conteúdo final e
+aprovar o Zeca original como o padrão da tela do Renan.
+**Escolha:**
+- **CC0:** confirmada pelo Renan na sessão com o Claude. Entre "CC0
+  (Recomendado)" e "CC BY 4.0", a escolha foi a CC0, feita depois de ver a
+  prancha do Zeca original e mantida na aprovação do conteúdo final.
+- **Aprovação:** com a folha de contato final da variante escura (impressão
+  digital `165852bd8825…`), a vitrine das 22 animações do gerador e os GIFs
+  (parado, aceno, pulinho, chamando, trabalhando, voo grande) na frente, a
+  resposta foi "Aprovo e deixa como padrão". O `config/bichinho.toml` local
+  aponta `aparencia.skin = "zeca-livre-escuro"` e mantém
+  `tamanho = "pequeno"`. A aprovação foi feita pelo
+  `bin/pet skin-aprovar zeca-livre-escuro` contra essa impressão digital,
+  com a cópia em `/state/skins/zeca-livre-escuro`. Na produção: `tela:
+  ativa`, `zeca-livre-escuro` da imagem, D = 4 no eDP-1.
+- O Zeca do pack (`zeca`, `5b843b03…`) continua instalado e aprovado; voltar
+  a ele é só trocar `aparencia.skin` no config.
+**Por quê:** os dois atos cabem ao Renan (decisões 0026, 0067 e 0069) e
+foram feitos com o conteúdo final na frente.
