@@ -46,7 +46,12 @@
 {"t":1980000,"i":"rajada","sid8":"s1","nivel":4}
 {"t":2040000,"i":"rajada","sid8":"s1","nivel":4}
 {"t":2100000,"i":"rajada","sid8":"s1","nivel":4}
+{"t":2160000,"i":"base","estado":"idle","prioridade":"parado"}
 {"t":2160000,"i":"pulso","ligado":false,"sid8":"s1"}
+{"t":2340000,"i":"reacao","nome":"yawn","motivo":"sono"}
+{"t":2340000,"i":"base","estado":"sleep","prioridade":"dormindo"}
+{"t":3000000,"i":"voo","destino":"alto_centro","motivo":"voltou","sid8":"s1"}
+{"t":3000000,"i":"base","estado":"idle","prioridade":"parado"}
 {"t":3020000,"i":"escalada","sid8":"s1","nivel":0,"motivo":"andou"}
 {"t":3020000,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
 {"t":3030800,"i":"turno","sid8":"s1","turno8":"p1","fim":"stop","nivel":"T1","pontuacao":0.27,"reacao":"done_small"}

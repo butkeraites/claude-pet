@@ -1,4 +1,4 @@
-{"cenario": "pergunta-com-volta", "descricao": "uma permissão com o Renan longe: L1, L2 e o primeiro voo da L3; ele volta (ao navegador) e o pet voa na hora; sem olhar o Claude, o terceiro voo e a L4; ele vai ao terminal do Claude e o pulso para; a escalada acaba quando a ferramenta roda", "padrao": {"sid": "s1", "ent": "cli", "proj": "web"}}
+{"cenario": "pergunta-com-volta", "descricao": "uma permissão com o Renan longe: L1, L2 e o primeiro voo da L3; o Renan volta (ao navegador) e o pet voa na hora; sem olhar o Claude, os outros dois voos da L3 (o da volta tem a conta dele) e a L4; o Renan vai ao terminal do Claude e o pulso para; a escalada acaba quando a ferramenta roda", "padrao": {"sid": "s1", "ent": "cli", "proj": "web"}}
 {"t": 0, "desktop": {"ocioso": true}}
 {"t": 0, "evento": {"e": "UserPromptSubmit", "turno": "p1", "ts": 0, "orig": "comum"}}
 {"t": 20000, "evento": {"e": "PermissionRequest", "turno": "p1", "ts": 19995, "tool": "Bash"}}

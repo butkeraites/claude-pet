@@ -1,4 +1,4 @@
-{"cenario": "pergunta-ausente", "descricao": "uma pergunta com o Renan longe do teclado: L1 na hora, a L2 (uma rajada a cada 6 s por 30 s), a L3 (três voos, de 60 em 60 s), a L4 no teto (o selo pulsando e uma rajada por minuto por 30 min) e depois o selo parado; ele volta sem voo sobrando e responde", "padrao": {"sid": "s1", "ent": "cli", "proj": "api"}}
+{"cenario": "pergunta-ausente", "descricao": "uma pergunta com o Renan longe do teclado: L1 na hora, a L2 (uma rajada a cada 6 s por 30 s), a L3 (três voos, de 60 em 60 s), a L4 no teto (o selo pulsando e uma rajada por minuto por 30 min); no teto a pose de espera sai e o pet dorme com o selo; o Renan volta (o voo da volta, com a conta dele, e o pet acordado) e responde", "padrao": {"sid": "s1", "ent": "cli", "proj": "api"}}
 {"t": 0, "desktop": {"ocioso": false}}
 {"t": 0, "evento": {"e": "UserPromptSubmit", "turno": "p1", "ts": 0, "orig": "comum"}}
 {"t": 30000, "evento": {"e": "PostToolUse", "turno": "p1", "ts": 29990, "tool": "Bash", "dur": 4000}}

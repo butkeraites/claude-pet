@@ -80,6 +80,12 @@ impl Pet {
         self.animador.largar(&self.skin, agora_ms);
     }
 
+    /// Há um estado segurado (o voo da skin no arraste e no voo da
+    /// escalada).
+    pub fn segurado(&self) -> bool {
+        self.animador.segurado()
+    }
+
     pub fn skin(&self) -> &Skin {
         &self.skin
     }

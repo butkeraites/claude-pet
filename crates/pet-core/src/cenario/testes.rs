@@ -280,11 +280,40 @@ fn pergunta_ausente_escala_ate_o_teto_e_para() {
     assert_eq!(rajadas(2), vec![90_000, 96_000, 102_000, 108_000, 114_000]);
     assert_eq!(rajadas(4).len(), 30, "uma por minuto, por 30 min");
     assert_eq!(rajadas(4).last(), Some(&2_100_000));
-    let voos: Vec<u64> = so(&linha, "voo").iter().map(|x| x.t_ms).collect();
+    let voos: Vec<(u64, &str)> = so(&linha, "voo")
+        .iter()
+        .map(|x| match x.tipo {
+            Tipo::Voo { motivo, .. } => (x.t_ms, motivo),
+            _ => unreachable!(),
+        })
+        .collect();
     assert_eq!(
         voos,
-        vec![150_000, 210_000, 270_000],
-        "três voos, nenhum na volta"
+        vec![
+            (150_000, "escalada"),
+            (210_000, "escalada"),
+            (270_000, "escalada"),
+            (3_000_000, "voltou")
+        ],
+        "os três da L3 com o Renan longe, e o da volta, que tem a conta dele (decisão 0090)"
+    );
+    // O teto solta a pose de espera: o pet dorme com o selo, e a volta o
+    // acorda (decisão 0090).
+    let bases: Vec<(u64, &str)> = so(&linha, "base")
+        .iter()
+        .map(|x| match x.tipo {
+            Tipo::Base { estado, .. } => (x.t_ms, estado),
+            _ => unreachable!(),
+        })
+        .filter(|(t, _)| (2_000_000..3_010_000).contains(t))
+        .collect();
+    assert_eq!(
+        bases,
+        vec![
+            (2_160_000, "idle"),
+            (2_340_000, "sleep"),
+            (3_000_000, "idle")
+        ]
     );
     let pulsos: Vec<(u64, bool)> = so(&linha, "pulso")
         .iter()
@@ -311,14 +340,94 @@ fn pergunta_com_volta_voa_na_hora_em_que_o_renan_volta() {
         vec![
             (110_000, "escalada"),
             (130_000, "voltou"),
-            (190_000, "escalada")
-        ]
+            (190_000, "escalada"),
+            (250_000, "escalada")
+        ],
+        "o da volta não gasta os da L3 (decisão 0090)"
     );
     // Olhou o terminal do Claude: o pulso para na hora.
     assert!(
         so(&linha, "pulso")
             .iter()
             .any(|x| x.t_ms == 400_000 && matches!(x.tipo, Tipo::Pulso { ligado: false, .. }))
+    );
+}
+
+#[test]
+fn a_pergunta_noutro_terminal_escala_e_a_vista_no_terminal_dela_para() {
+    // Olhar o terminal de outra sessão do Claude não é ver o diálogo desta
+    // (decisão 0090): a escalada segue; 5 s no terminal dela e o diálogo
+    // conta como visto, e nada mais escala nem com o Renan de volta ao
+    // outro terminal; a pose de espera sai 2 min depois.
+    let linha = linha_do_tempo("pergunta-noutro-terminal");
+    assert_eq!(
+        niveis(&linha),
+        vec![
+            (20_000, 1),
+            (50_000, 2),
+            (110_000, 3),
+            (205_000, 3),
+            (600_000, 0)
+        ]
+    );
+    assert!(so(&linha, "escalada").iter().any(|x| matches!(
+        x.tipo,
+        Tipo::Escalada {
+            motivo: "vista",
+            ..
+        }
+    ) && x.t_ms == 205_000));
+    assert!(
+        so(&linha, "voo").iter().all(|x| x.t_ms < 200_000),
+        "nada voa depois de visto"
+    );
+    assert!(
+        so(&linha, "base")
+            .iter()
+            .any(|x| matches!(x.tipo, Tipo::Base { estado: "idle", .. }) && x.t_ms == 325_000)
+    );
+}
+
+#[test]
+fn a_pergunta_dispensada_no_terminal_nao_escala_e_o_pet_dorme() {
+    // O Esc numa pergunta não manda evento nenhum (conferido no 2.1.288):
+    // visto no terminal, o diálogo não escala com o Renan longe, a pose sai
+    // e o pet dorme; o prompt seguinte tira o aviso (decisão 0090).
+    let linha = linha_do_tempo("pergunta-dispensada");
+    assert!(so(&linha, "rajada").is_empty() && so(&linha, "voo").is_empty());
+    assert_eq!(
+        niveis(&linha),
+        vec![(5_000, 1), (10_000, 1), (1_260_000, 0)]
+    );
+    let bases: Vec<(u64, &str)> = so(&linha, "base")
+        .iter()
+        .map(|x| match x.tipo {
+            Tipo::Base { estado, .. } => (x.t_ms, estado),
+            _ => unreachable!(),
+        })
+        .collect();
+    assert!(bases.contains(&(130_000, "idle")) && bases.contains(&(310_000, "sleep")));
+}
+
+#[test]
+fn com_a_protecao_de_tela_a_volta_voa_quando_o_pet_aparece() {
+    // O primeiro toque do Renan chega com a proteção de tela ainda aberta: o
+    // voo da volta espera o pet poder aparecer (decisão 0090), e nada tocou
+    // escondido (nem os voos da L3).
+    let linha = linha_do_tempo("pergunta-com-protetor-de-tela");
+    let voos: Vec<(u64, &str)> = so(&linha, "voo")
+        .iter()
+        .map(|x| match x.tipo {
+            Tipo::Voo { motivo, .. } => (x.t_ms, motivo),
+            _ => unreachable!(),
+        })
+        .collect();
+    assert_eq!(voos, vec![(601_000, "voltou")]);
+    assert!(
+        so(&linha, "rajada")
+            .iter()
+            .all(|x| x.t_ms < 140_000 || x.t_ms >= 601_000),
+        "nada toca com a proteção de tela"
     );
 }
 

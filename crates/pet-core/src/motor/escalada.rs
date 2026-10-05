@@ -4,8 +4,8 @@
 //! Uma máquina pura, no relógio do laço, para o aviso de espera que o Motor
 //! mostra (o mais velho; os outros viram o "+N"). A fase vem do tempo desde
 //! o aviso; o que cada fase faz depende de o Renan precisar ser chamado
-//! ([`Contexto::chama`]: não está olhando um terminal do Claude, ou está sem
-//! mexer há 60 s ou mais):
+//! ([`Contexto::chama`]: não está olhando o terminal da sessão que espera, ou
+//! está sem mexer há 60 s ou mais; e não viu o diálogo lá, decisão 0090):
 //!
 //! | Fase | Desde | Com o Renan a chamar |
 //! |---|---|---|
@@ -14,12 +14,15 @@
 //! | L3 | 90 s | o voo até o alto-centro e de volta, até 3, com 60 s entre eles |
 //! | L4 | 5 min | o selo pulsando e uma rajada a cada 60 s, por 30 min |
 //!
-//! Sem precisar chamar (olhando o terminal do Claude e mexendo), fica em L1.
-//! Com o "não perturbe" ou a soneca ([`Contexto::teto_l1`]), nunca passa de
-//! L1. Escondido ([`Contexto::visivel`] falso), nada toca, e o relógio anda.
-//! Quando o Renan volta (`ocioso` de verdadeiro para falso), um voo na hora,
-//! se ainda há voo. Um prazo que esta máquina devolve sempre muda alguma
-//! coisa quando vence, ou é futuro: nunca um prazo vencido que fica.
+//! Sem precisar chamar (olhando o terminal da sessão que espera e mexendo),
+//! fica em L1. Com o "não perturbe" ou a soneca ([`Contexto::teto_l1`]),
+//! nunca passa de L1. Escondido ([`Contexto::visivel`] falso), nada toca, e o
+//! relógio anda. Quando o Renan volta (`ocioso` de verdadeiro para falso), um
+//! voo na hora, ou assim que o pet puder aparecer (a proteção de tela fecha
+//! depois da volta), até [`VOLTA_VALE_MS`] depois; os voos da volta têm a
+//! conta deles ([`VOLTAS_MAX`]), fora dos da L3 (decisão 0090). Um prazo que
+//! esta máquina devolve sempre muda alguma coisa quando vence, ou é futuro:
+//! nunca um prazo vencido que fica.
 
 /// A L2 começa aqui.
 pub const L2_APOS_MS: u64 = 30_000;
@@ -41,6 +44,12 @@ pub const RAJADA_L4_CADA_MS: u64 = 60_000;
 pub const L4_DURA_MS: u64 = 30 * 60 * 1000;
 /// Sem mexer por isto, o Renan precisa ser chamado mesmo olhando o terminal.
 pub const PARADO_PARA_CHAMAR_MS: u64 = 60_000;
+/// Voos da volta do Renan por aviso, fora dos [`VOOS_MAX`] da L3: os da L3
+/// podem ter saído com ele longe (decisão 0090).
+pub const VOLTAS_MAX: u8 = 3;
+/// A volta com o pet fora da tela (a proteção de tela ainda aberta) espera
+/// por isto o pet poder aparecer.
+pub const VOLTA_VALE_MS: u64 = 2 * 60 * 1000;
 
 /// O que o Motor sabe agora (decisão 0075).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -84,6 +93,10 @@ pub struct Escalada {
     ultimo_voo: Option<u64>,
     proxima_l4: Option<u64>,
     pub pulso: bool,
+    /// Os voos da volta do Renan.
+    pub voltas: u8,
+    /// A volta que espera o pet poder aparecer, até este instante.
+    volta_pendente: Option<u64>,
 }
 
 impl Escalada {
@@ -98,7 +111,18 @@ impl Escalada {
             ultimo_voo: None,
             proxima_l4: None,
             pulso: false,
+            voltas: 0,
+            volta_pendente: None,
         }
+    }
+
+    /// O voo da volta, agora; o próximo voo da L3 espera os 60 s dele.
+    fn voar_na_volta(&mut self, agora: u64, passos: &mut Vec<Passo>) {
+        self.volta_pendente = None;
+        self.subir(3, passos);
+        passos.push(Passo::Voo { volta: true });
+        self.voltas += 1;
+        self.ultimo_voo = Some(agora);
     }
 
     fn fase(&self, agora: u64) -> u8 {
@@ -135,6 +159,15 @@ impl Escalada {
     /// O que vence agora.
     pub fn vencer(&mut self, agora: u64, ctx: Contexto) -> Vec<Passo> {
         let mut passos = Vec::new();
+        // A volta que esperava o pet aparecer (a proteção de tela fechou), ou
+        // que acabou o prazo, ou que o "não perturbe" e a soneca cancelam.
+        if let Some(ate) = self.volta_pendente {
+            if agora >= ate || ctx.teto_l1 {
+                self.volta_pendente = None;
+            } else if ctx.visivel {
+                self.voar_na_volta(agora, &mut passos);
+            }
+        }
         let fase = self.fase(agora);
         let pode = ctx.chama && ctx.visivel && !ctx.teto_l1;
         // O selo só pulsa na L4, com o Renan a chamar, nos 30 min.
@@ -173,16 +206,19 @@ impl Escalada {
     }
 
     /// O Renan voltou ao teclado ou ao mouse com o aviso de pé: um voo na
-    /// hora, se ainda há voo (decisão 0075).
+    /// hora (decisão 0075), com a conta dos voos da volta (decisão 0090). Com
+    /// o pet fora da tela (a proteção de tela fecha logo depois da volta), o
+    /// voo espera até [`VOLTA_VALE_MS`] o pet poder aparecer.
     pub fn voltou(&mut self, agora: u64, ctx: Contexto) -> Vec<Passo> {
         let mut passos = Vec::new();
-        if ctx.teto_l1 || !ctx.visivel || self.voos >= VOOS_MAX {
+        if ctx.teto_l1 || self.voltas >= VOLTAS_MAX {
             return passos;
         }
-        self.subir(3, &mut passos);
-        passos.push(Passo::Voo { volta: true });
-        self.voos += 1;
-        self.ultimo_voo = Some(agora);
+        if !ctx.visivel {
+            self.volta_pendente = Some(agora + VOLTA_VALE_MS);
+            return passos;
+        }
+        self.voar_na_volta(agora, &mut passos);
         passos
     }
 
@@ -196,6 +232,15 @@ impl Escalada {
         let pode = ctx.chama && ctx.visivel && !ctx.teto_l1;
         let fase = self.fase(agora);
         let mut c: Vec<u64> = Vec::new();
+        // A volta pendente voa (ou sai) já com o pet na tela ou um teto;
+        // senão, no fim do prazo dela.
+        if let Some(ate) = self.volta_pendente {
+            c.push(if ctx.visivel || ctx.teto_l1 {
+                agora
+            } else {
+                ate
+            });
+        }
         // O pulso muda já: o fim da L4, o Renan olhou o terminal, o "não
         // perturbe" ligou.
         if self.pulso != (pode && fase == 4 && agora < self.fim_l4()) {
@@ -361,10 +406,21 @@ mod testes {
         );
         assert_eq!(e.voltou(20_000, CHAMA), vec![Passo::Voo { volta: true }]);
         assert_eq!(e.voltou(25_000, CHAMA), vec![Passo::Voo { volta: true }]);
-        assert!(e.voltou(26_000, CHAMA).is_empty(), "acabaram os voos");
-        // Na L3, sem voo sobrando, nenhum voo mais.
+        assert!(e.voltou(26_000, CHAMA).is_empty(), "acabaram os da volta");
+        // Os voos da L3 têm a conta deles (decisão 0090): os três saem, o
+        // primeiro 60 s depois do último da volta.
         let saida = rodar(&mut e, 26_000, 299_999, CHAMA);
-        assert!(saida.iter().all(|(_, p)| !matches!(p, Passo::Voo { .. })));
+        let voos: Vec<u64> = saida
+            .iter()
+            .filter(|(_, p)| matches!(p, Passo::Voo { volta: false }))
+            .map(|(t, _)| *t)
+            .collect();
+        assert_eq!(voos, vec![90_000, 150_000, 210_000]);
+        // E os da L3 que saíram com o Renan longe não gastam os da volta.
+        let mut e = Escalada::nova(0);
+        rodar(&mut e, 0, 299_999, CHAMA);
+        assert_eq!(e.voos, VOOS_MAX);
+        assert_eq!(e.voltou(400_000, CHAMA), vec![Passo::Voo { volta: true }]);
         // Escondido, nada toca; o relógio anda.
         let mut e = Escalada::nova(0);
         let escondido = Contexto {
@@ -372,6 +428,54 @@ mod testes {
             ..CHAMA
         };
         assert!(rodar(&mut e, 0, 400_000, escondido).is_empty());
+    }
+
+    #[test]
+    fn a_volta_com_a_protecao_de_tela_espera_o_pet_aparecer() {
+        // O primeiro toque acorda o Renan, mas a proteção de tela só fecha
+        // depois: o voo da volta sai quando o pet pode aparecer (decisão
+        // 0090), dentro do prazo.
+        let escondido = Contexto {
+            visivel: false,
+            ..CHAMA
+        };
+        let mut e = Escalada::nova(0);
+        rodar(&mut e, 0, 400_000, escondido);
         assert!(e.voltou(400_000, escondido).is_empty());
+        assert_eq!(e.proximo(400_000, escondido), Some(400_000 + VOLTA_VALE_MS));
+        assert_eq!(e.proximo(401_500, CHAMA), Some(401_500), "o pet apareceu");
+        assert_eq!(
+            e.vencer(401_500, CHAMA),
+            vec![
+                Passo::Nivel(3),
+                Passo::Voo { volta: true },
+                Passo::Pulso(true),
+                Passo::Nivel(4),
+                Passo::Rajada
+            ]
+        );
+        // Sem aparecer no prazo, a volta sai sem voo; o "não perturbe"
+        // também a cancela.
+        let mut e = Escalada::nova(0);
+        assert!(e.voltou(10_000, escondido).is_empty());
+        assert!(e.vencer(10_000 + VOLTA_VALE_MS, escondido).is_empty());
+        assert!(
+            rodar(
+                &mut e,
+                10_000 + VOLTA_VALE_MS,
+                20_000 + VOLTA_VALE_MS,
+                CHAMA
+            )
+            .iter()
+            .all(|(_, p)| !matches!(p, Passo::Voo { volta: true }))
+        );
+        let mut e = Escalada::nova(0);
+        assert!(e.voltou(10_000, escondido).is_empty());
+        let quieto = Contexto {
+            teto_l1: true,
+            ..CHAMA
+        };
+        assert!(e.vencer(11_000, quieto).is_empty());
+        assert_eq!(e.proximo(11_000, CHAMA), Some(30_000), "só a L2");
     }
 }

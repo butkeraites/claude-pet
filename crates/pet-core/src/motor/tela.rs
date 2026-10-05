@@ -7,7 +7,10 @@
 //!   começo da festa de agora entra nela, com o nível maior e o balão "2
 //!   prontos: api, web"; a reação só toca de novo se o nível subir, e a
 //!   primeira festa sai na hora da acomodação dela, sem esperar;
-//! - **a base**: o estado da skin da sessão mais alta na [`Prioridade`];
+//! - **a base**: o estado da skin da sessão mais alta na [`Prioridade`]; a
+//!   espera segura a base pelo aviso, até o teto da escalada ou
+//!   [`ESPERA_VISTA_NA_BASE_MS`] depois de o Renan ver o diálogo no terminal
+//!   da sessão (decisão 0090);
 //! - **os selos** das outras sessões ([`Selos`]);
 //! - **o pronto** que segura a base por [`PRONTO_NA_BASE_MS`] e depois vira
 //!   bandeirinha;
@@ -29,7 +32,7 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-use super::{BOCEJO, DESPERTAR, Motor, balao, intencoes, janelas};
+use super::{BOCEJO, DESPERTAR, Motor, balao, escalada, intencoes, janelas};
 use crate::animador::{Base, Ritmo};
 use crate::cerebro::{self, EstadoSessao, Nivel, Reacao, ResumoSessao, TipoAviso, TipoEspera};
 use crate::config::ModoCelebracao;
@@ -39,6 +42,10 @@ use crate::fonte;
 pub const MESCLA_MS: u64 = 3_000;
 /// O pronto segura a base por isto depois da festa; depois, só a bandeirinha.
 pub const PRONTO_NA_BASE_MS: u64 = 2 * 60 * 1000;
+/// O aviso de espera que o Renan já viu no terminal da sessão segura a base
+/// por isto; depois, só o selo "!" (decisão 0090). O que ele não viu segura
+/// até o fim da escalada (o teto da L4).
+pub const ESPERA_VISTA_NA_BASE_MS: u64 = 2 * 60 * 1000;
 /// Parado e sem nada pendente por isto: o bocejo.
 pub const BOCEJO_MS: u64 = 3 * 60 * 1000;
 /// … por isto: dorme.
@@ -101,12 +108,14 @@ impl Prioridade {
     }
 
     /// A de uma sessão agora (`agora_ms` no relógio do laço). O pronto só
-    /// conta nos [`PRONTO_NA_BASE_MS`] depois da festa.
-    pub fn da_sessao(s: &ResumoSessao, agora_ms: u64) -> Prioridade {
+    /// conta nos [`PRONTO_NA_BASE_MS`] depois da festa. A espera vem do
+    /// aviso, e só enquanto ele segura a base (`espera`, decisão 0090): o
+    /// clique que o vê, o diálogo visto no terminal e o teto da escalada a
+    /// soltam, mesmo com a sessão ainda "esperando" (um Esc numa pergunta não
+    /// manda evento nenhum).
+    pub fn da_sessao(s: &ResumoSessao, agora_ms: u64, espera: bool) -> Prioridade {
         let aviso = s.aviso;
-        if s.estado == EstadoSessao::Esperando
-            || aviso.is_some_and(|a| a.tipo == TipoAviso::Esperando)
-        {
+        if espera {
             return Prioridade::Esperando;
         }
         match s.estado {
@@ -320,6 +329,10 @@ pub struct PainelEscalada {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub espera: Option<TipoEspera>,
     pub pulso: bool,
+    /// O Renan já viu o diálogo no terminal da sessão: nada passa da L1
+    /// (decisão 0090).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub vista: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -504,17 +517,38 @@ impl Motor {
 
     // --- a base, os selos e o sono ------------------------------------------
 
+    /// Até quando o aviso de espera da sessão `s` segura a base (decisão
+    /// 0090): até o teto da escalada (o fim da L4); o que o Renan viu no
+    /// terminal da sessão, até [`ESPERA_VISTA_NA_BASE_MS`] depois. `None`:
+    /// a sessão não tem aviso de espera.
+    fn fim_da_espera_na_base(&self, s: &ResumoSessao) -> Option<u64> {
+        let aviso = s.aviso.filter(|a| a.tipo == TipoAviso::Esperando)?;
+        let teto = aviso.desde_mono + escalada::L4_APOS_MS + escalada::L4_DURA_MS;
+        let vista = self
+            .chamando
+            .as_ref()
+            .filter(|c| c.chave == s.chave && c.desde_ms == aviso.desde_ms)
+            .and_then(|c| c.vista_ms);
+        Some(vista.map_or(teto, |v| (v + ESPERA_VISTA_NA_BASE_MS).min(teto)))
+    }
+
     /// A tela como ela deveria estar em `agora_ms`, do que o cérebro sabe.
     fn decidir_tela(&self, agora_ms: u64) -> Decisao {
         let sessoes = self.cerebro.resumo_das_sessoes();
         let chamando = self.chamando.as_ref().map(|c| &c.chave);
+        let mut proxima: Vec<u64> = Vec::new();
         // A sessão que manda: a mais alta na prioridade; no empate, a real
         // antes da de teste, a que o pet chama (o aviso mais velho) e a de
         // evento mais novo.
         let vistas: BTreeMap<janelas::Chave, Prioridade> = sessoes
             .iter()
             .map(|s| {
-                let mut p = Prioridade::da_sessao(s, agora_ms);
+                let fim_da_espera = self.fim_da_espera_na_base(s);
+                if let Some(fim) = fim_da_espera.filter(|f| *f > agora_ms) {
+                    proxima.push(fim);
+                }
+                let espera = fim_da_espera.is_some_and(|f| agora_ms < f);
+                let mut p = Prioridade::da_sessao(s, agora_ms, espera);
                 if s.acomodando && p == Prioridade::Parado {
                     p = self.tela.vistas.get(&s.chave).copied().unwrap_or(p);
                 }
@@ -526,13 +560,13 @@ impl Motor {
             .map(|s| (vistas[&s.chave], s))
             .max_by_key(|(p, s)| (*p, !s.teste, chamando == Some(&s.chave), s.ultimo_evento_ms));
         let prioridade = lider.map_or(Prioridade::Parado, |(p, _)| p);
-        let pendente = sessoes.iter().any(|s| {
-            s.aviso
-                .is_some_and(|a| matches!(a.tipo, TipoAviso::Esperando | TipoAviso::Erro))
-        });
+        // A espera que segura a base já é a prioridade; um erro pendente
+        // ainda segura o sono.
+        let pendente = sessoes
+            .iter()
+            .any(|s| s.aviso.is_some_and(|a| a.tipo == TipoAviso::Erro));
         let parado = prioridade == Prioridade::Parado && !pendente;
         let longe = self.desktop.ocioso == Some(true);
-        let mut proxima: Vec<u64> = Vec::new();
         let sono = if parado {
             let desde = self.tela.parado_desde.unwrap_or(agora_ms);
             let mut sono = self.tela.sono;
@@ -898,6 +932,7 @@ impl Motor {
                 nivel: c.escalada.nivel,
                 espera: c.espera,
                 pulso: c.escalada.pulso,
+                vista: c.vista_ms.is_some(),
             }),
             festa: self
                 .tela

@@ -1,0 +1,13 @@
+{"t":2000,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":5000,"i":"reacao","nome":"alert","motivo":"aviso","sid8":"s1"}
+{"t":5000,"i":"balao","linhas":["api: pergunta pra você"],"motivo":"aviso"}
+{"t":5000,"i":"escalada","sid8":"s1","nivel":1,"espera":"pergunta","motivo":"aviso"}
+{"t":5000,"i":"base","estado":"waiting","prioridade":"esperando","sid8":"s1"}
+{"t":10000,"i":"escalada","sid8":"s1","nivel":1,"motivo":"vista"}
+{"t":130000,"i":"base","estado":"idle","prioridade":"parado"}
+{"t":310000,"i":"reacao","nome":"yawn","motivo":"sono"}
+{"t":310000,"i":"base","estado":"sleep","prioridade":"dormindo"}
+{"t":1260000,"i":"reacao","nome":"wake","motivo":"acordou"}
+{"t":1260000,"i":"escalada","sid8":"s1","nivel":0,"motivo":"andou"}
+{"t":1260000,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":1260800,"i":"turno","sid8":"s1","turno8":"p1","fim":"substituido"}

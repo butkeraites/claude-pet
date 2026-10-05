@@ -313,3 +313,61 @@ dia comum, acrescentadas à mão.
 | `real-agente-dentro-da-acomodacao` | o agente que o modelo pôs em segundo plano e a notificação na acomodação (901–931 s) |
 | `real-laco` | a segunda rodada: o shell e a notificação, o `/loop` com o `crn`, o `idle_prompt` e um tique com o Renan longe |
 | `pergunta`, `plano-lido-no-terminal` | a pergunta e o plano da primeira rodada, o plano com a leitura esticada |
+
+## Revisão (2026-10-05): o Esc e o "não" num diálogo, e o título do terminal
+
+Conferido para a revisão do M5 (decisão 0090), do mesmo jeito: um daemon de
+rascunho da branch (debug, porta 27391, sem compositor, parado pelo PID no
+fim), uma sessão aninhada do 2.1.288 no tmux (`--model haiku`,
+`PET_PORTA=27391`, o `bichinho` da branch no PATH só dela, `CLAUDECODE` e as
+`CLAUDE_*` fora do ambiente). Do título do terminal (o `pane_title` do tmux)
+só o primeiro glifo foi lido, nunca o resto.
+
+```
+  0.000 s1 SessionStart       -    src=startup
+ 12.998 s1 UserPromptSubmit   p1                          ← pede uma AskUserQuestion
+ 16.011 s1 PreToolUse         p1   tool=AskUserQuestion
+ 16.023 s1 PermissionRequest  p1   tool=AskUserQuestion
+ 22.022 s1 Notification       p1   nt=permission_prompt
+ (Esc em ~29 s: "User declined to answer questions"; nada mais de p1 em 94 s)
+143.576 s1 UserPromptSubmit   p2                          ← no modo plano, um plano
+145.736 s1 PostToolUse        p2   tool=Write dur=57      (o arquivo do plano)
+145.957 s1 PostToolUse        p2   tool=ToolSearch dur=2
+146.789 s1 PreToolUse         p2   tool=ExitPlanMode
+146.810 s1 PermissionRequest  p2   tool=ExitPlanMode
+ (o "diga o que mudar" sem texto em ~148 s: "User rejected Claude's plan";
+  nada mais de p2 em 80 s)
+292.271 s1 UserPromptSubmit   p3                          ← outro plano
+293.593 s1 PostToolUse        p3   tool=Write dur=62
+294.479 s1 PreToolUse         p3   tool=ExitPlanMode
+294.495 s1 PermissionRequest  p3   tool=ExitPlanMode
+ (o "diga o que mudar" com um texto: o modelo segue no mesmo turno)
+301.227 s1 PostToolUse        p3   tool=Write dur=56
+302.239 s1 PreToolUse         p3   tool=ExitPlanMode      ← outro diálogo
+302.261 s1 PermissionRequest  p3   tool=ExitPlanMode
+308.256 s1 Notification       p3   nt=permission_prompt
+ (Esc no plano em ~310 s, depois da notificação: nada de p3 até o prompt seguinte)
+323.213 s1 UserPromptSubmit   p4                          ← um Bash de sleep
+330.144 s1 Stop               p4                          (bloqueado: nenhum PostToolUse)
+357.319 s1 UserPromptSubmit   p5                          ← um Bash de 20 s
+380.944 s1 PostToolUse        p5   tool=Bash dur=20098
+387.607 s1 Stop               p5
+390.291 s1 SessionEnd         p6   reason=prompt_input_exit
+```
+
+- **O Esc numa pergunta e o plano recusado sem comentário não mandam evento
+  nenhum:** nem `PostToolUse`, nem `PostToolUseFailure`, nem Stop, nem
+  `idle_prompt` (que não sai de um turno interrompido). A sessão fica
+  "esperando" até o próximo prompt. O plano recusado **com** um comentário
+  segue no mesmo turno (a ferramenta seguinte tira a espera, e o plano novo
+  é outro aviso).
+- **O `PermissionDenied`** do 2.1.288 só sai quando o classificador do modo
+  automático nega uma ferramenta, não no Esc nem no "não" do Renan (lido no
+  binário).
+- **O título** ficou com o ✳ o tempo todo, com o diálogo na tela, depois do
+  Esc, pensando e num Bash de 20 s: no tmux, o glifo não separa parado,
+  trabalhando e esperando. A regra do PLANO "o turno fecha quando o título do
+  terminal focado vira ✳" não acha nada aqui (decisão 0092).
+- Um Bash de `sleep` sozinho foi bloqueado pelo próprio Claude Code antes de
+  rodar: nada chegou dele (nem `PostToolUse`), como a ferramenta bloqueada da
+  primeira rodada.

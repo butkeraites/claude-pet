@@ -400,6 +400,8 @@ As outras sessões aparecem como selos: um contador "+N", uma bandeirinha com a 
 
 **Saída da escalada:** qualquer evento da própria sessão ou um clique no aviso exibido.
 
+*Correção (2026-10-05, revisão, decisão 0090):* "olhando o terminal do Claude" é olhar o terminal da sessão que espera, quando a janela dela é certa (o de outra sessão não vale); 5 s nele com o Renan presente contam como o diálogo visto, e daí nada passa da L1 (o Esc numa pergunta e o plano recusado não mandam evento nenhum no 2.1.288, e são feitos ali). A pose de espera vem do aviso e dura até o teto da escalada, ou 2 min depois de o diálogo ser visto; o clique que vê o aviso a solta, e o pet pode dormir com o selo "!". Os voos da volta têm a conta deles (até 3), fora dos 3 da L3, e esperam o pet aparecer na tela (a proteção de tela que fecha depois do primeiro toque, a sessão bloqueada).
+
 **Presença:**
 - `olhando_claude` = o título da janela focada começa com ✳, ◐ ou ◑ (vem do `activewindow` do socket2).
   - Fica guardado só esse booleano, nunca o título.
@@ -778,7 +780,8 @@ Atualizado em 2026-10-05 com a pesquisa do M5 (`docs/pesquisa/10-cerebro-m5.md`,
 - **T5.20** a produção refeita da branch com o estado do Renan intacto, as demonstrações ao vivo conferidas no `/v1/estado` e a conferência na tela (`bin/pet foto`, nitidez, custo) só com a sessão desbloqueada.
 
 **Revisão** (as três revisões adversariais do M5; IDs na ordem dos commits, decisões 0089 em diante):
-- **T5.21** as correntes: os agentes que nascem depois do Stop são da corrente, o pedido digitado com a corrente aberta festeja sozinho e a continuação depois do fim da corrente pontua a soma dela (decisão 0089).
+- **T5.21** as correntes: os agentes que nascem depois do Stop são da corrente, o pedido digitado com a corrente aberta festeja sozinho e a continuação depois do fim da corrente pontua a soma dela (decisão 0089);
+- **T5.22** a espera e a escalada: a pose pelo aviso (o clique e o teto a soltam), o diálogo visto no terminal da sessão, olhar o terminal da sessão que espera e não o de outra, os voos da volta com a conta deles e só com o pet na tela (a proteção de tela, a sessão bloqueada), e a janela que fecha no meio do voo (decisão 0090).
 
 **Verificação:** `bin/pet verificar` verde a cada commit e `cargo test -p pet-core` com os cenários. Tabelas, exemplos de pontuação (decisão 0074) e cenários:
 
@@ -790,7 +793,10 @@ Atualizado em 2026-10-05 com a pesquisa do M5 (`docs/pesquisa/10-cerebro-m5.md`,
 | `dois-prontos` | uma festa só, "2 prontos" |
 | `pergunta`, `pergunta-dupla` | um aviso só |
 | `plano-lido-no-terminal` | fica em L1 |
-| `pergunta-ausente` | L1 → L2 → L3 → teto |
+| `pergunta-ausente` | L1 → L2 → L3 → teto; no teto a pose sai e o pet dorme com o selo; a volta voa (decisão 0090) |
+| `pergunta-noutro-terminal` | o Renan no terminal de outra sessão: a escalada segue; 5 s no terminal dela e nada mais escala (decisão 0090) |
+| `pergunta-dispensada` | o Esc no terminal: visto, sem escalada com o Renan longe; a pose sai e o pet dorme (decisão 0090) |
+| `pergunta-com-protetor-de-tela` | a volta com a proteção de tela ainda aberta voa quando o pet aparece (decisão 0090) |
 | `idle-prompt-repetido` | — |
 | `servidor-em-segundo-plano` | festas normais com um dev server rodando |
 | `workflow-longo` | T3 no Stop final da corrente (a notificação que a fecha) |

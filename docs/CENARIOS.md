@@ -70,9 +70,9 @@ Cada linha tem `t` (ms do relógio do laço) e `i` (o tipo). O
 | `balao` | um balão | `linhas`, `motivo` (`festa`, `aviso`, `aviso_refinado`, `erro`, `cansado`, `lista`, `sem_foco`, `pedido`) |
 | `base` | a base que o pet segura mudou | `estado` (o da skin: `waiting`, `error`, `sleep`, `ready`, `working`, `thinking`, `idle`), `prioridade`, `sid8`, `profundo` (o sono profundo, sem commit) |
 | `selos` | os selos das outras sessões mudaram | `mais` (o "+N"), `bandeiras` (a cor de cada pronto, 0 a 7), `corrente` (o "…") |
-| `escalada` | a escalada do aviso de espera mais velho | `sid8`, `nivel` (1 a 4; 0 no fim), `espera` (no começo), `motivo` (`aviso`, `vez`, `tempo`, `voltou`, `andou`, `visto`, `sessao_saiu`, `outro_aviso`) |
+| `escalada` | a escalada do aviso de espera mais velho | `sid8`, `nivel` (1 a 4; 0 no fim), `espera` (no começo), `motivo` (`aviso`, `vez`, `tempo`, `voltou`, `andou`, `visto`, `sessao_saiu`, `outro_aviso`; `vista`, com o nível de agora, quando o Renan viu o diálogo 5 s no terminal da sessão: nada mais passa da L1, decisão 0090) |
 | `rajada` | a chamada (`alert`) de novo, na L2 e na L4 | `sid8`, `nivel` |
-| `voo` | o voo até o alto-centro do monitor e de volta | `destino` (`alto_centro`), `motivo` (`escalada`, `voltou`), `sid8` |
+| `voo` | o voo até o alto-centro do monitor e de volta | `destino` (`alto_centro`), `motivo` (`escalada`, até 3 na L3; `voltou`, até 3 da volta do Renan, com a conta deles, decisão 0090), `sid8` |
 | `pulso` | o selo do aviso pulsando a 1 Hz liga ou desliga (L4) | `ligado`, `sid8` |
 | `discricao` | a tela compartilhada (2 s de sinal somados) liga; 5 min sem sinal desligam (decisão 0081) | `ligada`, `tirou_balao` |
 | `clique` | o que um clique fez | `resultado` (`focou`, `nao_focou`, `lista`, `soneca`, `nada`), `sid8` |
@@ -87,8 +87,11 @@ resto é desenhado pela segunda metade do M5 (a seção abaixo); a `faixa`
 O `/v1/estado.fotografia` (o `tela` de lá é o da aprovação; decisão 0080):
 `base` (o estado da skin), `prioridade`, `sid8` (a sessão que manda),
 `sono` (`acordado`, `bocejou`, `dormindo`, `profundo`), `selos`, `escalada`
-(`sid8`, `nivel`, `espera`, `pulso`), `festa` (`nivel`, `sessoes`, `ha_ms`,
-nos 3 s dela) e `discricao`.
+(`sid8`, `nivel`, `espera`, `pulso`, e `vista` com o diálogo visto no
+terminal da sessão), `festa` (`nivel`, `sessoes`, `ha_ms`, nos 3 s dela) e
+`discricao`. A base `waiting` vem do aviso de espera e dura até o teto da
+escalada, ou 2 min depois de o diálogo ser visto; o clique que vê o aviso a
+solta na hora (decisão 0090).
 
 ## A tela: o que cada intenção desenha
 

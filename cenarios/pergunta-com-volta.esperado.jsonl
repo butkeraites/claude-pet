@@ -13,6 +13,7 @@
 {"t":110000,"i":"voo","destino":"alto_centro","motivo":"escalada","sid8":"s1"}
 {"t":130000,"i":"voo","destino":"alto_centro","motivo":"voltou","sid8":"s1"}
 {"t":190000,"i":"voo","destino":"alto_centro","motivo":"escalada","sid8":"s1"}
+{"t":250000,"i":"voo","destino":"alto_centro","motivo":"escalada","sid8":"s1"}
 {"t":320000,"i":"pulso","ligado":true,"sid8":"s1"}
 {"t":320000,"i":"escalada","sid8":"s1","nivel":4,"motivo":"tempo"}
 {"t":320000,"i":"rajada","sid8":"s1","nivel":4}

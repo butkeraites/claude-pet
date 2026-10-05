@@ -3769,3 +3769,80 @@ volta, e um workflow é o pedido mais longo que existe: perder o trabalho
 dele ou fechá-lo num T0 é o contrário da festa proporcional ao trabalho
 (decisão 0003). E um pedido que o Renan digita é dele, com o fim dele: não
 pode sumir dentro da corrente de outro pedido.
+
+## 0090 — Revisão da espera e da escalada: a pose pelo aviso, o diálogo visto no terminal da sessão, a volta com a conta dela e o voo que ninguém viu (2026-10-05)
+
+**Problema:** as revisões adversariais do M5 (lentes do cérebro e da tela)
+acharam, e uma sessão aninhada do 2.1.288 conferiu (pesquisa em
+`docs/pesquisa/10-cerebro-m5.md`, seção da revisão):
+- **O diálogo dispensado nunca saía.** O Esc numa pergunta e um plano
+  recusado sem comentário não mandam evento nenhum (nem `PostToolUse`, nem
+  `PostToolUseFailure`, nem Stop, nem `idle_prompt` em 80–94 s). A sessão
+  ficava "esperando" até o próximo prompt, ou 12 h: a escalada inteira (L2 a
+  L4) por um diálogo que não existia mais e o sono bloqueado. O clique que
+  levava ao terminal tirava o aviso, mas não a pose: a prioridade vinha do
+  estado da sessão, e a espera em repouso ficava a 2 commits/s por até 12 h.
+- **Olhar qualquer terminal do Claude calava a escalada de outra sessão:**
+  com o Renan trabalhando no terminal de A, a pergunta de B nunca passava da
+  L1 (a decisão 0079 dizia "lá ele já vê o diálogo", e no terminal de A não
+  vê).
+- **A volta quase nunca aparecia** com a proteção de tela aos 150 s e o
+  bloqueio aos 900 s (a configuração do Renan): os voos da L3 saíam com ele
+  longe e gastavam a conta da volta; o primeiro toque chegava com a proteção
+  de tela ainda aberta, e o voo não saía nem tentava de novo; bloqueado, o
+  voo saía embaixo da tela de senha e acabava pelo relógio antes do
+  desbloqueio.
+- **A janela que fechava no meio do voo** (o HDMI desplugado com o pet nele)
+  deixava o pet segurando o voo da skin em laço, a uns 12 commits/s: o voo
+  que acabava sem palco não largava.
+**Escolha:**
+- **A pose pelo aviso:** a prioridade "esperando você" vem do aviso de
+  espera, e só enquanto ele segura a base: até o teto da escalada (o fim da
+  L4, 35 min depois do aviso) ou, com o diálogo visto no terminal da sessão,
+  até `ESPERA_VISTA_NA_BASE_MS` (2 min) depois. Depois, o selo "!" fica
+  parado, o pet volta ao repouso e pode dormir com ele; o aviso continua para
+  o clique e a lista. O clique que vê o aviso solta a pose na hora. Uma sessão
+  "esperando" sem aviso (vista, ou um gatilho atrasado) conta como parada.
+- **O diálogo visto no terminal da sessão:** com a janela certa da sessão em
+  foco e o Renan presente por `ESPERA_VISTA_MS` (5 s), contados do mais tarde
+  entre o aviso, a janela ficar ativa e ele voltar a mexer, o diálogo conta
+  como visto (a intenção `escalada` com o motivo `vista`, e `vista` na
+  `fotografia.escalada`): daí em diante nada passa da L1 (nem rajada, nem
+  voo, nem pulso, nem o voo da volta), e um voo no ar volta para a casa. O
+  Esc e o "não" são feitos no terminal da sessão: o diálogo dispensado conta
+  como visto e não escala com o Renan indo embora. Sem a janela certa da
+  sessão, nada conta como visto, e o teto solta a pose.
+- **Olhar a espera** é ter em foco o terminal da sessão que espera, quando a
+  janela dela é certa; sem ela, um terminal do Claude qualquer, como antes.
+  Vale para a escalada e para a volta (corrige a decisão 0079).
+- **A volta:** os voos da volta têm a conta deles (`VOLTAS_MAX`, até 3 por
+  aviso), fora dos 3 da L3, e o próximo da L3 espera os 60 s dele depois de
+  um. A volta com o pet fora da tela (a proteção de tela ainda aberta) espera
+  até `VOLTA_VALE_MS` (2 min) o pet poder aparecer e voa então, com a L3 dela
+  no motivo `voltou`. A volta acorda o pet (o teto pode ter soltado a pose e
+  deixado ele dormindo com o selo). No desenho, que não muda as intenções: o
+  voo da volta que não pôde começar (sem palco: a camada ainda voltando da
+  proteção de tela) ou que acabou sem a janela mostrar quadro nenhum (a
+  sessão bloqueada: o compositor segura o primeiro) sai de novo quando a
+  janela mostrar quadros (o palco pronto, ou o quadro preso mostrado no
+  desbloqueio), por até `VOLTA_POR_MOSTRAR_MS` (2 min).
+- **A janela que fecha no meio do voo:** o `Sumiu` acaba o voo e o confete,
+  como o esconder; o voo que acaba sem palco larga o voo da skin.
+- **Testes:** na escalada, os voos da volta com a conta deles e a volta que
+  espera o pet aparecer (e sai no prazo, ou com o "não perturbe"); no Motor,
+  o clique que vê a espera solta a pose e o pet dorme, a volta que ninguém
+  viu com a sessão bloqueada sai no desbloqueio (uma intenção só), a janela
+  que fecha no meio do voo larga o voo, e o orçamento depois do teto (o
+  repouso e o sono profundo sem commit, com o selo); os dourados novos
+  `pergunta-noutro-terminal`, `pergunta-dispensada` e
+  `pergunta-com-protetor-de-tela`, e o `pergunta-ausente` (o voo da volta e
+  o pet dormindo depois do teto) e o `pergunta-com-volta` (o terceiro voo da
+  L3) refeitos. Sete mutações reprovaram (olhar qualquer terminal, sem a
+  espera vista, a pose pelo estado, a volta gastando os voos da L3, a volta
+  escondida perdida, sem mostrar a volta de novo, o voo sem palco sem
+  largar).
+**Por quê:** chamar por um diálogo que já não existe é o pior erro da
+escalada: ensina o Renan a ignorar o pet. O diálogo dispensado não manda
+nada, mas é dispensado no terminal da sessão, e isso o desktop vê; quem viu o
+diálogo e foi embora sabe dele, e o selo parado basta. A volta é o momento em
+que a chamada mais vale, e só vale se aparecer na tela.
