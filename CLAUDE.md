@@ -44,6 +44,18 @@ O plugin instalado é o 0.2.0 (exec form), da worktree estável na `main`, com
 o `~/.local/bin/bichinho` dela. O andamento por tarefa está no
 `PROGRESS.md`.
 
+**Na branch `m5-cerebro` (sem PR ainda):** a primeira metade do M5, o
+cérebro (T5.1–T5.10, decisões 0071–0080): a pesquisa com o 2.1.288
+(`docs/pesquisa/10-cerebro-m5.md`), o hook com `orig` e `crn`, as correntes
+de agentes e os turnos de máquina, a pontuação T0–T3 com os pesos no config,
+os prazos do estado, os avisos com a escalada L1–L4, a festa e a tela (a
+mesclagem, a base, os selos, o sono, a discrição), tudo num registro de
+intenções do Motor com cenários dourados (`cenarios/`, `docs/CENARIOS.md`),
+`bin/pet simular` e `bin/pet eventos --salvar`. As reações e os balões já vão
+para a tela; o desenho do resto (a base segurada, os selos, os voos, o
+confete, o pulso, a faixa) e a leitura do `screencast` no socket2 são a
+segunda metade, na mesma branch.
+
 **Na tela do Renan:** o `zeca-livre-escuro` no tamanho `pequeno` (D = 4 no
 eDP-1), aprovado em 2026-10-05 (decisão 0070). O `zeca` do pack continua
 instalado e aprovado: para voltar, é só trocar `aparencia.skin` no
@@ -92,7 +104,9 @@ Fora dele, use `~/.cargo/bin/cargo`.
 | `bin/pet tocar <reação>` / `esconder` / `mostrar` | `/v1/comando` (não persiste); o `tocar` diz a tag que a skin tocou e se apareceu na tela |
 | `bin/pet clique [esquerdo\|direito]` | clica no pet como o mouse (`/v1/comando` `clique`, decisão 0057) e mostra o que ele fez: `focou` o terminal da sessão do aviso mais urgente (o endereço da janela e se o desktop já confirmou), `balao` com o porquê de não focar, `lista` das sessões ou `soneca` |
 | `claude --plugin-dir ~/Documents/claude-pet/plugin` | o plugin da branch numa sessão só (nunca instalar antes do merge) |
-| `~/.cargo/bin/cargo test` | testes do workspace (os quadros dourados regeneram com `PET_ATUALIZAR_OURO=1`) |
+| `~/.cargo/bin/cargo test` | testes do workspace (os quadros e os cenários dourados regeneram com `PET_ATUALIZAR_OURO=1`; leia o diff) |
+| `bin/pet simular <nome\|arquivo>` | roda `cenarios/<nome>.jsonl` (ou o arquivo) no cérebro e no Motor num relógio falso, offline, e imprime as intenções (o `bichinho simular` da branch: `PET_BICHINHO` ou o cargo); a saída é o `.esperado.jsonl` (decisão 0078) |
+| `bin/pet eventos [--salvar <arquivo>]` | o `/v1/debug/eventos` de um pet de debug (`PET_PORTA`); `--salvar` grava um cenário com pseudônimos pelo `bichinho cenario`. Recusa um pet sem debug (a produção nunca guarda eventos) |
 | `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build` | modo desenvolvimento (sem restart, debug, skin `_teste`) |
 | `bin/pet foto` | foto do pet (grim no monitor inteiro); em debug, só os pixels opacos do pet sobre fundo neutro |
 | `scripts/verificar-ao-vivo.sh` | verificação do M1 na tela de verdade; termina com a produção de pé |
@@ -140,6 +154,11 @@ Fora dele, use `~/.cargo/bin/cargo`.
     e `poof` (seguir o monitor), `balao` (o balão, o selo zZ e o coração),
     `janelas` (o anel de ativações e a janela de cada sessão) e o clique em
     ciclo sobre os avisos que o cérebro guarda (`Cerebro::pendencias`).
+  - No Motor (M5): `intencoes` (o registro das decisões, decisão 0077),
+    `escalada` (a máquina pura da L1–L4) e `tela` (a festa com a mesclagem, a
+    base pela prioridade, os selos, o sono e a discrição); o executor dos
+    cenários é o `pet_core::cenario` (atrás das features `teste` e
+    `simulacao`), com o `de_eventos` que faz o cenário com pseudônimos.
 - Uma camada OVERLAY do tamanho do monitor focado, criada com output NULL,
   nunca redimensionada, sem subsurfaces; o Zeca anda dentro do buffer.
   Cada pixel de arte vira um bloco D×D inteiro de pixels do monitor.
@@ -293,7 +312,22 @@ Fora dele, use `~/.cargo/bin/cargo`.
   O próprio Claude Code põe `CLAUDE_CODE_ENTRYPOINT` (`cli` no terminal,
   `sdk-cli` no `-p`), e o cérebro só conta `cli` (`sessoes.origens`).
 - No 2.1.288 o `UserPromptSubmit` vem **sem** `source`, e o `SessionEnd`
-  vem com o `prompt_id` do `/exit`.
+  vem com o `prompt_id` do `/exit`. Cada notificação de tarefa e cada tique
+  de um `/loop` é um turno com `prompt_id` novo: o hook do M5 manda o `orig`
+  (a forma do prompt) e o `crn` (os agendamentos do Stop), e o cérebro separa
+  o que a máquina começou (decisões 0072 e 0073). Sem o binário novo no
+  PATH, os dois faltam e o pet degrada sem quebrar.
+- `/v1/estado.tela` é o estado da aprovação (`ativa`, `sem_personagem`); a
+  fotografia do M5 (a base, os selos, a escalada, a festa) é
+  `/v1/estado.fotografia` (decisão 0080).
+- Toda regra nova do cérebro ou da tela muda algum dourado de `cenarios/`:
+  regere com `PET_ATUALIZAR_OURO=1` e leia o diff linha a linha antes do
+  commit (é ele que diz o que o Zeca passou a fazer). O `bichinho simular`
+  roda sem personagem, e um teste garante que as intenções não dependem da
+  skin.
+- Cenário gravado só de um pet de debug, pelo `bin/pet eventos --salvar`
+  (pseudônimos, só os campos do fio v1); mesmo assim, leia antes de pôr no
+  git.
 - `bin/pet testar` precisa do pet de pé; as sessões de teste somem em 60 s
   e nunca se misturam com as reais.
 - **Clique e sessão bloqueada:** bloqueado, o Hyprland recusa o `activate`

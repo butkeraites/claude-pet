@@ -693,3 +693,18 @@ fn cada_linha_da_tabela_do_plano() {
         Some(Tipo::Base { estado: "idle", .. })
     ));
 }
+
+/// O `bichinho simular` roda sem personagem: em todo cenário, a linha do
+/// tempo tem de ser a mesma do dourado (que roda com a `_teste`).
+#[test]
+fn sem_personagem_a_linha_do_tempo_e_a_mesma() {
+    for nome in nomes() {
+        let texto = std::fs::read_to_string(pasta().join(format!("{nome}.jsonl"))).unwrap();
+        let cenario = ler(&nome, &texto).unwrap();
+        assert_eq!(
+            linhas(&rodar(&cenario, None).unwrap()),
+            linhas(&linha_do_tempo(&nome)),
+            "{nome}"
+        );
+    }
+}

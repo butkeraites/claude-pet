@@ -15,14 +15,18 @@ no terminal:
 Pode ser arrastado com o mouse para qualquer lugar e sempre aparece no
 monitor que está em foco. Sem som.
 
-> **Estado:** em construção. Na `main` (`v0.4.0`): o overlay nítido no
+> **Estado:** em construção. Na `main` (`v0.4.1`): o overlay nítido no
 > Hyprland (M1), o Zeca com aprovação do personagem (M2), hooks → reação
-> (M3), a costura para Windows e macOS com o hook nativo (parte do M8) e
-> arrastar, seguir o monitor ativo e o clique que leva ao terminal (M4). Na
-> branch `skin-zeca-livre`: o Zeca original, arte livre em CC0, como skin
-> (TS.1–TS.4). O destino é um lançamento open source para Linux, macOS e
-> Windows. O repositório de desenvolvimento ainda se chama `claude-pet`.
-> Veja `PLANO.md` para os marcos e `PROGRESS.md` para o andamento.
+> (M3), a costura para Windows e macOS com o hook nativo (parte do M8),
+> arrastar, seguir o monitor ativo e o clique que leva ao terminal (M4) e o
+> Zeca original, arte livre em CC0. Na branch `m5-cerebro`: o cérebro
+> completo do M5 (as festas pelo trabalho, as correntes de agentes, os avisos
+> com a escalada, a tela com selos, sono e discrição), decidido num registro
+> de intenções com cenários dourados; o desenho do que ainda não aparece (a
+> base segurada, os selos, os voos, o confete) vem na mesma branch. O destino
+> é um lançamento open source para Linux, macOS e Windows. O repositório de
+> desenvolvimento ainda se chama `claude-pet`. Veja `PLANO.md` para os marcos
+> e `PROGRESS.md` para o andamento.
 
 ## Requisitos
 
@@ -185,6 +189,15 @@ tamanho normal; decisão 0064). O binário novo do hook passa a mandar os ids
 de terminal (`term`, decisão 0054); o antigo continua funcionando com o pet
 novo, sem eles.
 
+No M5 também não muda o plugin, e a troca é a mesma (`bin/pet subir` e
+`bin/pet instalar-host`, no clone). O binário novo do hook passa a mandar a
+forma do prompt (`orig`: `notificacao` quando o Claude Code acorda a sessão
+com o aviso de uma tarefa em segundo plano, `comum` para o resto; o texto
+nunca sai do hook) e quantos agendamentos o Stop lista (`crn`; decisão
+0072). Com o antigo, o pet novo funciona sem eles: a notificação de uma
+tarefa vira continuação quando há uma corrente de agentes aberta, e o tique
+de um `/loop` não é visto (festeja como um prompt digitado).
+
 **Para testar uma mudança**, carregue o plugin e o binário da branch só
 numa sessão (o `~/.local/bin` continua com o da worktree estável):
 
@@ -276,7 +289,14 @@ pede que você digite «sim» no terminal).
 ```sh
 bin/pet verificar               # fmt, clippy, testes, compose, plugin
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+bin/pet simular pergunta        # um cenário no cérebro, num relógio falso: as intenções
 ```
+
+O cérebro decide num registro de intenções, e os cenários de `cenarios/`
+(com o dourado de cada um) são o teste e a documentação do que ele faz: o
+formato, as intenções e como gravar um cenário de verdade com pseudônimos
+(`bin/pet eventos --salvar`, só de um pet de debug) estão em
+`docs/CENARIOS.md`.
 
 Documentação para quem mexe no código: `CLAUDE.md`, `DECISIONS.md` e
 `docs/`.

@@ -43,6 +43,16 @@ uso: bin/pet <comando>
                   (sem ela, o da main) e de árvore limpa: o hook vale para todas
                   as sessões do Claude Code. --da-branch pula a conferência
                   (só para uma pasta fora do PATH, nos testes)
+  simular <nome|arquivo>
+                  roda um cenário (cenarios/<nome>.jsonl, ou o arquivo) no
+                  cérebro e no Motor num relógio falso, offline, e imprime a
+                  linha do tempo das intenções (o bichinho da branch: PET_BICHINHO
+                  ou o cargo)
+  eventos [--salvar <arquivo>]
+                  os eventos que um pet de debug recebeu (/v1/debug/eventos;
+                  só metadados); --salvar grava um cenário com pseudônimos
+                  (s1, p1, a1, projeto-a) no arquivo. Recusa um pet sem debug
+                  (a produção nunca guarda eventos)
   testar CENÁRIO  manda eventos sintéticos pelo hook de verdade (o `bichinho
                   avisar` do PATH, ou PET_BICHINHO; sem ele, o avisar.sh de
                   reserva), com PET_TESTE=1 (isolados das sessões reais e
@@ -177,6 +187,92 @@ fonte_do_clone() {
 }
 
 # O hook que o plugin chama (decisão 0041): o `bichinho` do PATH, como o
+# O bichinho da branch, para os subcomandos que o do PATH (o da worktree
+# estável) pode não ter: PET_BICHINHO, ou o cargo.
+bichinho_da_branch() {
+  if [ -n "${PET_BICHINHO:-}" ]; then
+    "$PET_BICHINHO" "$@"
+  else
+    cargo run -q -p bichinho -- "$@"
+  fi
+}
+
+# Um caminho que o usuário deu, relativo a onde ele estava.
+caminho_do_usuario() {
+  case "$1" in
+    /*) printf '%s' "$1" ;;
+    *) printf '%s' "$ORIGEM/$1" ;;
+  esac
+}
+
+# bin/pet simular <nome|arquivo>: o cenário pelo nome (cenarios/<nome>.jsonl)
+# ou pelo arquivo, no relógio falso (decisão 0078).
+simular() {
+  local alvo="${1:-}" arquivo
+  if [ -z "$alvo" ] || [ "$#" -gt 1 ]; then
+    echo "uso: bin/pet simular <nome|arquivo.jsonl>" >&2
+    return 2
+  fi
+  if [ -f "$(caminho_do_usuario "$alvo")" ]; then
+    arquivo="$(caminho_do_usuario "$alvo")"
+  elif [ -f "cenarios/${alvo}.jsonl" ]; then
+    arquivo="$RAIZ/cenarios/${alvo}.jsonl"
+  else
+    echo "não achei o cenário «${alvo}» (nem o arquivo, nem cenarios/${alvo}.jsonl)" >&2
+    return 1
+  fi
+  bichinho_da_branch simular "$arquivo"
+}
+
+# bin/pet eventos [--salvar <arquivo>]: o /v1/debug/eventos do pet da
+# PET_PORTA; com --salvar, o cenário com pseudônimos (decisão 0078). Só de um
+# pet de debug: a produção não guarda eventos, e a recusa vem antes de pedir.
+eventos() {
+  local destino=""
+  case "${1:-}" in
+    "") ;;
+    --salvar)
+      destino="${2:-}"
+      if [ -z "$destino" ] || [ "$#" -gt 2 ]; then
+        echo "uso: bin/pet eventos [--salvar <arquivo.jsonl>]" >&2
+        return 2
+      fi
+      ;;
+    *)
+      echo "uso: bin/pet eventos [--salvar <arquivo.jsonl>]" >&2
+      return 2
+      ;;
+  esac
+  local estado
+  if ! estado="$(api /v1/estado)"; then
+    echo "o pet não respondeu em ${URL} — está de pé?" >&2
+    return 1
+  fi
+  if [ "$(jq -r '.debug' <<<"$estado")" != true ]; then
+    echo "o pet em ${URL} não está em debug: só um pet de debug (PET_DEBUG=1, a pilha de dev ou um de rascunho na PET_PORTA) guarda os eventos; a produção nunca guarda" >&2
+    return 1
+  fi
+  local json
+  if ! json="$(api /v1/debug/eventos)"; then
+    echo "o pet em ${URL} não deu os eventos (/v1/debug/eventos)" >&2
+    return 1
+  fi
+  if [ -z "$destino" ]; then
+    jq . <<<"$json"
+    return
+  fi
+  local arquivo nome temporario
+  arquivo="$(caminho_do_usuario "$destino")"
+  nome="$(basename "$arquivo" .jsonl)"
+  temporario="$(mktemp "${arquivo}.XXXXXX")"
+  if ! bichinho_da_branch cenario "$nome" <<<"$json" >"$temporario"; then
+    rm -f "$temporario"
+    return 1
+  fi
+  mv "$temporario" "$arquivo"
+  echo "✓ $(grep -c '"evento"' "$arquivo") eventos em ${destino}, com pseudônimos (s1, p1, a1, projeto-a); confira antes de pôr no git"
+}
+
 # Claude Code acha no exec form, ou PET_BICHINHO; vazio se não houver.
 binario_do_hook() {
   if [ -n "${PET_BICHINHO:-}" ]; then
@@ -834,6 +930,8 @@ case "$comando" in
     fi
     ;;
   testar) testar "$@" ;;
+  simular) simular "$@" ;;
+  eventos) eventos "$@" ;;
   tocar)
     if [ -z "${1:-}" ]; then
       echo "uso: bin/pet tocar <reação>" >&2
