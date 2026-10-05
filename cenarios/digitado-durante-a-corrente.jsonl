@@ -1,0 +1,17 @@
+{"cenario": "digitado-durante-a-corrente", "descricao": "o Renan digita outro pedido enquanto um agente em segundo plano trabalha: o pedido dele festeja pelo trabalho dele, com o pronto, sem o trabalho do agente; a corrente segue (o «…») e fecha na notificação do agente, com uma festa pelo trabalho dela", "padrao": {"sid": "s1", "ent": "cli", "proj": "api"}}
+{"t": 0, "desktop": {"ocioso": false}}
+{"t": 0, "evento": {"e": "SessionStart", "src": "startup"}}
+{"t": 1000, "evento": {"e": "UserPromptSubmit", "turno": "p1", "orig": "comum"}}
+{"t": 3000, "evento": {"e": "SubagentStart", "turno": "p1", "agente": true, "aid": "a1"}}
+{"t": 3100, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Agent", "dur": 6}}
+{"t": 5000, "evento": {"e": "Stop", "turno": "p1", "bg": 1, "bgt": ["subagent"], "bgi": ["a1"], "crn": 0}}
+{"t": 20000, "evento": {"e": "UserPromptSubmit", "turno": "p2", "orig": "comum"}}
+{"t": 30000, "evento": {"e": "PostToolUse", "turno": "p2", "tool": "Edit", "dur": 30, "arq": "a00000000001"}}
+{"t": 31000, "evento": {"e": "PostToolUse", "turno": "p2", "agente": true, "aid": "a1", "tool": "Bash", "dur": 30000}}
+{"t": 40000, "evento": {"e": "PostToolUse", "turno": "p2", "tool": "Bash", "dur": 2000}}
+{"t": 45000, "evento": {"e": "Stop", "turno": "p2", "bg": 1, "bgt": ["subagent"], "bgi": ["a1"], "crn": 0}}
+{"t": 100000, "evento": {"e": "PostToolUse", "turno": "p2", "agente": true, "aid": "a1", "tool": "Bash", "dur": 60000}}
+{"t": 160000, "evento": {"e": "PostToolUse", "turno": "p2", "agente": true, "aid": "a1", "tool": "Edit", "dur": 30, "arq": "b00000000001"}}
+{"t": 165000, "evento": {"e": "UserPromptSubmit", "turno": "p3", "orig": "notificacao"}}
+{"t": 165900, "evento": {"e": "Stop", "turno": "p3", "bg": 0, "crn": 0}}
+{"t": 180000, "fim": true}

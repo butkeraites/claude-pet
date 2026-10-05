@@ -1,13 +1,13 @@
-{"cenario": "workflow-longo", "descricao": "um pedido que roda um workflow com três agentes em segundo plano por 20 min: o Stop do pedido e o da primeira notificação ficam na corrente, sem festa; a última notificação (src=system) fecha a corrente com a soma de tudo", "padrao": {"sid": "s1", "ent": "cli", "proj": "api"}}
+{"cenario": "workflow-longo", "descricao": "um pedido que roda um workflow por 20 min: dois agentes nascem antes do Stop do pedido e o terceiro 12 s depois dele (o workflow lança os agentes quando quer); o Stop do pedido e o da primeira notificação ficam na corrente, sem festa; a última notificação (orig notificacao, como o 2.1.288 manda) fecha a corrente com a soma de tudo", "padrao": {"sid": "s1", "ent": "cli", "proj": "api"}}
 {"t": 0, "evento": {"e": "SessionStart", "src": "startup"}}
 {"t": 2000, "evento": {"e": "UserPromptSubmit", "turno": "p1", "orig": "comum"}}
 {"t": 5000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Workflow", "dur": 12}}
 {"t": 5500, "evento": {"e": "SubagentStart", "turno": "p1", "agente": true, "aid": "a1"}}
 {"t": 5600, "evento": {"e": "SubagentStart", "turno": "p1", "agente": true, "aid": "a2"}}
-{"t": 5700, "evento": {"e": "SubagentStart", "turno": "p1", "agente": true, "aid": "a3"}}
-{"t": 8000, "evento": {"e": "Stop", "turno": "p1", "bg": 4, "bgt": ["workflow", "subagent", "subagent", "subagent"], "bgi": ["w1", "a1", "a2", "a3"], "crn": 0}}
+{"t": 8000, "evento": {"e": "Stop", "turno": "p1", "bg": 3, "bgt": ["workflow", "subagent", "subagent"], "bgi": ["w1", "a1", "a2"], "crn": 0}}
 {"t": 10000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000000"}}
 {"t": 19000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Bash", "dur": 24000}}
+{"t": 20000, "evento": {"e": "SubagentStart", "turno": "p1", "agente": true, "aid": "a3"}}
 {"t": 28000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Read", "dur": 5}}
 {"t": 37000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000001"}}
 {"t": 46000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Read", "dur": 5}}
@@ -74,7 +74,7 @@
 {"t": 595000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Bash", "dur": 24000}}
 {"t": 600500, "evento": {"e": "UserPromptSubmit", "turno": "p2", "orig": "notificacao"}}
 {"t": 602000, "evento": {"e": "PostToolUse", "turno": "p2", "tool": "Read", "dur": 8}}
-{"t": 603000, "evento": {"e": "Stop", "turno": "p2", "bg": 3, "bgt": ["workflow", "subagent", "subagent"], "bgi": ["w1", "a2", "a3"], "crn": 0}}
+{"t": 603000, "evento": {"e": "Stop", "turno": "p2", "bg": 1, "bgt": ["workflow"], "bgi": ["w1"], "crn": 0}}
 {"t": 604000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000007"}}
 {"t": 613000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Read", "dur": 5}}
 {"t": 622000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Read", "dur": 5}}
@@ -129,7 +129,7 @@
 {"t": 1063000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Bash", "dur": 24000}}
 {"t": 1072000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Bash", "dur": 24000}}
 {"t": 1081000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Bash", "dur": 24000}}
-{"t": 1201000, "evento": {"e": "UserPromptSubmit", "turno": "p3", "src": "system"}}
+{"t": 1201000, "evento": {"e": "UserPromptSubmit", "turno": "p3", "orig": "notificacao"}}
 {"t": 1203000, "evento": {"e": "PostToolUse", "turno": "p3", "tool": "Edit", "dur": 40, "arq": "b00000000001"}}
 {"t": 1204000, "evento": {"e": "PostToolUse", "turno": "p3", "tool": "Edit", "dur": 40, "arq": "b00000000002"}}
 {"t": 1210000, "evento": {"e": "PostToolUse", "turno": "p3", "tool": "Bash", "dur": 5800}}

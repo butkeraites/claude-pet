@@ -610,6 +610,48 @@ fn cada_linha_da_tabela_do_plano() {
         niveis_das_festas("workflow-longo"),
         vec![(1_213_800, T3, "done_big")]
     );
+    // workflow-agentes-depois-do-stop: os agentes que nascem na acomodação e
+    // depois do turno comemorado são da corrente (decisão 0089).
+    let linha = linha_do_tempo("workflow-agentes-depois-do-stop");
+    assert_eq!(
+        niveis_das_festas("workflow-agentes-depois-do-stop"),
+        vec![(872_800, T3, "done_big")]
+    );
+    assert_eq!(
+        turnos(&linha)
+            .iter()
+            .map(|(t, fim, _)| (t.as_str(), *fim))
+            .collect::<Vec<_>>(),
+        vec![
+            ("p1", crate::cerebro::Fim::Stop),
+            ("p2", crate::cerebro::Fim::Stop)
+        ],
+        "nada reabre nem fica substituído"
+    );
+    // digitado-durante-a-corrente: o pedido digitado festeja sozinho, e a
+    // corrente fecha na notificação (decisão 0089).
+    let linha = linha_do_tempo("digitado-durante-a-corrente");
+    assert_eq!(
+        niveis_das_festas("digitado-durante-a-corrente"),
+        vec![(45_800, T1, "done_small"), (166_700, T1, "done_small")]
+    );
+    assert_eq!(
+        turnos(&linha)
+            .iter()
+            .map(|(t, _, origem)| (t.as_str(), *origem))
+            .collect::<Vec<_>>(),
+        vec![
+            ("p1", None),
+            ("p2", None),
+            ("p3", Some(OrigemTurno::Notificacao))
+        ]
+    );
+    assert!(
+        so(&linha, "turno").iter().any(
+            |x| matches!(&x.tipo, Tipo::Turno { turno8: Some(t), corrente: None, .. } if t == "p2")
+        ),
+        "o pedido digitado fica fora da corrente"
+    );
     // stop-bloqueado: a continuação só festeja se subir.
     assert_eq!(
         niveis_das_festas("stop-bloqueado"),

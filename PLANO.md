@@ -353,6 +353,7 @@ Essa pasta do Omarchy **nunca** é montada no container, porque guarda o histór
 - O teto de "turno de máquina" (T1 discreto) vale só para `loop_wakeup`, `schedule_wakeup` e `poll_event`, ou para `system` sem corrente aberta.
 - Uma corrente de agentes expira em 12 h.
 - *Correção (2026-10-05, decisões 0071–0073):* o 2.1.288 nunca manda o `source`. A notificação de tarefa vem com `orig = notificacao` (o hook olha só o começo do prompt) e o tique é um prompt comum numa sessão com agendamento pendente (`crn`) que o Renan não digitou (longe do teclado, ou outra janela certa em foco). A corrente abre e fecha pelo `bgt` de cada Stop, e todo Stop com a corrente aberta é Stop dela.
+- *Correção (2026-10-05, revisão, decisão 0089):* um prompt digitado com a corrente aberta que não começou nada novo em segundo plano festeja sozinho, com o pronto, e a corrente segue; os turnos de máquina continuam entrando nela. Um subagente novo que nasce depois do Stop (os de um workflow nascem quando ele quer) é trabalho da corrente, não a thread principal continuando: não cancela a acomodação nem reabre o turno.
 
 **Stop:**
 - Todo Stop é candidato a fim de turno.
@@ -776,6 +777,9 @@ Atualizado em 2026-10-05 com a pesquisa do M5 (`docs/pesquisa/10-cerebro-m5.md`,
 - **T5.19** a prova do orçamento em relógio falso (20 min trabalhando, 10 min de espera na L4, 30 min parado e o sono profundo, a rajada do T3) e a nitidez dos desenhos novos (D inteiro, pixels do dispositivo);
 - **T5.20** a produção refeita da branch com o estado do Renan intacto, as demonstrações ao vivo conferidas no `/v1/estado` e a conferência na tela (`bin/pet foto`, nitidez, custo) só com a sessão desbloqueada.
 
+**Revisão** (as três revisões adversariais do M5; IDs na ordem dos commits, decisões 0089 em diante):
+- **T5.21** as correntes: os agentes que nascem depois do Stop são da corrente, o pedido digitado com a corrente aberta festeja sozinho e a continuação depois do fim da corrente pontua a soma dela (decisão 0089).
+
 **Verificação:** `bin/pet verificar` verde a cada commit e `cargo test -p pet-core` com os cenários. Tabelas, exemplos de pontuação (decisão 0074) e cenários:
 
 | Cenário | Esperado |
@@ -790,6 +794,8 @@ Atualizado em 2026-10-05 com a pesquisa do M5 (`docs/pesquisa/10-cerebro-m5.md`,
 | `idle-prompt-repetido` | — |
 | `servidor-em-segundo-plano` | festas normais com um dev server rodando |
 | `workflow-longo` | T3 no Stop final da corrente (a notificação que a fecha) |
+| `workflow-agentes-depois-do-stop` | os agentes que o workflow lança depois do Stop são da corrente: T3 no fim (decisão 0089) |
+| `digitado-durante-a-corrente` | o pedido digitado com o agente em segundo plano festeja sozinho, com o pronto; a corrente fecha na notificação (decisão 0089) |
 | `stop-bloqueado` | a continuação só festeja se subir de nível |
 | `interrompido` | sem festa, com e sem `PostToolUseFailure` |
 | `erro-limite` | cansado, sem festa |

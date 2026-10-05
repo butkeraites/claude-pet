@@ -3705,3 +3705,67 @@ continuar valendo (decisão 0005); com o pior caso em teste, uma mudança que o
 estoure reprova o `bin/pet verificar` antes de chegar à tela do Renan. A
 medição na tela (CPU e GPU do Hyprland, `scripts/medir-custo.sh`) continua a
 ser feita com a tela acesa e desbloqueada.
+
+## 0089 — Revisão das correntes: os agentes que nascem depois do Stop, o pedido digitado com a corrente aberta e a continuação depois do fim dela (2026-10-05)
+
+**Problema:** a revisão adversarial do cérebro do M5 (lente das correntes e
+dos cenários) achou três buracos, reproduzidos no `bichinho simular`:
+- **O agente que nasce depois do Stop virava a thread principal.** Os
+  agentes de um workflow nascem quando o workflow quer, e o `bgi` do Stop é o
+  id do workflow, não o deles. Um `SubagentStart` de um `aid` nunca visto
+  dentro da acomodação cancelava o Stop (a corrente nem abria, e o workflow
+  acabava num T0 de máquina); depois dela, reabria o turno comemorado, que
+  engolia o trabalho do agente e fechava `substituido` no prompt seguinte (13
+  min de ferramenta viraram um T1 de 1,05).
+- **Todo Stop com a corrente aberta era dela** (decisão 0073): um pedido que
+  o Renan digita enquanto um agente em segundo plano trabalha acabava sem
+  festa e sem pronto, somado na festa do agente ou perdido se a corrente
+  expirasse. Era um retrocesso do M4 e o contrário da festa proporcional ao
+  trabalho de cada pedido.
+- **A continuação de um Stop hook depois do fim da corrente** pontuava só o
+  turno, com o teto de máquina, e trocava o registro da corrente pelo dele.
+**Escolha:**
+- **O agente novo em segundo plano:** um `SubagentStart` de um `aid` nunca
+  visto não é a thread principal (1) na acomodação de um Stop que listou
+  agentes em voo: conta como subagente desse turno, que vai para a corrente,
+  e não cancela a acomodação; (2) com a corrente aberta e nenhum turno aberto
+  daquele prompt: conta na corrente e o `aid` passa a ser dela, então o que
+  ele faz conta nela até com um prompt digitado aberto. Com o turno daquele
+  prompt aberto, é dele (o Agent em primeiro plano), como no M3; depois de um
+  Stop sem agente em voo, continua sendo a thread principal (a continuação
+  de um Stop hook).
+- **A ferramenta de um agente** que é da corrente (em voo no último Stop ou
+  nascido para ela) conta na corrente; a de um agente que sobreviveu ao turno
+  dele, com a corrente aberta, também; sem corrente, fica ignorada como antes.
+- **O pedido digitado com a corrente aberta:** um turno digitado cujo Stop
+  só lista agentes que já são da corrente (não começou nada novo em segundo
+  plano) festeja sozinho, pelo trabalho dele, com o pronto; a corrente segue
+  (o "…") e fecha no Stop sem agente em voo. Um pedido digitado que começa
+  trabalho novo em segundo plano entra na corrente, como o que a abriu; um
+  Stop digitado sem nada em voo fecha a corrente com a soma, como antes. Os
+  turnos de máquina (notificação, tique) continuam entrando nela. Com o hook
+  antigo (sem `orig`), um prompt com a corrente aberta continua sendo
+  notificação (a degradação da decisão 0073).
+- **A continuação depois do fim da corrente:** o turno em que a corrente
+  fechou guarda a corrente; se ele reabre (o `sha`), o Stop seguinte o põe de
+  volta nela e pontua a soma de novo, com o t0, a origem e o resumo dela, e
+  só festeja se o nível subir.
+- **Testes:** no cérebro, os agentes de um workflow nascendo na acomodação e
+  depois do turno comemorado, o pedido digitado (sozinho, com o pronto; o que
+  lança agente novo entra; o agente do workflow que nasce no meio dele e
+  sobrevive) e a continuação depois do fim da corrente; os dourados
+  `workflow-agentes-depois-do-stop` e `digitado-durante-a-corrente`, e o
+  `workflow-longo` com o terceiro agente nascendo 12 s depois do Stop e a
+  última notificação com `orig: notificacao` (o 2.1.288 nunca manda o
+  `src`). Quatro mutações reprovaram (o agente novo como thread principal, o
+  pedido digitado dentro da corrente, a continuação sem a corrente, a
+  ferramenta do agente que sobreviveu ao turno ignorada).
+- **Limite:** um agente de workflow que nasce com um pedido digitado aberto
+  conta nesse pedido (o ponto do subagente e o que ele faz enquanto o pedido
+  está aberto): nada separa o nascimento dele do de um Agent em primeiro
+  plano. O que ele faz depois que o pedido fecha é da corrente.
+**Por quê:** o fim de um pedido em segundo plano é quando o último agente
+volta, e um workflow é o pedido mais longo que existe: perder o trabalho
+dele ou fechá-lo num T0 é o contrário da festa proporcional ao trabalho
+(decisão 0003). E um pedido que o Renan digita é dele, com o fim dele: não
+pode sumir dentro da corrente de outro pedido.
