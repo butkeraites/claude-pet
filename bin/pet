@@ -406,6 +406,17 @@ testar_turno() {
     echo "(outro T3 de teste há menos de 10 min: este virou T2)"
   fi
   mostrar_tela "${sid:0:8}"
+  # O confete anda por uns segundos (a chuva do T3 começa acima da tela):
+  # o máximo de pedaços que o desenho mostrou em 2 s.
+  if [ "$nome" = done_medium ] || [ "$nome" = done_big ]; then
+    local maximo=0 agora
+    for _ in $(seq 1 20); do
+      agora="$(api /v1/estado | jq -r '.desenho.confete // 0' 2>/dev/null || echo 0)"
+      [ "$agora" -gt "$maximo" ] && maximo=$agora
+      sleep 0.1
+    done
+    echo "confete na tela (o máximo em 2 s): ${maximo} pedaços"
+  fi
   if [ "$nome" = "$esperado" ]; then
     echo "✓ ${cenario} → ${nome}"
   else

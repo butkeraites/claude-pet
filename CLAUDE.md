@@ -44,17 +44,21 @@ O plugin instalado é o 0.2.0 (exec form), da worktree estável na `main`, com
 o `~/.local/bin/bichinho` dela. O andamento por tarefa está no
 `PROGRESS.md`.
 
-**Na branch `m5-cerebro` (sem PR ainda):** a primeira metade do M5, o
-cérebro (T5.1–T5.10, decisões 0071–0080): a pesquisa com o 2.1.288
+**Na branch `m5-cerebro` (sem PR ainda):** o M5 inteiro. A primeira
+metade, o cérebro (T5.1–T5.10, decisões 0071–0080): a pesquisa com o 2.1.288
 (`docs/pesquisa/10-cerebro-m5.md`), o hook com `orig` e `crn`, as correntes
 de agentes e os turnos de máquina, a pontuação T0–T3 com os pesos no config,
 os prazos do estado, os avisos com a escalada L1–L4, a festa e a tela (a
 mesclagem, a base, os selos, o sono, a discrição), tudo num registro de
 intenções do Motor com cenários dourados (`cenarios/`, `docs/CENARIOS.md`),
-`bin/pet simular` e `bin/pet eventos --salvar`. As reações e os balões já vão
-para a tela; o desenho do resto (a base segurada, os selos, os voos, o
-confete, o pulso, a faixa) e a leitura do `screencast` no socket2 são a
-segunda metade, na mesma branch.
+`bin/pet simular` e `bin/pet eventos --salvar`. A segunda metade, a tela
+(T5.11–T5.20, decisões 0081–0088; `docs/pesquisa/11-tela-m5.md`): o
+`screencast` do socket2 com a discrição que segura, a base segurada no
+animador com o ritmo de cada estado, os selos ao lado do corpo com o pulso
+da L4, o voo da escalada até o alto-centro, o confete das festas T2 e T3, o
+`/v1/estado.desenho`, as demonstrações do `bin/pet testar` e a prova do
+orçamento em relógio falso. A produção roda a branch (com o estado do Renan
+intacto); a conferência na tela pede a sessão desbloqueada.
 
 **Na tela do Renan:** o `zeca-livre-escuro` no tamanho `pequeno` (D = 4 no
 eDP-1), aprovado em 2026-10-05 (decisão 0070). O `zeca` do pack continua
@@ -158,7 +162,12 @@ Fora dele, use `~/.cargo/bin/cargo`.
     `escalada` (a máquina pura da L1–L4) e `tela` (a festa com a mesclagem, a
     base pela prioridade, os selos, o sono e a discrição); o executor dos
     cenários é o `pet_core::cenario` (atrás das features `teste` e
-    `simulacao`), com o `de_eventos` que faz o cenário com pseudônimos.
+    `simulacao`), com o `de_eventos` que faz o cenário com pseudônimos. O
+    desenho (decisões 0082–0086): a base no animador (`animador::Base` e
+    `Ritmo`, com o `pet_core::sorteio` de semente injetada), `selos` (a
+    fileira ao lado do corpo e o «!» do aviso), `voo` (a máquina pura do voo
+    da escalada), o `confete::Festa` (a fonte do T2 e a chuva do T3) e o
+    `Painel::desenho`.
 - Uma camada OVERLAY do tamanho do monitor focado, criada com output NULL,
   nunca redimensionada, sem subsurfaces; o Zeca anda dentro do buffer.
   Cada pixel de arte vira um bloco D×D inteiro de pixels do monitor.
@@ -319,7 +328,18 @@ Fora dele, use `~/.cargo/bin/cargo`.
   PATH, os dois faltam e o pet degrada sem quebrar.
 - `/v1/estado.tela` é o estado da aprovação (`ativa`, `sem_personagem`); a
   fotografia do M5 (a base, os selos, a escalada, a festa) é
-  `/v1/estado.fotografia` (decisão 0080).
+  `/v1/estado.fotografia` (decisão 0080), e o que a janela desenha agora (a
+  base e o ritmo, os selos, o voo, o confete) é o `/v1/estado.desenho`
+  (decisão 0086): com a sessão bloqueada, é por ele que se confere a tela.
+- O desenho nunca muda as intenções: os dourados e o teste que roda os
+  cenários sem personagem reprovam. Rajada nova (um voo, um efeito) anda numa
+  grade de 34 ms e põe os outros prazos nela: nenhum quadro a menos de 34 ms
+  (os testes do orçamento, decisão 0088, com o Zeca original de produção).
+- No Hyprland 0.56.2 o `screencast` segue os quadros copiados (o `0` sai meio
+  segundo depois do último), então numa tela parada ele pisca; o
+  `screencastv2` traz o título da janela compartilhada e nunca é lido. A
+  discrição soma 2 s de sinal e segura 5 min depois do último (decisão
+  0081).
 - Toda regra nova do cérebro ou da tela muda algum dourado de `cenarios/`:
   regere com `PET_ATUALIZAR_OURO=1` e leia o diff linha a linha antes do
   commit (é ele que diz o que o Zeca passou a fazer). O `bichinho simular`

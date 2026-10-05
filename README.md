@@ -19,11 +19,12 @@ monitor que está em foco. Sem som.
 > Hyprland (M1), o Zeca com aprovação do personagem (M2), hooks → reação
 > (M3), a costura para Windows e macOS com o hook nativo (parte do M8),
 > arrastar, seguir o monitor ativo e o clique que leva ao terminal (M4) e o
-> Zeca original, arte livre em CC0. Na branch `m5-cerebro`: o cérebro
-> completo do M5 (as festas pelo trabalho, as correntes de agentes, os avisos
-> com a escalada, a tela com selos, sono e discrição), decidido num registro
-> de intenções com cenários dourados; o desenho do que ainda não aparece (a
-> base segurada, os selos, os voos, o confete) vem na mesma branch. O destino
+> Zeca original, arte livre em CC0. Na branch `m5-cerebro`: o M5 inteiro,
+> o cérebro completo (as festas pelo trabalho, as correntes de agentes, os
+> avisos com a escalada, a tela com selos, sono e discrição), decidido num
+> registro de intenções com cenários dourados, e a tela que desenha isso (o
+> Zeca em cada estado, os selos das outras sessões, o voo da escalada, o
+> confete das festas grandes, a discrição ao compartilhar a tela). O destino
 > é um lançamento open source para Linux, macOS e Windows. O repositório de
 > desenvolvimento ainda se chama `claude-pet`. Veja `PLANO.md` para os marcos
 > e `PROGRESS.md` para o andamento.
@@ -196,7 +197,9 @@ com o aviso de uma tarefa em segundo plano, `comum` para o resto; o texto
 nunca sai do hook) e quantos agendamentos o Stop lista (`crn`; decisão
 0072). Com o antigo, o pet novo funciona sem eles: a notificação de uma
 tarefa vira continuação quando há uma corrente de agentes aberta, e o tique
-de um `/loop` não é visto (festeja como um prompt digitado).
+de um `/loop` não é visto (festeja como um prompt digitado). A tela do M5 (a
+base, os selos, o voo, o confete, o compartilhamento de tela pelo socket2)
+só muda o pet: o `bin/pet subir` basta para ela.
 
 **Para testar uma mudança**, carregue o plugin e o binário da branch só
 numa sessão (o `~/.local/bin` continua com o da worktree estável):
@@ -207,8 +210,9 @@ cd ~/Documents/claude-pet
 PATH="$PWD/target/debug:$PATH" claude --plugin-dir ~/Documents/claude-pet/plugin
 ```
 
-Para conferir sem o Claude: `bin/pet testar rapido` (aceno) e
-`bin/pet testar pequeno` (pulinho) mandam eventos sintéticos pelo mesmo hook
+Para conferir sem o Claude: `bin/pet testar rapido` (aceno),
+`bin/pet testar pequeno` (pulinho), `medio`, `grande`, `pergunta` e
+`dois-prontos` (a tela do M5, logo abaixo) mandam eventos sintéticos pelo mesmo hook
 (o `bichinho avisar` do PATH, ou o de `PET_BICHINHO`, por exemplo
 `PET_BICHINHO="$PWD/target/debug/bichinho"`; sem nenhum, o `avisar.sh`, com
 aviso), dizem de que commit é o binário, e
@@ -283,6 +287,37 @@ checklist do HDMI, da tampa fechada e da suspensão).
 `scripts/e2e-monitor.sh --autorizo` cria um monitor de mentira para conferir
 a troca de monitor: mexe no Hyprland, então só com o seu consentimento (ele
 pede que você digite «sim» no terminal).
+
+### O que o Zeca mostra (M5)
+
+- **O estado de agora**, da sessão que mais precisa de você (na ordem:
+  esperando você, erro, cansado, pronto, trabalhando, compactando, pensando,
+  parado): trabalhando e pensando ele fica quase parado (uma micro-ação a
+  cada 10–30 s, sorteada); parado, respira e pisca; sem nada por uns
+  minutos, boceja e dorme, e no sono profundo não desenha nada.
+- **A festa** é do tamanho do trabalho: a resposta sem trabalho ganha o
+  aceno; trabalho pequeno, o pulinho e o balão "Prontinho! ‹projeto›";
+  médio, o voo curto com 12 confetes; grande, o voo grande com uma chuva de
+  confete pela tela (no máximo um a cada 10 min). Duas sessões terminando
+  juntas viram uma festa só ("2 prontos: api, web").
+- **Quando o Claude precisa de você**, ele chama na hora (o pio, um «!»
+  amarelo ao lado e o balão do tipo: pergunta, plano, permissão). Se você
+  não está olhando um terminal do Claude (ou está sem mexer há 1 min), a
+  chamada cresce: rajadas aos 30 s, um voo até o alto do monitor com "!!" aos
+  90 s (até 3 vezes, e de volta para o lugar de sempre), e aos 5 min o «!»
+  pulsa uma vez por segundo, com uma rajada por minuto, até parar de vez. Com
+  o "não perturbe" do Omarchy ou na soneca, só a primeira chamada.
+- **As outras sessões** viram selos ao lado dele: "+N" (as ocupadas), uma
+  bandeirinha na cor do projeto para cada resposta pronta e "…" quando um
+  agente trabalha em segundo plano.
+- **Compartilhando a tela**, os balões perdem o nome do projeto (depois de 2
+  s de compartilhamento, e até 5 min depois que ele acaba: no Hyprland 0.56 o
+  sinal pisca quando a tela fica parada).
+
+`bin/pet testar medio`, `grande`, `pergunta` e `dois-prontos` mostram cada
+uma dessas coisas com sessões de teste (que somem em 60 s), e o
+`bin/pet estado` diz o que a tela está desenhando (`desenho`), mesmo com a
+sessão bloqueada.
 
 ## Desenvolvimento
 

@@ -3,11 +3,12 @@
 //!
 //! É o contrato com quem desenha (a segunda metade do M5 e o M6) e o que os
 //! cenários dourados comparam (`pet_core::cenario`). As reações (`reacao`,
-//! `rajada`) já vão para a tela pelo animador do M3, e os balões (`balao`)
-//! pelo balão do M4: a linha e a tela saem da mesma chamada. O resto (a base
-//! segurada, os selos, os voos, o pulso, o confete, a faixa) espera quem
-//! desenha, e está aqui para os testes e o `/v1/estado` lerem (as intenções
-//! e a fotografia de agora, `fotografia`).
+//! `rajada`) vão para a tela pelo animador do M3, e os balões (`balao`) pelo
+//! balão do M4: a linha e a tela saem da mesma chamada. A base segurada, os
+//! selos, os voos, o pulso e o confete são desenhados pelo Motor (decisões
+//! 0082 a 0085), sem mudar nenhuma linha daqui; a faixa e o voo atravessando
+//! a tela ficam para o M6. Os testes e o `/v1/estado` leem as intenções, a
+//! fotografia de agora (`fotografia`) e o desenho (`desenho`).
 //!
 //! Só metadados: o id curto da sessão (`sid8`), o do turno, o nome da pasta
 //! do projeto nos balões (como o balão do M4 já mostra) e enums. Nada de

@@ -17,10 +17,13 @@
 //!   pisca numa tela parada), nenhum balão leva nome de projeto, até
 //!   [`SEGURA_MS`] depois do último sinal (decisão 0081).
 //!
-//! A reação e o balão vão para a tela daqui (decisão 0079); a base, os
-//! selos, o confete, os voos e a faixa esperam quem desenha (a segunda metade
-//! do M5), pelas intenções e pela fotografia de agora ([`PainelTela`], o
-//! `/v1/estado.fotografia`; o `tela` de lá já é o da aprovação).
+//! A reação e o balão vão para a tela daqui (decisão 0079); a base vai para o
+//! animador ([`Motor::sincronizar_base`], decisão 0082), e os selos, o
+//! confete e os voos são desenhados pelo Motor (decisões 0083 a 0085). O que
+//! foi decidido fica nas intenções e na fotografia de agora ([`PainelTela`], o
+//! `/v1/estado.fotografia`; o `tela` de lá já é o da aprovação); o que a
+//! janela desenha, no `/v1/estado.desenho` (decisão 0086). A faixa "PRONTO!"
+//! e o voo atravessando a tela são do M6.
 
 use std::collections::BTreeMap;
 
