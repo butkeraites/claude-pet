@@ -741,6 +741,43 @@ mod testes {
     }
 
     #[test]
+    fn o_desenho_vai_para_o_estado_so_com_metadados() {
+        use pet_core::evento::Evento;
+        let a = Ambiente::novo("nucleo-desenho");
+        let config = a.raiz.join("config");
+        fs::create_dir_all(&config).unwrap();
+        let (mut nucleo, mut janela) = ligado(&a, &config);
+        nucleo.publicar(Some(&janela));
+        let estado = nucleo.comp.estado_json();
+        assert_eq!(estado["desenho"]["base"], "idle");
+        assert_eq!(estado["desenho"]["ritmo"], "repouso");
+        assert_eq!(estado["desenho"]["confete"], 0);
+        // Um prompt: a base é o pensando, quase parada.
+        let agora = agora_desde_1970_ms();
+        let evento = Evento {
+            e: "UserPromptSubmit".into(),
+            sid: Some("0123456789abcdef".into()),
+            turno: Some("p1".into()),
+            ent: Some("cli".into()),
+            proj: Some("agenda-secreta".into()),
+            ts: Some(agora),
+            ..Evento::default()
+        };
+        let recebido = Recebido {
+            evento,
+            recebido_ms: agora,
+            chegada: Instant::now(),
+        };
+        nucleo.comando(Comando::Evento(Box::new(recebido)), Some(&mut janela));
+        nucleo.publicar(Some(&janela));
+        let estado = nucleo.comp.estado_json();
+        assert_eq!(estado["desenho"]["base"], "thinking");
+        assert_eq!(estado["desenho"]["ritmo"], "quieto");
+        assert_eq!(estado["fotografia"]["base"], "thinking");
+        assert!(!estado["desenho"].to_string().contains("agenda"));
+    }
+
+    #[test]
     fn a_posicao_arrastada_fica_em_state_e_volta_noutro_nucleo() {
         use pet_core::plataforma::{Botao, EventoPonteiro};
         let a = Ambiente::novo("nucleo-posicao");

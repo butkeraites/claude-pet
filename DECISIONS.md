@@ -3594,3 +3594,27 @@ anima ao mesmo tempo que o confete.
 pela tela é a parte do T3 que cabe no M5 sem arte nova; no relógio de 34 ms,
 o pior caso (a reação mais o confete) continua uma rajada de até 30 quadros
 por segundo, que acaba sozinha.
+
+## 0086 — O `/v1/estado.desenho`: o que as intenções viraram na janela (2026-10-05)
+
+**Problema:** o `/v1/estado` tinha as intenções (decisão 0077) e a
+fotografia do que o cérebro decidiu (decisão 0080), mas não o que a janela
+está desenhando: com a sessão do Renan quase sempre bloqueada, a
+conferência ao vivo da segunda metade do M5 (a base no animador, os selos, o
+voo, o confete) não teria como ser feita sem olhar a tela. E o que vai para
+o `/v1/estado` só pode ser metadado.
+**Escolha:** `Painel::desenho` (o `/v1/estado.desenho`), montado do estado
+do Motor na hora do painel: a `base` e o `ritmo` do animador, a fileira de
+`selos` (o `aviso` `normal` ou `aceso`, se `pulso`, o `mais`, a `corrente` e
+quantas `bandeiras`; vazia no voo e na viagem), o `voo` (a `fase` e o
+`motivo`) e o `confete` (quantos pedaços na tela). Vazio sem o pet desenhado
+(sem conexão, escondido). Só enums e contagens: nem o nome do projeto, que o
+balão e a fotografia já mostram, entra aqui. A seção da tela no
+`docs/CENARIOS.md` diz o que cada intenção desenha. Testes no Motor (a
+espera, o voo, a L4 com o pulso aceso, a festa com confete, o JSON sem o
+nome, nada sem janela) e no núcleo do daemon (o `desenho` no
+`/v1/estado`).
+**Por quê:** a intenção diz o que o cérebro quer, a fotografia diz o que ele
+decidiu agora, e o desenho diz o que a janela está fazendo com isso: com a
+tela fora do alcance, é a terceira linha que fecha a conta (e o
+`commits_total`, que só anda com a tela acesa).

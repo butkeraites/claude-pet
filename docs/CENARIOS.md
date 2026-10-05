@@ -77,9 +77,10 @@ Cada linha tem `t` (ms do relógio do laço) e `i` (o tipo). O
 | `discricao` | a tela compartilhada (2 s de sinal somados) liga; 5 min sem sinal desligam (decisão 0081) | `ligada`, `tirou_balao` |
 | `clique` | o que um clique fez | `resultado` (`focou`, `nao_focou`, `lista`, `soneca`, `nada`), `sid8` |
 
-As reações (`reacao`, `rajada`, a `reacao` de cada `festa`) já vão para o
-animador pelo caminho do M3, e os balões pelo balão do M4 (decisão 0079). A
-base, os selos, os voos, o confete, a faixa e o pulso esperam quem desenha.
+As reações (`reacao`, `rajada`, a `reacao` de cada `festa`) vão para o
+animador pelo caminho do M3, e os balões pelo balão do M4 (decisão 0079). O
+resto é desenhado pela segunda metade do M5 (a seção abaixo); a `faixa`
+"PRONTO!" e o `voo` `atravessar` do T3 ficam para o M6.
 
 ## A fotografia de agora
 
@@ -88,3 +89,28 @@ O `/v1/estado.fotografia` (o `tela` de lá é o da aprovação; decisão 0080):
 `sono` (`acordado`, `bocejou`, `dormindo`, `profundo`), `selos`, `escalada`
 (`sid8`, `nivel`, `espera`, `pulso`), `festa` (`nivel`, `sessoes`, `ha_ms`,
 nos 3 s dela) e `discricao`.
+
+## A tela: o que cada intenção desenha
+
+O desenho nunca muda as intenções (o teste que roda todos os cenários sem
+personagem confere). Com o personagem na tela:
+
+| Intenção | O que a janela mostra |
+|---|---|
+| `base` | o animador segura o estado da skin no ritmo dele (decisão 0082): `repouso` (parado, pronto, erro, espera até a L3: a pose e rajadas, até 2 commits/s), `quieto` (trabalhando, pensando: até 4 fps, uma micro-ação sorteada a cada 10–30 s), `laco` (dormindo, cansado: até 2 fps) e `parado` (`profundo`, e a espera na L4: só a pose, nenhum commit) |
+| `selos` | a fileira ao lado do corpo, na altura da cabeça (decisão 0083): o "+N", o "…" e as bandeirinhas na cor do projeto, em blocos da metade do D, fora da área de toque e dentro do monitor |
+| `escalada` | o «!» amarelo do aviso na fileira, da L1 até o aviso sair |
+| `pulso` | o «!» trocando de cor (amarelo, vermelho) uma vez por segundo |
+| `voo` (`alto_centro`) | o voo da casa ao alto-centro com o "!!" piscando abaixo de 2 Hz e de volta, ~4,2 s em passos de 34 ms, a área de toque junto, sem gravar posição (decisão 0084) |
+| `festa` e `festa_mesclada` | a reação do nível (o `done_medium` e o `done_big` são voos dentro da célula), o balão, e o confete: a fonte de 12 no T2, a chuva de 40 pela tela no T3, em passos de 34 ms, até 4,5 s (decisão 0085) |
+| `discricao` | os balões sem nome de projeto (o sinal do `screencast` somando 2 s; 5 min depois do último sinal, os nomes voltam; decisão 0081) |
+
+O `/v1/estado.desenho` diz o que a janela está desenhando agora (só
+metadados; vazio sem o pet na tela): `base` e `ritmo` (do animador),
+`selos` (`aviso`: `normal` ou `aceso`, `pulso`, `mais`, `corrente` e quantas
+`bandeiras`), `voo` (`fase`: `subindo`, `pairando`, `descendo`; `motivo`) e
+`confete` (quantos pedaços na tela). É o que o Motor manda a janela
+desenhar, pelo relógio: com a tela apagada o compositor não pede quadros e o
+`commits_total` não anda (decisão 0018), mas o `desenho` sim; com a sessão
+bloqueada, é por ele que se confere o desenho sem olhar a tela.
+

@@ -3691,3 +3691,57 @@ fn sem_confete_na_soneca_e_numa_janela_pequena_e_o_nivel_que_sobe_troca_a_fonte_
     }
     assert!(mais > 12, "a chuva do T3: {mais}");
 }
+
+// --- o desenho no /v1/estado (decisão 0086) ---------------------------------
+
+#[test]
+fn o_painel_mostra_o_que_a_janela_desenha() {
+    let l3 = 2_000 + escalada::L3_APOS_MS;
+    let (mut motor, janela) = esperando_ate(5_000);
+    let d = motor.painel(Some(&janela), 5_000).desenho;
+    assert_eq!(
+        (d.base.as_deref(), d.ritmo),
+        (Some("waiting"), Some("repouso"))
+    );
+    assert_eq!(
+        d.selos,
+        Some(PainelFileira {
+            aviso: Some("normal"),
+            pulso: false,
+            mais: 0,
+            corrente: false,
+            bandeiras: 0
+        })
+    );
+    assert_eq!((d.voo, d.confete), (None, 0));
+    // No voo: a fase e o motivo; a fileira dá lugar ao "!!".
+    let (mut motor2, mut janela2) = esperando_ate(l3 + 100);
+    let d = motor2.painel(Some(&janela2), l3 + 100).desenho;
+    assert_eq!(
+        d.voo,
+        Some(PainelVoo {
+            fase: "subindo",
+            motivo: "escalada"
+        })
+    );
+    assert_eq!(d.selos, None);
+    // Na L4: a pose parada e o pulso.
+    let l4 = 2_000 + escalada::L4_APOS_MS;
+    quadros_entre(&mut motor2, &mut janela2, l3 + 100, l4 + 1_500);
+    let d = motor2.painel(Some(&janela2), l4 + 1_500).desenho;
+    assert_eq!(d.ritmo, Some("parado"));
+    assert_eq!(
+        d.selos.map(|s| (s.aviso, s.pulso)),
+        Some((Some("aceso"), true))
+    );
+    // Numa festa T2, o confete; e o JSON só com metadados.
+    turno_de(&mut motor, "s2", "agenda-secreta", 6_000, 240_000);
+    let mut janela = janela;
+    quadros_como_o_laco(&mut motor, &mut janela, 5_000, 7_900);
+    let d = motor.painel(Some(&janela), 7_900).desenho;
+    assert!(d.confete > 0 && d.confete <= 12, "{d:?}");
+    let json = serde_json::to_string(&d).unwrap();
+    assert!(!json.contains("agenda"), "{json}");
+    // Sem janela (o compositor caiu), nada desenhado.
+    assert_eq!(motor.painel(None, 7_900).desenho, PainelDesenho::default());
+}

@@ -233,6 +233,7 @@ impl Compartilhado {
             "desktop": painel.desktop,
             "intencoes": painel.intencoes,
             "fotografia": painel.fotografia,
+            "desenho": painel.desenho,
             "eventos": self.eventos_json(),
             "sessoes": do_cerebro("sessoes", json!([])),
             "ultima_reacao": do_cerebro("ultima_reacao", Value::Null),

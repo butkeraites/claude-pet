@@ -175,6 +175,49 @@ pub struct Painel {
     /// A fotografia da tela de agora: a base, os selos, a escalada, a festa
     /// e a discrição (decisões 0076, 0077 e 0080).
     pub fotografia: PainelTela,
+    /// O que a janela está desenhando agora: a base no animador, a fileira
+    /// de selos, o voo e o confete (decisão 0086). Só metadados.
+    pub desenho: PainelDesenho,
+}
+
+/// O desenho de agora no `/v1/estado.desenho` (decisão 0086): o que as
+/// intenções viraram na janela. Sem pet na tela, vazio.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct PainelDesenho {
+    /// O estado da skin que o animador segura (a base, decisão 0082).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
+    /// O ritmo dela: `repouso`, `quieto`, `laco` ou `parado`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ritmo: Option<&'static str>,
+    /// A fileira de selos ao lado do corpo, se há uma (decisão 0083).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selos: Option<PainelFileira>,
+    /// O voo da escalada, se há um (decisão 0084).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub voo: Option<PainelVoo>,
+    /// Os pedaços de confete da festa na tela (decisão 0085).
+    pub confete: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct PainelFileira {
+    /// O selo do aviso: `normal` ou `aceso` (a metade acesa do pulso).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aviso: Option<&'static str>,
+    /// O selo do aviso pulsa (a L4).
+    pub pulso: bool,
+    pub mais: u32,
+    pub corrente: bool,
+    pub bandeiras: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PainelVoo {
+    /// `subindo`, `pairando` ou `descendo`.
+    pub fase: &'static str,
+    /// `escalada` ou `voltou`.
+    pub motivo: &'static str,
 }
 
 /// O que um `tocar` do `/v1/comando` fez (decisão 0033).
@@ -2585,6 +2628,7 @@ impl Motor {
     pub fn painel(&mut self, punho: Option<&dyn Punho>, agora_ms: u64) -> Painel {
         let intencoes = self.intencoes.painel(agora_ms);
         let fotografia = self.painel_da_tela(agora_ms);
+        let desenho = self.painel_do_desenho(agora_ms);
         let Some(punho) = punho else {
             return Painel {
                 desktop: self.desktop.painel(Default::default(), Default::default()),
@@ -2630,6 +2674,45 @@ impl Motor {
             focando: self.focando.last().map(|f| f.janela.0.clone()),
             intencoes,
             fotografia,
+            desenho: if info.visivel {
+                desenho
+            } else {
+                PainelDesenho::default()
+            },
+        }
+    }
+
+    /// O que a janela desenha agora, pelo estado do Motor (decisão 0086).
+    fn painel_do_desenho(&self, agora_ms: u64) -> PainelDesenho {
+        let Some(pet) = self.pet.as_ref().filter(|_| self.palco.is_some()) else {
+            return PainelDesenho::default();
+        };
+        let base = pet.base();
+        let fileira = self.fileira(agora_ms);
+        let selos =
+            (self.voo.is_none() && self.seguir.fase().is_none() && !fileira.vazia()).then(|| {
+                PainelFileira {
+                    aviso: fileira.aviso.map(|a| match a {
+                        selos::Aviso::Normal => "normal",
+                        selos::Aviso::Aceso => "aceso",
+                    }),
+                    pulso: self.pulso_desde.is_some() && self.chamando.is_some(),
+                    mais: fileira.mais,
+                    corrente: fileira.corrente,
+                    bandeiras: fileira.bandeiras.len(),
+                }
+            });
+        PainelDesenho {
+            base: Some(base.estado.clone()),
+            ritmo: Some(base.ritmo.nome()),
+            selos,
+            voo: self.voo.and_then(|v| {
+                v.fase(agora_ms).map(|fase| PainelVoo {
+                    fase: fase.nome(),
+                    motivo: v.motivo,
+                })
+            }),
+            confete: self.confete_na_tela(),
         }
     }
 
