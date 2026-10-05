@@ -344,6 +344,7 @@ Essa pasta do Omarchy **nunca** é montada no container, porque guarda o histór
   - quando chega `idle_prompt` daquela sessão;
   - quando `PostToolUseFailure` vem com `intr`;
   - quando o título do terminal focado vira "✳" com uma só sessão trabalhando.
+- *Correção (2026-10-05, revisão, decisão 0092):* a regra do "✳" não foi feita: no 2.1.288 o título do terminal fica ✳ o tempo todo (pensando, num Bash, com um diálogo na tela e depois do Esc; conferido no tmux), então ele diz "terminal do Claude", não "parado". O turno que o Esc deixa aberto fecha no prompt seguinte, no `idle_prompt` ou no `SessionEnd`, e o estado volta a parado pelo prazo de 5 min (decisão 0076); a espera que o Esc deixa tem as regras da decisão 0090.
 
 **Tarefas em segundo plano:**
 - Só trabalho de agente (`subagent`, `workflow`, `teammate`, `cloud_session`) abre ou estende uma corrente.
@@ -372,6 +373,8 @@ T1  score < 4                            -> pulinho + balão
 T2  4 <= score < 12                      -> voo curto + 12 confetes + balão
 T3  score >= 12 (no máx. 1 a cada 10 min) -> voo atravessando a tela + chuva de confete + faixa "PRONTO!" (2,5–4 s)
 ```
+
+*Correção (2026-10-05, decisões 0085 e 0092):* no M5 a chuva do T3 dura até 4,5 s (o último dos 40 pedaços sai da tela; decisão 0085); a faixa e o voo atravessando a tela são do M6. Um T3 que não tocou (o pet escondido ou na proteção de tela, a soneca) não gasta os 10 min.
 
 **Modos e mesclagem:**
 - `celebracao.modo`: `proporcional` (padrão), `sempre_grande`, `discreta` ou `desligada`.
@@ -785,7 +788,8 @@ Atualizado em 2026-10-05 com a pesquisa do M5 (`docs/pesquisa/10-cerebro-m5.md`,
 **Revisão** (as três revisões adversariais do M5; IDs na ordem dos commits, decisões 0089 em diante):
 - **T5.21** as correntes: os agentes que nascem depois do Stop são da corrente, o pedido digitado com a corrente aberta festeja sozinho e a continuação depois do fim da corrente pontua a soma dela (decisão 0089);
 - **T5.22** a espera e a escalada: a pose pelo aviso (o clique e o teto a soltam), o diálogo visto no terminal da sessão, olhar o terminal da sessão que espera e não o de outra, os voos da volta com a conta deles e só com o pet na tela (a proteção de tela, a sessão bloqueada), e a janela que fecha no meio do voo (decisão 0090);
-- **T5.23** a tela: o orçamento da espera (o ritmo atento na L1 e no erro, só a pose da L2 em diante), o "+N" que não pisca na acomodação, o erro e o cansado que não tocam escondidos, o erro que não segura o sono, a tela compartilhada discreta como o "não perturbe" e o `scripts/medir-custo.sh` com o pet acordado e as fases do M5 (decisão 0091).
+- **T5.23** a tela: o orçamento da espera (o ritmo atento na L1 e no erro, só a pose da L2 em diante), o "+N" que não pisca na acomodação, o erro e o cansado que não tocam escondidos, o erro que não segura o sono, a tela compartilhada discreta como o "não perturbe" e o `scripts/medir-custo.sh` com o pet acordado e as fases do M5 (decisão 0091);
+- **T5.24** o que ficou da revisão: o T3 que não tocou não gasta o intervalo, o log da reação do próprio pet, o comentário partido do `bin/pet`, a regra do "✳" fora, a presença no casamento da janela, os limites conhecidos (o tique na mesma janela, as mensagens de teammate e de canal, o "não perturbe" que só chega com os eventos) e as docs (PLANO, CLAUDE.md, README) reconciliadas (decisão 0092).
 
 **Verificação:** `bin/pet verificar` verde a cada commit e `cargo test -p pet-core` com os cenários. Tabelas, exemplos de pontuação (decisão 0074) e cenários:
 
@@ -826,6 +830,8 @@ Atualizado em 2026-10-05 com a pesquisa do M5 (`docs/pesquisa/10-cerebro-m5.md`,
 - "voltou!" via `ext_idle_notifier_v1`;
 - primeira aparição com "Oi! Me arrasta pra onde quiser";
 - dica "sem sinal do Claude Code — rode `bin/pet doutor`" se nenhum hook chegar em 5 min.
+
+*Correção (2026-10-05, revisão do M5, decisão 0092):* o M5 já entregou as micro-ações sorteadas, o bocejo, o sono e o sono profundo (decisão 0082) e a chuva de confete do T3 (decisão 0085); ficam para o M6 o piscar e o olhar em volta, a física das partículas, o voo atravessando a tela, o holofote "PRONTO!", o "voltou!" com o resumo, os balões 9-slice e a primeira aparição. O T3 do M5 dura até 4,5 s (o portão abaixo mede o do M6).
 
 **Verificação:**
 - Cada reação conferida com `tocar` + `foto` e revisada por você. Critério:

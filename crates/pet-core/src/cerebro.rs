@@ -1517,6 +1517,9 @@ pub struct Cerebro {
     /// O último T3 de cada mundo (o real, o de teste), no relógio
     /// monotônico (decisão 0074).
     ultimo_t3: [Option<u64>; 2],
+    /// O T3 de antes do último, para devolver o intervalo quando o último
+    /// não tocou (o pet escondido, a soneca; decisão 0092).
+    t3_antes: [Option<u64>; 2],
 }
 
 /// Hora do evento: o `ts` do hook quando plausível (até 6 h da chegada);
@@ -1559,6 +1562,7 @@ impl Cerebro {
             ultima_reacao: None,
             ignorados: BTreeMap::new(),
             ultimo_t3: [None; 2],
+            t3_antes: [None; 2],
         }
     }
 
@@ -1628,6 +1632,7 @@ impl Cerebro {
         };
         let cedo = self.ultimo_t3[mundo].is_some_and(|ultimo| agora.mono_ms < ultimo + intervalo);
         if !cedo {
+            self.t3_antes[mundo] = self.ultimo_t3[mundo];
             self.ultimo_t3[mundo] = Some(agora.mono_ms);
             return;
         }
@@ -1653,6 +1658,14 @@ impl Cerebro {
             festa.nivel = f.registro.nivel.unwrap_or(Nivel::T2);
             festa.reacao = reacao_do_turno;
         }
+    }
+
+    /// O último T3 do mundo `teste` não tocou (o pet escondido ou na
+    /// proteção de tela, a soneca que o troca pelo aceno): o intervalo volta
+    /// a contar do T3 de antes (decisão 0092).
+    pub fn t3_nao_tocou(&mut self, teste: bool) {
+        let mundo = usize::from(teste);
+        self.ultimo_t3[mundo] = self.t3_antes[mundo].take();
     }
 
     fn reagir(&mut self, reacao: Reacao, reacoes: &mut Vec<Reacao>) {

@@ -196,10 +196,14 @@ forma do prompt (`orig`: `notificacao` quando o Claude Code acorda a sessão
 com o aviso de uma tarefa em segundo plano, `comum` para o resto; o texto
 nunca sai do hook) e quantos agendamentos o Stop lista (`crn`; decisão
 0072). Com o antigo, o pet novo funciona sem eles: a notificação de uma
-tarefa vira continuação quando há uma corrente de agentes aberta, e o tique
-de um `/loop` não é visto (festeja como um prompt digitado). A tela do M5 (a
-base, os selos, o voo, o confete, o compartilhamento de tela pelo socket2)
-só muda o pet: o `bin/pet subir` basta para ela.
+tarefa vira continuação quando há uma corrente de agentes aberta (e um
+prompt que você digita com ela aberta também, sem festa própria), a
+notificação de um shell em segundo plano (sem corrente) conta como prompt
+digitado (a festa normal no lugar do pulinho discreto, e a janela da sessão
+casada com a que estiver em foco), e o tique de um `/loop` não é visto
+(festeja como um prompt digitado). A tela do M5 (a base, os selos, o voo, o
+confete, o compartilhamento de tela pelo socket2) só muda o pet: o
+`bin/pet subir` basta para ela.
 
 **Para testar uma mudança**, carregue o plugin e o binário da branch só
 numa sessão (o `~/.local/bin` continua com o da worktree estável):
@@ -220,11 +224,11 @@ aviso), dizem de que commit é o binário, e
 sessões de terminal contam (`sessoes.origens = ["cli"]` em
 `config/exemplo.toml`): `claude -p`, SDK e IDE ficam de fora.
 
-Com o Zeca aprovado, uma resposta sem trabalho (sem editar arquivo, rodar
-comando nem chamar subagente) ganha o aceno; uma resposta com trabalho ganha
-o pulinho; e fechar o Claude, o tchau. No Zeca original são a tirada de
-chapéu, o pulo comemorando e o tchau com a asa; no do pack, levantar e
-sentar, um pio e um pio de tchau. Sem personagem aprovado, as reações ficam só em `bin/pet estado`
+Com o Zeca aprovado, cada resposta ganha a festa do tamanho do trabalho
+(veja "O que o Zeca mostra", abaixo) e fechar o Claude, o tchau. No Zeca
+original o aceno é a tirada de chapéu, o pulinho é o pulo comemorando e o
+tchau é com a asa; no do pack, levantar e sentar, um pio e um pio de tchau.
+Sem personagem aprovado, as reações ficam só em `bin/pet estado`
 (`ultima_reacao` e `turnos`).
 
 ### Arrastar, seguir e clicar
@@ -298,21 +302,35 @@ pede que você digite «sim» no terminal).
 - **A festa** é do tamanho do trabalho: a resposta sem trabalho ganha o
   aceno; trabalho pequeno, o pulinho e o balão "Prontinho! ‹projeto›";
   médio, o voo curto com 12 confetes; grande, o voo grande com uma chuva de
-  confete pela tela (no máximo um a cada 10 min). Duas sessões terminando
-  juntas viram uma festa só ("2 prontos: api, web").
+  confete pela tela (no máximo um a cada 10 min; um que não apareceu, com a
+  proteção de tela ou na soneca, não conta). Duas sessões terminando juntas
+  viram uma festa só ("2 prontos: api, web"). Um pedido com agentes em
+  segundo plano (um workflow inclusive) festeja uma vez só, quando o último
+  agente volta, pela soma; um pedido que você digita enquanto eles trabalham
+  festeja sozinho, pelo trabalho dele.
 - **Quando o Claude precisa de você**, ele chama na hora (o pio, um «!»
   amarelo ao lado e o balão do tipo: pergunta, plano, permissão). Se você
-  não está olhando um terminal do Claude (ou está sem mexer há 1 min), a
+  não está olhando o terminal daquela sessão (ou está sem mexer há 1 min), a
   chamada cresce: rajadas aos 30 s, um voo até o alto do monitor com "!!" aos
   90 s (até 3 vezes, e de volta para o lugar de sempre), e aos 5 min o «!»
-  pulsa uma vez por segundo, com uma rajada por minuto, até parar de vez. Com
-  o "não perturbe" do Omarchy ou na soneca, só a primeira chamada.
+  troca de cor uma vez por segundo, com uma rajada por minuto, até parar de
+  vez aos 35 min: aí a pose de espera sai, o «!» fica parado e ele pode
+  dormir. Quando você volta depois de 1 min longe, um voo mostra o aviso
+  (assim que ele aparece na tela: com a proteção de tela ou a sessão
+  bloqueada, depois que ela some). Com 5 s no terminal da sessão, ele dá o
+  diálogo por visto e não escala mais (um Esc numa pergunta ou um plano
+  recusado não mandam evento nenhum, e a pose de espera sai 2 min depois);
+  o clique que leva ao terminal também a tira. Com o "não perturbe" do
+  Omarchy ou na soneca, só a primeira chamada. O "não perturbe" vem com os
+  eventos do Claude: ligado no meio de uma espera, vale no próximo evento de
+  qualquer sessão; para calar na hora, o clique direito (a soneca).
 - **As outras sessões** viram selos ao lado dele: "+N" (as ocupadas), uma
   bandeirinha na cor do projeto para cada resposta pronta e "…" quando um
   agente trabalha em segundo plano.
 - **Compartilhando a tela**, os balões perdem o nome do projeto (depois de 2
   s de compartilhamento, e até 5 min depois que ele acaba: no Hyprland 0.56 o
-  sinal pisca quando a tela fica parada).
+  sinal pisca quando a tela fica parada), e ele fica discreto como no "não
+  perturbe": só a primeira chamada e nenhum voo.
 
 `bin/pet testar medio`, `grande`, `pergunta` e `dois-prontos` mostram cada
 uma dessas coisas com sessões de teste (que somem em 60 s), e o

@@ -395,14 +395,22 @@ impl Nucleo {
     }
 
     fn reagir(&mut self, reacao: &Reacao, mut ov: Option<&mut dyn Punho>) {
+        // As do próprio pet (o bocejo do sono, o despertar) não têm sessão.
+        let de_quem = if reacao.sid8.is_empty() {
+            "do pet".to_owned()
+        } else {
+            format!(
+                "da sessão {}{}",
+                reacao.sid8,
+                if reacao.teste { " (teste)" } else { "" }
+            )
+        };
         info!(
-            "reação {}{} da sessão {}{}",
+            "reação {}{} {de_quem}",
             reacao.nome,
             reacao
                 .nivel
                 .map_or_else(String::new, |n| format!(" ({n:?})")),
-            reacao.sid8,
-            if reacao.teste { " (teste)" } else { "" }
         );
         let com_janela = ov.is_some();
         let agora = self.agora_ms();

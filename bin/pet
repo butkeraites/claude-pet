@@ -189,7 +189,6 @@ fonte_do_clone() {
   printf '%s' "$commit"
 }
 
-# O hook que o plugin chama (decisão 0041): o `bichinho` do PATH, como o
 # O bichinho da branch, para os subcomandos que o do PATH (o da worktree
 # estável) pode não ter: PET_BICHINHO, ou o cargo.
 bichinho_da_branch() {
@@ -200,7 +199,8 @@ bichinho_da_branch() {
   fi
 }
 
-# Um caminho que o usuário deu, relativo a onde ele estava.
+# Um caminho dado na linha de comando, relativo à pasta de onde o bin/pet foi
+# chamado.
 caminho_do_usuario() {
   case "$1" in
     /*) printf '%s' "$1" ;;
@@ -276,6 +276,7 @@ eventos() {
   echo "✓ $(grep -c '"evento"' "$arquivo") eventos em ${destino}, com pseudônimos (s1, p1, a1, projeto-a); confira antes de pôr no git"
 }
 
+# O hook que o plugin chama (decisão 0041): o `bichinho` do PATH, como o
 # Claude Code acha no exec form, ou PET_BICHINHO; vazio se não houver.
 binario_do_hook() {
   if [ -n "${PET_BICHINHO:-}" ]; then

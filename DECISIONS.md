@@ -3910,3 +3910,82 @@ rajada, o voo), não a base que respira por baixo dele. O "+N" que pisca é
 movimento sem significado; o que toca escondido ou dorme acordado engana; e
 quem compartilha a tela numa chamada não quer o pet voando pela tela dos
 outros.
+
+## 0092 — O que ficou da revisão do M5: o "✳" fora, a presença no casamento da janela, o T3 que não tocou, os limites conhecidos e as docs reconciliadas (2026-10-05)
+
+**Problema:** as revisões adversariais do M5 deixaram pontos menores:
+- a regra do PLANO "o turno fecha quando o título do terminal focado vira ✳
+  com uma só sessão trabalhando" não foi feita, e nenhuma decisão a tirou;
+- um prompt que chega com o Renan longe do teclado e do mouse (`ocioso`)
+  nunca casa a janela da sessão, o que muda a regra das decisões 0055 e 0060,
+  e só o PROGRESS do T5.4 e um comentário diziam isso (a decisão 0073 usa o
+  longe só como prova do tique, com `crn > 0`);
+- o intervalo de 10 min do T3 era gasto mesmo quando o T3 não aparecia (o pet
+  escondido, a proteção de tela, a soneca que o troca pelo aceno);
+- limites sem registro: o tique de um `/loop` com o Renan no teclado e a
+  janela da própria sessão em foco, as mensagens de teammate e de canal, e o
+  "não perturbe" que só chega com os eventos;
+- as docs desencontradas (o PLANO com o pulso "a 1 Hz", a faixa do T3 em
+  "2,5–4 s" e a lista do M6 com o que o M5 já fez; o CLAUDE.md com o rumo e as
+  pendências velhos e sem como voltar a produção para a `main`; o README com
+  a regra do M3 e sem a notificação do shell no hook antigo), o comentário
+  partido do `bin/pet`, o log "reação yawn da sessão " sem sessão, e
+  pronomes para o Renan em textos novos;
+- as sobras das sessões aninhadas das pesquisas em `~/.claude` e em
+  `/tmp/claude-1000`.
+**Escolha:**
+- **O "✳" fica de fora:** no 2.1.288 o título do terminal fica ✳ o tempo todo
+  (pensando, num Bash de 20 s, com um diálogo na tela e depois do Esc;
+  conferido no tmux, decisão 0090), então ele diz "terminal do Claude", não
+  "parado". O turno que o Esc deixa aberto fecha no prompt seguinte, no
+  `idle_prompt` ou no `SessionEnd`, e o estado volta a parado pelo prazo de 5
+  min (decisão 0076); a espera que ele deixa tem as regras da decisão 0090.
+  O PLANO ganha a nota.
+- **A presença no casamento da janela** (atualiza a decisão 0073): um prompt
+  que chega com o Renan longe do teclado e do mouse nunca casa a janela da
+  sessão: sem entrada nenhuma, a janela ativa não é a de onde o prompt saiu
+  (o Remote Control, um prompt colado por outro programa, o tique sem `crn`). O
+  próximo prompt digitado casa como antes; até lá, o clique cai no balão.
+- **O T3 que não tocou** (escondido, na proteção de tela, ou o aceno da
+  soneca) devolve o intervalo: o próximo T3 conta do T3 de antes. A sessão
+  bloqueada não entra (o Motor não a vê).
+- **Os limites conhecidos**, escritos:
+  - o tique de um `/loop` com o Renan no teclado e a janela da própria sessão
+    em foco (outro painel do tmux, outra aba do mesmo terminal) conta como
+    digitado (o pronto e a janela casada de novo): o aviso de ocioso do
+    Wayland é do teclado inteiro e não diz para qual janela vão as teclas, e
+    uma segunda notificação de 1–2 s não separaria o painel do lado;
+  - as mensagens de teammate (`<teammate-message>`) e de canal (`<channel
+    source=…>`) existem no binário do 2.1.288, e não foi visto ao vivo se
+    passam pelo `UserPromptSubmit`; se passarem, contam como digitadas
+    (`orig` comum). O conserto é um valor novo e fechado do `orig` no hook
+    (com canários e decisão própria), para quando o Renan usar times de
+    agentes ou canais;
+  - o "não perturbe" vem no `dnd` de cada evento do Claude (o pet nunca lê a
+    pasta do Omarchy, que guarda o histórico da área de transferência):
+    ligado no meio de uma espera, vale no próximo evento de qualquer sessão;
+    o clique direito (a soneca) cala na hora;
+  - a permissão de um Bash demorado segura a espera até o `PostToolUse` (só
+    a pergunta e o plano têm `PreToolUse`); com a decisão 0090, 5 s no
+    terminal da sessão param a escalada.
+- **As docs reconciliadas:** as notas de correção do PLANO (o "✳", o pulso, o
+  T3 de até 4,5 s, a lista do M6); o CLAUDE.md (o estado com a revisão, o
+  rumo, as pendências com a conferência na tela do M5, o PR e as sobras, a
+  volta da produção para a `main` e as pegadinhas novas); o README (a festa
+  pelo trabalho no lugar da regra do M3, o hook antigo com a notificação do
+  shell e o prompt digitado com a corrente aberta, o que mudou na espera); o
+  `docs/CENARIOS.md`; o comentário do `bin/pet`; o log "reação yawn do pet";
+  e as descrições dos cenários sem pronome para o Renan. As decisões 0079,
+  0084 (a atualização) e 0087 ainda dizem "ele" para o Renan em alguns
+  lugares: o DECISIONS só cresce (a única reescrita permitida foi a da 0035),
+  então ficam; o texto novo evita.
+- **As sobras:** as da sessão aninhada desta revisão (a pasta do projeto em
+  `~/.claude/projects`, a de `/tmp/claude-1000` e o plano em
+  `~/.claude/plans`) foram apagadas; as das pesquisas do T5.1 e do T5.2 e as
+  linhas no `~/.claude/history.jsonl` (um arquivo que as sessões do Renan
+  escrevem o tempo todo) ficam listadas no CLAUDE.md, para apagar só com o OK
+  do Renan.
+**Por quê:** uma regra do plano que nenhum código segue é uma promessa que
+ninguém cumpre; melhor dizer por quê e o que a substitui. Os limites são o que
+a semana de calibração do M7 vai encontrar: escritos, não são defeitos a
+descobrir de novo.

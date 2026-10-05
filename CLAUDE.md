@@ -57,8 +57,20 @@ intenções do Motor com cenários dourados (`cenarios/`, `docs/CENARIOS.md`),
 animador com o ritmo de cada estado, os selos ao lado do corpo com o pulso
 da L4, o voo da escalada até o alto-centro, o confete das festas T2 e T3, o
 `/v1/estado.desenho`, as demonstrações do `bin/pet testar` e a prova do
-orçamento em relógio falso. A produção roda a branch (com o estado do Renan
-intacto); a conferência na tela pede a sessão desbloqueada.
+orçamento em relógio falso. A revisão das três revisões adversariais
+(T5.21–T5.24, decisões 0089–0092): os agentes que um workflow lança depois do
+Stop são da corrente, o pedido digitado com a corrente aberta festeja sozinho,
+a pose de espera vem do aviso (o clique, o teto e o diálogo visto no
+terminal da sessão a soltam), a escalada olha o terminal da sessão que
+espera, os voos da volta têm a conta deles e só saem com o pet na tela, a
+espera cabe no orçamento (o ritmo atento e a pose parada da L2 em diante), a
+tela compartilhada é discreta como o "não perturbe" e o
+`scripts/medir-custo.sh` mede o pet acordado. A produção roda a branch (com
+o estado do Renan intacto); a conferência na tela pede a sessão
+desbloqueada. Para voltar a produção para a `main` antes do merge:
+`git -C ~/Documents/claude-pet switch main && bin/pet subir`, no clone (nunca
+na worktree estável; nunca mexa no `/state`), e depois `switch m5-cerebro`
+de novo para trabalhar.
 
 **Na tela do Renan:** o `zeca-livre-escuro` no tamanho `pequeno` (D = 4 no
 eDP-1), aprovado em 2026-10-05 (decisão 0070). O `zeca` do pack continua
@@ -76,10 +88,27 @@ em `docs/SKINS.md`.
 **Rumo (2026-10-03, decisões 0035–0042):** lançamento open source para
 Linux, macOS e Windows, com o app **bichinho** (o personagem continua Zeca);
 o PLANO tem o M8 (multiplataforma) e o M9 (publicação). A pesquisa está em
-`docs/pesquisa/09-multiplataforma.md`. O próximo marco é o M5 (cérebro
-completo).
+`docs/pesquisa/09-multiplataforma.md`. O M5 (cérebro completo e a tela dele)
+está na branch `m5-cerebro`, à espera do PR e da revisão do Renan; depois
+vem o M6 (o encanto: balões 9-slice, física das partículas, o voo
+atravessando a tela, a variedade parada).
 
 **Pendentes** (pedem a tela acesa e desbloqueada, ou o Renan):
+- o PR do M5 (`m5-cerebro` → `main`, corpo conferido pelo `NOMES_DE_TERCEIROS`
+  antes do `gh pr create`), a revisão do Renan e, depois do merge, a troca do
+  README (o hook mudou: `bin/pet instalar-host`);
+- a conferência na tela do M5: `bin/pet foto` da base, dos selos, do voo da
+  L3 e da volta com o "!!", do confete do T2 e da chuva do T3, a nitidez
+  (`cargo xtask nitidez`) e o `scripts/medir-custo.sh --personagem` (com as
+  fases `trabalhando` e `dormindo`; decisão 0091), para o orçamento no
+  compositor de verdade;
+- as sobras das sessões aninhadas das pesquisas do M5, fora do repositório
+  (só com o OK do Renan para apagar): as pastas
+  `~/.claude/projects/-home-barbaruiva-Documents-claude-pet-tmp-m5-pesquisa-sessao-{a,b,c}`
+  e `/tmp/claude-1000/-home-barbaruiva-Documents-claude-pet-tmp-m5-pesquisa-sessao-{a,b,c}`,
+  o plano `~/.claude/plans/planeje-como-criar-um-lazy-stream.md` e as linhas
+  delas no `~/.claude/history.jsonl` (as da revisão, `tmp/m5-revisao`,
+  também);
 - a conferência na tela do M4 (`scripts/verificar-m4.sh` e `--manual`, com
   o checklist do HDMI, da tampa e da suspensão) e o
   `scripts/e2e-monitor.sh --autorizo` (o Renan digita «sim» a cada vez);
@@ -117,7 +146,7 @@ Fora dele, use `~/.cargo/bin/cargo`.
 | `scripts/verificar-m4.sh [--manual]` | verificação do M4 contra a produção: o desktop no `/v1/estado` (os protocolos do clique e o da presença), a janela ativa igual à do Hyprland (`hyprctl -j`, só leitura) e, desbloqueado, dois `foot` com título-canário e sessões de teste para o clique levar a cada um (recusa se uma sessão real tem aviso, conferido antes de cada clique); `--manual` guia o Renan no arraste, no restart, na proteção de tela, no clique com o mouse (também com o `foot` noutra área de trabalho) e no checklist do HDMI, da tampa e da suspensão |
 | `scripts/e2e-monitor.sh --autorizo` | o pet segue um monitor headless criado e removido no Hyprland: **só com o consentimento do Renan, a cada vez** (ele digita «sim» no terminal; sem terminal, recusa) |
 | `cargo xtask globais [interface …]` | lista os globais do Wayland e confere os que o clique pede (só lê o registro) |
-| `scripts/medir-custo.sh` | CPU do Hyprland, GPU e commits/s: escondido × parado, com e sem carga de repintura, e estresse |
+| `scripts/medir-custo.sh` | CPU do Hyprland, GPU e commits/s: escondido × parado (o pet acordado por uma sessão de teste antes de cada fase), com e sem carga de repintura, estresse, trabalhando e dormindo (o M5) |
 | `cargo xtask skin-teste` / `nitidez` / `fantasma` / `carga` | gera a skin xadrez; compara captura e quadro esperado; acha pixel velho e fantasma; repintura invisível para medir custo |
 | `bin/pet skin-instalar <zip\|pasta>` | o pack vira o Zeca em `skins-locais/` (com e sem contorno, `--estrito`), com lint, cobertura (`--nativos mvp`) e prévias em `tmp/previa-zeca-m2/` |
 | `bin/pet skin-aprovar [id]` / `skin-revogar [id]` | aprova o conteúdo exato da skin da folha de contato vista (impressão digital conferida; cópia em `/state`) ou tira a aprovação |
@@ -326,6 +355,21 @@ Fora dele, use `~/.cargo/bin/cargo`.
   (a forma do prompt) e o `crn` (os agendamentos do Stop), e o cérebro separa
   o que a máquina começou (decisões 0072 e 0073). Sem o binário novo no
   PATH, os dois faltam e o pet degrada sem quebrar.
+- No 2.1.288 o Esc numa pergunta e o plano recusado sem comentário **não
+  mandam evento nenhum** (nem Stop, nem `idle_prompt`): a sessão fica
+  "esperando" até o próximo prompt. Por isso a pose de espera vem do aviso e
+  tem prazo, e 5 s no terminal da sessão dão o diálogo por visto (decisão
+  0090). O título do terminal fica ✳ o tempo todo (no tmux, conferido): ele
+  diz "terminal do Claude", não "parado".
+- "Olhando o Claude" para a escalada é o terminal **da sessão que espera**
+  (quando a janela dela é certa); o de outra sessão não cala a escalada.
+- O voo da volta do Renan que ninguém viu (sessão bloqueada: o compositor
+  segura o primeiro quadro) sai de novo quando a janela mostra quadros (o
+  `EventoOverlay::Redesenhar` do desbloqueio); isso é do desenho e não muda
+  as intenções.
+- O "não perturbe" só chega com os eventos do Claude (o `dnd` do hook; o pet
+  nunca lê a pasta do Omarchy): ligado no meio de uma espera, vale no próximo
+  evento de qualquer sessão. A soneca (clique direito) cala na hora.
 - `/v1/estado.tela` é o estado da aprovação (`ativa`, `sem_personagem`); a
   fotografia do M5 (a base, os selos, a escalada, a festa) é
   `/v1/estado.fotografia` (decisão 0080), e o que a janela desenha agora (a

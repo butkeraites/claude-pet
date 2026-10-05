@@ -3130,6 +3130,47 @@ fn discricoes(motor: &Motor) -> Vec<(u64, bool)> {
 }
 
 #[test]
+fn o_t3_que_ninguem_viu_nao_gasta_o_intervalo() {
+    // Um T3 com a proteção de tela aberta (ou na soneca) não toca: o próximo
+    // T3, um minuto depois e na tela, é T3, e não o T2 do intervalo de 10 min
+    // (decisão 0092).
+    let festas = |motor: &Motor| -> Vec<(u64, Nivel, bool)> {
+        motor
+            .intencoes()
+            .filter_map(|i| match &i.tipo {
+                intencoes::Tipo::Festa {
+                    nivel, escondida, ..
+                } => Some((i.t_ms, *nivel, *escondida)),
+                _ => None,
+            })
+            .collect()
+    };
+    let (mut motor, _janela) = ligado();
+    motor.acertar_relogio(em(0));
+    motor.evento_desktop(
+        None,
+        &crate::plataforma::EventoDesktop::JanelaAbriu {
+            janela: crate::plataforma::Alca("5c5c5c".into()),
+            protetor: true,
+        },
+        em(0),
+    );
+    turno_de(&mut motor, "s1", "api", 1_000, 720_000);
+    andar(&mut motor, 3_000);
+    motor.evento_desktop(
+        None,
+        &crate::plataforma::EventoDesktop::JanelaFechou(crate::plataforma::Alca("5c5c5c".into())),
+        em(30_000),
+    );
+    turno_de(&mut motor, "s2", "web", 60_000, 720_000);
+    andar(&mut motor, 62_000);
+    assert_eq!(
+        festas(&motor),
+        vec![(2_800, Nivel::T3, true), (61_800, Nivel::T3, false)]
+    );
+}
+
+#[test]
 fn a_tela_compartilhada_e_discreta_como_o_nao_perturbe() {
     // Com a tela sendo vista por outros (a discrição ligada), nada passa da
     // L1 e nada voa: nem a escalada, nem a festa (decisões 0010 e 0091).

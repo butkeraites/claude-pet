@@ -402,6 +402,10 @@ impl Motor {
     fn festa(&mut self, r: Reacao, agora_ms: u64) -> Option<Reacao> {
         let nivel = r.nivel.unwrap_or(Nivel::T0);
         if !self.na_tela() {
+            // O T3 que ninguém viu não gasta o intervalo dele (decisão 0092).
+            if nivel == Nivel::T3 {
+                self.cerebro.t3_nao_tocou(r.teste);
+            }
             self.anotar(
                 agora_ms,
                 intencoes::Tipo::Festa {
@@ -431,6 +435,9 @@ impl Motor {
             f.nivel = f.nivel.max(nivel);
             let f = f.clone();
             let toca = subiu && !soneca;
+            if subiu && soneca && nivel == Nivel::T3 {
+                self.cerebro.t3_nao_tocou(r.teste);
+            }
             let e = if toca {
                 efeitos(f.nivel, sem_voo)
             } else {
@@ -465,6 +472,10 @@ impl Motor {
             sessoes: sessoes.clone(),
         });
         let (nome, e) = if soneca {
+            // Na soneca o T3 vira o aceno: não gasta o intervalo dele.
+            if nivel == Nivel::T3 {
+                self.cerebro.t3_nao_tocou(r.teste);
+            }
             (cerebro::ACENO, Efeitos::default())
         } else {
             (r.nome, efeitos(nivel, sem_voo))
