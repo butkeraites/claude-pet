@@ -27,6 +27,7 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 use super::{BOCEJO, DESPERTAR, Motor, balao, intencoes, janelas};
+use crate::animador::{Base, Ritmo};
 use crate::cerebro::{self, EstadoSessao, Nivel, Reacao, ResumoSessao, TipoAviso, TipoEspera};
 use crate::config::ModoCelebracao;
 use crate::fonte;
@@ -637,7 +638,40 @@ impl Motor {
             self.tela.selos = d.selos.clone();
             self.anotar(agora_ms, intencoes::Tipo::Selos(d.selos));
         }
+        self.sincronizar_base(agora_ms);
         reacoes
+    }
+
+    /// A base que o pet deve segurar agora (decisão 0082): o estado da skin
+    /// da base anunciada, no ritmo dele.
+    pub(super) fn base_desejada(&self) -> Base {
+        let (prioridade, profundo) = self.tela.base;
+        let ritmo = match prioridade {
+            Prioridade::Dormindo if profundo => Ritmo::Parado,
+            Prioridade::Dormindo | Prioridade::Cansado => Ritmo::Laco,
+            Prioridade::Trabalhando | Prioridade::Compactando | Prioridade::Pensando => {
+                Ritmo::Quieto
+            }
+            // No teto da escalada, só a pose: o selo do aviso pulsa e a
+            // rajada vem a cada minuto (decisão 0075).
+            Prioridade::Esperando if self.nivel_da_escalada() >= 4 => Ritmo::Parado,
+            _ => Ritmo::Repouso,
+        };
+        Base {
+            estado: prioridade.estado_da_skin().to_owned(),
+            ritmo,
+        }
+    }
+
+    /// Leva a base de agora ao animador; se ela mudou, a pose nova entra no
+    /// próximo quadro, já (ou no fim da reação que estiver tocando).
+    pub(super) fn sincronizar_base(&mut self, agora_ms: u64) {
+        let base = self.base_desejada();
+        if let Some(pet) = self.pet.as_mut()
+            && pet.definir_base(base, agora_ms)
+        {
+            self.proximo_quadro = Some(self.proximo_quadro.map_or(agora_ms, |p| p.min(agora_ms)));
+        }
     }
 
     /// Um evento do Claude ou um clique: o pet acorda (o despertar, se

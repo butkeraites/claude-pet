@@ -23,11 +23,19 @@
 //! volta ao laço. O arraste é a exceção ao orçamento de commits parado: ele
 //! acaba quando o botão é solto (decisão 0048).
 //!
-//! Tudo aqui recebe o relógio de fora (milissegundos), para os testes não
-//! dependerem de tempo real.
+//! **A base** (M5, decisão 0082): o repouso não é mais só o do `idle`. O
+//! Motor diz o estado da skin que a tela segura (`waiting`, `working`,
+//! `sleep`, …) e o [`Ritmo`] dele: o repouso de sempre, quase parado
+//! (trabalhando e pensando: até 4 fps e uma micro-ação sorteada a cada 10–30
+//! s), o laço do sono (até 2 fps) ou só a pose (nenhum commit). As reações
+//! tocam por cima e voltam à base.
+//!
+//! Tudo aqui recebe o relógio de fora (milissegundos) e o sorteio com a
+//! semente de fora, para os testes não dependerem de tempo real nem de sorte.
 
 use crate::estados;
 use crate::skin::{Direcao, Skin, Tag};
+use crate::sorteio::{SEMENTE_PADRAO, Sorteio};
 
 /// Pausa mínima entre rajadas no repouso.
 pub const PAUSA_MS: u64 = 4000;
@@ -35,6 +43,66 @@ pub const PAUSA_MS: u64 = 4000;
 pub const DURACAO_MIN_MS: u64 = 34;
 /// Teto da média de commits com o pet parado (decisão 0005).
 pub const COMMITS_POR_S_PARADO: u64 = 2;
+/// Duração mínima de um quadro no ritmo quieto: até 4 fps (trabalhando e
+/// pensando, PLANO "Movimento").
+pub const DURACAO_MIN_QUIETO_MS: u64 = 250;
+/// Duração mínima de um quadro no laço do sono: até 2 fps (dormindo,
+/// decisão 0068).
+pub const DURACAO_MIN_SONO_MS: u64 = 500;
+/// As micro-ações do ritmo quieto: uma a cada tanto, sorteado nesta faixa.
+pub const MICRO_MIN_MS: u64 = 10_000;
+pub const MICRO_MAX_MS: u64 = 30_000;
+/// Trechos sorteados de uma vez no ritmo quieto (depois, repetem).
+const TRECHOS_SORTEADOS: usize = 8;
+/// "Não troca mais de quadro" (a pose parada, um laço de um quadro só): o
+/// [`Animador::em`] devolve isto, e o pet não marca prazo.
+pub const NUNCA: u64 = u64::MAX;
+
+/// Como a base que o pet segura anda (decisão 0082).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Ritmo {
+    /// A pose fixa e rajadas das tags do estado, com a pausa de pelo menos
+    /// [`PAUSA_MS`] e até [`COMMITS_POR_S_PARADO`] commits/s (o parado do M1,
+    /// o pronto, o erro, a espera).
+    Repouso,
+    /// Quase parado: quadros de pelo menos [`DURACAO_MIN_QUIETO_MS`] e uma
+    /// micro-ação a cada [`MICRO_MIN_MS`]–[`MICRO_MAX_MS`], sorteada
+    /// (trabalhando, pensando, compactando).
+    Quieto,
+    /// O laço da primeira tag do estado, com quadros de pelo menos
+    /// [`DURACAO_MIN_SONO_MS`] (dormindo, cansado).
+    Laco,
+    /// Só a pose: nenhum commit (o sono profundo, a espera no teto da L4).
+    Parado,
+}
+
+impl Ritmo {
+    pub fn nome(self) -> &'static str {
+        match self {
+            Ritmo::Repouso => "repouso",
+            Ritmo::Quieto => "quieto",
+            Ritmo::Laco => "laco",
+            Ritmo::Parado => "parado",
+        }
+    }
+}
+
+/// A base que o pet segura: o estado da skin e o ritmo.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Base {
+    pub estado: String,
+    pub ritmo: Ritmo,
+}
+
+impl Base {
+    /// O parado do M1: o `idle` no repouso de sempre.
+    pub fn parado() -> Base {
+        Base {
+            estado: "idle".into(),
+            ritmo: Ritmo::Repouso,
+        }
+    }
+}
 
 /// Quadros de uma tag na ordem em que tocam num ciclo (sem repetir as pontas
 /// no ping-pong, como o Aseprite).
@@ -65,12 +133,25 @@ pub struct Animacao {
 
 impl Animacao {
     pub fn nova(skin: &Skin, tag: usize, inicio_ms: u64, laco: bool) -> Animacao {
+        Animacao::nova_com_piso(skin, tag, inicio_ms, laco, DURACAO_MIN_MS)
+    }
+
+    /// Como [`Animacao::nova`], com nenhum quadro mais curto que `piso_ms`
+    /// (nunca abaixo de [`DURACAO_MIN_MS`]): os ritmos mais lentos da base.
+    pub fn nova_com_piso(
+        skin: &Skin,
+        tag: usize,
+        inicio_ms: u64,
+        laco: bool,
+        piso_ms: u64,
+    ) -> Animacao {
+        let piso = piso_ms.max(DURACAO_MIN_MS);
         // Quadros com a mesma imagem viram o mesmo quadro: um passo que não
         // muda nada na tela não conta como troca nem gera commit.
         let passos: Vec<(usize, u64)> = sequencia(&skin.tags[tag])
             .into_iter()
             .map(|q| {
-                let duracao = (skin.quadros[q].duracao_ms as u64).max(DURACAO_MIN_MS);
+                let duracao = (skin.quadros[q].duracao_ms as u64).max(piso);
                 (skin.canonico[q], duracao)
             })
             .collect();
@@ -120,14 +201,28 @@ struct Trecho {
     rajada: Animacao,
 }
 
-/// O pet parado: pose fixa e rajadas.
+/// O pet parado na base: a pose fixa e o que anda nela, pelo ritmo.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Repouso {
     pose: usize,
-    /// Trechos em ordem (cada rajada começa no instante 0; o repouso desloca).
-    trechos: Vec<Trecho>,
+    modo: Modo,
     inicio_ms: u64,
-    periodo_ms: u64,
+}
+
+/// Como o repouso anda.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Modo {
+    /// Pose e rajadas (os ritmos repouso e quieto): os trechos em ordem
+    /// (cada rajada começa no instante 0; o repouso desloca), repetindo a
+    /// cada `periodo_ms`.
+    Rajadas {
+        trechos: Vec<Trecho>,
+        periodo_ms: u64,
+    },
+    /// A tag em laço (o sono).
+    Laco(Animacao),
+    /// Só a pose.
+    Parado,
 }
 
 /// Trocas de quadro de uma rajada que sai da pose e volta para ela.
@@ -150,33 +245,84 @@ fn pausa_para(pose: usize, rajada: &Animacao) -> u64 {
     PAUSA_MS.max(minimo_do_trecho.saturating_sub(rajada.duracao_ms()))
 }
 
+/// As tags que tocam a base `estado` nesta skin: as do estado; senão as do
+/// primeiro estado de reserva que a skin tem (pelo catálogo, o repouso
+/// inclusive); senão as do `idle` (a skin garante que ele existe).
+fn tags_da_base(skin: &Skin, estado: &str) -> Vec<usize> {
+    let tags = skin.tags_do_estado(estado);
+    if !tags.is_empty() {
+        return tags;
+    }
+    estados::reserva(estado, &|r| !skin.tags_do_estado(r).is_empty())
+        .map(|r| skin.tags_do_estado(r))
+        .unwrap_or_else(|| skin.tags_do_estado("idle"))
+}
+
 impl Repouso {
-    /// Repouso do estado `idle` da skin (a skin garante que ele existe).
+    /// Repouso do estado `idle` da skin (a skin garante que ele existe), o
+    /// parado do M1.
     pub fn novo(skin: &Skin, inicio_ms: u64) -> Repouso {
-        let tags = skin.tags_do_estado("idle");
+        Repouso::da_base(skin, &Base::parado(), inicio_ms, &mut Sorteio::default())
+    }
+
+    /// O repouso da `base` a partir de `inicio_ms`: a pose é o primeiro
+    /// quadro da primeira tag do estado. No ritmo quieto, as pausas saem do
+    /// `sorteio`.
+    pub fn da_base(skin: &Skin, base: &Base, inicio_ms: u64, sorteio: &mut Sorteio) -> Repouso {
+        let tags = tags_da_base(skin, &base.estado);
         let pose = tags
             .first()
             .map(|&t| skin.canonico[sequencia(&skin.tags[t])[0]])
             .unwrap_or(0);
-        let trechos: Vec<Trecho> = tags
-            .iter()
-            .map(|&t| {
-                let rajada = Animacao::nova(skin, t, 0, false);
-                Trecho {
-                    pausa_ms: pausa_para(pose, &rajada),
-                    rajada,
-                }
-            })
-            .collect();
-        let periodo_ms = trechos
-            .iter()
-            .map(|t| t.pausa_ms + t.rajada.duracao_ms())
-            .sum::<u64>();
+        let rajadas = |trechos: Vec<Trecho>| {
+            let periodo_ms = trechos
+                .iter()
+                .map(|t| t.pausa_ms + t.rajada.duracao_ms())
+                .sum::<u64>();
+            Modo::Rajadas {
+                trechos,
+                periodo_ms: periodo_ms.max(PAUSA_MS),
+            }
+        };
+        let modo = match (base.ritmo, tags.first()) {
+            (_, None) | (Ritmo::Parado, _) => Modo::Parado,
+            (Ritmo::Repouso, _) => rajadas(
+                tags.iter()
+                    .map(|&t| {
+                        let rajada = Animacao::nova(skin, t, 0, false);
+                        Trecho {
+                            pausa_ms: pausa_para(pose, &rajada),
+                            rajada,
+                        }
+                    })
+                    .collect(),
+            ),
+            (Ritmo::Quieto, _) => rajadas(
+                (0..TRECHOS_SORTEADOS)
+                    .map(|k| {
+                        let tag = tags[k % tags.len()];
+                        let rajada =
+                            Animacao::nova_com_piso(skin, tag, 0, false, DURACAO_MIN_QUIETO_MS);
+                        let sorteada = sorteio.entre(MICRO_MIN_MS, MICRO_MAX_MS);
+                        Trecho {
+                            pausa_ms: sorteada.max(pausa_para(pose, &rajada)),
+                            rajada,
+                        }
+                    })
+                    .collect(),
+            ),
+            (Ritmo::Laco, Some(&tag)) => Modo::Laco(Animacao::nova_com_piso(
+                skin,
+                tag,
+                inicio_ms,
+                true,
+                DURACAO_MIN_SONO_MS,
+            )),
+        };
         Repouso {
             pose,
-            trechos,
+            modo,
             inicio_ms,
-            periodo_ms: periodo_ms.max(PAUSA_MS),
         }
     }
 
@@ -184,13 +330,25 @@ impl Repouso {
         self.pose
     }
 
-    /// Quadro em `agora_ms` e o instante da próxima troca.
+    /// Quadro em `agora_ms` e o instante da próxima troca ([`NUNCA`]: não
+    /// troca mais).
     pub fn em(&self, agora_ms: u64) -> (usize, u64) {
+        let (trechos, periodo_ms) = match &self.modo {
+            Modo::Parado => return (self.pose, NUNCA),
+            Modo::Laco(animacao) => {
+                let (quadro, proxima) = animacao.em(agora_ms);
+                return (quadro, proxima.unwrap_or(NUNCA));
+            }
+            Modo::Rajadas {
+                trechos,
+                periodo_ms,
+            } => (trechos, *periodo_ms),
+        };
         let decorrido = agora_ms.saturating_sub(self.inicio_ms);
-        let base = self.inicio_ms + decorrido / self.periodo_ms * self.periodo_ms;
-        let mut t = decorrido % self.periodo_ms;
+        let base = self.inicio_ms + decorrido / periodo_ms * periodo_ms;
+        let mut t = decorrido % periodo_ms;
         let mut inicio_segmento = base;
-        for Trecho { pausa_ms, rajada } in &self.trechos {
+        for Trecho { pausa_ms, rajada } in trechos {
             if t < *pausa_ms {
                 return (self.pose, inicio_segmento + pausa_ms);
             }
@@ -205,7 +363,7 @@ impl Repouso {
             t -= rajada.duracao_ms();
             inicio_segmento += rajada.duracao_ms();
         }
-        (self.pose, base + self.periodo_ms)
+        (self.pose, base + periodo_ms)
     }
 }
 
@@ -245,22 +403,62 @@ struct Segurando {
     animacao: Animacao,
 }
 
-/// O que o pet mostra: o repouso (ou um estado segurado) e, por cima, uma
-/// reação de cada vez.
+/// O que o pet mostra: o repouso da base (ou um estado segurado) e, por
+/// cima, uma reação de cada vez.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Animador {
     repouso: Repouso,
     tocando: Option<Tocando>,
     segurando: Option<Segurando>,
+    /// A base que o repouso segura (decisão 0082).
+    base: Base,
+    /// O sorteio das micro-ações do ritmo quieto.
+    sorteio: Sorteio,
 }
 
 impl Animador {
     pub fn novo(skin: &Skin, agora_ms: u64) -> Animador {
+        Animador::com_semente(skin, agora_ms, SEMENTE_PADRAO)
+    }
+
+    /// O animador parado (o `idle`), com o sorteio na `semente`.
+    pub fn com_semente(skin: &Skin, agora_ms: u64, semente: u64) -> Animador {
+        let base = Base::parado();
+        let mut sorteio = Sorteio::novo(semente);
         Animador {
-            repouso: Repouso::novo(skin, agora_ms),
+            repouso: Repouso::da_base(skin, &base, agora_ms, &mut sorteio),
             tocando: None,
             segurando: None,
+            base,
+            sorteio,
         }
+    }
+
+    /// A base que o repouso segura.
+    pub fn base(&self) -> &Base {
+        &self.base
+    }
+
+    /// Segura a `base` a partir de `agora_ms`: a pose dela já, ou no fim da
+    /// reação que estiver tocando (um estado segurado, como o arraste,
+    /// continua por cima até ser largado). `false`: a base já era essa.
+    pub fn definir_base(&mut self, skin: &Skin, base: Base, agora_ms: u64) -> bool {
+        if base == self.base {
+            return false;
+        }
+        self.base = base;
+        let inicio = self
+            .tocando
+            .as_ref()
+            .filter(|t| agora_ms < t.fim_ms)
+            .map_or(agora_ms, |t| t.fim_ms);
+        self.repouso = Repouso::da_base(skin, &self.base, inicio, &mut self.sorteio);
+        true
+    }
+
+    /// O repouso da base de agora, a partir de `inicio_ms`.
+    fn recomecar_repouso(&mut self, skin: &Skin, inicio_ms: u64) {
+        self.repouso = Repouso::da_base(skin, &self.base, inicio_ms, &mut self.sorteio);
     }
 
     /// Segura o estado `nome` em laço a partir de `agora_ms` (o `dangle`
@@ -291,7 +489,7 @@ impl Animador {
             .as_ref()
             .filter(|t| agora_ms < t.fim_ms)
             .map(|t| t.fim_ms);
-        self.repouso = Repouso::novo(skin, fim_da_reacao.unwrap_or(agora_ms));
+        self.recomecar_repouso(skin, fim_da_reacao.unwrap_or(agora_ms));
     }
 
     /// Há um estado segurado.
@@ -315,7 +513,7 @@ impl Animador {
         };
         let animacao = Animacao::nova(skin, tag, agora_ms, false);
         let fim_ms = agora_ms + animacao.duracao_ms();
-        self.repouso = Repouso::novo(skin, fim_ms);
+        self.recomecar_repouso(skin, fim_ms);
         self.tocando = Some(Tocando {
             nome: nome.to_owned(),
             animacao,
@@ -324,7 +522,8 @@ impl Animador {
         true
     }
 
-    /// Quadro em `agora_ms` e o instante da próxima troca.
+    /// Quadro em `agora_ms` e o instante da próxima troca ([`NUNCA`]: não
+    /// troca mais sozinho; a pose parada, um laço de um quadro só).
     pub fn em(&self, agora_ms: u64) -> (usize, u64) {
         if let Some(t) = &self.tocando
             && agora_ms < t.fim_ms
@@ -336,7 +535,7 @@ impl Animador {
             let (quadro, proxima) = s.animacao.em(agora_ms);
             // Um laço de um quadro só não troca mais: o próximo prazo fica
             // para quando ele for largado.
-            return (quadro, proxima.unwrap_or(u64::MAX));
+            return (quadro, proxima.unwrap_or(NUNCA));
         }
         self.repouso.em(agora_ms)
     }
@@ -360,6 +559,14 @@ mod testes {
     fn skin_de_teste() -> Skin {
         let pasta = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../skins/_teste");
         Skin::carregar(&pasta).expect("skins/_teste (cargo xtask skin-teste)")
+    }
+
+    /// Os trechos de um repouso de rajadas.
+    fn trechos(r: &Repouso) -> &[Trecho] {
+        match &r.modo {
+            Modo::Rajadas { trechos, .. } => trechos,
+            outro => panic!("esperava rajadas: {outro:?}"),
+        }
     }
 
     fn tag(de: usize, ate: usize, direcao: Direcao) -> Tag {
@@ -467,7 +674,8 @@ mod testes {
         let skin = skin_com_idle(&[50; 20]);
         let r = Repouso::novo(&skin, 0);
         assert_eq!(
-            r.trechos[0].pausa_ms, 9000,
+            trechos(&r)[0].pausa_ms,
+            9000,
             "20 trocas pedem 10 s por trecho"
         );
         let (media, _) = simular(&r, 600);
@@ -492,7 +700,7 @@ mod testes {
         let a = Animacao::nova(&skin, 0, 0, false);
         assert_eq!(a.em(200), (0, Some(300)), "o quadro 2 toca como o 0");
         let r = Repouso::novo(&skin, 0);
-        assert_eq!(trocas(r.pose(), &r.trechos[0].rajada), 2);
+        assert_eq!(trocas(r.pose(), &trechos(&r)[0].rajada), 2);
     }
 
     #[test]
@@ -679,5 +887,166 @@ mod testes {
         let (media, menor) = simular(&Repouso::novo(&skin, 0), 600);
         assert!(menor >= DURACAO_MIN_MS, "trocas a {menor} ms");
         assert!(media <= 2.0, "{media} commits/s");
+    }
+
+    // --- a base (decisão 0082) ---------------------------------------------
+
+    fn base(estado: &str, ritmo: Ritmo) -> Base {
+        Base {
+            estado: estado.into(),
+            ritmo,
+        }
+    }
+
+    /// Segue os prazos de `r` de `de` a `ate`: as horas das trocas de quadro
+    /// (= commits) e os quadros.
+    fn trocas_ate(r: &Repouso, de: u64, ate: u64) -> Vec<(u64, usize)> {
+        let (mut atual, mut t) = r.em(de);
+        let mut saida = Vec::new();
+        while t < ate {
+            let (q, proxima) = r.em(t);
+            if q != atual {
+                saida.push((t, q));
+                atual = q;
+            }
+            assert!(proxima > t, "prazo não avança em {t}");
+            t = proxima;
+        }
+        saida
+    }
+
+    #[test]
+    fn a_base_quieta_vai_ate_4_fps_com_uma_micro_acao_a_cada_10_a_30_s() {
+        let skin = skin_de_teste();
+        let mut sorteio = Sorteio::novo(7);
+        let r = Repouso::da_base(&skin, &base("working", Ritmo::Quieto), 0, &mut sorteio);
+        let working = skin.tags_do_estado("working")[0];
+        assert_eq!(
+            r.pose(),
+            skin.canonico[skin.tags[working].de],
+            "a pose do estado"
+        );
+        let trocas = trocas_ate(&r, 0, 20 * 60_000);
+        assert!(
+            trocas
+                .windows(2)
+                .all(|j| j[1].0 - j[0].0 >= DURACAO_MIN_QUIETO_MS)
+        );
+        // Os trechos parados (na pose) entre as micro-ações: de 10 a 30 s.
+        let mut parados = Vec::new();
+        let mut desde = Some(0);
+        for &(t, q) in &trocas {
+            if q == r.pose() {
+                desde = Some(t);
+            } else if let Some(d) = desde.take() {
+                parados.push(t - d);
+            }
+        }
+        assert!(parados.len() > 30, "{parados:?}");
+        assert!(
+            parados
+                .iter()
+                .all(|p| (MICRO_MIN_MS..=MICRO_MAX_MS).contains(p)),
+            "{parados:?}"
+        );
+        assert!(
+            parados.iter().min() != parados.iter().max(),
+            "sorteadas: {parados:?}"
+        );
+        let media = trocas.len() as f64 / (20.0 * 60.0);
+        assert!(media < 0.5, "{media} commits/s");
+        // A mesma semente, o mesmo repouso; outra, outro.
+        let de_novo = Repouso::da_base(
+            &skin,
+            &base("working", Ritmo::Quieto),
+            0,
+            &mut Sorteio::novo(7),
+        );
+        assert_eq!(trocas_ate(&de_novo, 0, 600_000), trocas_ate(&r, 0, 600_000));
+        let outro = Repouso::da_base(
+            &skin,
+            &base("working", Ritmo::Quieto),
+            0,
+            &mut Sorteio::novo(8),
+        );
+        assert_ne!(trocas_ate(&outro, 0, 600_000), trocas_ate(&r, 0, 600_000));
+    }
+
+    #[test]
+    fn o_laco_do_sono_vai_ate_2_fps_e_nao_para() {
+        // O pack tem quadros de 100 ms no sono: o piso os leva a 500 ms.
+        let skin = skin_com_idle(&[100, 100, 100]);
+        let mut r = Repouso::da_base(
+            &skin,
+            &base("idle", Ritmo::Laco),
+            1_000,
+            &mut Sorteio::default(),
+        );
+        let trocas = trocas_ate(&r, 1_000, 61_000);
+        assert!(
+            trocas
+                .windows(2)
+                .all(|j| j[1].0 - j[0].0 >= DURACAO_MIN_SONO_MS)
+        );
+        assert!((115..=120).contains(&trocas.len()), "{}", trocas.len());
+        assert_ne!(r.em(10 * 60 * 60_000).1, NUNCA, "o laço não acaba");
+        // Só a pose: nunca troca.
+        r = Repouso::da_base(
+            &skin,
+            &base("idle", Ritmo::Parado),
+            1_000,
+            &mut Sorteio::default(),
+        );
+        assert_eq!(r.em(5_000), (r.pose(), NUNCA));
+        assert!(trocas_ate(&r, 1_000, 3_600_000).is_empty());
+    }
+
+    #[test]
+    fn a_base_que_a_skin_nao_tem_cai_nas_reservas() {
+        // Só o `idle` (e a `festa`): a espera cai na reserva (`alert`, que não
+        // há, e o `idle`), com a pose do repouso.
+        let mini = skin_minima();
+        let r = Repouso::da_base(
+            &mini,
+            &base("waiting", Ritmo::Repouso),
+            0,
+            &mut Sorteio::default(),
+        );
+        assert_eq!(r.pose(), Repouso::novo(&mini, 0).pose());
+        assert_eq!(r, Repouso::novo(&mini, 0), "o repouso do idle");
+        // Um estado fora do catálogo também.
+        let r = Repouso::da_base(
+            &mini,
+            &base("nada_disso", Ritmo::Repouso),
+            0,
+            &mut Sorteio::default(),
+        );
+        assert_eq!(r, Repouso::novo(&mini, 0));
+    }
+
+    #[test]
+    fn a_base_nova_espera_a_reacao_acabar_e_o_arraste_continua_por_cima() {
+        let skin = skin_de_teste();
+        let mut a = Animador::novo(&skin, 0);
+        assert_eq!(a.base(), &Base::parado());
+        assert!(a.tocar(&skin, "done_small", 1_000)); // 2 quadros de 200 ms
+        assert!(a.definir_base(&skin, base("working", Ritmo::Quieto), 1_100));
+        assert!(
+            !a.definir_base(&skin, base("working", Ritmo::Quieto), 1_200),
+            "a mesma"
+        );
+        assert_eq!(a.reacao(1_100), Some("done_small"), "a reação continua");
+        let working = skin.tags_do_estado("working")[0];
+        let pose = skin.canonico[skin.tags[working].de];
+        assert_eq!(a.em(1_400).0, pose, "no fim dela, a pose do trabalho");
+        assert_eq!(a.pose(), pose);
+        // Arrastando, o laço segura; largado, volta à base de agora.
+        assert!(a.segurar(&skin, "dangle", 2_000));
+        assert!(a.definir_base(&skin, base("sleep", Ritmo::Laco), 2_100));
+        assert_eq!(a.reacao(2_100), Some("dangle"));
+        a.largar(&skin, 3_000);
+        let sleep = skin.tags_do_estado("sleep")[0];
+        assert_eq!(a.em(3_000).0, skin.canonico[skin.tags[sleep].de]);
+        assert_ne!(a.em(3_000).1, NUNCA, "o sono em laço");
     }
 }

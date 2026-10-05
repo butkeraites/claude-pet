@@ -374,7 +374,16 @@ impl Laco {
         let Some(prazo) = proximo else {
             return;
         };
-        let quando = self.nucleo.inicio() + Duration::from_millis(prazo);
+        // Um prazo absurdo (séculos) não derruba o laço: fica sem prazo, e o
+        // batimento de 5 s continua.
+        let Some(quando) = self
+            .nucleo
+            .inicio()
+            .checked_add(Duration::from_millis(prazo))
+        else {
+            aviso!("prazo fora do relógio ({prazo} ms): ignorado");
+            return;
+        };
         let inserido = self
             .handle
             .insert_source(Timer::from_deadline(quando), |_, _, laco| {

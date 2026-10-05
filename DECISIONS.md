@@ -3408,3 +3408,54 @@ quadro que denuncia é justamente o que o pet desenha depois de uma pausa. Os
 5 min cobrem as pausas de uma tela parada (os ritmos da base nunca passam de
 30 s sem desenhar, fora o sono profundo), e o custo do erro é pequeno: o balão
 diz "Prontinho!" sem o nome por mais alguns minutos depois da chamada.
+
+## 0082 — A base segurada no animador: os ritmos de cada estado e o sorteio com a semente injetada (2026-10-05)
+
+**Problema:** o cérebro anuncia a base (decisão 0076: o estado da skin da
+sessão mais alta na prioridade), mas o animador só sabia o repouso do `idle`:
+o Zeca ficava parado do mesmo jeito trabalhando, esperando ou dormindo, e o
+sono profundo não parava os commits. Cada estado pede um movimento próprio
+dentro do orçamento (decisão 0005): trabalhando e pensando quase parados, até
+4 fps, com micro-ações sorteadas a cada 10–30 s (PLANO, "Movimento"; revisão
+de produto em `docs/pesquisa/08-revisoes.md`), o sono até 2 fps, o sono
+profundo sem commit nenhum, a espera no teto da L4 só na pose (o selo pulsa e
+a rajada vem a cada minuto, decisão 0075). E o núcleo é puro: o sorteio não
+pode ler o relógio nem o sistema.
+**Escolha:**
+- **`animador::Base`** (o estado da skin e o `Ritmo`), que o Motor passa ao
+  pet a cada mudança da base anunciada (no fim de cada `observar_tela`, na
+  escalada e em todo pet novo): `Pet::definir_base`, que só faz algo se a
+  base mudou. A pose é o primeiro quadro da primeira tag do estado; a pose
+  nova entra no próximo quadro, já, ou no fim da reação que estiver tocando;
+  o arraste continua por cima até ser largado.
+- **Os ritmos** (`animador::Ritmo`):
+  - `repouso` (parado, pronto, erro e esperando até a L3): a pose e rajadas
+    das tags do estado com a pausa do M1 (pelo menos 4 s e até 2 commits/s);
+  - `quieto` (trabalhando, pensando, compactando): quadros de pelo menos 250
+    ms e uma rajada a cada 10–30 s, sorteada (8 trechos de cada vez, que se
+    repetem);
+  - `laco` (dormindo e cansado): a primeira tag do estado em laço, com quadros
+    de pelo menos 500 ms;
+  - `parado` (o sono profundo e a espera na L4): só a pose, e o pet não marca
+    prazo nenhum (o `animador::NUNCA` vira `None` no `Pet::sprite`, e o
+    `Motor::desenhar` passa a deixar o prazo vazio quando nada muda sozinho).
+- **Um estado que a skin não tem** cai nas reservas do catálogo
+  (`estados::reserva`, agora aceitando o `idle`), e no fim no próprio `idle`.
+- **O sorteio** (`pet_core::sorteio::Sorteio`, xorshift64*): o Motor guarda
+  um e dá a cada pet novo uma semente tirada dele; o daemon semeia na partida
+  (`Motor::semear`, com a hora e o processo), e quem não semeia (os testes, o
+  `bichinho simular`) usa a fixa. As intenções não dependem dele.
+- **Medido** em 30 min com o animador (sem reações): no Zeca original, o
+  parado 0,95 commit/s, o pronto 1,31, o erro e a espera 2,0 (o teto do
+  repouso: 23 e 12 quadros por rajada), trabalhando 0,77 e pensando 0,55
+  (nenhum quadro abaixo de 250 ms), dormindo 1,92 (520 ms por quadro) e o sono
+  profundo 0; no Zeca do pack, todos abaixo de 2,0 (dormindo 2,0, com o piso
+  de 500 ms nos quadros de 100 ms).
+- O laço do daemon passou a recusar um prazo absurdo (`checked_add`) em vez de
+  estourar o `Instant`: o `u64::MAX` do estado segurado de um quadro só nunca
+  chegava lá, mas a pose parada chegaria.
+**Por quê:** a base é o que o Renan vê de canto de olho por horas; o
+movimento grande fica no começo de cada estado (as reações) e o resto respira
+dentro do orçamento, até parar de vez no sono profundo. Sortear as
+micro-ações tira a cara de relógio do trabalho; a semente injetada mantém o
+núcleo puro e os testes repetíveis.

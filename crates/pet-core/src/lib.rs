@@ -28,6 +28,7 @@ pub mod motor;
 pub mod plataforma;
 pub mod raster;
 pub mod skin;
+pub mod sorteio;
 
 /// Versão do workspace, igual para o daemon, o core e o xtask.
 pub const VERSAO: &str = env!("CARGO_PKG_VERSION");

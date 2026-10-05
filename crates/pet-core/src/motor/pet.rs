@@ -1,13 +1,14 @@
 //! O pet na tela: personagem, onde ele fica e que quadro mostra agora.
 //!
-//! Parado (pose fixa com rajadas, para caber no orçamento de commits) no
-//! canto inferior direito (ou onde foi arrastado), tocando uma reação de
+//! Na base que a tela segura (M5: o estado da skin e o ritmo dele, decisão
+//! 0082; parado, pose fixa com rajadas, para caber no orçamento de commits)
+//! no canto inferior direito (ou onde foi arrastado), tocando uma reação de
 //! cada vez (M3: o aceno do T0, o pulinho do T1 e o `tocar`) e pendurado em
 //! laço enquanto é arrastado (M4).
 
 use std::rc::Rc;
 
-use crate::animador::Animador;
+use crate::animador::{self, Animador, Base};
 use crate::cena::Elemento;
 use crate::geometria::{self, Ret, Tamanho};
 use crate::plataforma::Monitor;
@@ -39,6 +40,22 @@ impl Pet {
     pub fn novo(skin: Rc<Skin>, agora_ms: u64) -> Pet {
         let animador = Animador::novo(&skin, agora_ms);
         Pet { skin, animador }
+    }
+
+    /// O pet parado, com o sorteio das micro-ações na `semente`.
+    pub fn com_semente(skin: Rc<Skin>, agora_ms: u64, semente: u64) -> Pet {
+        let animador = Animador::com_semente(&skin, agora_ms, semente);
+        Pet { skin, animador }
+    }
+
+    /// Segura a `base` (o estado da skin e o ritmo); `true` se mudou.
+    pub fn definir_base(&mut self, base: Base, agora_ms: u64) -> bool {
+        self.animador.definir_base(&self.skin, base, agora_ms)
+    }
+
+    /// A base que o pet segura.
+    pub fn base(&self) -> &Base {
+        self.animador.base()
     }
 
     /// Toca a reação uma vez e volta à pose; `false` se a skin não sabe
@@ -118,9 +135,11 @@ impl Pet {
         self.toque_no_palco(palco).is_some_and(|t| t.contem(x, y))
     }
 
-    /// O sprite agora e o instante da próxima troca de quadro.
-    pub fn sprite(&self, palco: &Palco, agora_ms: u64) -> (Elemento, u64) {
+    /// O sprite agora e o instante da próxima troca de quadro (`None`: não
+    /// troca mais sozinho, como a pose do sono profundo).
+    pub fn sprite(&self, palco: &Palco, agora_ms: u64) -> (Elemento, Option<u64>) {
         let (quadro, proxima) = self.animador.em(agora_ms);
+        let proxima = (proxima != animador::NUNCA).then_some(proxima);
         let sprite = Elemento::Sprite {
             quadro,
             x: palco.x,
@@ -134,7 +153,7 @@ impl Pet {
     /// A cena inteira agora e o instante da próxima mudança.
     pub fn cena(&self, palco: &Palco, agora_ms: u64) -> (Vec<Elemento>, Option<u64>) {
         let (sprite, proxima) = self.sprite(palco, agora_ms);
-        (vec![sprite], Some(proxima))
+        (vec![sprite], proxima)
     }
 }
 

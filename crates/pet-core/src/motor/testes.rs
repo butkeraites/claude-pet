@@ -2137,9 +2137,16 @@ fn o_balao_custa_dois_quadros() {
 #[test]
 fn o_selo_zz_parado_nao_custa_nada_na_soneca_e_um_quadro_no_fim() {
     // A soneca contra só o bocejo, no mesmo instante: o selo aparece no
-    // primeiro quadro do bocejo, fica parado 30 min e some num quadro.
+    // primeiro quadro do bocejo, fica parado 30 min e some num quadro. Um
+    // erro pendente nos dois os mantém acordados (o sono anima a base,
+    // decisão 0082, e o sono profundo cairia no mesmo instante do fim da
+    // soneca).
     use crate::plataforma::EventoPonteiro;
     let ((mut a, mut ja), (mut b, mut jb)) = dois_ligados();
+    for m in [&mut a, &mut b] {
+        hook_em(m, "s1", "api", "UserPromptSubmit", 1_000);
+        hook_em(m, "s1", "api", "StopFailure", 1_000);
+    }
     let (x, y) = meio_do_corpo(&ja);
     let antes_a = ja.quadros();
     for evento in [
@@ -3071,4 +3078,100 @@ fn a_fonte_que_cai_desliga_o_sinal_e_a_discricao_segura() {
         vec![(2_000, true), (4_000 + tela::SEGURA_MS, false)]
     );
     assert_eq!(motor.prazo_da_discricao(5_000 + tela::SEGURA_MS), None);
+}
+
+// --- a base segurada (decisão 0082) -----------------------------------------
+
+fn base_do_pet(motor: &Motor) -> (String, crate::animador::Ritmo) {
+    let base = motor.pet.as_ref().expect("o pet").base();
+    (base.estado.clone(), base.ritmo)
+}
+
+#[test]
+fn o_animador_segura_a_base_da_tela_no_ritmo_dela() {
+    use crate::animador::Ritmo;
+    let (mut motor, mut janela) = ligado();
+    motor.acertar_relogio(em(0));
+    ocioso(&mut motor, false, 0);
+    janela.mostrou();
+    quadros_entre(&mut motor, &mut janela, 0, 1_000);
+    assert_eq!(base_do_pet(&motor), ("idle".into(), Ritmo::Repouso));
+    mandar(
+        &mut motor,
+        hook_de("s1", "api", "UserPromptSubmit", 1_000),
+        1_000,
+    );
+    assert_eq!(base_do_pet(&motor), ("thinking".into(), Ritmo::Quieto));
+    // A pose nova vai para a tela já, no próximo quadro.
+    assert_eq!(motor.prazo_da_animacao(), Some(1_000));
+    let pose = |motor: &Motor, estado: &str| {
+        let skin = motor.skin.as_ref().unwrap();
+        let tag = skin.tags_do_estado(estado)[0];
+        skin.canonico[skin.tags[tag].de]
+    };
+    let quadro = |janela: &Falsa| match janela.cena.as_ref().unwrap()[0] {
+        Elemento::Sprite { quadro, .. } => quadro,
+        _ => panic!("o sprite primeiro"),
+    };
+    quadros_entre(&mut motor, &mut janela, 1_000, 2_000);
+    assert_eq!(quadro(&janela), pose(&motor, "thinking"));
+    let bash = Evento {
+        tool: Some("Bash".into()),
+        dur: Some(10),
+        ..hook_de("s1", "api", "PostToolUse", 2_000)
+    };
+    mandar(&mut motor, bash, 2_000);
+    assert_eq!(base_do_pet(&motor), ("working".into(), Ritmo::Quieto));
+    quadros_entre(&mut motor, &mut janela, 2_000, 3_000);
+    assert_eq!(quadro(&janela), pose(&motor, "working"));
+    mandar(&mut motor, hook_de("s1", "api", "Stop", 3_000), 3_000);
+    quadros_entre(&mut motor, &mut janela, 3_000, 4_000);
+    assert_eq!(base_do_pet(&motor), ("ready".into(), Ritmo::Repouso));
+    // O pronto vira bandeirinha em 2 min, o pet dorme 8 min depois (o laço
+    // do sono) e entra no sono profundo aos 30 min: só a pose, sem commit.
+    quadros_entre(&mut motor, &mut janela, 4_000, 700_000);
+    assert_eq!(base_do_pet(&motor), ("sleep".into(), Ritmo::Laco));
+    quadros_entre(&mut motor, &mut janela, 700_000, 1_930_000);
+    assert_eq!(base_do_pet(&motor), ("sleep".into(), Ritmo::Parado));
+    let profundo = quadros_entre(&mut motor, &mut janela, 1_930_000, 1_930_000 + 30 * 60_000);
+    assert!(
+        profundo.is_empty(),
+        "{} commits no sono profundo",
+        profundo.len()
+    );
+    assert_eq!(motor.prazo_da_animacao(), None);
+    // Um evento acorda: a base volta a andar.
+    mandar(
+        &mut motor,
+        hook_de("s2", "web", "UserPromptSubmit", 3_800_000),
+        3_800_000,
+    );
+    assert_eq!(base_do_pet(&motor), ("thinking".into(), Ritmo::Quieto));
+}
+
+#[test]
+fn no_teto_da_escalada_a_espera_fica_so_na_pose() {
+    use crate::animador::Ritmo;
+    let (mut motor, _janela) = ligado();
+    motor.acertar_relogio(em(0));
+    olhando(&mut motor, false, 0);
+    ocioso(&mut motor, false, 0);
+    mandar(
+        &mut motor,
+        hook_de("s1", "api", "UserPromptSubmit", 1_000),
+        1_000,
+    );
+    hook_em(&mut motor, "s1", "api", "PermissionRequest", 2_000);
+    assert_eq!(base_do_pet(&motor), ("waiting".into(), Ritmo::Repouso));
+    andar(&mut motor, 2_000 + escalada::L4_APOS_MS);
+    assert_eq!(motor.nivel_da_escalada(), 4);
+    assert_eq!(base_do_pet(&motor), ("waiting".into(), Ritmo::Parado));
+    // Respondida, a espera sai e a base anda de novo.
+    let rodou = Evento {
+        tool: Some("Bash".into()),
+        dur: Some(10),
+        ..hook_de("s1", "api", "PostToolUse", 400_000)
+    };
+    mandar(&mut motor, rodou, 400_000);
+    assert_eq!(base_do_pet(&motor), ("working".into(), Ritmo::Quieto));
 }

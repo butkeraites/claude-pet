@@ -60,6 +60,7 @@ use crate::plataforma::{
     Monitor, Overlay, Passo, Punho, passo_de_visibilidade,
 };
 use crate::skin::Skin;
+use crate::sorteio::Sorteio;
 
 pub use arraste::{Arraste, Gesto};
 pub use balao::Balao;
@@ -331,6 +332,8 @@ pub struct Motor {
     /// A festa, a base, os selos, o sono e a discrição anunciados (decisão
     /// 0076).
     tela: tela::Tela,
+    /// O sorteio de cada pet novo (as micro-ações da base; decisão 0082).
+    sorteio: Sorteio,
 }
 
 impl Motor {
@@ -370,7 +373,21 @@ impl Motor {
             nao_perturbe: false,
             relogio_ms: 0,
             tela: tela::Tela::default(),
+            sorteio: Sorteio::default(),
         }
+    }
+
+    /// A semente do sorteio (o daemon semeia pela hora da partida; sem
+    /// semear, a fixa dos testes). Vale para o próximo pet.
+    pub fn semear(&mut self, semente: u64) {
+        self.sorteio = Sorteio::novo(semente);
+    }
+
+    /// Um pet novo com o personagem, na base de agora (decisão 0082).
+    fn pet_novo(&mut self, skin: Rc<Skin>, agora_ms: u64) -> Pet {
+        let mut pet = Pet::com_semente(skin, agora_ms, self.sorteio.proximo());
+        pet.definir_base(self.base_desejada(), agora_ms);
+        pet
     }
 
     // --- intenções (decisão 0077) --------------------------------------------
@@ -826,6 +843,8 @@ impl Motor {
             };
             self.anotar(agora_ms, tipo);
         }
+        // O teto (a L4) segura só a pose da espera (decisão 0082).
+        self.sincronizar_base(agora_ms);
         reacoes
     }
 
@@ -1029,7 +1048,7 @@ impl Motor {
     /// agora, sem palco até a janela ficar pronta. A camada nova nasce no
     /// monitor em foco: o alvo de antes não vale mais (decisão 0059).
     pub fn conectou(&mut self, agora_ms: u64) {
-        self.pet = self.skin.clone().map(|skin| Pet::novo(skin, agora_ms));
+        self.pet = self.skin.clone().map(|skin| self.pet_novo(skin, agora_ms));
         self.palco = None;
         self.arraste.cancelar();
         self.seguir.esquecer();
@@ -1158,7 +1177,7 @@ impl Motor {
                 self.proximo_quadro = None;
                 self.estresse = None;
                 self.skin = Some(Rc::clone(&skin));
-                self.pet = Some(Pet::novo(skin, agora_ms));
+                self.pet = Some(self.pet_novo(skin, agora_ms));
                 self.palco = None;
                 ov.esquecer_cena();
                 self.aplicar_visibilidade(ov, agora_ms);
@@ -2030,9 +2049,9 @@ impl Motor {
             Ok(Desenho::SemMudanca) => {}
             Err(e) => aviso!("desenho: {e}"),
         }
-        if let Some(proxima) = proxima {
-            self.proximo_quadro = Some(proxima);
-        }
+        // Sem nada que mude sozinho (a pose do sono profundo, parada), nenhum
+        // prazo: nenhum commit até um evento.
+        self.proximo_quadro = proxima;
     }
 
     /// A próxima troca de quadro da animação, se houver uma marcada.

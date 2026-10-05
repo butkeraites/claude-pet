@@ -111,6 +111,10 @@ impl Nucleo {
         inicio: Instant,
     ) -> Nucleo {
         let mut motor = Motor::novo(ConfigCerebro::de(&config.config()));
+        // O sorteio das micro-ações do pet (decisão 0082): a hora da partida
+        // e o processo, para cada partida variar; o núcleo puro não lê o
+        // relógio.
+        motor.semear(agora_desde_1970_ms() ^ (u64::from(std::process::id()) << 32));
         motor.definir_tamanho(config.config().tamanho, None, 0);
         motor.definir_posicoes(ler_posicoes(&onde.estado));
         let mut nucleo = Nucleo {
