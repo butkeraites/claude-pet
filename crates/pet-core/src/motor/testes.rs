@@ -3745,3 +3745,280 @@ fn o_painel_mostra_o_que_a_janela_desenha() {
     // Sem janela (o compositor caiu), nada desenhado.
     assert_eq!(motor.painel(None, 7_900).desenho, PainelDesenho::default());
 }
+
+// --- a prova do orçamento e da nitidez (decisão 0088) ------------------------
+//
+// O orçamento de commits (decisão 0005): parado e esperando, em média até 2
+// por segundo; o sono profundo, nenhum; as rajadas (o voo, o confete) até 30
+// por segundo e curtas. Com o compositor mostrando cada quadro na hora (o pior
+// caso: na tela de verdade um quadro em voo espera o frame callback) e as
+// reações tocando como no laço do daemon, com o Zeca original de produção
+// (`zeca-livre-escuro`, D = 4 no `pequeno` do eDP-1) e com a skin de teste.
+
+fn skin_de_producao() -> Rc<Skin> {
+    let pasta = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../skins/zeca-livre-escuro");
+    Rc::new(Skin::carregar(&pasta).expect("skins/zeca-livre-escuro"))
+}
+
+/// Um Motor com `skin` no tamanho `tamanho`, pronto no eDP-1 em `t = 0`, o
+/// Renan no teclado (ou longe, `longe`) e fora de um terminal do Claude.
+fn ligado_com(skin: Rc<Skin>, tamanho: Tamanho, longe: bool) -> (Motor, Falsa) {
+    let mut motor = Motor::novo(ConfigCerebro::default());
+    motor.definir_skin(Some(skin));
+    motor.definir_tamanho(tamanho, None, 0);
+    let mut janela = Falsa::default();
+    motor.conectou(0);
+    motor.aplicar_visibilidade(&mut janela, 0);
+    janela.pronta = Some(edp());
+    motor.evento_overlay(&mut janela, EventoOverlay::Pronta, 0);
+    motor.acertar_relogio(em(0));
+    olhando(&mut motor, false, 0);
+    ocioso(&mut motor, longe, 0);
+    janela.mostrou();
+    (motor, janela)
+}
+
+/// Os commits (quadros novos e só de estado) de `de` a `ate`, com as horas
+/// dos quadros novos.
+fn commits_entre(motor: &mut Motor, janela: &mut Falsa, de: u64, ate: u64) -> (u64, Vec<u64>) {
+    let antes = motor.commits.total;
+    let horas = quadros_como_o_laco(motor, janela, de, ate);
+    (motor.commits.total - antes, horas)
+}
+
+fn por_segundo(commits: u64, de: u64, ate: u64) -> f64 {
+    commits as f64 * 1000.0 / (ate - de) as f64
+}
+
+fn menor_intervalo(horas: &[u64]) -> u64 {
+    horas
+        .windows(2)
+        .map(|j| j[1] - j[0])
+        .min()
+        .unwrap_or(u64::MAX)
+}
+
+fn skins_do_orcamento() -> Vec<(Rc<Skin>, Tamanho)> {
+    vec![
+        (skin_de_producao(), Tamanho::Pequeno),
+        (skin_teste(), Tamanho::Normal),
+    ]
+}
+
+#[test]
+fn orcamento_trabalhando_por_20_min() {
+    for (skin, tamanho) in skins_do_orcamento() {
+        let id = skin.id.clone();
+        let (mut motor, mut janela) = ligado_com(skin, tamanho, false);
+        mandar(
+            &mut motor,
+            hook_de("s1", "api", "UserPromptSubmit", 1_000),
+            1_000,
+        );
+        let mut commits = 0;
+        let mut horas = Vec::new();
+        // Um Bash a cada 30 s: a sessão fica trabalhando os 20 min.
+        let mut t = 2_000;
+        while t < 2_000 + 20 * 60_000 {
+            let bash = Evento {
+                tool: Some("Bash".into()),
+                dur: Some(10),
+                ..hook_de("s1", "api", "PostToolUse", t)
+            };
+            mandar(&mut motor, bash, t);
+            let (c, h) = commits_entre(&mut motor, &mut janela, t, t + 30_000);
+            commits += c;
+            horas.extend(h);
+            t += 30_000;
+        }
+        let media = por_segundo(commits, 2_000, t);
+        eprintln!(
+            "orçamento {id}: trabalhando 20 min a {media:.2} commits/s, o menor intervalo {} ms",
+            menor_intervalo(&horas)
+        );
+        assert_eq!(
+            motor.painel(None, t).fotografia.base,
+            "working",
+            "{id}: trabalhando o tempo todo"
+        );
+        assert!(media <= 1.0, "{id}: {media:.2} commits/s trabalhando");
+        assert!(
+            menor_intervalo(&horas) >= animador::DURACAO_MIN_QUIETO_MS,
+            "{id}: quase parado, até 4 fps: {} ms",
+            menor_intervalo(&horas)
+        );
+    }
+}
+
+#[test]
+fn orcamento_na_espera_por_10_min_no_teto() {
+    for (skin, tamanho) in skins_do_orcamento() {
+        let id = skin.id.clone();
+        let (mut motor, mut janela) = ligado_com(skin, tamanho, false);
+        mandar(
+            &mut motor,
+            hook_de("s1", "api", "UserPromptSubmit", 1_000),
+            1_000,
+        );
+        hook_em(&mut motor, "s1", "api", "PermissionRequest", 2_000);
+        let l4 = 2_000 + escalada::L4_APOS_MS;
+        // Até a L4 (a chamada, as rajadas da L2, os 3 voos da L3): rajadas
+        // curtas, nenhum quadro a menos de 34 ms.
+        let (_, antes) = commits_entre(&mut motor, &mut janela, 2_000, l4 + 1_000);
+        assert!(menor_intervalo(&antes) >= animador::DURACAO_MIN_MS, "{id}");
+        assert_eq!(motor.nivel_da_escalada(), 4);
+        let (commits, horas) = commits_entre(&mut motor, &mut janela, l4 + 1_000, l4 + 601_000);
+        let media = por_segundo(commits, l4 + 1_000, l4 + 601_000);
+        eprintln!("orçamento {id}: a espera na L4 por 10 min a {media:.2} commits/s");
+        assert!(
+            (0.8..=2.0).contains(&media),
+            "{id}: {media:.2} commits/s na L4 (o pulso a 1 por segundo e a rajada a cada minuto)"
+        );
+        assert!(menor_intervalo(&horas) >= animador::DURACAO_MIN_MS, "{id}");
+        // Depois dos 30 min da L4, o selo parado: nenhum commit.
+        let fim = 2_000 + escalada::L4_APOS_MS + escalada::L4_DURA_MS;
+        commits_entre(&mut motor, &mut janela, l4 + 601_000, fim + 1_000);
+        let (parado, _) = commits_entre(&mut motor, &mut janela, fim + 1_000, fim + 601_000);
+        assert_eq!(parado, 0, "{id}: o selo parado depois do teto");
+    }
+}
+
+#[test]
+fn orcamento_parado_por_30_min_e_o_sono_profundo_sem_commit() {
+    for (skin, tamanho) in skins_do_orcamento() {
+        let id = skin.id.clone();
+        let (mut motor, mut janela) = ligado_com(skin, tamanho, false);
+        // Até o sono profundo (aos 30 min, o quadro da pose dele inclusive).
+        let (commits, horas) = commits_entre(&mut motor, &mut janela, 0, 30 * 60_000 + 1_000);
+        let media = por_segundo(commits, 0, 30 * 60_000 + 1_000);
+        eprintln!("orçamento {id}: parado e dormindo 30 min a {media:.2} commits/s");
+        assert!(media <= 2.0, "{id}: {media:.2} commits/s parado e dormindo");
+        assert!(media > 0.3, "{id}: anda ({media:.2})");
+        assert!(menor_intervalo(&horas) >= animador::DURACAO_MIN_MS, "{id}");
+        let (profundo, _) =
+            commits_entre(&mut motor, &mut janela, 30 * 60_000 + 1_000, 90 * 60_000);
+        assert_eq!(profundo, 0, "{id}: o sono profundo sem commit");
+        assert_eq!(
+            motor.painel(None, 90 * 60_000).fotografia.sono,
+            Sono::Profundo
+        );
+    }
+}
+
+#[test]
+fn orcamento_a_rajada_do_t3_e_curta_e_vai_ate_30_quadros_por_segundo() {
+    for (skin, tamanho) in skins_do_orcamento() {
+        let id = skin.id.clone();
+        let (mut motor, mut janela) = ligado_com(skin, tamanho, false);
+        commits_entre(&mut motor, &mut janela, 0, 1_000);
+        turno_de(&mut motor, "s1", "api", 1_000, 720_000);
+        let festa = 2_000 + crate::cerebro::ACOMODACAO_MS;
+        let (_, ate_a_festa) = commits_entre(&mut motor, &mut janela, 1_000, festa);
+        let (commits, horas) = commits_entre(&mut motor, &mut janela, festa, festa + 5_000);
+        let mut todas = ate_a_festa;
+        todas.extend(&horas);
+        assert!(
+            menor_intervalo(&todas) >= animador::DURACAO_MIN_MS,
+            "{id}: até 30 por segundo ({} ms)",
+            menor_intervalo(&todas)
+        );
+        eprintln!(
+            "orçamento {id}: o T3 com {commits} commits em 5 s, o menor intervalo {} ms",
+            menor_intervalo(&todas)
+        );
+        assert!(commits <= 5 * 30, "{id}: {commits} commits em 5 s");
+        assert!(commits >= 60, "{id}: a chuva anda ({commits})");
+        assert_eq!(motor.confete_na_tela(festa + 5_000), 0, "{id}: curta");
+        // Depois, o pronto no repouso: até 2 por segundo.
+        let (depois, _) = commits_entre(&mut motor, &mut janela, festa + 5_000, festa + 65_000);
+        assert!(
+            por_segundo(depois, festa + 5_000, festa + 65_000) <= 2.0,
+            "{id}: {depois} commits no minuto depois"
+        );
+    }
+}
+
+/// Toda peça da cena em blocos inteiros: o sprite com o D do palco e a
+/// célula na grade de D da casa (`casa`), os blocos e os glifos em
+/// múltiplos da metade do D (os selos e o balão) ou do D (o "!!" e o
+/// confete), e tudo dentro do monitor.
+fn conferir_nitidez(janela: &Falsa, palco: Palco, casa: (i32, i32), onde: &str) {
+    let dt = balao::dt(palco.d);
+    let tela = Ret::novo(0, 0, palco.tela.0, palco.tela.1);
+    for e in janela.cena.as_ref().expect("uma cena") {
+        match *e {
+            Elemento::Sprite { x, y, d, .. } => {
+                assert_eq!(d, palco.d, "{onde}: o sprite no D do palco");
+                assert_eq!(
+                    ((x - casa.0) % d, (y - casa.1) % d),
+                    (0, 0),
+                    "{onde}: a célula na grade de D da casa"
+                );
+            }
+            Elemento::Bloco { ret, cor } => {
+                assert_eq!(cor[3], 255, "{onde}: opaco");
+                assert!(
+                    (ret.w % dt == 0 && ret.h % dt == 0)
+                        || (ret.w % palco.d == 0 && ret.h % palco.d == 0),
+                    "{onde}: bloco fora da grade: {ret:?}"
+                );
+                assert_eq!(
+                    ret.intersecao(&tela),
+                    Some(ret),
+                    "{onde}: fora do monitor: {ret:?}"
+                );
+            }
+            Elemento::Glifo { d, .. } => assert_eq!(d, dt, "{onde}: o glifo na metade do D"),
+        }
+    }
+}
+
+#[test]
+fn nitidez_dos_desenhos_novos_com_o_zeca_de_producao() {
+    let (mut motor, mut janela) = ligado_com(skin_de_producao(), Tamanho::Pequeno, false);
+    let palco = motor.palco.expect("o palco");
+    assert_eq!(palco.d, 4, "D = 4 no pequeno do eDP-1 (decisão 0042)");
+    let casa = (palco.x, palco.y);
+    // Selos: duas sessões ocupadas, uma com o pronto (a bandeirinha) e uma
+    // corrente; a festa T3 com a chuva.
+    turno_de(&mut motor, "s1", "api", 1_000, 720_000);
+    mandar(
+        &mut motor,
+        hook_de("s2", "web", "UserPromptSubmit", 1_500),
+        1_500,
+    );
+    let festa = 2_000 + crate::cerebro::ACOMODACAO_MS;
+    for t in (festa..festa + 4_000).step_by(250) {
+        commits_entre(&mut motor, &mut janela, t, t + 250);
+        conferir_nitidez(&janela, motor.palco.unwrap(), casa, "festa");
+    }
+    // A espera com o «!», o voo da L3 com o "!!" e o pulso da L4.
+    let (mut motor, mut janela) = ligado_com(skin_de_producao(), Tamanho::Pequeno, false);
+    turno_de(&mut motor, "s3", "lab", 500, 900);
+    mandar(
+        &mut motor,
+        hook_de("s1", "api", "UserPromptSubmit", 1_000),
+        1_000,
+    );
+    hook_em(&mut motor, "s1", "api", "PermissionRequest", 2_000);
+    let l3 = 2_000 + escalada::L3_APOS_MS;
+    let mut t = 2_000;
+    while t < 2_000 + escalada::L4_APOS_MS + 3_000 {
+        commits_entre(&mut motor, &mut janela, t, t + 100);
+        let onde = if t >= l3 && motor.voo().is_some() {
+            "voo"
+        } else {
+            "espera"
+        };
+        conferir_nitidez(&janela, motor.palco.unwrap(), casa, onde);
+        t += if (l3..l3 + 5_000).contains(&t) {
+            100
+        } else {
+            5_000
+        };
+    }
+    assert_eq!(
+        motor.painel(None, t).fotografia.escalada.map(|e| e.nivel),
+        Some(4)
+    );
+}

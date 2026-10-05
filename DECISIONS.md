@@ -3654,3 +3654,42 @@ bloqueada, sem nunca mexer nas sessões reais do Renan nem nas aprovações.
 **Por quê:** com a tela do Renan quase sempre bloqueada, a demonstração que
 vale é a que se confere sozinha pelo `/v1/estado`; e um teste no mundo de
 teste pode rodar na produção a qualquer hora sem tocar no que é dele.
+
+## 0088 — A prova do orçamento e da nitidez da tela do M5 em relógio falso (2026-10-05)
+
+**Problema:** a segunda metade do M5 pôs a base, os selos, o pulso, o voo e o
+confete na tela; o orçamento de commits (decisão 0005: parado e esperando em
+média até 2/s, 0 no sono profundo, rajadas até 30 por segundo e curtas) e a
+nitidez (D inteiro, pixels inteiros, movimento em múltiplos de D) precisam de
+prova em teste, com o personagem de produção, e não só nas contas de cada
+decisão. Com a sessão do Renan bloqueada, a medição na tela fica pendente.
+**Escolha:** testes do Motor em relógio falso, com o compositor mostrando
+cada quadro na hora (o pior caso) e as reações tocando como no laço do daemon
+(`quadros_como_o_laco`), contando os commits (os quadros novos e os só de
+estado), com o Zeca original de produção (`zeca-livre-escuro`, D = 4 no
+`pequeno` do eDP-1) e com a skin de teste:
+- **trabalhando por 20 min** (um Bash a cada 30 s): 0,68 commit/s no Zeca
+  original (0,18 na de teste), nenhum quadro a menos de 250 ms (até 4 fps);
+  o teste exige até 1/s;
+- **a espera na L4 por 10 min** (a pose parada, o pulso a uma troca por
+  segundo, a rajada a cada minuto): 1,38 commit/s (1,03); antes dela, a
+  chamada, as rajadas da L2 e os três voos da L3 sem quadro a menos de 34
+  ms; depois dos 30 min da L4, o selo parado sem commit nenhum em 10 min;
+- **parado por 30 min** (o repouso, o bocejo, o laço do sono e o quadro do
+  sono profundo): 1,66 commit/s (1,67); depois, **nenhum commit** em 60 min
+  de sono profundo;
+- **a rajada do T3** (o `done_big` e a chuva): 118 commits em 5 s (99),
+  nenhum a menos de 34 ms, o confete fora da tela antes dos 5 s, e o minuto
+  seguinte (o pronto no repouso) até 2/s;
+- **a nitidez**, com o Zeca original no D = 4: em cada quadro da festa T3 com
+  os selos, da espera com o «!», do voo com o "!!" e do pulso, o sprite no D
+  do palco e na grade de D da casa, cada bloco em múltiplos da metade do D
+  (os selos, o balão) ou do D (o "!!", o confete), os glifos na metade do D,
+  tudo opaco e dentro do monitor.
+Uma mutação (o pulso com um ciclo inteiro por segundo, duas trocas) reprovou
+o orçamento da L4 e o teste do pulso, como a decisão 0083 previa.
+**Por quê:** o orçamento é a condição de a camada do tamanho do monitor
+continuar valendo (decisão 0005); com o pior caso em teste, uma mudança que o
+estoure reprova o `bin/pet verificar` antes de chegar à tela do Renan. A
+medição na tela (CPU e GPU do Hyprland, `scripts/medir-custo.sh`) continua a
+ser feita com a tela acesa e desbloqueada.
