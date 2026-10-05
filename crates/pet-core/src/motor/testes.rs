@@ -1556,12 +1556,24 @@ fn ocioso(motor: &mut Motor, longe: bool, ms: u64) {
     );
 }
 
+/// O título da janela em foco é (`true`) ou não é o de um terminal do Claude.
+fn olhando(motor: &mut Motor, olhando: bool, ms: u64) {
+    motor.evento_desktop(
+        None,
+        &crate::plataforma::EventoDesktop::OlhandoClaude(olhando),
+        em(ms),
+    );
+}
+
 #[test]
 fn o_pronto_sai_com_10_s_do_terminal_em_foco_e_o_esperando_fica() {
     let mut motor = Motor::novo(ConfigCerebro::default());
     motor.acertar_relogio(em(0));
     ligar_desktop(&mut motor, 0);
     ocioso(&mut motor, false, 0);
+    // Os foot são terminais do Claude: a escalada do aviso de B fica na L1
+    // e não tem prazo (decisão 0075).
+    olhando(&mut motor, true, 0);
     ativou(&mut motor, Some("f00d01"), 1_000);
     prompt_em(&mut motor, "sessao-a", "api", 2_000);
     ativou(&mut motor, Some("f00d02"), 3_000);
@@ -2335,4 +2347,292 @@ fn o_tique_do_laco_pela_janela_certa_fora_de_foco() {
     );
     let resumo = motor.resumo();
     assert_eq!(resumo.turnos[0].origem, cerebro::OrigemTurno::Tique);
+}
+
+// --- avisos de espera e a escalada (decisão 0075) ---------------------------
+
+/// As intenções desde `t` (inclusive), em JSON, sem as do turno e da festa.
+fn chamadas_desde(motor: &Motor, t: u64) -> Vec<String> {
+    motor
+        .intencoes()
+        .filter(|i| i.t_ms >= t)
+        .filter(|i| !matches!(i.tipo, intencoes::Tipo::Turno { .. }))
+        .map(|i| {
+            // O "t" é sempre o primeiro campo: fora ele, na ordem da linha.
+            let linha = serde_json::to_string(i).unwrap();
+            let (_, resto) = linha.split_once(',').unwrap();
+            format!("{{{resto}")
+        })
+        .collect()
+}
+
+fn nomes(reacoes: &[Reacao]) -> Vec<&'static str> {
+    reacoes.iter().map(|r| r.nome).collect()
+}
+
+#[test]
+fn a_chamada_toca_na_l1_e_a_escalada_segue_o_aviso_mais_velho() {
+    let (mut motor, _janela) = ligado();
+    motor.acertar_relogio(em(0));
+    ocioso(&mut motor, false, 0);
+    prompt_em(&mut motor, "sessao-a", "api", 1_000);
+    hook_em(&mut motor, "sessao-a", "api", "PermissionRequest", 2_000);
+    assert_eq!(
+        chamadas_desde(&motor, 2_000),
+        vec![
+            r#"{"i":"reacao","nome":"alert","motivo":"aviso","sid8":"sessao-a"}"#,
+            r#"{"i":"balao","linhas":["Ô, meu camarada!","api precisa de você"],"motivo":"aviso"}"#,
+            r#"{"i":"escalada","sid8":"sessao-a","nivel":1,"espera":"permissao","motivo":"aviso"}"#,
+        ]
+    );
+    assert_eq!(
+        motor.balao(2_000).map(|b| b.linhas[1].as_str()),
+        Some("api precisa de você"),
+        "o balão vai para a tela"
+    );
+    // Um segundo aviso chama na hora dele, mas não escala: vira o "+N".
+    prompt_em(&mut motor, "sessao-b", "web", 3_000);
+    let ev = Evento {
+        e: "PermissionRequest".into(),
+        sid: Some("sessao-b".into()),
+        turno: Some("sessao-b-p".into()),
+        ent: Some("cli".into()),
+        proj: Some("web".into()),
+        tool: Some("Bash".into()),
+        ts: Some(PAREDE + 10_000),
+        ..Evento::default()
+    };
+    let reacoes = motor.evento(&ev, PAREDE + 10_000, em(10_000));
+    assert_eq!(nomes(&reacoes), vec![CHAMADA]);
+    assert_eq!(
+        chamadas_desde(&motor, 10_000).len(),
+        2,
+        "a chamada e o balão"
+    );
+    // A L2 do mais velho: 30 s depois dele, uma rajada a cada 6 s.
+    assert_eq!(motor.prazo_do_cerebro(), Some(32_000));
+    assert_eq!(nomes(&motor.tique(em(32_000))), vec![CHAMADA]);
+    assert_eq!(motor.nivel_da_escalada(), 2);
+    assert_eq!(motor.prazo_do_cerebro(), Some(38_000));
+    // A respondida (a ferramenta rodou): a escalada dela acaba, e a de B
+    // começa do relógio dela (aberta em 10 s: já na L2, na hora).
+    let rodou = Evento {
+        e: "PostToolUse".into(),
+        sid: Some("sessao-a".into()),
+        turno: Some("sessao-a-p".into()),
+        ent: Some("cli".into()),
+        proj: Some("api".into()),
+        tool: Some("Bash".into()),
+        dur: Some(50),
+        ts: Some(PAREDE + 40_000),
+        ..Evento::default()
+    };
+    assert!(motor.evento(&rodou, PAREDE + 40_000, em(40_000)).is_empty());
+    assert_eq!(
+        chamadas_desde(&motor, 40_000),
+        vec![
+            r#"{"i":"escalada","sid8":"sessao-a","nivel":0,"motivo":"andou"}"#,
+            r#"{"i":"escalada","sid8":"sessao-b","nivel":1,"espera":"permissao","motivo":"vez"}"#,
+        ]
+    );
+    assert_eq!(motor.prazo_do_cerebro(), Some(40_000));
+    assert_eq!(nomes(&motor.tique(em(40_000))), vec![CHAMADA]);
+    assert_eq!(motor.nivel_da_escalada(), 2);
+    // O fim da sessão B leva a escalada junto.
+    let fim = Evento {
+        e: "SessionEnd".into(),
+        sid: Some("sessao-b".into()),
+        ent: Some("cli".into()),
+        ts: Some(PAREDE + 41_000),
+        ..Evento::default()
+    };
+    motor.evento(&fim, PAREDE + 41_000, em(41_000));
+    assert!(chamadas_desde(&motor, 41_000).contains(
+        &r#"{"i":"escalada","sid8":"sessao-b","nivel":0,"motivo":"sessao_saiu"}"#.to_owned()
+    ));
+    assert_eq!(motor.nivel_da_escalada(), 0);
+    assert_eq!(motor.prazo_da_escalada(), None);
+}
+
+#[test]
+fn soneca_e_pet_escondido_seguram_a_escalada() {
+    // Na soneca: a chamada vira o aceno e nada passa da L1; acordado, a
+    // escalada segue da fase em que está.
+    let (mut motor, mut janela) = ligado();
+    motor.acertar_relogio(em(0));
+    ocioso(&mut motor, false, 0);
+    motor.alternar_soneca(&mut janela, 500);
+    prompt_em(&mut motor, "sessao-a", "api", 1_000);
+    let ev = Evento {
+        e: "PermissionRequest".into(),
+        sid: Some("sessao-a".into()),
+        turno: Some("sessao-a-p".into()),
+        ent: Some("cli".into()),
+        proj: Some("api".into()),
+        tool: Some("Bash".into()),
+        ts: Some(PAREDE + 2_000),
+        ..Evento::default()
+    };
+    assert_eq!(
+        nomes(&motor.evento(&ev, PAREDE + 2_000, em(2_000))),
+        vec![cerebro::ACENO]
+    );
+    assert_eq!(motor.prazo_da_escalada(), None, "teto L1: nada a vencer");
+    motor.tique(em(200_000));
+    assert_eq!(motor.nivel_da_escalada(), 1);
+    motor.alternar_soneca(&mut janela, 200_000);
+    assert_eq!(motor.prazo_da_escalada(), Some(200_000), "acordou: já");
+    motor.tique(em(200_000));
+    assert_eq!(
+        chamadas_desde(&motor, 200_000)
+            .iter()
+            .filter(|l| l.contains("escalada") || l.contains("voo"))
+            .cloned()
+            .collect::<Vec<_>>(),
+        vec![
+            r#"{"i":"escalada","sid8":"sessao-a","nivel":3,"motivo":"tempo"}"#,
+            r#"{"i":"voo","destino":"alto_centro","motivo":"escalada","sid8":"sessao-a"}"#,
+        ]
+    );
+    // Escondido: a L1 não toca (nem balão), e o relógio anda.
+    let (mut motor, _janela) = ligado();
+    motor.acertar_relogio(em(0));
+    motor.definir_visivel(false);
+    prompt_em(&mut motor, "sessao-a", "api", 1_000);
+    assert!(motor.evento(&ev, PAREDE + 2_000, em(2_000)).is_empty());
+    assert_eq!(
+        chamadas_desde(&motor, 2_000),
+        vec![
+            r#"{"i":"escalada","sid8":"sessao-a","nivel":1,"espera":"permissao","motivo":"aviso"}"#
+        ]
+    );
+    assert!(motor.balao(2_000).is_none());
+    assert_eq!(motor.prazo_da_escalada(), None);
+    motor.definir_visivel(true);
+    motor.tique(em(100_000));
+    assert_eq!(
+        motor.nivel_da_escalada(),
+        3,
+        "voltou a aparecer na L3: o voo"
+    );
+    assert!(
+        chamadas_desde(&motor, 100_000)
+            .iter()
+            .any(|l| l.contains("\"voo\""))
+    );
+}
+
+#[test]
+fn o_clique_que_ve_o_aviso_acaba_a_escalada() {
+    let (mut motor, mut janela) = ligado();
+    motor.acertar_relogio(em(0));
+    ligar_desktop(&mut motor, 0);
+    ocioso(&mut motor, false, 0);
+    ativou(&mut motor, Some("f00d01"), 500);
+    prompt_em(&mut motor, "sessao-a", "api", 1_000);
+    hook_em(&mut motor, "sessao-a", "api", "PermissionRequest", 2_000);
+    assert_eq!(motor.nivel_da_escalada(), 1);
+    janela.desktop.janelas = alcas(&["f00d01"]);
+    janela.mostrou();
+    let clicou = motor.clicar(&mut janela, Botao::Esquerdo, 5_000);
+    assert!(matches!(
+        clicou,
+        Clicou::Focou {
+            confirmado: true,
+            ..
+        }
+    ));
+    assert_eq!(
+        chamadas_desde(&motor, 5_000)
+            .into_iter()
+            .filter(|l| l.contains("escalada"))
+            .collect::<Vec<_>>(),
+        vec![r#"{"i":"escalada","sid8":"sessao-a","nivel":0,"motivo":"visto"}"#]
+    );
+    assert_eq!(motor.prazo_da_escalada(), None);
+}
+
+#[test]
+fn a_volta_so_voa_depois_de_60_s_longe_e_fora_do_terminal_do_claude() {
+    let (mut motor, _janela) = ligado();
+    motor.acertar_relogio(em(0));
+    ocioso(&mut motor, false, 0);
+    olhando(&mut motor, true, 0);
+    prompt_em(&mut motor, "sessao-a", "api", 1_000);
+    hook_em(&mut motor, "sessao-a", "api", "PermissionRequest", 2_000);
+    assert_eq!(
+        motor.prazo_da_escalada(),
+        None,
+        "olhando o Claude e mexendo"
+    );
+    // Parou de mexer (o desktop conta 5 s depois): chama aos 60 s parado.
+    ocioso(&mut motor, true, 10_000);
+    assert_eq!(motor.prazo_da_escalada(), Some(65_000));
+    // Voltou com 25 s parado: nem voo, nem prazo.
+    ocioso(&mut motor, false, 30_000);
+    assert_eq!(motor.prazo_da_escalada(), None);
+    assert!(
+        !chamadas_desde(&motor, 30_000)
+            .iter()
+            .any(|l| l.contains("voo"))
+    );
+    // Parado de novo, até chamar: a fase já é a L3 (o voo).
+    ocioso(&mut motor, true, 40_000);
+    assert_eq!(motor.prazo_da_escalada(), Some(95_000));
+    motor.tique(em(95_000));
+    assert_eq!(motor.nivel_da_escalada(), 3);
+    // Volta ao terminal do Claude depois de 85 s parado: ele vê o aviso lá,
+    // nada de voo.
+    ocioso(&mut motor, false, 120_000);
+    assert!(
+        !chamadas_desde(&motor, 96_000)
+            .iter()
+            .any(|l| l.contains("voltou"))
+    );
+    // Parado de novo por 60 s e de volta noutra janela: o voo, na hora.
+    ocioso(&mut motor, true, 130_000);
+    olhando(&mut motor, false, 131_000);
+    motor.tique(em(155_000));
+    ocioso(&mut motor, false, 200_000);
+    assert!(chamadas_desde(&motor, 200_000).contains(
+        &r#"{"i":"voo","destino":"alto_centro","motivo":"voltou","sid8":"sessao-a"}"#.to_owned()
+    ));
+}
+
+#[test]
+fn o_tipo_refinado_troca_o_balao_sem_chamar_de_novo() {
+    let (mut motor, _janela) = ligado();
+    motor.acertar_relogio(em(0));
+    prompt_em(&mut motor, "sessao-a", "api", 1_000);
+    let notificacao = Evento {
+        e: "Notification".into(),
+        sid: Some("sessao-a".into()),
+        turno: Some("sessao-a-p".into()),
+        ent: Some("cli".into()),
+        proj: Some("api".into()),
+        nt: Some("permission_prompt".into()),
+        ts: Some(PAREDE + 2_000),
+        ..Evento::default()
+    };
+    assert_eq!(
+        nomes(&motor.evento(&notificacao, PAREDE + 2_000, em(2_000))),
+        vec![CHAMADA]
+    );
+    let pergunta = Evento {
+        e: "PreToolUse".into(),
+        tool: Some("AskUserQuestion".into()),
+        ts: Some(PAREDE + 2_030),
+        nt: None,
+        ..notificacao
+    };
+    assert!(
+        motor
+            .evento(&pergunta, PAREDE + 2_030, em(2_030))
+            .is_empty()
+    );
+    assert_eq!(
+        chamadas_desde(&motor, 2_030),
+        vec![r#"{"i":"balao","linhas":["api: pergunta pra você"],"motivo":"aviso_refinado"}"#]
+    );
+    assert_eq!(motor.nivel_da_escalada(), 1);
 }

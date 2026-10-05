@@ -1,0 +1,13 @@
+{"cenario": "pergunta-ausente", "descricao": "uma pergunta com o Renan longe do teclado: L1 na hora, a L2 (uma rajada a cada 6 s por 30 s), a L3 (três voos, de 60 em 60 s), a L4 no teto (o selo pulsando e uma rajada por minuto por 30 min) e depois o selo parado; ele volta sem voo sobrando e responde", "padrao": {"sid": "s1", "ent": "cli", "proj": "api"}}
+{"t": 0, "desktop": {"ocioso": false}}
+{"t": 0, "evento": {"e": "UserPromptSubmit", "turno": "p1", "ts": 0, "orig": "comum"}}
+{"t": 30000, "evento": {"e": "PostToolUse", "turno": "p1", "ts": 29990, "tool": "Bash", "dur": 4000}}
+{"t": 50000, "desktop": {"ocioso": true}}
+{"t": 60000, "evento": {"e": "PreToolUse", "turno": "p1", "ts": 59995, "tool": "AskUserQuestion"}}
+{"t": 60020, "evento": {"e": "PermissionRequest", "turno": "p1", "ts": 60010, "tool": "AskUserQuestion"}}
+{"t": 66010, "evento": {"e": "Notification", "turno": "p1", "ts": 66005, "nt": "permission_prompt"}}
+{"t": 3000000, "desktop": {"ocioso": false}}
+{"t": 3000500, "desktop": {"olhando_claude": true}}
+{"t": 3020000, "evento": {"e": "PostToolUse", "turno": "p1", "ts": 3019990, "tool": "AskUserQuestion", "dur": 0}}
+{"t": 3030000, "evento": {"e": "Stop", "turno": "p1", "ts": 3029990, "bg": 0, "crn": 0}}
+{"t": 3040000, "fim": true}

@@ -23,10 +23,15 @@
 //! cresce para o palco inteiro só enquanto arrasta. O clique esquerdo leva
 //! ao terminal da sessão do aviso mais urgente ([`Motor::clicar`], decisão
 //! 0057).
+//!
+//! No M5, o Motor anota cada decisão no registro de intenções ([`intencoes`],
+//! decisão 0077), chama a cada aviso de espera novo e escala o mais velho
+//! ([`escalada`], decisão 0075).
 
 pub mod arraste;
 pub mod balao;
 mod desktop;
+pub mod escalada;
 pub mod intencoes;
 pub mod janelas;
 mod pet;
@@ -44,7 +49,7 @@ use crate::animador;
 use crate::cena::{self, Elemento};
 use crate::cerebro::{
     self, Agora, Cerebro, ConfigCerebro, EstadoSessao, Evidencia, Pendencia, Reacao, Resumo,
-    TipoAviso,
+    TipoAviso, TipoEspera,
 };
 use crate::confete::{Chuva, Grade};
 use crate::evento::Evento;
@@ -62,6 +67,7 @@ pub use pet::{Palco, Pet};
 pub use posicoes::{Fracao, Posicoes};
 pub use viagem::{Pouso, Seguir};
 
+use escalada::Escalada;
 pub use ritmo::{Commits, Estresse, JANELA_COMMITS_MS};
 use viagem::{Decisao, Fase as FaseViagem};
 
@@ -102,6 +108,8 @@ pub const VOLTA_DO_CICLO_MS: u64 = 15_000;
 pub const CORACAO_MS: u64 = 1_200;
 /// O susto de quando um turno acaba num erro da API (decisão 0076).
 pub const SUSTO: &str = "error";
+/// A chamada de um aviso de espera (a L1) e as rajadas dela (decisão 0075).
+pub const CHAMADA: &str = "alert";
 
 /// O que o pet publica para o `/v1/estado` (o laço publica; a entrada HTTP
 /// só lê).
@@ -205,6 +213,19 @@ struct Focando {
     ate_ms: u64,
 }
 
+/// O aviso de espera que o pet está chamando (decisão 0075): o mais velho
+/// (os outros viram o "+N").
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Chamando {
+    chave: janelas::Chave,
+    sid8: String,
+    proj: Option<String>,
+    /// Quando o aviso abriu (ms desde 1970): outro aviso da mesma sessão é
+    /// outra escalada.
+    desde_ms: u64,
+    escalada: Escalada,
+}
+
 /// O sprite como deveria estar na tela: o RGBA exato, em pixels do monitor,
 /// para a checagem de nitidez comparar com uma captura.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -286,6 +307,20 @@ pub struct Motor {
     /// (e desde quando): a entrada no erro e no cansado toca uma vez só
     /// (decisão 0076).
     estados_vistos: BTreeMap<janelas::Chave, (EstadoSessao, u64)>,
+    /// Os avisos de espera já chamados (a L1), com a hora em que abriram e
+    /// o tipo anunciado: um gatilho do mesmo diálogo não chama de novo
+    /// (decisão 0075).
+    chamados: BTreeMap<janelas::Chave, (u64, Option<TipoEspera>)>,
+    /// A escalada do aviso de espera mais velho.
+    chamando: Option<Chamando>,
+    /// Desde quando (relógio do laço) o desktop diz que o Renan está longe
+    /// do teclado e do mouse (o "sem mexer há 60 s" e a volta).
+    ausente_desde: Option<u64>,
+    /// O "não perturbe" do Omarchy, pelo `dnd` do último evento do Claude.
+    nao_perturbe: bool,
+    /// O instante mais novo do relógio do laço que o Motor viu (os prazos
+    /// calculados sem um `agora`).
+    relogio_ms: u64,
 }
 
 impl Motor {
@@ -319,6 +354,11 @@ impl Motor {
             cerebro_mudou: false,
             intencoes: intencoes::Registro::default(),
             estados_vistos: BTreeMap::new(),
+            chamados: BTreeMap::new(),
+            chamando: None,
+            ausente_desde: None,
+            nao_perturbe: false,
+            relogio_ms: 0,
         }
     }
 
@@ -377,12 +417,14 @@ impl Motor {
             );
         }
         reacoes.extend(self.observar_cerebro(agora_ms));
+        reacoes.extend(self.observar_avisos(agora_ms, None));
         reacoes
     }
 
     /// Acerta o relógio de parede pelo de agora (o núcleo chama a cada lote).
     pub fn acertar_relogio(&mut self, agora: Agora) {
         self.deslocamento_parede = agora.parede_ms.saturating_sub(agora.mono_ms);
+        self.relogio_ms = self.relogio_ms.max(agora.mono_ms);
     }
 
     /// A hora de parede (ms desde 1970) de um instante do relógio do laço.
@@ -531,13 +573,7 @@ impl Motor {
                     nivel: None,
                 },
             );
-            self.anotar(
-                agora_ms,
-                intencoes::Tipo::Balao {
-                    linhas: vec![linha],
-                    motivo,
-                },
-            );
+            self.balao_decidido(vec![linha], motivo, agora_ms);
             reacoes.push(Reacao {
                 nome,
                 sid8: s.sid8.clone(),
@@ -552,6 +588,254 @@ impl Motor {
         reacoes
     }
 
+    // --- avisos de espera e a escalada (decisão 0075) --------------------------
+
+    /// O pet pode aparecer para chamar ou festejar: ninguém mandou esconder e
+    /// a proteção de tela não está na tela. Não depende de haver personagem:
+    /// as intenções são as mesmas sem skin.
+    fn na_tela(&self) -> bool {
+        self.visivel && !self.desktop.protetor_ativo()
+    }
+
+    /// Um balão que o Motor decidiu (o erro, a chamada): na intenção e na
+    /// tela, se o pet pode aparecer (escondido, nada toca). Sem a janela
+    /// aqui, o próximo quadro o desenha, já.
+    fn balao_decidido(&mut self, linhas: Vec<String>, motivo: &'static str, agora_ms: u64) {
+        if !self.na_tela() {
+            return;
+        }
+        self.mostrar_balao_por(None, linhas, motivo, agora_ms);
+        if self.pet.is_some() {
+            self.proximo_quadro = Some(self.proximo_quadro.map_or(agora_ms, |p| p.min(agora_ms)));
+        }
+    }
+
+    /// O que a escalada sabe agora: se o Renan precisa ser chamado (não está
+    /// olhando um terminal do Claude, ou está sem mexer há 60 s ou mais; o
+    /// desktop conta o longe depois de [`OCIOSO_MS`] sem mexer), os tetos e
+    /// se o pet pode aparecer.
+    fn contexto_da_escalada(&self, agora_ms: u64) -> escalada::Contexto {
+        let parado_desde = match (self.desktop.ocioso, self.ausente_desde) {
+            (Some(true), Some(desde)) => Some(desde.saturating_sub(OCIOSO_MS)),
+            _ => None,
+        };
+        let chama_em = parado_desde.map(|d| d + escalada::PARADO_PARA_CHAMAR_MS);
+        let chama = !self.desktop.olhando_claude || chama_em.is_some_and(|t| agora_ms >= t);
+        escalada::Contexto {
+            chama,
+            chama_em: chama_em.filter(|_| !chama),
+            teto_l1: self.nao_perturbe || self.soneca(agora_ms).is_some(),
+            visivel: self.na_tela(),
+        }
+    }
+
+    /// Os avisos de espera depois de o cérebro mudar (ou de um aviso ser
+    /// visto, `visto`): cada aviso novo chama (a L1: a chamada e o balão do
+    /// tipo, na hora; decisão 0075), um gatilho do mesmo diálogo que sobe o
+    /// tipo só troca o balão, e a escalada segue o mais velho. Devolve as
+    /// chamadas para o animador.
+    fn observar_avisos(&mut self, agora_ms: u64, visto: Option<&janelas::Chave>) -> Vec<Reacao> {
+        let esperando: Vec<Pendencia> = self
+            .cerebro
+            .pendencias()
+            .into_iter()
+            .filter(|p| p.aviso.tipo == TipoAviso::Esperando)
+            .collect();
+        let mut reacoes = Vec::new();
+        let mut chamados = BTreeMap::new();
+        let mut novos = Vec::new();
+        for p in &esperando {
+            let antes = self.chamados.get(&p.chave).copied();
+            chamados.insert(p.chave.clone(), (p.aviso.desde_ms, p.aviso.espera));
+            match antes {
+                Some((desde, espera)) if desde == p.aviso.desde_ms => {
+                    if p.aviso.espera > espera {
+                        let linhas = balao::linhas_da_espera(p.aviso.espera, p.proj.as_deref());
+                        self.balao_decidido(linhas, "aviso_refinado", agora_ms);
+                    }
+                }
+                _ => {
+                    novos.push(p.chave.clone());
+                    reacoes.extend(self.chamar(p, agora_ms));
+                }
+            }
+        }
+        self.chamados = chamados;
+        let mais_velho = esperando.first();
+        let mesmo = match (&self.chamando, mais_velho) {
+            (Some(c), Some(p)) => c.chave == p.chave && c.desde_ms == p.aviso.desde_ms,
+            (None, None) => true,
+            _ => false,
+        };
+        if !mesmo {
+            if let Some(c) = self.chamando.take() {
+                let motivo = if esperando
+                    .iter()
+                    .any(|p| p.chave == c.chave && p.aviso.desde_ms == c.desde_ms)
+                {
+                    "outro_aviso"
+                } else if visto == Some(&c.chave) {
+                    "visto"
+                } else if self.cerebro.tem_sessao(&c.chave) {
+                    "andou"
+                } else {
+                    "sessao_saiu"
+                };
+                self.encerrar_escalada(c, motivo, agora_ms);
+            }
+            if let Some(p) = mais_velho {
+                let novo = novos.contains(&p.chave);
+                self.anotar(
+                    agora_ms,
+                    intencoes::Tipo::Escalada {
+                        sid8: p.sid8.clone(),
+                        nivel: 1,
+                        espera: p.aviso.espera,
+                        motivo: if novo { "aviso" } else { "vez" },
+                    },
+                );
+                self.chamando = Some(Chamando {
+                    chave: p.chave.clone(),
+                    sid8: p.sid8.clone(),
+                    proj: p.proj.clone(),
+                    desde_ms: p.aviso.desde_ms,
+                    escalada: Escalada::nova(p.aviso.desde_mono),
+                });
+            }
+        }
+        reacoes
+    }
+
+    /// A L1 de um aviso novo: a chamada e o balão do tipo dele. Escondido,
+    /// nada toca; na soneca, a chamada vira o aceno (decisão 0053).
+    fn chamar(&mut self, p: &Pendencia, agora_ms: u64) -> Option<Reacao> {
+        if !self.na_tela() {
+            return None;
+        }
+        let nome = if self.soneca(agora_ms).is_some() {
+            cerebro::ACENO
+        } else {
+            CHAMADA
+        };
+        self.anotar(
+            agora_ms,
+            intencoes::Tipo::Reacao {
+                nome: nome.to_owned(),
+                motivo: "aviso",
+                sid8: Some(p.sid8.clone()),
+                nivel: None,
+            },
+        );
+        let linhas = balao::linhas_da_espera(p.aviso.espera, p.proj.as_deref());
+        self.balao_decidido(linhas, "aviso", agora_ms);
+        Some(Reacao {
+            nome,
+            sid8: p.sid8.clone(),
+            proj: p.proj.clone(),
+            ts: self.parede(agora_ms),
+            nivel: None,
+            teste: p.chave.0,
+            discreta: false,
+        })
+    }
+
+    /// A escalada acabou: o pulso desliga e o nível volta a 0.
+    fn encerrar_escalada(&mut self, c: Chamando, motivo: &'static str, agora_ms: u64) {
+        if c.escalada.pulso {
+            self.anotar(
+                agora_ms,
+                intencoes::Tipo::Pulso {
+                    ligado: false,
+                    sid8: c.sid8.clone(),
+                },
+            );
+        }
+        self.anotar(
+            agora_ms,
+            intencoes::Tipo::Escalada {
+                sid8: c.sid8,
+                nivel: 0,
+                espera: None,
+                motivo,
+            },
+        );
+    }
+
+    /// O que a escalada pediu vira intenção; as rajadas também vão para o
+    /// animador (a chamada de novo).
+    fn aplicar_escalada(
+        &mut self,
+        passos: Vec<escalada::Passo>,
+        motivo: &'static str,
+        agora_ms: u64,
+    ) -> Vec<Reacao> {
+        let Some(c) = self.chamando.as_ref() else {
+            return Vec::new();
+        };
+        let (sid8, proj, teste, nivel) =
+            (c.sid8.clone(), c.proj.clone(), c.chave.0, c.escalada.nivel);
+        let mut reacoes = Vec::new();
+        for passo in passos {
+            let tipo = match passo {
+                escalada::Passo::Nivel(n) => intencoes::Tipo::Escalada {
+                    sid8: sid8.clone(),
+                    nivel: n,
+                    espera: None,
+                    motivo,
+                },
+                escalada::Passo::Rajada => {
+                    reacoes.push(Reacao {
+                        nome: CHAMADA,
+                        sid8: sid8.clone(),
+                        proj: proj.clone(),
+                        ts: self.parede(agora_ms),
+                        nivel: None,
+                        teste,
+                        discreta: false,
+                    });
+                    intencoes::Tipo::Rajada {
+                        sid8: sid8.clone(),
+                        nivel,
+                    }
+                }
+                escalada::Passo::Voo { volta } => intencoes::Tipo::Voo {
+                    destino: "alto_centro",
+                    motivo: if volta { "voltou" } else { "escalada" },
+                    sid8: Some(sid8.clone()),
+                },
+                escalada::Passo::Pulso(ligado) => intencoes::Tipo::Pulso {
+                    ligado,
+                    sid8: sid8.clone(),
+                },
+            };
+            self.anotar(agora_ms, tipo);
+        }
+        reacoes
+    }
+
+    /// Os prazos da escalada que venceram.
+    fn vencer_escalada(&mut self, agora_ms: u64) -> Vec<Reacao> {
+        let ctx = self.contexto_da_escalada(agora_ms);
+        let Some(c) = self.chamando.as_mut() else {
+            return Vec::new();
+        };
+        let passos = c.escalada.vencer(agora_ms, ctx);
+        self.aplicar_escalada(passos, "tempo", agora_ms)
+    }
+
+    /// Quando a escalada muda de novo (no relógio do último instante visto:
+    /// um prazo que já passou vence no próximo giro do laço).
+    fn prazo_da_escalada(&self) -> Option<u64> {
+        let c = self.chamando.as_ref()?;
+        let agora = self.relogio_ms;
+        c.escalada.proximo(agora, self.contexto_da_escalada(agora))
+    }
+
+    /// O nível da escalada do aviso que o pet chama (0 sem nenhum).
+    pub fn nivel_da_escalada(&self) -> u8 {
+        self.chamando.as_ref().map_or(0, |c| c.escalada.nivel)
+    }
+
     /// Um evento do Claude Code, no relógio da chegada (decisão 0032).
     ///
     /// No prompt do teclado e no começo de uma sessão que o cérebro
@@ -563,6 +847,8 @@ impl Motor {
     /// com o Renan longe do teclado (decisão 0073).
     pub fn evento(&mut self, ev: &Evento, recebido_ms: u64, agora: Agora) -> Vec<Reacao> {
         self.acertar_relogio(agora);
+        // O "não perturbe" do Omarchy vem em todo evento (decisão 0075).
+        self.nao_perturbe = ev.dnd;
         let evidencia = self.evidencia(ev, recebido_ms);
         let reacoes = self.cerebro.receber_com(ev, recebido_ms, agora, evidencia);
         let reacoes = self.depois_do_cerebro(reacoes, agora.mono_ms);
@@ -614,13 +900,14 @@ impl Motor {
     }
 
     /// O prazo do cérebro venceu (acomodação do Stop, sessões e avisos que
-    /// expiram, o pronto visto pelo foco).
+    /// expiram, o pronto visto pelo foco, a escalada).
     pub fn tique(&mut self, agora: Agora) -> Vec<Reacao> {
         self.acertar_relogio(agora);
         let reacoes = self.cerebro.tique(agora);
-        let reacoes = self.depois_do_cerebro(reacoes, agora.mono_ms);
+        let mut reacoes = self.depois_do_cerebro(reacoes, agora.mono_ms);
         self.esquecer_janelas_sem_sessao();
         self.ver_pelo_foco(agora.mono_ms);
+        reacoes.extend(self.vencer_escalada(agora.mono_ms));
         reacoes
     }
 
@@ -629,13 +916,17 @@ impl Motor {
         self.identidades.manter(|chave| cerebro.tem_sessao(chave));
     }
 
-    /// Quando chamar [`Self::tique`]: os prazos do cérebro e o do pronto
-    /// visto pelo foco.
+    /// Quando chamar [`Self::tique`]: os prazos do cérebro, o do pronto
+    /// visto pelo foco e o da escalada.
     pub fn prazo_do_cerebro(&self) -> Option<u64> {
-        [self.cerebro.proximo_prazo(), self.prazo_visto_pelo_foco()]
-            .into_iter()
-            .flatten()
-            .min()
+        [
+            self.cerebro.proximo_prazo(),
+            self.prazo_visto_pelo_foco(),
+            self.prazo_da_escalada(),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
     }
 
     /// O resumo do cérebro, com a janela de cada sessão.
@@ -729,6 +1020,7 @@ impl Motor {
         self.coracao_ate = None;
         // Quem contava se o Renan está era a conexão (decisão 0062).
         self.desktop.ocioso = None;
+        self.ausente_desde = None;
         self.balao = None;
         self.arraste.cancelar();
         self.seguir.esquecer();
@@ -1067,6 +1359,8 @@ impl Motor {
         if matches!(evento, EventoPonteiro::Apertou { .. }) && self.desktop.ocioso == Some(true) {
             self.desktop.ocioso = Some(false);
             self.presente_desde = agora_ms;
+            // Quem aperta o pet já está olhando para ele: nenhum voo de volta.
+            self.ausente_desde = None;
         }
         let (Some(palco), true) = (self.palco, self.pet.is_some()) else {
             self.arraste.cancelar();
@@ -1314,7 +1608,7 @@ impl Motor {
                 ate_ms: agora_ms + CONFIRMAR_FOCO_MS,
             });
         } else {
-            self.ver(&alvo.chave);
+            self.ver(&alvo.chave, agora_ms);
         }
         self.balao = None;
         self.coracao_ate = Some(agora_ms + CORACAO_MS);
@@ -1356,11 +1650,13 @@ impl Motor {
         self.mostrar_balao_por(Some(ov), linhas, "sem_foco", agora_ms);
     }
 
-    /// O Renan viu o aviso da sessão: ele sai, e o núcleo publica o cérebro.
-    fn ver(&mut self, chave: &janelas::Chave) -> Option<TipoAviso> {
+    /// O Renan viu o aviso da sessão: ele sai (e a escalada dele, se era o
+    /// que o pet chamava), e o núcleo publica o cérebro.
+    fn ver(&mut self, chave: &janelas::Chave, agora_ms: u64) -> Option<TipoAviso> {
         let tipo = self.cerebro.ver(chave);
         if tipo.is_some() {
             self.cerebro_mudou = true;
+            self.observar_avisos(agora_ms, Some(chave));
         }
         self.ciclo.retain(|c| c != chave);
         tipo
@@ -1425,7 +1721,7 @@ impl Motor {
     fn ver_pelo_foco(&mut self, agora_ms: u64) {
         for (p, prazo) in self.vistas_pelo_foco() {
             if agora_ms >= prazo {
-                self.ver(&p.chave);
+                self.ver(&p.chave, agora_ms);
                 info!(
                     "o {} da sessão {} saiu: o terminal dela ficou em foco",
                     p.aviso.tipo.nome(),
@@ -1503,7 +1799,29 @@ impl Motor {
         let protetor_antes = self.desktop.protetor_ativo();
         let ativa_antes = self.desktop.janela_ativa.clone();
         let ligado_antes = self.desktop.ligado;
+        let ocioso_antes = self.desktop.ocioso;
         let mudou = self.desktop.aplicar(evento, agora.parede_ms);
+        if self.desktop.ocioso != Some(true) {
+            // A volta conta só para quem ficou longe de verdade: sem mexer
+            // há 60 s ou mais, e não de volta a um terminal do Claude (lá
+            // ele já vê o aviso). Um voo, na hora (decisão 0075).
+            let longe_desde = self.ausente_desde.take();
+            if ocioso_antes == Some(true)
+                && self.desktop.ocioso == Some(false)
+                && !self.desktop.olhando_claude
+                && longe_desde.is_some_and(|d| {
+                    agora.mono_ms + OCIOSO_MS >= d + escalada::PARADO_PARA_CHAMAR_MS
+                })
+            {
+                let ctx = self.contexto_da_escalada(agora.mono_ms);
+                if let Some(c) = self.chamando.as_mut() {
+                    let passos = c.escalada.voltou(agora.mono_ms, ctx);
+                    self.aplicar_escalada(passos, "voltou", agora.mono_ms);
+                }
+            }
+        } else if ocioso_antes != Some(true) {
+            self.ausente_desde = Some(agora.mono_ms);
+        }
         // Desde quando a janela ativa está ativa (o pronto visto pelo foco):
         // a fonte que volta não sabe desde quando.
         if self.desktop.janela_ativa != ativa_antes
@@ -1534,7 +1852,7 @@ impl Motor {
             self.focando = esperando;
             for focando in vistos {
                 info!("clique: a janela {} ficou ativa", janela.0);
-                self.ver(&focando.chave);
+                self.ver(&focando.chave, agora.mono_ms);
             }
         }
         // A proteção de tela do Omarchy abriu ou fechou: o pet sai e volta

@@ -1,0 +1,6 @@
+{"t":2210,"i":"reacao","nome":"alert","motivo":"aviso","sid8":"s1"}
+{"t":2210,"i":"balao","linhas":["projeto-a: pergunta pra você"],"motivo":"aviso"}
+{"t":2210,"i":"escalada","sid8":"s1","nivel":1,"espera":"pergunta","motivo":"aviso"}
+{"t":18970,"i":"escalada","sid8":"s1","nivel":0,"motivo":"andou"}
+{"t":20535,"i":"turno","sid8":"s1","turno8":"p1","fim":"stop","nivel":"T0","pontuacao":0.05,"reacao":"nod"}
+{"t":20535,"i":"reacao","nome":"nod","motivo":"fim","sid8":"s1","nivel":"T0"}

@@ -1,0 +1,6 @@
+{"t":6000,"i":"reacao","nome":"alert","motivo":"aviso","sid8":"s1"}
+{"t":6000,"i":"balao","linhas":["api: pergunta pra você"],"motivo":"aviso"}
+{"t":6000,"i":"escalada","sid8":"s1","nivel":1,"espera":"pergunta","motivo":"aviso"}
+{"t":25000,"i":"escalada","sid8":"s1","nivel":0,"motivo":"andou"}
+{"t":33800,"i":"turno","sid8":"s1","turno8":"p1","fim":"stop","nivel":"T1","pontuacao":0.75,"reacao":"done_small"}
+{"t":33800,"i":"reacao","nome":"done_small","motivo":"fim","sid8":"s1","nivel":"T1"}

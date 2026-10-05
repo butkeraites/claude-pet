@@ -1,0 +1,21 @@
+{"t":20000,"i":"reacao","nome":"alert","motivo":"aviso","sid8":"s1"}
+{"t":20000,"i":"balao","linhas":["Ô, meu camarada!","web precisa de você"],"motivo":"aviso"}
+{"t":20000,"i":"escalada","sid8":"s1","nivel":1,"espera":"permissao","motivo":"aviso"}
+{"t":50000,"i":"escalada","sid8":"s1","nivel":2,"motivo":"tempo"}
+{"t":50000,"i":"rajada","sid8":"s1","nivel":2}
+{"t":56000,"i":"rajada","sid8":"s1","nivel":2}
+{"t":62000,"i":"rajada","sid8":"s1","nivel":2}
+{"t":68000,"i":"rajada","sid8":"s1","nivel":2}
+{"t":74000,"i":"rajada","sid8":"s1","nivel":2}
+{"t":110000,"i":"escalada","sid8":"s1","nivel":3,"motivo":"tempo"}
+{"t":110000,"i":"voo","destino":"alto_centro","motivo":"escalada","sid8":"s1"}
+{"t":130000,"i":"voo","destino":"alto_centro","motivo":"voltou","sid8":"s1"}
+{"t":190000,"i":"voo","destino":"alto_centro","motivo":"escalada","sid8":"s1"}
+{"t":320000,"i":"pulso","ligado":true,"sid8":"s1"}
+{"t":320000,"i":"escalada","sid8":"s1","nivel":4,"motivo":"tempo"}
+{"t":320000,"i":"rajada","sid8":"s1","nivel":4}
+{"t":380000,"i":"rajada","sid8":"s1","nivel":4}
+{"t":400000,"i":"pulso","ligado":false,"sid8":"s1"}
+{"t":410000,"i":"escalada","sid8":"s1","nivel":0,"motivo":"andou"}
+{"t":415800,"i":"turno","sid8":"s1","turno8":"p1","fim":"stop","nivel":"T1","pontuacao":0.18,"reacao":"done_small"}
+{"t":415800,"i":"reacao","nome":"done_small","motivo":"fim","sid8":"s1","nivel":"T1"}

@@ -1,0 +1,8 @@
+{"cenario": "pergunta-nao-perturbe", "descricao": "uma pergunta com o Renan longe e o não perturbe do Omarchy ligado (o dnd dos eventos): a chamada e o balão da L1 e nada mais, nem rajada nem voo", "padrao": {"sid": "s1", "ent": "cli", "proj": "api", "dnd": true}}
+{"t": 0, "desktop": {"ocioso": true}}
+{"t": 0, "evento": {"e": "UserPromptSubmit", "turno": "p1", "ts": 0, "orig": "comum"}}
+{"t": 10000, "evento": {"e": "PreToolUse", "turno": "p1", "ts": 9995, "tool": "AskUserQuestion"}}
+{"t": 10020, "evento": {"e": "PermissionRequest", "turno": "p1", "ts": 10010, "tool": "AskUserQuestion"}}
+{"t": 16010, "evento": {"e": "Notification", "turno": "p1", "ts": 16005, "nt": "permission_prompt"}}
+{"t": 900000, "evento": {"e": "PostToolUse", "turno": "p1", "ts": 899990, "tool": "AskUserQuestion", "dur": 0}}
+{"t": 910000, "fim": true}

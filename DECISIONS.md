@@ -3286,3 +3286,36 @@ pseudonimizados), sem que dados reais do Renan acabem no git.
 **Por quê:** o mesmo executor para testar e simular; e o que sai de uma
 sessão de verdade só vai para um arquivo depois de virar pseudônimo, de um pet
 de rascunho, nunca da produção.
+
+## 0079 — A escalada na implementação: a L1 de cada aviso, a volta e os balões na tela (2026-10-05)
+
+**Problema:** ao implementar a escalada (decisão 0075, T5.7), quatro pontos
+ficaram em aberto: um segundo aviso de espera, aberto enquanto o primeiro
+escala, chamaria ou não; a "volta" do Renan (o `ocioso` de verdadeiro para
+falso) dispara a cada pausa de 5 s de quem lê o terminal, porque o desktop
+conta o longe depois de 5 s sem mexer; quem põe na tela os balões que o
+Motor decide (o registro de intenções deixava todos para a segunda metade
+do M5, decisão 0077); e o que fazem a soneca e o pet escondido com a L1.
+**Escolha:**
+- **Cada aviso novo tem a L1 dele:** a reação `alert` e o balão do tipo, na
+  hora. A escalada (L2–L4) é só do aviso de espera mais velho; quando ele
+  sai, o seguinte escala a partir do relógio dele (o nível 1 com o motivo
+  `vez`, e na hora a fase em que já está), sem chamar de novo.
+- **A volta conta só depois de 60 s sem mexer** (a mesma régua do "sem
+  mexer há 60 s ou mais") e só se a janela em foco não é um terminal do
+  Claude (lá ele já vê o diálogo); um aperto no pet também não conta.
+- **Os balões vão para a tela pelo balão do M4**, na mesma chamada que anota
+  a intenção `balao` (o erro, o cansado, a chamada, o tipo refinado); com o
+  pet escondido ou a proteção de tela, nem a linha nem o balão. As reações
+  continuam pelo animador do M3 (a `rajada` toca a `alert` de novo); o resto
+  (a base, os selos, os voos, o pulso, o confete) espera quem desenha.
+- **Na soneca**, a L1 toca o aceno no lugar da chamada (só reações pequenas,
+  decisão 0053) e nada passa da L1; **escondido**, a L1 não toca e nada é
+  repetido na volta: a escalada segue da fase em que o relógio dela está.
+- **Os prazos** da escalada são recalculados na hora em que vencem (o Motor
+  só sabe o "agora" do último lote); a máquina garante que um prazo olhado de
+  novo no instante dele ainda vence, e o teste dela reprova o contrário.
+**Por quê:** um aviso novo é uma notícia mesmo com outro escalando, mas duas
+escaladas ao mesmo tempo seriam barulho; quem só leu o plano por 10 s não
+"voltou" de lugar nenhum; e o balão já existe desde o M4 — deixá-lo para
+depois faria a intenção dizer uma coisa e a tela outra.

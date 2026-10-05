@@ -2,10 +2,11 @@
 //! uma linha normalizada, com a hora no relógio do laço.
 //!
 //! É o contrato com quem desenha (a segunda metade do M5 e o M6) e o que os
-//! cenários dourados comparam (`pet_core::cenario`). As reações continuam
-//! indo ao animador pelo caminho do M3; o resto (a base segurada, os selos,
-//! os voos, o confete, os balões da festa) espera quem desenha, e está aqui
-//! para os testes e o `/v1/estado` lerem.
+//! cenários dourados comparam (`pet_core::cenario`). As reações (`reacao`,
+//! `rajada`) já vão para a tela pelo animador do M3, e os balões (`balao`)
+//! pelo balão do M4: a linha e a tela saem da mesma chamada. O resto (a base
+//! segurada, os selos, os voos, o pulso, o confete) espera quem desenha, e
+//! está aqui para os testes e o `/v1/estado` lerem.
 //!
 //! Só metadados: o id curto da sessão (`sid8`), o do turno, o nome da pasta
 //! do projeto nos balões (como o balão do M4 já mostra) e enums. Nada de
@@ -15,7 +16,7 @@ use std::collections::VecDeque;
 
 use serde::Serialize;
 
-use crate::cerebro::{Fim, Nivel, OrigemTurno, RegistroTurno, ResumoCorrente};
+use crate::cerebro::{Fim, Nivel, OrigemTurno, RegistroTurno, ResumoCorrente, TipoEspera};
 
 /// Intenções guardadas para o `/v1/estado` (as mais novas).
 pub const GUARDADAS: usize = 200;
@@ -82,6 +83,32 @@ pub enum Tipo {
         #[serde(skip_serializing_if = "Option::is_none")]
         sid8: Option<String>,
     },
+    /// A escalada do aviso de espera que o pet chama (decisão 0075): o nível
+    /// 1 quando ela começa (`aviso`: o aviso é novo; `vez`: o aviso mais
+    /// velho saiu e este passou a ser o mais velho), 2 a 4 quando sobe
+    /// (`tempo`, `voltou`) e 0 quando acaba (`andou`: a sessão andou; `visto`:
+    /// o clique; `sessao_saiu`; `outro_aviso`: um mais urgente passou à
+    /// frente).
+    Escalada {
+        sid8: String,
+        nivel: u8,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        espera: Option<TipoEspera>,
+        motivo: &'static str,
+    },
+    /// A chamada (`alert`) tocada de novo, na L2 e na L4.
+    Rajada { sid8: String, nivel: u8 },
+    /// Um voo do pet até `destino` e de volta. Na escalada, `alto_centro` (o
+    /// alto-centro do monitor, com "!!"), pelo `motivo` `escalada` (o
+    /// tempo) ou `voltou` (o Renan voltou ao teclado).
+    Voo {
+        destino: &'static str,
+        motivo: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        sid8: Option<String>,
+    },
+    /// O selo do aviso pulsando a 1 Hz (a L4) liga ou desliga.
+    Pulso { ligado: bool, sid8: String },
 }
 
 fn eh_falso(b: &bool) -> bool {

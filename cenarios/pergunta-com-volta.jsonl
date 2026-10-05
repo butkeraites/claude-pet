@@ -1,0 +1,10 @@
+{"cenario": "pergunta-com-volta", "descricao": "uma permissão com o Renan longe: L1, L2 e o primeiro voo da L3; ele volta (ao navegador) e o pet voa na hora; sem olhar o Claude, o terceiro voo e a L4; ele vai ao terminal do Claude e o pulso para; a escalada acaba quando a ferramenta roda", "padrao": {"sid": "s1", "ent": "cli", "proj": "web"}}
+{"t": 0, "desktop": {"ocioso": true}}
+{"t": 0, "evento": {"e": "UserPromptSubmit", "turno": "p1", "ts": 0, "orig": "comum"}}
+{"t": 20000, "evento": {"e": "PermissionRequest", "turno": "p1", "ts": 19995, "tool": "Bash"}}
+{"t": 26000, "evento": {"e": "Notification", "turno": "p1", "ts": 25995, "nt": "permission_prompt"}}
+{"t": 130000, "desktop": {"ocioso": false}}
+{"t": 400000, "desktop": {"olhando_claude": true}}
+{"t": 410000, "evento": {"e": "PostToolUse", "turno": "p1", "ts": 409990, "tool": "Bash", "dur": 2000}}
+{"t": 415000, "evento": {"e": "Stop", "turno": "p1", "ts": 414990, "bg": 0, "crn": 0}}
+{"t": 425000, "fim": true}

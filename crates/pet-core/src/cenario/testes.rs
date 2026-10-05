@@ -179,3 +179,149 @@ fn o_executor_vence_os_prazos_como_o_laco() {
         "as intenções não dependem da skin"
     );
 }
+
+// --- o que importa em cada linha da tabela do PLANO (decisão 0077) ----------
+
+use crate::motor::intencoes::Tipo;
+
+/// As linhas do tipo `i` (o nome da intenção na linha do tempo).
+fn so<'a>(linha: &'a [Intencao], i: &str) -> Vec<&'a Intencao> {
+    linha
+        .iter()
+        .filter(|x| serde_json::to_value(x).unwrap()["i"] == i)
+        .collect()
+}
+
+/// Os níveis da escalada, em ordem, com o instante.
+fn niveis(linha: &[Intencao]) -> Vec<(u64, u8)> {
+    linha
+        .iter()
+        .filter_map(|x| match &x.tipo {
+            Tipo::Escalada { nivel, .. } => Some((x.t_ms, *nivel)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn chamadas(linha: &[Intencao]) -> usize {
+    linha
+        .iter()
+        .filter(
+            |x| matches!(&x.tipo, Tipo::Reacao { nome, motivo: "aviso", .. } if nome == "alert"),
+        )
+        .count()
+}
+
+#[test]
+fn pergunta_e_pergunta_dupla_sao_um_aviso_so() {
+    for nome in ["pergunta", "pergunta-dupla"] {
+        let linha = linha_do_tempo(nome);
+        assert_eq!(chamadas(&linha), 1, "{nome}: uma chamada");
+        let baloes: Vec<_> = so(&linha, "balao");
+        assert_eq!(baloes.len(), 1, "{nome}: um balão");
+        assert!(
+            matches!(&baloes[0].tipo, Tipo::Balao { linhas, .. } if linhas[0].ends_with("pergunta pra você")),
+            "{nome}: o balão da pergunta"
+        );
+        let n = niveis(&linha);
+        assert_eq!(
+            n.iter().map(|(_, n)| *n).collect::<Vec<_>>(),
+            vec![1, 0],
+            "{nome}: L1 até a resposta"
+        );
+        assert!(so(&linha, "rajada").is_empty() && so(&linha, "voo").is_empty());
+    }
+}
+
+#[test]
+fn plano_lido_no_terminal_fica_em_l1() {
+    let linha = linha_do_tempo("plano-lido-no-terminal");
+    assert_eq!(chamadas(&linha), 1);
+    assert_eq!(
+        niveis(&linha).iter().map(|(_, n)| *n).max(),
+        Some(1),
+        "lendo no terminal do Claude, com pausas de menos de 60 s"
+    );
+    assert!(so(&linha, "rajada").is_empty() && so(&linha, "voo").is_empty());
+    assert!(matches!(
+        &so(&linha, "balao")[0].tipo,
+        Tipo::Balao { linhas, .. } if linhas[0].starts_with("Plano pra aprovar!")
+    ));
+}
+
+#[test]
+fn pergunta_ausente_escala_ate_o_teto_e_para() {
+    let linha = linha_do_tempo("pergunta-ausente");
+    // O aviso abre em 60 s.
+    assert_eq!(
+        niveis(&linha),
+        vec![
+            (60_000, 1),
+            (90_000, 2),
+            (150_000, 3),
+            (360_000, 4),
+            (3_020_000, 0)
+        ]
+    );
+    let rajadas = |nivel: u8| {
+        so(&linha, "rajada")
+            .iter()
+            .filter(|x| matches!(x.tipo, Tipo::Rajada { nivel: n, .. } if n == nivel))
+            .map(|x| x.t_ms)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(rajadas(2), vec![90_000, 96_000, 102_000, 108_000, 114_000]);
+    assert_eq!(rajadas(4).len(), 30, "uma por minuto, por 30 min");
+    assert_eq!(rajadas(4).last(), Some(&2_100_000));
+    let voos: Vec<u64> = so(&linha, "voo").iter().map(|x| x.t_ms).collect();
+    assert_eq!(
+        voos,
+        vec![150_000, 210_000, 270_000],
+        "três voos, nenhum na volta"
+    );
+    let pulsos: Vec<(u64, bool)> = so(&linha, "pulso")
+        .iter()
+        .map(|x| match x.tipo {
+            Tipo::Pulso { ligado, .. } => (x.t_ms, ligado),
+            _ => unreachable!(),
+        })
+        .collect();
+    assert_eq!(pulsos, vec![(360_000, true), (2_160_000, false)]);
+}
+
+#[test]
+fn pergunta_com_volta_voa_na_hora_em_que_o_renan_volta() {
+    let linha = linha_do_tempo("pergunta-com-volta");
+    let voos: Vec<(u64, &str)> = so(&linha, "voo")
+        .iter()
+        .map(|x| match x.tipo {
+            Tipo::Voo { motivo, .. } => (x.t_ms, motivo),
+            _ => unreachable!(),
+        })
+        .collect();
+    assert_eq!(
+        voos,
+        vec![
+            (110_000, "escalada"),
+            (130_000, "voltou"),
+            (190_000, "escalada")
+        ]
+    );
+    // Olhou o terminal do Claude: o pulso para na hora.
+    assert!(
+        so(&linha, "pulso")
+            .iter()
+            .any(|x| x.t_ms == 400_000 && matches!(x.tipo, Tipo::Pulso { ligado: false, .. }))
+    );
+}
+
+#[test]
+fn com_o_nao_perturbe_nunca_passa_de_l1() {
+    let linha = linha_do_tempo("pergunta-nao-perturbe");
+    assert_eq!(chamadas(&linha), 1, "a L1 toca");
+    assert_eq!(
+        niveis(&linha).iter().map(|(_, n)| *n).collect::<Vec<_>>(),
+        vec![1, 0]
+    );
+    assert!(so(&linha, "rajada").is_empty() && so(&linha, "voo").is_empty());
+}

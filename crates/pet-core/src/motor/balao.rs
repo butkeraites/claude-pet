@@ -10,7 +10,7 @@
 //! rabinho virado para cima).
 
 use crate::cena::Elemento;
-use crate::cerebro::{EstadoSessao, ResumoSessao, TipoAviso};
+use crate::cerebro::{EstadoSessao, ResumoSessao, TipoAviso, TipoEspera};
 use crate::fonte;
 use crate::geometria::Ret;
 
@@ -273,6 +273,26 @@ pub fn com_projeto(frase: &str, proj: Option<&str>) -> String {
     }
 }
 
+/// O balão da chamada de um aviso de espera (decisão 0075), pelo tipo. Sem
+/// `proj` (sem pasta, ou a tela compartilhada), a frase sem o nome.
+pub fn linhas_da_espera(espera: Option<TipoEspera>, proj: Option<&str>) -> Vec<String> {
+    let nome = proj.map(|p| fonte::cortar(p, MAX_PROJETO));
+    match espera {
+        Some(TipoEspera::Pergunta) => vec![match nome {
+            Some(nome) => format!("{nome}: pergunta pra você"),
+            None => "Pergunta pra você".to_owned(),
+        }],
+        Some(TipoEspera::Plano) => vec![com_projeto("Plano pra aprovar!", proj)],
+        Some(TipoEspera::Permissao | TipoEspera::Elicitacao) | None => vec![
+            "Ô, meu camarada!".to_owned(),
+            match nome {
+                Some(nome) => format!("{nome} precisa de você"),
+                None => "precisa de você".to_owned(),
+            },
+        ],
+    }
+}
+
 /// "há quanto tempo", curto: 40 s, 3 min, 2 h.
 pub fn duracao(ms: u64) -> String {
     let s = ms / 1000;
@@ -483,5 +503,44 @@ mod testes {
             linha_da_sessao(None, "erro", 0, 0, false),
             "sem pasta: erro (0 s)"
         );
+    }
+
+    #[test]
+    fn a_chamada_pelo_tipo_da_espera_cabe_no_balao() {
+        let longo = Some("agenda-presidencial-2026");
+        assert_eq!(
+            linhas_da_espera(Some(TipoEspera::Pergunta), Some("api")),
+            vec!["api: pergunta pra você"]
+        );
+        assert_eq!(
+            linhas_da_espera(Some(TipoEspera::Plano), Some("api")),
+            vec!["Plano pra aprovar! api"]
+        );
+        assert_eq!(
+            linhas_da_espera(Some(TipoEspera::Permissao), Some("api")),
+            vec!["Ô, meu camarada!", "api precisa de você"]
+        );
+        assert_eq!(
+            linhas_da_espera(Some(TipoEspera::Elicitacao), None),
+            vec!["Ô, meu camarada!", "precisa de você"]
+        );
+        assert_eq!(linhas_da_espera(None, None)[1], "precisa de você");
+        for espera in [
+            None,
+            Some(TipoEspera::Permissao),
+            Some(TipoEspera::Elicitacao),
+            Some(TipoEspera::Plano),
+            Some(TipoEspera::Pergunta),
+        ] {
+            for proj in [longo, None] {
+                for linha in linhas_da_espera(espera, proj) {
+                    assert!(
+                        linha.chars().count() <= MAX_CARACTERES,
+                        "{linha}: o balão cortaria"
+                    );
+                    assert!(linha.chars().all(fonte::tem), "{linha}: glifo");
+                }
+            }
+        }
     }
 }

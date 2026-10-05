@@ -111,6 +111,9 @@ pub const ATIVA_SEM_EVENTO_MS: u64 = 5 * 60 * 1000;
 pub const ERRO_NA_TELA_MS: u64 = 60_000;
 /// O erro do `StopFailure` que deixa o Zeca cansado: o limite de uso.
 pub const ERRO_DE_LIMITE: &str = "rate_limit";
+/// Um gatilho atrasado de um diálogo (até isto antes do aviso) ainda refina
+/// o tipo da espera (decisão 0075).
+pub const JANELA_DO_DIALOGO_MS: u64 = 5_000;
 /// Arquivos diferentes lembrados por turno. Passou disso, cada arquivo novo
 /// só soma num contador: um processo local mandando `arq` sempre novo não
 /// cresce a memória.
@@ -467,10 +470,46 @@ impl TipoAviso {
     }
 }
 
+/// O que a sessão espera do Renan (decisão 0075), do menos ao mais forte: um
+/// gatilho novo do mesmo diálogo só sobe o tipo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TipoEspera {
+    /// Uma permissão (`PermissionRequest`, `permission_prompt`, …).
+    Permissao,
+    /// Um formulário de um servidor MCP (`elicitation_dialog`).
+    Elicitacao,
+    /// O plano para aprovar (`ExitPlanMode`).
+    Plano,
+    /// Uma pergunta (`AskUserQuestion`).
+    Pergunta,
+}
+
+/// O tipo de espera que um evento dispara, se dispara (decisão 0075). O
+/// `PermissionRequest` da pergunta e do plano é a pergunta e o plano.
+pub fn espera_do_evento(ev: &Evento) -> Option<TipoEspera> {
+    match ev.e.as_str() {
+        "PreToolUse" | "PermissionRequest" => Some(match ev.tool.as_deref() {
+            Some("AskUserQuestion") => TipoEspera::Pergunta,
+            Some("ExitPlanMode") => TipoEspera::Plano,
+            _ => TipoEspera::Permissao,
+        }),
+        "Notification" => match ev.nt.as_deref() {
+            Some("elicitation_dialog" | "elicitation_url_dialog") => Some(TipoEspera::Elicitacao),
+            Some("idle_prompt") | None => None,
+            Some(_) => Some(TipoEspera::Permissao),
+        },
+        _ => None,
+    }
+}
+
 /// O aviso de uma sessão.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Aviso {
     pub tipo: TipoAviso,
+    /// O que ela espera, num aviso de espera (decisão 0075).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub espera: Option<TipoEspera>,
     /// Desde quando (ms desde 1970).
     pub desde_ms: u64,
     /// Desde quando no relógio monotônico (os prazos).
@@ -1637,6 +1676,7 @@ impl Cerebro {
                             if f.pronto {
                                 sessao.aviso = Some(Aviso {
                                     tipo: TipoAviso::Pronto,
+                                    espera: None,
                                     desde_ms: f.registro.fim_ms,
                                     desde_mono: agora.mono_ms,
                                 });
@@ -1831,6 +1871,7 @@ impl Cerebro {
                         if f.pronto && novo_de_maquina {
                             sessao.aviso = Some(Aviso {
                                 tipo: TipoAviso::Pronto,
+                                espera: None,
                                 desde_ms: t,
                                 desde_mono: agora.mono_ms,
                             });
@@ -1910,11 +1951,26 @@ impl Cerebro {
                 if !guarda_o_pronto {
                     sessao.aviso = tipo.map(|tipo| Aviso {
                         tipo,
+                        espera: (tipo == TipoAviso::Esperando)
+                            .then(|| espera_do_evento(ev))
+                            .flatten(),
                         desde_ms: t,
                         desde_mono: agora.mono_ms,
                     });
                 }
             }
+        }
+        // Um gatilho do mesmo diálogo (a sessão ainda espera e nada andou):
+        // só sobe o tipo, e o relógio do aviso fica (decisão 0075). Um
+        // gatilho que chegou fora de ordem, até 5 s antes, também refina.
+        if !ev.agente
+            && sessao.estado == EstadoSessao::Esperando
+            && let Some(nova) = espera_do_evento(ev)
+            && let Some(aviso) = sessao.aviso.as_mut()
+            && aviso.tipo == TipoAviso::Esperando
+            && t + JANELA_DO_DIALOGO_MS >= aviso.desde_ms
+        {
+            aviso.espera = aviso.espera.max(Some(nova));
         }
         if let Some(motivo) = ignorado {
             self.ignorar(motivo);
@@ -2014,6 +2070,7 @@ impl Cerebro {
                     if f.pronto {
                         sessao.aviso = Some(Aviso {
                             tipo: TipoAviso::Pronto,
+                            espera: None,
                             desde_ms: fim_ms,
                             desde_mono: agora.mono_ms,
                         });
@@ -3518,6 +3575,145 @@ mod testes {
             vec![chega(11_000, de("d", notificacao("permission_prompt")))],
         );
         assert!(c.pendencias().iter().all(|p| p.chave.1 != "d"));
+    }
+
+    fn dialogo(e: &str, turno: &str, tool: &str) -> Evento {
+        Evento {
+            turno: Some(turno.into()),
+            tool: Some(tool.into()),
+            ..ev(e)
+        }
+    }
+
+    fn espera_de(c: &Cerebro) -> Option<(TipoAviso, Option<TipoEspera>, u64)> {
+        c.pendencias()
+            .first()
+            .map(|p| (p.aviso.tipo, p.aviso.espera, p.aviso.desde_ms - BASE))
+    }
+
+    #[test]
+    fn um_dialogo_e_um_aviso_so_com_o_tipo_refinado() {
+        // Os três gatilhos de uma pergunta no 2.1.288 (decisão 0071): o
+        // PreToolUse, o PermissionRequest 14 ms depois e a notificação 6 s
+        // depois. Um aviso só, desde o primeiro, do tipo pergunta.
+        let mut c = novo();
+        rodar(
+            &mut c,
+            vec![
+                chega(0, prompt("p1")),
+                chega(2_205, dialogo("PreToolUse", "p1", "AskUserQuestion")),
+                chega(2_219, dialogo("PermissionRequest", "p1", "AskUserQuestion")),
+                chega(8_217, notificacao("permission_prompt")),
+            ],
+        );
+        assert_eq!(
+            espera_de(&c),
+            Some((TipoAviso::Esperando, Some(TipoEspera::Pergunta), 2_205))
+        );
+        // Respondida: a sessão andou, o aviso sai.
+        rodar(
+            &mut c,
+            vec![chega(18_964, ferramenta("p1", "AskUserQuestion", None, 0))],
+        );
+        assert_eq!(espera_de(&c), None);
+        // O plano: plano, e a notificação não desce para permissão.
+        rodar(
+            &mut c,
+            vec![
+                chega(20_000, dialogo("PreToolUse", "p1", "ExitPlanMode")),
+                chega(20_021, dialogo("PermissionRequest", "p1", "ExitPlanMode")),
+                chega(26_000, notificacao("permission_prompt")),
+            ],
+        );
+        assert_eq!(
+            espera_de(&c),
+            Some((TipoAviso::Esperando, Some(TipoEspera::Plano), 20_000))
+        );
+        rodar(
+            &mut c,
+            vec![chega(30_000, ferramenta("p1", "ExitPlanMode", None, 1))],
+        );
+        // A notificação chegou antes do PreToolUse (hooks async): a permissão
+        // sobe para pergunta, no mesmo aviso.
+        rodar(
+            &mut c,
+            vec![
+                chega(40_000, notificacao("permission_prompt")),
+                chega(40_030, dialogo("PreToolUse", "p1", "AskUserQuestion")),
+            ],
+        );
+        assert_eq!(
+            espera_de(&c),
+            Some((TipoAviso::Esperando, Some(TipoEspera::Pergunta), 40_000))
+        );
+        rodar(
+            &mut c,
+            vec![chega(45_000, ferramenta("p1", "AskUserQuestion", None, 0))],
+        );
+        // Um gatilho que saiu até 5 s antes do aviso (fora de ordem) refina;
+        // um mais velho que isso, não.
+        rodar(
+            &mut c,
+            vec![
+                chega(50_000, notificacao("elicitation_dialog")),
+                atrasado(50_100, 46_000, dialogo("PreToolUse", "p1", "ExitPlanMode")),
+            ],
+        );
+        assert_eq!(
+            espera_de(&c),
+            Some((TipoAviso::Esperando, Some(TipoEspera::Plano), 50_000))
+        );
+        rodar(
+            &mut c,
+            vec![
+                chega(51_000, ferramenta("p1", "ExitPlanMode", None, 1)),
+                chega(60_000, permissao("p1")),
+                atrasado(
+                    60_100,
+                    54_000,
+                    dialogo("PreToolUse", "p1", "AskUserQuestion"),
+                ),
+            ],
+        );
+        assert_eq!(
+            espera_de(&c),
+            Some((TipoAviso::Esperando, Some(TipoEspera::Permissao), 60_000))
+        );
+        // Um evento de subagente não refina (ele não abre diálogo do Renan).
+        let do_agente = Evento {
+            agente: true,
+            aid: Some("x1".into()),
+            ..dialogo("PermissionRequest", "p1", "AskUserQuestion")
+        };
+        rodar(&mut c, vec![chega(61_000, do_agente)]);
+        assert_eq!(espera_de(&c).unwrap().1, Some(TipoEspera::Permissao));
+        assert_eq!(
+            serde_json::to_value(c.pendencias()[0].aviso).unwrap()["espera"],
+            "permissao"
+        );
+    }
+
+    #[test]
+    fn o_tipo_de_espera_de_cada_gatilho() {
+        let n = |nt: &str| espera_do_evento(&notificacao(nt));
+        assert_eq!(n("permission_prompt"), Some(TipoEspera::Permissao));
+        assert_eq!(n("worker_permission_prompt"), Some(TipoEspera::Permissao));
+        assert_eq!(n("agent_needs_input"), Some(TipoEspera::Permissao));
+        assert_eq!(n("elicitation_dialog"), Some(TipoEspera::Elicitacao));
+        assert_eq!(n("elicitation_url_dialog"), Some(TipoEspera::Elicitacao));
+        assert_eq!(n("idle_prompt"), None);
+        assert_eq!(
+            espera_do_evento(&dialogo("PermissionRequest", "p", "Bash")),
+            Some(TipoEspera::Permissao)
+        );
+        assert_eq!(
+            espera_do_evento(&dialogo("PermissionRequest", "p", "ExitPlanMode")),
+            Some(TipoEspera::Plano)
+        );
+        assert_eq!(espera_do_evento(&prompt("p")), None);
+        assert!(TipoEspera::Pergunta > TipoEspera::Plano);
+        assert!(TipoEspera::Plano > TipoEspera::Elicitacao);
+        assert!(TipoEspera::Elicitacao > TipoEspera::Permissao);
     }
 
     // --- correntes e turnos de máquina (decisão 0073) ------------------------
