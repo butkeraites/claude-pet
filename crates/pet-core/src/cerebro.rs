@@ -77,8 +77,9 @@
 //! ([`Cerebro::pendencias`]); visto ([`Cerebro::ver`]), o aviso sai. Mudar de
 //! estado resolve o aviso de antes, e entrar em "esperando você" ou em erro
 //! abre um; o pronto abre quando a acomodação do Stop termina (a festa) e
-//! um prompt digitado o resolve. O `idle_prompt` nunca abre nem resolve
-//! aviso, e um evento atrasado (mais velho que o estado de agora) não mexe
+//! um prompt digitado o resolve. O `idle_prompt` nunca abre aviso e só tira
+//! o de espera que sobrou (ele nunca sai com um diálogo na tela; decisão
+//! 0094), e um evento atrasado (mais velho que o estado de agora) não mexe
 //! nele. O pronto e o erro somem sozinhos em [`VIDA_AVISO_MS`]; o "esperando
 //! você" só sai com um evento da própria sessão ou visto.
 
@@ -2056,6 +2057,17 @@ impl Cerebro {
                     if sessao.turno.is_none() {
                         sessao.estado = EstadoSessao::Parada;
                     }
+                    // O `idle_prompt` nunca sai com um diálogo na tela (lido
+                    // no 2.1.288): um aviso de espera de antes dele é de um
+                    // diálogo que acabou sem o evento chegar (respondido com o
+                    // pet fora, e a memória o trouxe de volta; decisão 0094).
+                    // Ele sai; o pronto e o erro ficam.
+                    if sessao
+                        .aviso
+                        .is_some_and(|a| a.tipo == TipoAviso::Esperando && t >= a.desde_ms)
+                    {
+                        sessao.aviso = None;
+                    }
                 }
                 Some(_) => sessao.estado = EstadoSessao::Esperando,
                 None => ignorado = Some("notificacao_sem_tipo"),
@@ -2146,9 +2158,10 @@ impl Cerebro {
             sessao.estado_desde_mono = instante(agora.mono_ms);
             // Os avisos (decisão 0057): mudar de estado resolve o de antes, e
             // entrar em "esperando você" ou em erro abre um. O `idle_prompt`
-            // (repete a cada ~60 s) nunca abre nem resolve; um evento
-            // atrasado, mais velho que o estado de antes (a permissão que ele
-            // pede já foi respondida), não mexe no aviso.
+            // (repete a cada ~60 s) nunca abre e aqui não resolve (a espera
+            // que sobrou sai no ramo dele; decisão 0094); um evento atrasado,
+            // mais velho que o estado de antes (a permissão que ele pede já
+            // foi respondida), não mexe no aviso.
             let ocioso = ev.e == "Notification" && ev.nt.as_deref() == Some("idle_prompt");
             if !ocioso && t >= desde_antes {
                 let tipo = match sessao.estado {
@@ -2472,12 +2485,13 @@ impl Cerebro {
     /// pensando, o trabalhando e o compactando até [`ATIVA_SEM_EVENTO_MS`]
     /// depois do último evento, o erro e o cansado até [`ERRO_NA_TELA_MS`];
     /// vencido, parada); o pronto e o erro até [`VIDA_AVISO_MS`]; o
-    /// "esperando você" enquanto a sessão vive. Nada de turno, de corrente
-    /// ou de festa: o turno que estava aberto não é de confiança (o Stop dele
-    /// pode ter se perdido com o pet fora), e o próximo evento dele abre um
-    /// turno implícito, como no M3. A sessão volta marcada como restaurada
-    /// até o próximo evento dela. Uma que o cérebro já acompanha fica como
-    /// está.
+    /// "esperando você" enquanto a sessão vive. Uma hora além da janela do
+    /// `ts` dos hooks ([`JANELA_TS_MS`]) deixa a sessão de fora. Nada de
+    /// turno, de corrente ou de festa: o turno que estava aberto não é de
+    /// confiança (o Stop dele pode ter se perdido com o pet fora), e o
+    /// próximo evento dele abre um turno implícito, como no M3. A sessão volta
+    /// marcada como restaurada até o próximo evento dela. Uma que o cérebro
+    /// já acompanha fica como está.
     pub fn restaurar(&mut self, guardadas: &[SessaoGuardada], agora: Agora) -> Restauradas {
         let mut r = Restauradas::default();
         let mut ordem: Vec<&SessaoGuardada> = guardadas.iter().collect();
@@ -2491,9 +2505,24 @@ impl Cerebro {
             }
             let origem = g.ent.as_deref().unwrap_or("desconhecida");
             let reais = self.sessoes.keys().filter(|(teste, _)| !teste).count();
+            // Uma hora mais adiante que a janela do `ts` dos hooks (6 h) não
+            // é de verdade (o relógio voltou, o arquivo mexido): os prazos
+            // sairiam do relógio do laço.
+            let limite = agora.parede_ms.saturating_add(JANELA_TS_MS);
+            let do_futuro = [
+                Some(g.ultimo_evento_ms),
+                Some(g.estado_desde_ms),
+                g.aviso.map(|a| a.desde_ms),
+                g.aviso.and_then(|a| a.vista_ms),
+                g.janela.as_ref().map(|j| j.em_ms),
+            ]
+            .into_iter()
+            .flatten()
+            .any(|ms| ms > limite);
             if self.sessoes.contains_key(&chave)
                 || !self.config.origens.iter().any(|o| o == origem)
                 || reais >= MAX_SESSOES
+                || do_futuro
             {
                 r.de_fora += 1;
                 continue;
@@ -3770,19 +3799,36 @@ mod testes {
         assert_eq!(aviso_de(&c), Some(TipoAviso::Erro));
         rodar(&mut c, vec![chega(95_000, prompt("p3"))]);
         assert_eq!(aviso_de(&c), None);
-        // O idle_prompt fecha o turno (sem Stop) e para a sessão, mas não
-        // resolve o "esperando você".
+        // O idle_prompt fecha o turno (sem Stop) e para a sessão. Ele nunca
+        // sai com um diálogo na tela (lido no 2.1.288): o "esperando você"
+        // que sobrou é de um diálogo que acabou sem o evento chegar, e sai
+        // junto (decisão 0094). Um idle_prompt atrasado, de antes do aviso,
+        // não mexe nele.
         rodar(
             &mut c,
             vec![
                 chega(96_000, permissao("p3")),
-                chega(160_000, notificacao("idle_prompt")),
+                atrasado(150_000, 95_500, notificacao("idle_prompt")),
             ],
         );
+        assert_eq!(aviso_de(&c), Some(TipoAviso::Esperando), "o atrasado");
+        rodar(&mut c, vec![chega(160_000, notificacao("idle_prompt"))]);
         assert_eq!(c.resumo().sessoes[0].estado, EstadoSessao::Parada);
-        assert_eq!(aviso_de(&c), Some(TipoAviso::Esperando));
+        assert_eq!(aviso_de(&c), None);
+        // O pronto e o erro ficam com o idle_prompt (ele se repete; quem os
+        // tira é o Renan).
+        rodar(
+            &mut c,
+            vec![
+                chega(170_000, prompt("p4")),
+                chega(171_000, stop("p4")),
+                Ate(172_000),
+                chega(232_000, notificacao("idle_prompt")),
+            ],
+        );
+        assert_eq!(aviso_de(&c), Some(TipoAviso::Pronto));
         // O fim da sessão leva o aviso junto.
-        rodar(&mut c, vec![chega(170_000, ev("SessionEnd"))]);
+        rodar(&mut c, vec![chega(240_000, ev("SessionEnd"))]);
         assert!(c.pendencias().is_empty());
     }
 
@@ -5290,6 +5336,11 @@ mod testes {
             guardada("repetida", antes(2_000)),
             guardada("repetida", antes(3_000)),
             guardada("ja-acompanhada", antes(1_000)),
+            guardada("do-futuro", volta + JANELA_TS_MS + 1),
+            SessaoGuardada {
+                aviso: Some(aviso(TipoAviso::Pronto, volta + 7 * H)),
+                ..guardada("aviso-do-futuro", antes(1_000))
+            },
         ];
         let mut c = novo();
         // Uma sessão que o cérebro já acompanha fica como está.
@@ -5297,7 +5348,7 @@ mod testes {
         viva.sid = Some("ja-acompanhada".into());
         c.receber(&viva, volta, depois_da_volta(volta, 0));
         let r = c.restaurar(&lista, depois_da_volta(volta, 0));
-        assert_eq!((r.expiradas, r.de_fora), (1, 4));
+        assert_eq!((r.expiradas, r.de_fora), (1, 6));
         let estado = |sid: &str| {
             c.resumo()
                 .sessoes
@@ -5341,6 +5392,12 @@ mod testes {
         );
         assert_eq!(estado("do-sdk"), None);
         assert_eq!(estado("sem-origem"), None);
+        assert_eq!(
+            estado("do-futuro"),
+            None,
+            "o relógio voltou, ou o arquivo foi mexido"
+        );
+        assert_eq!(estado("aviso-do-futuro"), None);
         assert_eq!(
             estado("ja-acompanhada").map(|e| e.0),
             Some(EstadoSessao::Pensando),

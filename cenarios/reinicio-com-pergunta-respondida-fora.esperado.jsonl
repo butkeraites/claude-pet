@@ -1,0 +1,16 @@
+{"t":1000,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":10000,"i":"reacao","nome":"alert","motivo":"aviso","sid8":"s1"}
+{"t":10000,"i":"balao","linhas":["api: pergunta pra você"],"motivo":"aviso"}
+{"t":10000,"i":"escalada","sid8":"s1","nivel":1,"espera":"pergunta","motivo":"aviso"}
+{"t":10000,"i":"base","estado":"waiting","prioridade":"esperando","sid8":"s1"}
+{"t":35000,"i":"escalada","sid8":"s1","nivel":1,"espera":"pergunta","motivo":"restaurada"}
+{"t":35000,"i":"restauracao","sessoes":1,"avisos":1}
+{"t":35000,"i":"base","estado":"waiting","prioridade":"esperando","sid8":"s1"}
+{"t":40000,"i":"escalada","sid8":"s1","nivel":2,"motivo":"tempo"}
+{"t":40000,"i":"rajada","sid8":"s1","nivel":2}
+{"t":46000,"i":"rajada","sid8":"s1","nivel":2}
+{"t":52000,"i":"rajada","sid8":"s1","nivel":2}
+{"t":58000,"i":"rajada","sid8":"s1","nivel":2}
+{"t":64000,"i":"rajada","sid8":"s1","nivel":2}
+{"t":90000,"i":"escalada","sid8":"s1","nivel":0,"motivo":"andou"}
+{"t":90000,"i":"base","estado":"idle","prioridade":"parado"}

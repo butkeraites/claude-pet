@@ -407,6 +407,8 @@ As outras sessões aparecem como selos: um contador "+N", uma bandeirinha com a 
 
 **Saída da escalada:** qualquer evento da própria sessão ou um clique no aviso exibido.
 
+*Correção (2026-10-05, decisão 0094):* o `idle_prompt` também tira o aviso de espera que sobrou (ele nunca sai com um diálogo na tela: a espera é de um diálogo que acabou sem o evento chegar, como o respondido com o pet fora); o pronto e o erro continuam com ele.
+
 *Correção (2026-10-05, revisão, decisão 0090):* "olhando o terminal do Claude" é olhar o terminal da sessão que espera, quando a janela dela é certa (o de outra sessão não vale); 5 s nele com o Renan presente contam como o diálogo visto, e daí nada passa da L1 (o Esc numa pergunta e o plano recusado não mandam evento nenhum no 2.1.288, e são feitos ali). A pose de espera vem do aviso e dura até o teto da escalada, ou 2 min depois de o diálogo ser visto; o clique que vê o aviso a solta, e o pet pode dormir com o selo "!". Os voos da volta têm a conta deles (até 3), fora dos 3 da L3, e esperam o pet aparecer na tela (a proteção de tela que fecha depois do primeiro toque, a sessão bloqueada).
 
 **Presença:**
@@ -794,7 +796,7 @@ Atualizado em 2026-10-05 com a pesquisa do M5 (`docs/pesquisa/10-cerebro-m5.md`,
 - **T5.24** o que ficou da revisão: o T3 que não tocou não gasta o intervalo, o log da reação do próprio pet, o comentário partido do `bin/pet`, a regra do "✳" fora, a presença no casamento da janela, os limites conhecidos (o tique na mesma janela, as mensagens de teammate e de canal, o "não perturbe" que só chega com os eventos) e as docs (PLANO, CLAUDE.md, README) reconciliadas (decisão 0092).
 
 **A memória das sessões** (relatado pelo Renan em 2026-10-05: cada reinício do pet esquecia as sessões abertas, e o clique dizia "nenhuma sessão do Claude aberta"; decisão 0093):
-- **T5.25** a memória das sessões: `pet_core::memoria` (o formato com versão, só metadados das sessões reais, até 64 sessões e 256 KiB, conferido campo a campo), os instantes do laço com sinal no cérebro e na escalada (`cerebro::Instante`, `Agora::no_laco`, `cerebro::depois`), o `Cerebro::restaurar` pelas regras de sempre, o `Motor::restaurar` quieto (a `Escalada::retomada`, a intenção `restauracao`, a marca `restaurada` no `/v1/estado.sessoes`), a instância do compositor nas janelas (`Motor::definir_compositor`), no daemon a gravação de uma vez pelo laço (no batimento, quando muda, e no SIGTERM) e o boot id do Linux; o passo `reinicio` nos cenários (e no `docs/CENARIOS.md`) e os dourados de reinício, o teste do daemon de verdade e o canário;
+- **T5.25** a memória das sessões: `pet_core::memoria` (o formato com versão, só metadados das sessões reais, até 64 sessões e 256 KiB, conferido campo a campo), os instantes do laço com sinal no cérebro e na escalada (`cerebro::Instante`, `Agora::no_laco`, `cerebro::depois`), o `Cerebro::restaurar` pelas regras de sempre, o `Motor::restaurar` quieto (a `Escalada::retomada`, a intenção `restauracao`, a marca `restaurada` no `/v1/estado.sessoes`), a instância do compositor nas janelas (`Motor::definir_compositor`), no daemon a gravação de uma vez pelo laço (no batimento, quando muda, e no SIGTERM) e o boot id do Linux; o passo `reinicio` nos cenários (e no `docs/CENARIOS.md`) e os dourados de reinício, o teste do daemon de verdade e o canário; na revisão, o `idle_prompt` que tira a espera que sobrou e as horas do futuro fora da memória (decisão 0094);
 - **T5.26** as docs e a conferência: o CLAUDE.md (o estado, as pegadinhas da memória e do `/reload-plugins`), o README, a conferência ao vivo num daemon de rascunho com uma sessão aninhada, e a produção refeita da branch e reiniciada com as sessões reais do Renan na lista antes e depois.
 
 **Verificação:** `bin/pet verificar` verde a cada commit e `cargo test -p pet-core` com os cenários. Tabelas, exemplos de pontuação (decisão 0074) e cenários:
@@ -825,6 +827,7 @@ Atualizado em 2026-10-05 com a pesquisa do M5 (`docs/pesquisa/10-cerebro-m5.md`,
 | `reinicio-sessao-parada` | o pet reinicia: a sessão parada volta na lista do clique com o tempo de antes, sem tocar nada; a de teste não volta (decisão 0093) |
 | `reinicio-no-meio-do-turno` | o turno aberto não volta; a sessão volta trabalhando até o prazo dela; o próximo evento abre um turno implícito e o Stop festeja o que veio depois; o Stop perdido com o pet fora espera o `idle_prompt` |
 | `reinicio-com-pergunta` | a escalada segue do tempo que passou, sem chamar de novo; os voos e a L4 nas horas deles |
+| `reinicio-com-pergunta-respondida-fora` | a resposta e o Stop se perdem com o pet fora: a espera volta e sai no `idle_prompt`, sem festa (decisão 0094) |
 | `reinicio-com-pronto-e-erro` | o pronto e o erro voltam sem festa nem susto; o clique leva aos terminais de antes |
 | `reinicio-depois-de-13-h` | a sessão de 13 h não volta; a de 11 h sai na hora dela |
 | `reinicio-da-maquina`, `reinicio-com-arquivo-corrompido` | nada volta |

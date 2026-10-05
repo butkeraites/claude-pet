@@ -4125,3 +4125,44 @@ não do Claude (nada de festa nem de chamada por algo que já passou). Depois
 de um boot, esquecer é o certo; depois de um logout, a sessão continua viva
 no tmux, mas o endereço de uma janela de outro compositor nunca é de
 confiança: focar a janela errada é pior que o balão.
+
+## 0094 — Revisão da memória das sessões: o `idle_prompt` tira a espera que sobrou e as horas do futuro ficam de fora (2026-10-05)
+
+**Problema:** relendo a decisão 0093 antes de levar a memória para a
+produção, dois buracos. Uma pergunta que o Renan responde com o pet fora,
+num turno que também acaba com o pet fora (a resposta e o Stop se perdem),
+voltava com a memória e seguia escalando: o `idle_prompt`, o único evento que
+a sessão ainda manda depois disso, nunca mexia em aviso nenhum (decisão
+0057), e o pet chamaria por um diálogo que não existe mais até o próximo
+prompt, o pior erro da escalada (decisão 0090). E um arquivo com horas muito
+adiante (o relógio que voltou entre as partidas, o arquivo mexido)
+restaurava sessões com prazos fora do relógio do laço.
+**Escolha:**
+- **O `idle_prompt` tira a espera que sobrou** (corrige a decisão 0057, que o
+  deixava sem mexer em aviso nenhum): ele nunca sai com um diálogo na tela
+  (lido no binário do 2.1.288, no T5.7), então um aviso de espera de antes
+  dele é de um diálogo que acabou sem o evento chegar. A espera sai no
+  primeiro `idle_prompt` da sessão; um atrasado, de antes do aviso, não mexe
+  nela; o pronto e o erro continuam com ele (ele se repete, e quem os tira é
+  o Renan). Sem reinício nenhum, o caso não acontece: nenhum dourado mudou.
+  O dourado novo `reinicio-com-pergunta-respondida-fora` mostra a espera que
+  volta quieta, segue escalando (a L2 ainda sai: o pet não tem como saber) e
+  sai no `idle_prompt`, sem festa.
+- **As horas do futuro:** uma sessão com alguma hora (o último evento, o
+  estado, o aviso, o diálogo visto, o casamento da janela) mais de 6 h
+  adiante da partida (`JANELA_TS_MS`, a mesma janela do `ts` dos hooks)
+  fica de fora.
+- **Testes:** o dos avisos no cérebro (o `idle_prompt` tira a espera que
+  sobrou, não a de um atrasado, nem o pronto), o da memória com as horas do
+  futuro e o dourado com a asserção dele. Três mutações reprovaram (a espera
+  que fica, o atrasado que a tira, o pronto que sai junto).
+- **Limites:** a espera respondida com o pet fora segue escalando até o
+  `idle_prompt`, uns 60 s depois do fim do turno. Uma janela que fechou com o
+  pet fora continua na sessão até o próximo prompt casar outra ou o clique
+  dizer que ela sumiu (no mesmo compositor, o endereço de uma janela fechada
+  poderia, em tese, ser o de uma nova; a parada de uma atualização dura
+  segundos).
+**Por quê:** a memória não pode trazer de volta uma chamada por algo que já
+passou, e o `idle_prompt` é a prova, mandada pela própria sessão, de que não
+há diálogo na tela: o primeiro evento depois de um turno perdido. E nada lido
+do disco pode pôr um prazo fora do relógio do laço.

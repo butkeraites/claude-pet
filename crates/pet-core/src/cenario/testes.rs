@@ -887,10 +887,11 @@ fn sem_personagem_a_linha_do_tempo_e_a_mesma() {
 // --- a memória das sessões (decisão 0093) -----------------------------------
 
 /// Os cenários de reinício e o instante em que o pet volta em cada um.
-const REINICIOS: [(&str, u64); 8] = [
+const REINICIOS: [(&str, u64); 9] = [
     ("reinicio-sessao-parada", 60_000),
     ("reinicio-no-meio-do-turno", 75_000),
     ("reinicio-com-pergunta", 120_000),
+    ("reinicio-com-pergunta-respondida-fora", 35_000),
     ("reinicio-com-pronto-e-erro", 70_000),
     ("reinicio-depois-de-13-h", 46_810_000),
     ("reinicio-da-maquina", 150_000),
@@ -1058,6 +1059,31 @@ fn a_pergunta_volta_e_a_escalada_segue_do_tempo_que_passou() {
         so(&linha, "pulso")
             .iter()
             .any(|x| x.t_ms == 310_000 && matches!(x.tipo, Tipo::Pulso { ligado: true, .. }))
+    );
+}
+
+#[test]
+fn a_pergunta_respondida_com_o_pet_fora_sai_no_idle_prompt() {
+    // A resposta e o Stop se perderam com o pet fora: a espera volta e segue
+    // até o idle_prompt, que nunca sai com um diálogo na tela (decisão 0094).
+    let linha = linha_do_tempo("reinicio-com-pergunta-respondida-fora");
+    assert_eq!(restauracao(&linha), (1, 1, 0, None));
+    assert_eq!(chamadas(&linha), 1);
+    assert_eq!(niveis(&linha).last(), Some(&(90_000, 0)));
+    assert!(so(&linha, "escalada").iter().any(|x| x.t_ms == 90_000
+        && matches!(
+            x.tipo,
+            Tipo::Escalada {
+                motivo: "andou",
+                ..
+            }
+        )));
+    assert!(festas(&linha).is_empty(), "o turno de antes não festeja");
+    assert!(tocou_entre(&linha, 90_001, 100_000).is_empty());
+    assert!(
+        so(&linha, "base")
+            .iter()
+            .any(|x| x.t_ms == 90_000 && matches!(x.tipo, Tipo::Base { estado: "idle", .. }))
     );
 }
 
