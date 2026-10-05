@@ -10,7 +10,8 @@
 //! (`sessoes.origens`, padrão `["cli"]`): `claude -p`, SDK e IDE ficam de
 //! fora. Eventos de teste (`teste: true`, do `bin/pet testar`) vivem num
 //! mundo à parte, nunca se misturam com sessões reais e somem 60 s depois
-//! do último evento. `SessionEnd` sempre larga a sessão e o turno dela; o
+//! do último evento; uma sessão real, depois de uma semana sem evento nenhum
+//! ([`VIDA_SESSAO_MS`], decisão 0096). `SessionEnd` sempre larga a sessão e o turno dela; o
 //! tchau (`bye`) só vem quando o processo está saindo (não num `/clear` nem
 //! numa retomada, que seguem com outro `sid`) e não sobra nenhuma sessão.
 //!
@@ -81,7 +82,8 @@
 //! o de espera que sobrou (ele nunca sai com um diálogo na tela; decisão
 //! 0094), e um evento atrasado (mais velho que o estado de agora) não mexe
 //! nele. O pronto e o erro somem sozinhos em [`VIDA_AVISO_MS`]; o "esperando
-//! você" só sai com um evento da própria sessão ou visto.
+//! você" só sai com um evento da própria sessão, visto, ou depois de
+//! [`VIDA_ESPERA_MS`] sem evento nenhum dela (decisão 0096).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -98,9 +100,16 @@ pub const ACOMODACAO_MS: u64 = 800;
 pub const JANELA_TS_MS: u64 = 6 * 60 * 60 * 1000;
 /// Uma sessão de teste some depois disto sem eventos.
 pub const VIDA_TESTE_MS: u64 = 60_000;
-/// Uma sessão real some depois disto sem eventos (o `SessionEnd` de um
-/// processo morto nunca chega).
-pub const VIDA_SESSAO_MS: u64 = 12 * 60 * 60 * 1000;
+/// Uma sessão real some depois disto sem eventos: uma semana (decisão 0096;
+/// eram 12 h). O Zeca acompanha todas as sessões abertas, e uma parada não
+/// manda nada; o `SessionEnd` tira a que acaba, e uma máquina que reinicia
+/// não traz nenhuma de volta. A vida só enterra a de um processo que morreu
+/// sem o `SessionEnd`, que fica no fim da lista do clique até lá.
+pub const VIDA_SESSAO_MS: u64 = 7 * 24 * 60 * 60 * 1000;
+/// A espera de uma sessão sem evento nenhum por isto sai, o estado e o aviso
+/// (decisão 0096): um Esc numa pergunta não manda nada (decisão 0090), e a
+/// sessão não sai mais em 12 h, como saía antes.
+pub const VIDA_ESPERA_MS: u64 = 12 * 60 * 60 * 1000;
 /// Uma corrente de agentes sem evento nenhum por isto expira, sem festa
 /// (decisão 0073).
 pub const VIDA_CORRENTE_MS: u64 = 12 * 60 * 60 * 1000;
@@ -1572,6 +1581,14 @@ impl Sessao {
         }
     }
 
+    /// Quando a espera sai sozinha (decisão 0096): [`VIDA_ESPERA_MS`] depois
+    /// do último evento da sessão, se ela espera.
+    fn prazo_da_espera(&self) -> Option<u64> {
+        let espera = self.estado == EstadoSessao::Esperando
+            || self.aviso.is_some_and(|a| a.tipo == TipoAviso::Esperando);
+        espera.then(|| depois(self.ultimo_mono, VIDA_ESPERA_MS))
+    }
+
     fn resumo_da_corrente(&self) -> Option<ResumoCorrente> {
         self.corrente.as_ref().map(|c| ResumoCorrente {
             aberta: true,
@@ -2328,6 +2345,18 @@ impl Cerebro {
                 sessao.estado_desde = agora.parede_ms;
                 sessao.estado_desde_mono = instante(agora.mono_ms);
             }
+            // A espera sem evento nenhum da sessão por 12 h sai (decisão
+            // 0096): a sessão fica.
+            if sessao.prazo_da_espera().is_some_and(|p| agora.mono_ms >= p) {
+                if sessao.aviso.is_some_and(|a| a.tipo == TipoAviso::Esperando) {
+                    sessao.aviso = None;
+                }
+                if sessao.estado == EstadoSessao::Esperando {
+                    sessao.estado = EstadoSessao::Parada;
+                    sessao.estado_desde = agora.parede_ms;
+                    sessao.estado_desde_mono = instante(agora.mono_ms);
+                }
+            }
         }
         self.registrar(fechamentos, &mut reacoes, agora);
         let antes = self.sessoes.len();
@@ -2399,6 +2428,7 @@ impl Cerebro {
                     aviso,
                     corrente,
                     s.prazo_do_estado(),
+                    s.prazo_da_espera(),
                 ]
             })
             .flatten()
@@ -2514,9 +2544,10 @@ impl Cerebro {
     /// [`VIDA_SESSAO_MS`] e de uma origem aceita (as mais novas primeiro, até
     /// [`MAX_SESSOES`]); o estado, com o prazo dele (o pensando, o trabalhando
     /// e o compactando até [`ATIVA_SEM_EVENTO_MS`] depois do último evento, o
-    /// erro e o cansado até [`ERRO_NA_TELA_MS`]; vencido, parada); o pronto e
-    /// o erro até [`VIDA_AVISO_MS`]; o "esperando você" enquanto a sessão
-    /// vive. Uma hora além da janela do `ts` dos hooks ([`JANELA_TS_MS`]), ou
+    /// erro e o cansado até [`ERRO_NA_TELA_MS`], a espera até
+    /// [`VIDA_ESPERA_MS`]; vencido, parada); o pronto e o erro até
+    /// [`VIDA_AVISO_MS`]; o "esperando você" até [`VIDA_ESPERA_MS`] depois do
+    /// último evento. Uma hora além da janela do `ts` dos hooks ([`JANELA_TS_MS`]), ou
     /// um instante do laço depois da gravação, deixa a sessão de fora. Nada de
     /// turno, de corrente ou de festa: o turno que estava aberto não é de
     /// confiança (o Stop dele pode ter se perdido com o pet fora), e o
@@ -2585,7 +2616,8 @@ impl Cerebro {
                 EstadoSessao::Erro | EstadoSessao::Cansado => {
                     Some(desde.saturating_add(duracao(ERRO_NA_TELA_MS)))
                 }
-                EstadoSessao::Parada | EstadoSessao::Esperando => None,
+                EstadoSessao::Esperando => Some(ultimo.saturating_add(duracao(VIDA_ESPERA_MS))),
+                EstadoSessao::Parada => None,
             };
             (s.estado, s.estado_desde, s.estado_desde_mono) = match fim_do_estado {
                 Some(fim) if mono >= fim => (EstadoSessao::Parada, agora.na_parede(fim), fim),
@@ -2593,8 +2625,11 @@ impl Cerebro {
             };
             s.aviso = g.aviso.and_then(|a| {
                 let desde_mono = volta.instante(a.desde_laco_ms, a.desde_ms);
-                let vivo = a.tipo == TipoAviso::Esperando
-                    || mono < desde_mono.saturating_add(duracao(VIDA_AVISO_MS));
+                let vivo = if a.tipo == TipoAviso::Esperando {
+                    mono < ultimo.saturating_add(duracao(VIDA_ESPERA_MS))
+                } else {
+                    mono < desde_mono.saturating_add(duracao(VIDA_AVISO_MS))
+                };
                 vivo.then(|| Aviso {
                     tipo: a.tipo,
                     espera: a.espera.filter(|_| a.tipo == TipoAviso::Esperando),
@@ -3714,12 +3749,13 @@ mod testes {
         assert_eq!(c.proximo_prazo(), Some(1_000 + ACOMODACAO_MS));
         assert!(c.tique(em(1_799)).is_empty());
         assert_eq!(c.tique(em(1_800))[0].nome, ACENO);
-        // O pronto some em 2 h (decisão 0057); a sessão, em 12 h.
+        // O pronto some em 2 h (decisão 0057); a sessão, numa semana (decisão
+        // 0096).
         assert_eq!(c.proximo_prazo(), Some(1_800 + VIDA_AVISO_MS));
         assert!(c.tique(em(1_800 + VIDA_AVISO_MS)).is_empty());
         assert!(c.pendencias().is_empty());
         assert_eq!(c.proximo_prazo(), Some(1_000 + VIDA_SESSAO_MS));
-        // Real sem eventos por 12 h some calada.
+        // Real sem eventos por uma semana some calada.
         assert!(c.tique(em(1_000 + VIDA_SESSAO_MS)).is_empty());
         assert!(c.resumo().sessoes.is_empty());
     }
@@ -3930,9 +3966,23 @@ mod testes {
             &mut c,
             vec![chega(0, prompt("p1")), chega(100, permissao("p1"))],
         );
-        assert_eq!(c.proximo_prazo(), Some(100 + VIDA_SESSAO_MS));
+        assert_eq!(c.proximo_prazo(), Some(100 + VIDA_ESPERA_MS));
         rodar(&mut c, vec![Ate(VIDA_AVISO_MS + 1_000)]);
         assert_eq!(aviso_de(&c), Some(TipoAviso::Esperando));
+        // Sem evento nenhum da sessão por 12 h, a espera sai e a sessão fica
+        // (decisão 0096): até uma semana sem evento.
+        rodar(&mut c, vec![Ate(100 + VIDA_ESPERA_MS - 1)]);
+        assert_eq!(aviso_de(&c), Some(TipoAviso::Esperando));
+        rodar(&mut c, vec![Ate(100 + VIDA_ESPERA_MS)]);
+        assert_eq!(aviso_de(&c), None);
+        let s = &c.resumo().sessoes[0];
+        assert_eq!(
+            (s.estado, s.estado_desde_ms),
+            (EstadoSessao::Parada, BASE + 100 + VIDA_ESPERA_MS)
+        );
+        assert_eq!(c.proximo_prazo(), Some(100 + VIDA_SESSAO_MS));
+        rodar(&mut c, vec![Ate(100 + VIDA_SESSAO_MS)]);
+        assert!(c.resumo().sessoes.is_empty());
     }
 
     #[test]
@@ -5360,8 +5410,15 @@ mod testes {
             vista_laco_ms: None,
         };
         let mut lista = vec![
-            guardada("velha", antes(13 * H)),
-            guardada("quase-12-h", antes(VIDA_SESSAO_MS - 1)),
+            guardada("velha", antes(VIDA_SESSAO_MS)),
+            guardada("quase-uma-semana", antes(VIDA_SESSAO_MS - 1)),
+            guardada("de-13-h", antes(13 * H)),
+            SessaoGuardada {
+                estado: EstadoSessao::Esperando,
+                estado_desde_ms: antes(13 * H),
+                aviso: Some(aviso(TipoAviso::Esperando, antes(13 * H))),
+                ..guardada("espera-de-13-h", antes(13 * H))
+            },
             SessaoGuardada {
                 estado: EstadoSessao::Trabalhando,
                 ..guardada("trabalhando-6-min", antes(6 * 60_000))
@@ -5426,8 +5483,18 @@ mod testes {
                 .find(|s| s.chave.1 == sid)
                 .map(|s| (s.estado, s.estado_desde_ms, s.aviso.map(|a| a.tipo)))
         };
-        assert_eq!(estado("velha"), None, "13 h: fora");
-        assert!(estado("quase-12-h").is_some());
+        assert_eq!(estado("velha"), None, "uma semana: fora");
+        assert!(estado("quase-uma-semana").is_some());
+        assert_eq!(
+            estado("de-13-h"),
+            Some((EstadoSessao::Parada, antes(13 * H), None)),
+            "13 h: volta (decisão 0096)"
+        );
+        assert_eq!(
+            estado("espera-de-13-h"),
+            Some((EstadoSessao::Parada, antes(H), None)),
+            "a espera sai 12 h depois do último evento; a sessão volta"
+        );
         assert_eq!(
             estado("trabalhando-6-min"),
             Some((EstadoSessao::Parada, antes(60_000), None)),
@@ -5481,7 +5548,7 @@ mod testes {
                 .count(),
             1
         );
-        // Os prazos de agora: o da quase-12-h é o primeiro (1 ms).
+        // Os prazos de agora: o da quase-uma-semana é o primeiro (1 ms).
         assert_eq!(c.proximo_prazo(), Some(1));
         // O teto: as mais novas primeiro, até MAX_SESSOES.
         lista = (0..MAX_SESSOES as u64 + 2)

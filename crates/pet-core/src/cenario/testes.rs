@@ -1136,19 +1136,29 @@ fn o_pronto_e_o_erro_voltam_sem_festa_nem_susto_e_o_clique_leva_aos_terminais() 
 }
 
 #[test]
-fn depois_de_13_h_a_sessao_nao_volta_e_a_de_11_h_sai_na_hora_dela() {
+fn depois_de_13_h_as_duas_sessoes_voltam_e_ficam_na_lista() {
+    // A vida de uma sessão sem evento é de uma semana (decisão 0096): a de 13
+    // h e a de 11 h voltam e continuam abertas uma hora depois.
     let linha = linha_do_tempo("reinicio-depois-de-13-h");
-    assert_eq!(restauracao(&linha), (1, 0, 1, None));
+    assert_eq!(restauracao(&linha), (2, 0, 0, None));
     assert_eq!(
         listas(&linha),
         vec![
-            (46_820_000, vec!["api: parado (11 h)".to_owned()]),
+            (
+                46_820_000,
+                vec![
+                    "api: parado (11 h)".to_owned(),
+                    "velha: parado (13 h)".to_owned()
+                ]
+            ),
             (
                 50_410_000,
-                vec!["nenhuma sessão do Claude aberta".to_owned()]
+                vec![
+                    "api: parado (12 h)".to_owned(),
+                    "velha: parado (14 h)".to_owned()
+                ]
             )
-        ],
-        "a de 13 h ficou de fora; a de 11 h saiu 12 h depois do último evento"
+        ]
     );
 }
 
@@ -1325,4 +1335,28 @@ fn a_parada_na_acomodacao_do_stop_traz_o_pronto_sem_festa() {
                 ..
             }
         )));
+}
+
+// --- todas as sessões abertas (decisão 0096) -----------------------------------
+
+#[test]
+fn a_espera_de_uma_noite_sai_em_12_h_e_a_sessao_fica() {
+    // Ninguém responde e a sessão não manda mais nada: a escalada até o teto;
+    // 12 h depois do último evento, a espera sai (`expirou`) e a sessão
+    // continua na lista do clique (antes, ela inteira saía em 12 h).
+    let linha = linha_do_tempo("espera-de-uma-noite");
+    assert_eq!(niveis(&linha).last(), Some(&(43_210_000, 0)));
+    assert!(so(&linha, "escalada").iter().any(|x| x.t_ms == 43_210_000
+        && matches!(
+            x.tipo,
+            Tipo::Escalada {
+                motivo: "expirou",
+                ..
+            }
+        )));
+    assert!(barulho_entre(&linha, 2_110_000, u64::MAX).is_empty());
+    assert_eq!(
+        listas(&linha),
+        vec![(46_800_000, vec!["api: parado (59 min)".to_owned()])]
+    );
 }

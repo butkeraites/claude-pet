@@ -91,7 +91,7 @@ pub enum Tipo {
     /// velho saiu e este passou a ser o mais velho), 2 a 4 quando sobe
     /// (`tempo`, `voltou`) e 0 quando acaba (`andou`: a sessão andou; `visto`:
     /// o clique; `sessao_saiu`; `outro_aviso`: um mais urgente passou à
-    /// frente). `restaurada`, com o nível de antes: a memória das sessões
+    /// frente; `expirou`: 12 h sem evento nenhum da sessão, decisão 0096). `restaurada`, com o nível de antes: a memória das sessões
     /// trouxe o aviso na partida do pet, e a escalada segue do tempo que
     /// passou, sem chamar de novo (decisão 0093).
     Escalada {

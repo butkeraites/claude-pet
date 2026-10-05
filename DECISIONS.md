@@ -4272,3 +4272,51 @@ ser de outra janela, nem esquecer as sessões que uma suspensão não esqueceria
 Medir a idade da memória pela saída e pelo refresco deixa a parada curta de
 uma atualização igual a antes, e quieta só o que a parada longa pode ter
 mudado.
+
+## 0096 — Todas as sessões abertas: a sessão real não sai mais em 12 h sem evento (2026-10-05)
+
+**Problema:** a decisão do Renan é que o Zeca acompanhe todas as sessões
+abertas do Claude. A memória (decisões 0093 e 0095) cobre o reinício do pet,
+mas a regra de 2026-10-03 (decisão 0020) tirava uma sessão real depois de 12
+h sem evento, com o pet de pé ou na volta: uma sessão parada de uma noite (a
+máquina do Renan fica acordada: no ar há 14 dias, com 14,3 h suspensas) sumia
+da lista, e o clique voltava a dizer "nenhuma sessão do Claude aberta" com a
+sessão aberta. A regra existia para enterrar a sessão de um processo que
+morreu sem o `SessionEnd`. Hoje o boot id (decisão 0093) já tira as de uma
+máquina que reiniciou, e o terminal que fecha manda o `SessionEnd`: numa
+sessão aninhada do 2.1.288 no tmux, matar o tmux (o SIGHUP de um terminal
+que fecha) mandou o `SessionEnd` com o motivo `other`, e o pet tirou a sessão
+com o tchau (conferido em 2026-10-05, num daemon de rascunho). E sem a vida
+de 12 h, uma espera não sairia nunca: um Esc numa pergunta não manda nada
+(decisão 0090).
+**Escolha:**
+- **A vida de uma sessão real sem evento nenhum passa a uma semana**
+  (`VIDA_SESSAO_MS`), no tempo acordado como antes; o `SessionEnd` e a máquina
+  que reinicia continuam tirando na hora. A sessão de um processo que morreu
+  sem o `SessionEnd` (um `kill -9`, um crash) fica na lista do clique até lá,
+  parada e no fim (a lista vai da mais recente à mais velha, e o balão mostra
+  5 linhas e o "+ N"); vencidos os avisos dela (em até 12 h), ela não segura
+  a base nem entra no "+N".
+- **A espera sai sozinha depois de 12 h sem evento nenhum da sessão**
+  (`VIDA_ESPERA_MS`): o aviso "esperando você" e o estado; a sessão fica,
+  parada. A escalada acaba com o motivo novo `expirou`. Na volta da memória,
+  igual: a espera de uma sessão sem evento há mais de 12 h volta parada, sem o
+  aviso.
+- **Testes:** no cérebro, a espera que sai em 12 h com a sessão ficando até
+  uma semana, e a volta (a sessão de 13 h volta, a espera de 13 h volta
+  parada, a de uma semana fica de fora); o dourado novo `espera-de-uma-noite`
+  (a escalada até o teto, o sono com o selo, a espera que expira e a sessão
+  na lista do clique) e o `reinicio-depois-de-13-h` refeito (as duas sessões
+  voltam e ficam na lista); sete mutações reprovaram (a vida de 12 h, a
+  espera que nunca sai, o estado que fica esperando, a espera sem prazo, a
+  volta com a espera velha ou ainda esperando, o `expirou` que vira `andou`).
+- **Limites:** a sessão de um processo que morreu sem o `SessionEnd` fica
+  na lista até uma semana sem evento; a espera sem evento por 12 h sai mesmo
+  com o diálogo ainda na tela (o pet não tem como saber; antes, a sessão
+  inteira saía junto).
+**Por quê:** o clique que diz "nenhuma sessão aberta" com uma sessão aberta
+é o erro que o Renan relatou, e uma noite parada o repetia sem reinício
+nenhum. O fantasma que ficou (o processo morto sem o `SessionEnd`) é raro,
+quieto e vai para o fim da lista; esquecer uma sessão aberta é o contrário do
+trabalho do Zeca. A espera continua com prazo: chamar por um diálogo de 12 h
+sem evento nenhum seria pior que deixá-la no clique.

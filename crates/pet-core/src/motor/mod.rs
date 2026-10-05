@@ -546,13 +546,18 @@ impl Motor {
     /// cansado ([`Self::observar_cerebro`]), os avisos de espera
     /// ([`Self::observar_avisos`]) e a base, os selos e o sono
     /// ([`Self::observar_tela`]). O que volta é o que o animador deve tocar.
-    fn depois_do_cerebro(&mut self, reacoes: Vec<Reacao>, agora_ms: u64) -> Vec<Reacao> {
+    fn depois_do_cerebro(
+        &mut self,
+        reacoes: Vec<Reacao>,
+        agora_ms: u64,
+        pelo_relogio: bool,
+    ) -> Vec<Reacao> {
         for registro in self.cerebro.tirar_turnos_fechados() {
             self.anotar(agora_ms, intencoes::Tipo::do_turno(&registro));
         }
         let mut reacoes = self.festejar(reacoes, agora_ms);
         reacoes.extend(self.observar_cerebro(agora_ms));
-        reacoes.extend(self.observar_avisos(agora_ms, None));
+        reacoes.extend(self.observar_avisos(agora_ms, None, pelo_relogio));
         reacoes.extend(self.observar_tela(agora_ms));
         reacoes
     }
@@ -1088,8 +1093,14 @@ impl Motor {
     /// visto, `visto`): cada aviso novo chama (a L1: a chamada e o balão do
     /// tipo, na hora; decisão 0075), um gatilho do mesmo diálogo que sobe o
     /// tipo só troca o balão, e a escalada segue o mais velho. Devolve as
-    /// chamadas para o animador.
-    fn observar_avisos(&mut self, agora_ms: u64, visto: Option<&janelas::Chave>) -> Vec<Reacao> {
+    /// chamadas para o animador. `pelo_relogio`: o cérebro mudou num prazo,
+    /// não num evento (a espera que sai sozinha expirou; decisão 0096).
+    fn observar_avisos(
+        &mut self,
+        agora_ms: u64,
+        visto: Option<&janelas::Chave>,
+        pelo_relogio: bool,
+    ) -> Vec<Reacao> {
         let esperando: Vec<Pendencia> = self
             .cerebro
             .pendencias()
@@ -1142,7 +1153,7 @@ impl Motor {
                 } else if visto == Some(&c.chave) {
                     "visto"
                 } else if self.cerebro.tem_sessao(&c.chave) {
-                    "andou"
+                    if pelo_relogio { "expirou" } else { "andou" }
                 } else {
                     "sessao_saiu"
                 };
@@ -1365,7 +1376,7 @@ impl Motor {
         };
         let evidencia = self.evidencia(ev, recebido_ms);
         let do_cerebro = self.cerebro.receber_com(ev, recebido_ms, agora, evidencia);
-        reacoes.extend(self.depois_do_cerebro(do_cerebro, agora.mono_ms));
+        reacoes.extend(self.depois_do_cerebro(do_cerebro, agora.mono_ms, false));
         if let Some(origem) = janelas::origem(&ev.e, ev.src.as_deref())
             && let Some(sid) = &ev.sid
         {
@@ -1418,7 +1429,7 @@ impl Motor {
     pub fn tique(&mut self, agora: Agora) -> Vec<Reacao> {
         self.acertar_relogio(agora);
         let reacoes = self.cerebro.tique(agora);
-        let mut reacoes = self.depois_do_cerebro(reacoes, agora.mono_ms);
+        let mut reacoes = self.depois_do_cerebro(reacoes, agora.mono_ms, true);
         self.esquecer_janelas_sem_sessao();
         self.ver_pelo_foco(agora.mono_ms);
         self.ver_a_espera(agora.mono_ms);
@@ -2460,7 +2471,7 @@ impl Motor {
         let tipo = self.cerebro.ver(chave);
         if tipo.is_some() {
             self.cerebro_mudou = true;
-            self.observar_avisos(agora_ms, Some(chave));
+            self.observar_avisos(agora_ms, Some(chave), false);
             self.observar_tela(agora_ms);
         }
         self.ciclo.retain(|c| c != chave);
