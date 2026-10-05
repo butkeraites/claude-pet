@@ -41,7 +41,9 @@ use serde::Serialize;
 
 use crate::animador;
 use crate::cena::{self, Elemento};
-use crate::cerebro::{self, Agora, Cerebro, ConfigCerebro, Pendencia, Reacao, Resumo, TipoAviso};
+use crate::cerebro::{
+    self, Agora, Cerebro, ConfigCerebro, Evidencia, Pendencia, Reacao, Resumo, TipoAviso,
+};
 use crate::confete::{Chuva, Grade};
 use crate::evento::Evento;
 use crate::geometria::{Ret, Tamanho};
@@ -354,7 +356,11 @@ impl Motor {
                 agora_ms,
                 intencoes::Tipo::Reacao {
                     nome: reacao.nome.to_owned(),
-                    motivo,
+                    motivo: if reacao.discreta {
+                        "fim_discreto"
+                    } else {
+                        motivo
+                    },
                     sid8: Some(reacao.sid8.clone()),
                     nivel: reacao.nivel,
                 },
@@ -483,16 +489,28 @@ impl Motor {
     /// No prompt do teclado e no começo de uma sessão que o cérebro
     /// acompanha, casa a janela do terminal dela: a que o anel de ativações
     /// diz que estava ativa na hora (`ts`) do hook (decisão 0055). O começo
-    /// só preenche, a compactação nunca casa (decisão 0060).
+    /// só preenche, a compactação nunca casa (decisão 0060), e o prompt só
+    /// casa se foi digitado: a notificação de uma tarefa e o tique de um laço
+    /// não (o cérebro decide, com a evidência daqui), nem um prompt que chega
+    /// com o Renan longe do teclado (decisão 0073).
     pub fn evento(&mut self, ev: &Evento, recebido_ms: u64, agora: Agora) -> Vec<Reacao> {
         self.acertar_relogio(agora);
-        let reacoes = self.cerebro.receber(ev, recebido_ms, agora);
+        let evidencia = self.evidencia(ev, recebido_ms);
+        let reacoes = self.cerebro.receber_com(ev, recebido_ms, agora, evidencia);
         let reacoes = self.depois_do_cerebro(reacoes, agora.mono_ms);
         if let Some(origem) = janelas::origem(&ev.e, ev.src.as_deref())
             && let Some(sid) = &ev.sid
         {
             let chave = (ev.teste, sid.clone());
-            if self.cerebro.tem_sessao(&chave) {
+            // Um prompt que o cérebro ignorou (repetido, de um turno fechado)
+            // casa como no M4: o `observar` já descarta o atrasado.
+            let digitado = origem != janelas::Origem::Prompt
+                || (!evidencia.ausente
+                    && self
+                        .cerebro
+                        .origem_do_turno(&chave, ev.turno.as_deref())
+                        .is_none_or(|o| !o.maquina()));
+            if self.cerebro.tem_sessao(&chave) && digitado {
                 let ts = cerebro::hora_do_evento(ev.ts, recebido_ms);
                 let achado = self.desktop.anel.em(ts);
                 self.identidades
@@ -501,6 +519,30 @@ impl Motor {
         }
         self.esquecer_janelas_sem_sessao();
         reacoes
+    }
+
+    /// O que o Motor sabe da hora de um prompt (decisão 0073): o Renan longe
+    /// do teclado e do mouse, ou a janela certa da sessão fora de foco na
+    /// hora do hook. Só o prompt pede.
+    fn evidencia(&self, ev: &Evento, recebido_ms: u64) -> Evidencia {
+        if ev.e != "UserPromptSubmit" {
+            return Evidencia::default();
+        }
+        let ts = cerebro::hora_do_evento(ev.ts, recebido_ms);
+        let outra_janela = ev.sid.as_ref().is_some_and(|sid| {
+            let chave = (ev.teste, sid.clone());
+            match (self.identidades.de(&chave), self.desktop.anel.em(ts)) {
+                (Some(identidade), janelas::Achado::Janela(ativa)) => {
+                    identidade.certeza == janelas::Certeza::Certa
+                        && identidade.janela.as_ref().is_some_and(|j| *j != ativa)
+                }
+                _ => false,
+            }
+        });
+        Evidencia {
+            ausente: self.desktop.ocioso == Some(true),
+            outra_janela,
+        }
     }
 
     /// O prazo do cérebro venceu (acomodação do Stop, sessões e avisos que

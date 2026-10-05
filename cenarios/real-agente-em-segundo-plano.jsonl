@@ -1,0 +1,13 @@
+{"cenario": "real-agente-em-segundo-plano", "descricao": "da pesquisa (decisão 0071), pseudonimizado: o pedido lança um agente em segundo plano; a notificação acorda o turno principal com o shell do agente em voo; o agente acorda quando o shell acaba e a segunda notificação chega no fim", "padrao": {"sid": "s1", "ent": "cli", "proj": "projeto-a"}}
+{"t": 0, "evento": {"e": "UserPromptSubmit", "turno": "p3", "ts": 0, "orig": "comum"}}
+{"t": 2212, "evento": {"e": "SubagentStart", "turno": "p3", "ts": 2199, "agente": true, "aid": "x1"}}
+{"t": 2218, "evento": {"e": "PostToolUse", "turno": "p3", "ts": 2212, "tool": "Agent", "dur": 6}}
+{"t": 3624, "evento": {"e": "Stop", "turno": "p3", "ts": 3618, "bg": 1, "bgt": ["subagent"], "bgi": ["x1"], "crn": 0}}
+{"t": 7441, "evento": {"e": "PostToolUse", "turno": "p3", "ts": 7430, "agente": true, "aid": "x1", "tool": "Bash", "dur": 41}}
+{"t": 8680, "evento": {"e": "UserPromptSubmit", "turno": "p4", "ts": 8670, "orig": "notificacao"}}
+{"t": 11587, "evento": {"e": "Stop", "turno": "p4", "ts": 11583, "bg": 1, "bgt": ["shell"], "bgi": ["x2"], "crn": 0}}
+{"t": 32534, "evento": {"e": "SubagentStart", "turno": "p4", "ts": 32519, "agente": true, "aid": "x1"}}
+{"t": 33347, "evento": {"e": "UserPromptSubmit", "turno": "p5", "ts": 33336, "orig": "notificacao"}}
+{"t": 34682, "evento": {"e": "Stop", "turno": "p5", "ts": 34678, "bg": 0, "crn": 0}}
+{"t": 94685, "evento": {"e": "Notification", "turno": "p5", "ts": 94684, "nt": "idle_prompt"}}
+{"t": 100000, "fim": true}

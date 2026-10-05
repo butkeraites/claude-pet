@@ -1,5 +1,5 @@
-//! Cérebro mínimo (M3, decisões 0020 e 0032): eventos do Claude Code →
-//! reações.
+//! Cérebro (M3, decisões 0020 e 0032; M5, decisões 0072 em diante): eventos
+//! do Claude Code → reações.
 //!
 //! Puro: o relógio vem de fora ([`Agora`]) e nada aqui faz I/O. O daemon
 //! entrega cada evento validado ([`crate::evento`]) com a hora em que ele
@@ -21,6 +21,24 @@
 //! ferramenta (`dur`). Ferramentas de um subagente contam para o turno em
 //! que ele nasceu, mas não mudam o estado da sessão. Evento de um turno que
 //! ninguém abriu (o pet reiniciou no meio) abre um turno implícito.
+//!
+//! **A origem do turno** (decisão 0073): o 2.1.288 não manda o `source`, e
+//! uma notificação de tarefa ou um tique de laço chegam como um prompt
+//! qualquer. [`classificar`] decide pelo `src` (se um Claude Code futuro
+//! mandar), pelo `orig` que o hook calcula (decisão 0072), pelos agendamentos
+//! do último Stop (`crn`) com a evidência do Motor (o Renan longe do teclado,
+//! ou outra janela certa em foco) e, com o hook antigo, pela corrente aberta.
+//! O turno de máquina fora de uma corrente fica no teto T1, discreto, sem
+//! pronto; o T0 dele não reage. Ele nunca resolve o pronto de antes.
+//!
+//! **A corrente** (decisão 0073): um Stop com agente em voo (`bgt` com
+//! [`TAREFAS_DE_AGENTE`]) abre a corrente da sessão; enquanto ela está
+//! aberta, todo Stop da sessão é dela: com agente em voo o turno entra (sem
+//! festa, sem pronto), sem agente em voo ela fecha com uma festa só, pela
+//! soma dos turnos e do trabalho dos agentes que veio depois (pelo `aid`). O
+//! agente que acorda (um `SubagentStart` de um `aid` já visto) é trabalho em
+//! segundo plano, não continuação da thread principal. A corrente expira
+//! [`VIDA_CORRENTE_MS`] depois do último evento dela, sem festa.
 //!
 //! Os hooks são async e chegam fora de ordem. Além do turno aberto, cada
 //! sessão guarda dois turnos que ainda podem receber eventos:
@@ -46,9 +64,8 @@
 //!
 //! **Nível**: T0 (nenhuma ferramenta de trabalho, nenhum subagente, nenhum
 //! arquivo editado) → `nod`, o aceno discreto; o resto → T1, `done_small`,
-//! o pulinho. T2/T3, correntes de tarefas em segundo plano, escalada e
-//! presença são do M5; por isso cada turno guarda os componentes inteiros
-//! em [`RegistroTurno`] (o `/v1/estado.turnos`), para a pontuação do M5.
+//! o pulinho. Cada turno guarda os componentes inteiros em [`RegistroTurno`]
+//! (o `/v1/estado.turnos`).
 //!
 //! **Avisos** (M4, decisão 0057): cada sessão tem um espaço de aviso, o que
 //! ela pede ao Renan — esperando você (uma permissão, uma pergunta, o
@@ -57,17 +74,17 @@
 //! ([`Cerebro::pendencias`]); visto ([`Cerebro::ver`]), o aviso sai. Mudar de
 //! estado resolve o aviso de antes, e entrar em "esperando você" ou em erro
 //! abre um; o pronto abre quando a acomodação do Stop termina (a festa) e
-//! um prompt novo o resolve. O `idle_prompt` nunca abre nem resolve aviso, e
-//! um evento atrasado (mais velho que o estado de agora) não mexe nele. O
-//! pronto e o erro somem sozinhos em [`VIDA_AVISO_MS`]; o "esperando você"
-//! só sai com um evento da própria sessão ou visto.
+//! um prompt digitado o resolve. O `idle_prompt` nunca abre nem resolve
+//! aviso, e um evento atrasado (mais velho que o estado de agora) não mexe
+//! nele. O pronto e o erro somem sozinhos em [`VIDA_AVISO_MS`]; o "esperando
+//! você" só sai com um evento da própria sessão ou visto.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use serde::Serialize;
 
 use crate::config::{Config, ModoCelebracao};
-use crate::evento::{self, Evento};
+use crate::evento::{self, Evento, ORIG_NOTIFICACAO};
 
 /// Acomodação depois de um Stop, e espera pelo Stop atrasado de um turno
 /// trocado.
@@ -79,6 +96,9 @@ pub const VIDA_TESTE_MS: u64 = 60_000;
 /// Uma sessão real some depois disto sem eventos (o `SessionEnd` de um
 /// processo morto nunca chega).
 pub const VIDA_SESSAO_MS: u64 = 12 * 60 * 60 * 1000;
+/// Uma corrente de agentes sem evento nenhum por isto expira, sem festa
+/// (decisão 0073).
+pub const VIDA_CORRENTE_MS: u64 = 12 * 60 * 60 * 1000;
 /// Turnos fechados no `/v1/estado.turnos`.
 pub const TURNOS_GUARDADOS: usize = 20;
 /// O pronto e o erro somem sozinhos depois disto (decisão 0057).
@@ -93,6 +113,10 @@ const FECHADOS_POR_SESSAO: usize = 32;
 const FECHADOS_A_TIRAR: usize = 64;
 /// Subagentes lembrados por sessão (para atribuir ferramentas ao turno).
 const AGENTES_POR_SESSAO: usize = 32;
+/// Turnos guardados um a um numa corrente; passou disso, somam num só.
+const MEMBROS_POR_CORRENTE: usize = 64;
+/// Agentes em voo lembrados por corrente.
+const AGENTES_POR_CORRENTE: usize = 64;
 /// Teto de sessões acompanhadas de cada tipo (real ou teste); acima disso
 /// a mais parada sai.
 const MAX_SESSOES: usize = 64;
@@ -106,6 +130,12 @@ const FIM_SEM_TCHAU: [&str; 2] = ["clear", "resume"];
 /// Ferramentas que contam como trabalho de verdade (decisão 0003).
 pub const FERRAMENTAS_DE_TRABALHO: [&str; 5] =
     ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash"];
+
+/// Os tipos de tarefa em segundo plano (os rótulos normalizados do `bgt`)
+/// que são trabalho de agente: só eles abrem ou estendem uma corrente
+/// (decisão 0073). `shell`, `monitor`, `mcp_task` e `outro` nunca seguram uma
+/// festa; `dream`, `auto_mode_scan` e `memory_import` são ignorados.
+pub const TAREFAS_DE_AGENTE: [&str; 4] = ["subagent", "workflow", "teammate", "cloud_session"];
 
 /// Aceno discreto (T0).
 pub const ACENO: &str = "nod";
@@ -155,6 +185,10 @@ pub enum Nivel {
     T1,
 }
 
+fn eh_falso(b: &bool) -> bool {
+    !*b
+}
+
 /// Uma reação para o pet tocar.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Reacao {
@@ -168,6 +202,9 @@ pub struct Reacao {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nivel: Option<Nivel>,
     pub teste: bool,
+    /// Uma festa discreta (o turno de máquina, decisão 0073): sem balão.
+    #[serde(skip_serializing_if = "eh_falso")]
+    pub discreta: bool,
 }
 
 /// Como um turno acabou.
@@ -187,9 +224,88 @@ pub enum Fim {
     Substituido,
     /// A sessão acabou.
     SessaoEncerrada,
+    /// A corrente de agentes ficou sem evento por [`VIDA_CORRENTE_MS`]: sem
+    /// festa.
+    CorrenteExpirou,
 }
 
-/// Os componentes de um turno fechado: o que o M5 vai pontuar.
+/// De onde veio o prompt que abriu o turno (decisão 0073).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OrigemTurno {
+    /// O Renan digitou (ou não há prova do contrário).
+    Digitado,
+    /// O Claude Code acordou a sessão com o aviso de uma tarefa em segundo
+    /// plano (`orig = notificacao`, ou um prompt sem marca com a corrente
+    /// aberta, no hook antigo).
+    Notificacao,
+    /// Um laço ou um agendamento (`loop_wakeup`, `schedule_wakeup`,
+    /// `poll_event`, ou um prompt comum com agendamento pendente que o Renan
+    /// não digitou).
+    Tique,
+    /// `src = system` (um Claude Code que mande o `source`).
+    Sistema,
+}
+
+impl OrigemTurno {
+    /// Foi a máquina que começou o turno.
+    pub fn maquina(self) -> bool {
+        self != OrigemTurno::Digitado
+    }
+}
+
+/// O que o Motor sabe da hora de um prompt comum (decisão 0073): prova de
+/// que o Renan não o digitou.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Evidencia {
+    /// O Renan estava longe do teclado e do mouse (o `ext_idle_notifier_v1`).
+    pub ausente: bool,
+    /// A janela da sessão é certa, e o anel diz que outra estava ativa na
+    /// hora do prompt.
+    pub outra_janela: bool,
+}
+
+/// A origem de um prompt (decisão 0073): `src` se vier; `orig =
+/// notificacao`; com agendamento pendente (`crons`) e prova de que não foi
+/// digitado, tique; sem `orig` (o hook de antes do M5) e com a corrente
+/// aberta, notificação; senão, digitado.
+pub fn classificar(
+    src: Option<&str>,
+    orig: Option<&str>,
+    corrente_aberta: bool,
+    crons: Option<u64>,
+    evidencia: Evidencia,
+) -> OrigemTurno {
+    match src {
+        Some("user") => return OrigemTurno::Digitado,
+        Some("system") => return OrigemTurno::Sistema,
+        Some("loop_wakeup" | "schedule_wakeup" | "poll_event") => return OrigemTurno::Tique,
+        _ => {}
+    }
+    match orig {
+        Some(ORIG_NOTIFICACAO) => OrigemTurno::Notificacao,
+        Some(_) => {
+            let agendada = crons.is_some_and(|n| n > 0);
+            if agendada && (evidencia.ausente || evidencia.outra_janela) {
+                OrigemTurno::Tique
+            } else {
+                OrigemTurno::Digitado
+            }
+        }
+        None if corrente_aberta => OrigemTurno::Notificacao,
+        None => OrigemTurno::Digitado,
+    }
+}
+
+/// A corrente de um turno no registro: se ficou aberta (o turno entrou nela)
+/// ou se fechou nele, e quantos turnos ela teve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct ResumoCorrente {
+    pub aberta: bool,
+    pub turnos: u32,
+}
+
+/// Os componentes de um turno fechado: o que o M5 pontua.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RegistroTurno {
     pub sid8: String,
@@ -199,8 +315,10 @@ pub struct RegistroTurno {
     pub teste: bool,
     /// Aberto por um evento qualquer, sem o `UserPromptSubmit`.
     pub implicito: bool,
-    /// `source` do `UserPromptSubmit` (`user`, `system`, …).
+    /// `source` do `UserPromptSubmit` (`user`, `system`, …), se veio.
     pub src: Option<String>,
+    /// De onde veio o prompt (decisão 0073).
+    pub origem: OrigemTurno,
     pub t0_ms: u64,
     pub fim_ms: u64,
     /// Relógio do turno (fim − t0): só para calibrar, nunca pontua.
@@ -229,6 +347,13 @@ pub struct RegistroTurno {
     pub nivel: Option<Nivel>,
     /// A última reação tocada por este turno.
     pub reacao: Option<&'static str>,
+    /// A corrente: o turno entrou numa aberta, ou ela fechou nele (com a
+    /// soma de todos nos componentes acima).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub corrente: Option<ResumoCorrente>,
+    /// O que segurou o nível (`maquina`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub teto: Vec<&'static str>,
     /// (teste, sid, turno) inteiros, para trocar o registro de um turno que
     /// reabriu; nunca vai para o `/v1/estado`.
     #[serde(skip)]
@@ -319,6 +444,12 @@ pub struct ResumoSessao {
     /// O que a sessão pede ao Renan, se pede (decisão 0057).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub aviso: Option<Aviso>,
+    /// A corrente de agentes aberta, se há uma (o selo "…"; decisão 0073).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub corrente: Option<ResumoCorrente>,
+    /// Quantos agendamentos o último Stop listou (`crn`), se o hook disse.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agendamentos: Option<u64>,
     /// A janela do terminal da sessão, como o Motor a casou (decisão 0055);
     /// o cérebro não sabe de janelas e deixa vazio.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -342,7 +473,7 @@ pub struct Resumo {
     pub origens: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct StopPendente {
     /// Hora do Stop (parede).
     ts_ms: u64,
@@ -350,6 +481,32 @@ struct StopPendente {
     prazo_mono: u64,
     sha: bool,
     bg: Option<u64>,
+    /// Os ids das tarefas de agente em voo no Stop (decisão 0073).
+    agentes: Vec<String>,
+}
+
+impl StopPendente {
+    fn do_evento(ev: &Evento, ts_ms: u64, prazo_mono: u64) -> StopPendente {
+        StopPendente {
+            ts_ms,
+            prazo_mono,
+            sha: ev.sha,
+            bg: ev.bg,
+            agentes: agentes_em_voo(ev),
+        }
+    }
+}
+
+/// As tarefas de agente em voo num Stop: os ids do `bgi` cujo tipo no `bgt`
+/// é de [`TAREFAS_DE_AGENTE`] (as listas andam alinhadas; decisão 0019).
+fn agentes_em_voo(ev: &Evento) -> Vec<String> {
+    ev.bgt
+        .iter()
+        .zip(&ev.bgi)
+        .filter(|(tipo, _)| TAREFAS_DE_AGENTE.contains(&tipo.as_str()))
+        .map(|(_, id)| id.clone())
+        .take(AGENTES_POR_CORRENTE)
+        .collect()
 }
 
 /// A festa de um turno que fechou por um Stop: um turno que reabre a leva
@@ -360,12 +517,9 @@ struct Festa {
     reacao: Option<&'static str>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Turno {
-    id: Option<String>,
-    t0_ms: u64,
-    implicito: bool,
-    src: Option<String>,
+/// O trabalho de um turno, ou de uma corrente inteira.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct Componentes {
     trabalho: u32,
     outras: u32,
     subagentes: u32,
@@ -376,33 +530,9 @@ struct Turno {
     /// Arquivos novos que chegaram com o conjunto cheio.
     arquivos_a_mais: u32,
     dur_ms: u64,
-    stop: Option<StopPendente>,
-    /// Já fechou por um Stop e reabriu: a festa de então.
-    festa: Option<Festa>,
-    continuacoes: u32,
 }
 
-impl Turno {
-    fn novo(id: Option<String>, t0_ms: u64, implicito: bool, src: Option<String>) -> Turno {
-        Turno {
-            id,
-            t0_ms,
-            implicito,
-            src,
-            trabalho: 0,
-            outras: 0,
-            subagentes: 0,
-            falhas: 0,
-            de_agentes: 0,
-            arquivos: BTreeSet::new(),
-            arquivos_a_mais: 0,
-            dur_ms: 0,
-            stop: None,
-            festa: None,
-            continuacoes: 0,
-        }
-    }
-
+impl Componentes {
     fn arquivos(&self) -> u32 {
         u32::try_from(self.arquivos.len())
             .unwrap_or(u32::MAX)
@@ -415,6 +545,22 @@ impl Turno {
             Nivel::T0
         } else {
             Nivel::T1
+        }
+    }
+
+    /// Alguma ferramenta ou subagente já contou.
+    fn andou(&self) -> bool {
+        self.trabalho > 0 || self.outras > 0 || self.subagentes > 0
+    }
+
+    fn guardar_arquivo(&mut self, arq: &str) {
+        if self.arquivos.contains(arq) {
+            return;
+        }
+        if self.arquivos.len() < ARQUIVOS_POR_TURNO {
+            self.arquivos.insert(arq.to_owned());
+        } else {
+            self.arquivos_a_mais = self.arquivos_a_mais.saturating_add(1);
         }
     }
 
@@ -434,24 +580,145 @@ impl Turno {
         if ev.agente {
             self.de_agentes = self.de_agentes.saturating_add(1);
         }
-        if !falhou
-            && let Some(arq) = &ev.arq
-            && !self.arquivos.contains(arq)
-        {
-            if self.arquivos.len() < ARQUIVOS_POR_TURNO {
-                self.arquivos.insert(arq.clone());
-            } else {
-                self.arquivos_a_mais = self.arquivos_a_mais.saturating_add(1);
-            }
+        if !falhou && let Some(arq) = &ev.arq {
+            self.guardar_arquivo(arq);
         }
         self.dur_ms = self.dur_ms.saturating_add(ev.dur.unwrap_or(0));
     }
+
+    /// Soma outro trabalho a este (a corrente juntando os turnos).
+    fn somar(&mut self, outro: &Componentes) {
+        self.trabalho = self.trabalho.saturating_add(outro.trabalho);
+        self.outras = self.outras.saturating_add(outro.outras);
+        self.subagentes = self.subagentes.saturating_add(outro.subagentes);
+        self.falhas = self.falhas.saturating_add(outro.falhas);
+        self.de_agentes = self.de_agentes.saturating_add(outro.de_agentes);
+        self.dur_ms = self.dur_ms.saturating_add(outro.dur_ms);
+        for arq in &outro.arquivos {
+            self.guardar_arquivo(arq);
+        }
+        self.arquivos_a_mais = self.arquivos_a_mais.saturating_add(outro.arquivos_a_mais);
+    }
 }
 
-/// A reação de um nível, segundo o modo de celebração.
-fn reacao_do_nivel(nivel: Nivel, modo: ModoCelebracao) -> Option<&'static str> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Turno {
+    id: Option<String>,
+    t0_ms: u64,
+    implicito: bool,
+    src: Option<String>,
+    origem: OrigemTurno,
+    comp: Componentes,
+    stop: Option<StopPendente>,
+    /// Já fechou por um Stop e reabriu: a festa de então.
+    festa: Option<Festa>,
+    continuacoes: u32,
+}
+
+impl Turno {
+    fn novo(
+        id: Option<String>,
+        t0_ms: u64,
+        implicito: bool,
+        src: Option<String>,
+        origem: OrigemTurno,
+    ) -> Turno {
+        Turno {
+            id,
+            t0_ms,
+            implicito,
+            src,
+            origem,
+            comp: Componentes::default(),
+            stop: None,
+            festa: None,
+            continuacoes: 0,
+        }
+    }
+}
+
+/// A corrente de agentes de uma sessão (decisão 0073).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Corrente {
+    /// O t0 do primeiro turno.
+    t0_ms: u64,
+    /// Nasceu de um turno de máquina sem corrente: a festa dela tem o teto
+    /// de máquina.
+    raiz_maquina: bool,
+    /// Os turnos que entraram, cada um com o trabalho dele (um turno que
+    /// reabre e fecha de novo troca a entrada dele).
+    membros: Vec<(Option<String>, Componentes)>,
+    /// Os turnos que passaram de [`MEMBROS_POR_CORRENTE`], somados.
+    excedente: Componentes,
+    /// O trabalho dos agentes depois que o turno deles fechou.
+    fundo: Componentes,
+    turnos: u32,
+    /// As tarefas de agente em voo, pelo último Stop.
+    agentes: BTreeSet<String>,
+    /// O último evento da corrente (monotônico), para a expiração.
+    ultimo_mono: u64,
+}
+
+impl Corrente {
+    fn nova(t0_ms: u64, raiz_maquina: bool, agora_mono: u64) -> Corrente {
+        Corrente {
+            t0_ms,
+            raiz_maquina,
+            membros: Vec::new(),
+            excedente: Componentes::default(),
+            fundo: Componentes::default(),
+            turnos: 0,
+            agentes: BTreeSet::new(),
+            ultimo_mono: agora_mono,
+        }
+    }
+
+    fn guardar_membro(&mut self, id: Option<String>, comp: Componentes) {
+        if id.is_some()
+            && let Some(entrada) = self.membros.iter_mut().find(|(m, _)| *m == id)
+        {
+            entrada.1 = comp;
+            return;
+        }
+        self.turnos = self.turnos.saturating_add(1);
+        if self.membros.len() < MEMBROS_POR_CORRENTE {
+            self.membros.push((id, comp));
+        } else {
+            self.excedente.somar(&comp);
+        }
+    }
+
+    fn tem_turno(&self, id: &str) -> bool {
+        self.membros.iter().any(|(m, _)| m.as_deref() == Some(id))
+    }
+
+    fn total(&self) -> Componentes {
+        let mut total = self.excedente.clone();
+        for (_, comp) in &self.membros {
+            total.somar(comp);
+        }
+        total.somar(&self.fundo);
+        total
+    }
+}
+
+/// O nível de um trabalho com os tetos: o de máquina segura em T1 e deixa a
+/// festa discreta (decisão 0073).
+fn nivel_com_teto(comp: &Componentes, maquina: bool) -> (Nivel, Vec<&'static str>) {
+    let nivel = comp.nivel();
+    if maquina {
+        (nivel.min(Nivel::T1), vec!["maquina"])
+    } else {
+        (nivel, Vec::new())
+    }
+}
+
+/// A reação de um nível, segundo o modo de celebração; a de um turno de
+/// máquina é discreta, e o T0 de máquina não reage (decisão 0073).
+fn reacao_do_nivel(nivel: Nivel, modo: ModoCelebracao, maquina: bool) -> Option<&'static str> {
     match (nivel, modo) {
         (_, ModoCelebracao::Desligada) => None,
+        (Nivel::T0, _) if maquina => None,
         (_, ModoCelebracao::Discreta) | (Nivel::T0, _) => Some(ACENO),
         (Nivel::T1, _) => Some(PULINHO),
     }
@@ -463,6 +730,9 @@ struct Fechamento {
     reacao: Option<Reacao>,
     /// O turno tinha reaberto: o registro troca o que ele já tinha.
     substitui: bool,
+    /// O fim merece o pronto (decisão 0057): um Stop que fecha um turno
+    /// digitado, ou a corrente que nasceu de um.
+    pronto: bool,
 }
 
 /// Um turno trocado por um turno novo sem ter visto o próprio Stop.
@@ -508,6 +778,10 @@ struct Sessao {
     turno: Option<Turno>,
     trocado: Option<Trocado>,
     comemorado: Option<Comemorado>,
+    /// A corrente de agentes aberta (decisão 0073).
+    corrente: Option<Corrente>,
+    /// Os agendamentos do último Stop (`crn`), se o hook disse.
+    agendamentos: Option<u64>,
     /// Turnos já fechados (o `prompt_id`), mais novo no fim.
     fechados: VecDeque<String>,
     /// Subagente → turno em que nasceu.
@@ -532,6 +806,8 @@ impl Sessao {
             turno: None,
             trocado: None,
             comemorado: None,
+            corrente: None,
+            agendamentos: None,
             fechados: VecDeque::new(),
             agentes: VecDeque::new(),
             ultimo_mono: agora.mono_ms,
@@ -618,8 +894,13 @@ impl Sessao {
     ) -> &mut Turno {
         self.encerrar_aberto(t, agora, modo, fechamentos);
         self.comemorado = None;
-        self.turno
-            .insert(Turno::novo(id.map(str::to_owned), t, true, None))
+        self.turno.insert(Turno::novo(
+            id.map(str::to_owned),
+            t,
+            true,
+            None,
+            OrigemTurno::Digitado,
+        ))
     }
 
     /// Um turno novo vai começar: o aberto acaba. Com Stop pendente comemora
@@ -635,8 +916,9 @@ impl Sessao {
         let Some(aberto) = self.turno.take() else {
             return;
         };
-        if let Some(stop) = aberto.stop {
-            fechamentos.push(self.fechar_turno(aberto, Fim::Stop, stop.ts_ms, agora, modo, true));
+        if let Some(stop) = &aberto.stop {
+            let fim_ms = stop.ts_ms;
+            fechamentos.push(self.fechar_turno(aberto, Fim::Stop, fim_ms, agora, modo, true));
             return;
         }
         if let Some(velho) = self.trocado.take() {
@@ -681,8 +963,11 @@ impl Sessao {
 
     /// Fecha um turno. Só `Fim::Stop` comemora: na primeira vez, pelo nível
     /// e pelo modo; num turno que reabriu, só se o nível subiu, e o registro
-    /// troca o de antes. Fechado por um Stop, o turno fica comemorado se
-    /// `reabrivel` (o trocado não: já há um turno novo depois dele).
+    /// troca o de antes. Com a corrente aberta, ou com agente em voo no Stop,
+    /// o Stop é da corrente (decisão 0073): com agente em voo, o turno entra
+    /// nela sem festa; sem agente em voo, ela fecha aqui com a soma. Fechado
+    /// por um Stop, o turno fica comemorado se `reabrivel` (o trocado não: já
+    /// há um turno novo depois dele).
     fn fechar_turno(
         &mut self,
         mut turno: Turno,
@@ -695,7 +980,47 @@ impl Sessao {
         if let Some(id) = &turno.id {
             self.lembrar_fechado(id);
         }
-        let nivel_agora = (fim == Fim::Stop).then(|| turno.nivel());
+        let stop = turno.stop.take();
+        let mut comp = turno.comp.clone();
+        let mut t0_ms = turno.t0_ms;
+        let mut maquina = turno.origem.maquina();
+        let mut corrente = None;
+        let mut fim_da_corrente = false;
+        if fim == Fim::Stop {
+            let em_voo = stop.as_ref().map(|s| s.agentes.clone()).unwrap_or_default();
+            if self.corrente.is_some() || !em_voo.is_empty() {
+                let c = self
+                    .corrente
+                    .get_or_insert_with(|| Corrente::nova(turno.t0_ms, maquina, agora.mono_ms));
+                c.ultimo_mono = agora.mono_ms;
+                c.guardar_membro(turno.id.clone(), turno.comp.clone());
+                c.agentes = em_voo.iter().cloned().collect();
+                if em_voo.is_empty() {
+                    let c = self.corrente.take().expect("a corrente de agora");
+                    comp = c.total();
+                    t0_ms = c.t0_ms;
+                    maquina = c.raiz_maquina;
+                    corrente = Some(ResumoCorrente {
+                        aberta: false,
+                        turnos: c.turnos,
+                    });
+                    fim_da_corrente = true;
+                } else {
+                    corrente = Some(ResumoCorrente {
+                        aberta: true,
+                        turnos: c.turnos,
+                    });
+                }
+            }
+        }
+        // Com a corrente aberta, o Stop não festeja (nem o pronto).
+        let festeja = fim == Fim::Stop && corrente.is_none_or(|c| !c.aberta);
+        let (nivel_agora, teto) = if festeja {
+            let (nivel, teto) = nivel_com_teto(&comp, maquina);
+            (Some(nivel), teto)
+        } else {
+            (None, Vec::new())
+        };
         let antes = turno.festa;
         let subiu = match (nivel_agora, antes) {
             (Some(_), None) => true,
@@ -704,7 +1029,7 @@ impl Sessao {
         };
         let nome = nivel_agora
             .filter(|_| subiu)
-            .and_then(|nivel| reacao_do_nivel(nivel, modo));
+            .and_then(|nivel| reacao_do_nivel(nivel, modo, maquina));
         let reacao = nome.map(|nome| Reacao {
             nome,
             sid8: evento::curto(&self.sid),
@@ -712,16 +1037,17 @@ impl Sessao {
             ts: agora.parede_ms,
             nivel: nivel_agora,
             teste: self.teste,
+            discreta: maquina,
         });
         let nivel = nivel_agora.max(antes.map(|festa| festa.nivel));
         let reacao_do_turno = nome.or(antes.and_then(|festa| festa.reacao));
-        if antes.is_none() {
+        let reaberto = turno.continuacoes > 0;
+        if !reaberto {
             self.contadores.turnos += 1;
         }
         if reacao.is_some() {
             self.contadores.reacoes += 1;
         }
-        let stop = turno.stop.take();
         let registro = RegistroTurno {
             sid8: evento::curto(&self.sid),
             turno8: turno.id.as_deref().map(evento::curto),
@@ -729,22 +1055,25 @@ impl Sessao {
             teste: self.teste,
             implicito: turno.implicito,
             src: turno.src.clone(),
-            t0_ms: turno.t0_ms,
+            origem: turno.origem,
+            t0_ms,
             fim_ms,
-            relogio_ms: fim_ms.saturating_sub(turno.t0_ms),
-            trabalho: turno.trabalho,
-            outras: turno.outras,
-            arquivos: turno.arquivos(),
-            subagentes: turno.subagentes,
-            falhas: turno.falhas,
-            de_agentes: turno.de_agentes,
-            dur_ms: turno.dur_ms,
-            bg: stop.and_then(|s| s.bg),
-            sha: stop.is_some_and(|s| s.sha),
+            relogio_ms: fim_ms.saturating_sub(t0_ms),
+            trabalho: comp.trabalho,
+            outras: comp.outras,
+            arquivos: comp.arquivos(),
+            subagentes: comp.subagentes,
+            falhas: comp.falhas,
+            de_agentes: comp.de_agentes,
+            dur_ms: comp.dur_ms,
+            bg: stop.as_ref().and_then(|s| s.bg),
+            sha: stop.as_ref().is_some_and(|s| s.sha),
             continuacoes: turno.continuacoes,
             fim,
             nivel,
             reacao: reacao_do_turno,
+            corrente,
+            teto,
             chave: (self.teste, self.sid.clone(), turno.id.clone()),
         };
         if fim == Fim::Stop && reabrivel {
@@ -760,24 +1089,65 @@ impl Sessao {
         Fechamento {
             registro,
             reacao,
-            substitui: antes.is_some(),
+            substitui: reaberto,
+            // O fim do pedido do Renan: um turno digitado que não ficou numa
+            // corrente aberta, ou a corrente que nasceu de um.
+            pronto: festeja && !maquina && (fim_da_corrente || corrente.is_none()),
         }
+    }
+
+    /// A corrente fecha sem festa (expirou, ou a sessão acabou): o registro
+    /// dela, com a soma.
+    fn fechar_corrente(&mut self, fim: Fim, fim_ms: u64) -> Option<Fechamento> {
+        let c = self.corrente.take()?;
+        let comp = c.total();
+        Some(Fechamento {
+            registro: RegistroTurno {
+                sid8: evento::curto(&self.sid),
+                turno8: None,
+                proj: self.proj.clone(),
+                teste: self.teste,
+                implicito: false,
+                src: None,
+                origem: if c.raiz_maquina {
+                    OrigemTurno::Notificacao
+                } else {
+                    OrigemTurno::Digitado
+                },
+                t0_ms: c.t0_ms,
+                fim_ms,
+                relogio_ms: fim_ms.saturating_sub(c.t0_ms),
+                trabalho: comp.trabalho,
+                outras: comp.outras,
+                arquivos: comp.arquivos(),
+                subagentes: comp.subagentes,
+                falhas: comp.falhas,
+                de_agentes: comp.de_agentes,
+                dur_ms: comp.dur_ms,
+                bg: None,
+                sha: false,
+                continuacoes: 0,
+                fim,
+                nivel: None,
+                reacao: None,
+                corrente: Some(ResumoCorrente {
+                    aberta: false,
+                    turnos: c.turnos,
+                }),
+                teto: Vec::new(),
+                chave: (self.teste, self.sid.clone(), None),
+            },
+            reacao: None,
+            substitui: false,
+            pronto: false,
+        })
     }
 
     /// Turno de uma ferramenta de subagente: o turno em que ele nasceu, se
     /// ainda estiver aberto ou trocado; senão o do próprio evento; senão o
     /// aberto.
     fn turno_do_agente(&mut self, aid: Option<&str>, id: Option<&str>) -> Option<&mut Turno> {
-        let nascimento = aid.and_then(|aid| {
-            self.agentes
-                .iter()
-                .find(|(a, _)| a == aid)
-                .map(|(_, t)| t.clone())
-        });
-        let alvo = match nascimento {
-            Some(t) => t,
-            None => id.map(str::to_owned),
-        };
+        let alvo = self.nascimento(aid).or_else(|| id.map(str::to_owned));
         let Some(alvo) = alvo else {
             return self.turno.as_mut();
         };
@@ -791,6 +1161,36 @@ impl Sessao {
             .filter(|turno| eh_dele(turno))
     }
 
+    /// O turno em que o subagente `aid` nasceu, se ele é conhecido.
+    fn nascimento(&self, aid: Option<&str>) -> Option<String> {
+        let aid = aid?;
+        self.agentes
+            .iter()
+            .find(|(a, _)| a == aid)
+            .and_then(|(_, t)| t.clone())
+    }
+
+    /// O subagente `aid` já foi visto (o `SubagentStart` dele ou o `bgi` de
+    /// um Stop).
+    fn conhece_agente(&self, aid: &str) -> bool {
+        self.agentes.iter().any(|(a, _)| a == aid)
+            || self
+                .corrente
+                .as_ref()
+                .is_some_and(|c| c.agentes.contains(aid))
+    }
+
+    /// A corrente aberta, se o trabalho do agente `aid` (do turno `id`) é
+    /// dela: o agente está em voo nela, ou nasceu num turno dela.
+    fn corrente_do_agente(&mut self, aid: Option<&str>, id: Option<&str>) -> Option<&mut Corrente> {
+        let nascimento = self.nascimento(aid);
+        let c = self.corrente.as_mut()?;
+        let dela = aid.is_some_and(|a| c.agentes.contains(a))
+            || nascimento.as_deref().is_some_and(|t| c.tem_turno(t))
+            || id.is_some_and(|t| c.tem_turno(t));
+        dela.then_some(c)
+    }
+
     fn lembrar_agente(&mut self, aid: &str, turno: Option<String>) {
         if self.agentes.iter().any(|(a, _)| a == aid) {
             return;
@@ -799,6 +1199,13 @@ impl Sessao {
             self.agentes.pop_front();
         }
         self.agentes.push_back((aid.to_owned(), turno));
+    }
+
+    fn resumo_da_corrente(&self) -> Option<ResumoCorrente> {
+        self.corrente.as_ref().map(|c| ResumoCorrente {
+            aberta: true,
+            turnos: c.turnos,
+        })
     }
 }
 
@@ -915,6 +1322,19 @@ impl Cerebro {
     /// reações para tocar agora (inclusive as de prazos que venceram antes
     /// dele).
     pub fn receber(&mut self, ev: &Evento, recebido_ms: u64, agora: Agora) -> Vec<Reacao> {
+        self.receber_com(ev, recebido_ms, agora, Evidencia::default())
+    }
+
+    /// [`Self::receber`], com o que o Motor sabe da hora de um prompt
+    /// (decisão 0073): a prova de que o Renan não o digitou, para separar o
+    /// tique de um laço.
+    pub fn receber_com(
+        &mut self,
+        ev: &Evento,
+        recebido_ms: u64,
+        agora: Agora,
+        evidencia: Evidencia,
+    ) -> Vec<Reacao> {
         let mut reacoes = self.tique(agora);
         let origem = ev.ent.as_deref().unwrap_or("desconhecida");
         if !self.config.origens.iter().any(|o| o == origem) {
@@ -960,11 +1380,16 @@ impl Cerebro {
 
         // Um evento de trabalho da thread principal: o SubagentStart vem com
         // o `agent_id` do subagente que nasce, mas quem o lança é a thread
-        // principal. Depois do Stop, ele mostra que o turno continua.
-        let continua = (!ev.agente || ev.e == "SubagentStart") && continua_o_turno(&ev.e);
+        // principal. Depois do Stop, ele mostra que o turno continua. O de um
+        // agente já visto é ele acordando em segundo plano (o shell dele
+        // acabou; decisão 0073): não é a thread principal.
+        let agente_conhecido =
+            ev.e == "SubagentStart" && ev.aid.as_deref().is_some_and(|a| sessao.conhece_agente(a));
+        let continua = (!ev.agente || (ev.e == "SubagentStart" && !agente_conhecido))
+            && continua_o_turno(&ev.e);
         if continua
             && let Some(turno) = sessao.turno.as_mut()
-            && let Some(stop) = turno.stop
+            && let Some(stop) = turno.stop.as_ref()
             && t > stop.ts_ms
             && (id.is_none() || id == turno.id.as_deref())
         {
@@ -985,26 +1410,60 @@ impl Cerebro {
                 };
                 match alvo {
                     Alvo::Novo => {
-                        let turno = sessao.abrir(id, t, agora, modo, &mut fechamentos);
-                        turno.implicito = false;
-                        turno.src.clone_from(&ev.src);
+                        // O aberto acaba antes (o Stop pendente comemora na
+                        // hora e pode abrir ou fechar a corrente), e só então
+                        // a origem do prompt novo é decidida (decisão 0073).
+                        let antes = fechamentos.len();
+                        sessao.encerrar_aberto(t, agora, modo, &mut fechamentos);
+                        for f in &fechamentos[antes..] {
+                            if f.pronto {
+                                sessao.aviso = Some(Aviso {
+                                    tipo: TipoAviso::Pronto,
+                                    desde_ms: f.registro.fim_ms,
+                                    desde_mono: agora.mono_ms,
+                                });
+                            }
+                        }
+                        sessao.comemorado = None;
+                        let origem = classificar(
+                            ev.src.as_deref(),
+                            ev.orig.as_deref(),
+                            sessao.corrente.is_some(),
+                            sessao.agendamentos,
+                            evidencia,
+                        );
+                        sessao.turno = Some(Turno::novo(
+                            id.map(str::to_owned),
+                            t,
+                            false,
+                            ev.src.clone(),
+                            origem,
+                        ));
                         sessao.estado = EstadoSessao::Pensando;
                     }
                     // Aberto por um evento que chegou antes do prompt (hooks
                     // async fora de ordem): é o turno dele.
-                    Alvo::Aberto => match sessao.turno.as_mut() {
-                        Some(turno) if turno.implicito => {
-                            turno.implicito = false;
-                            turno.t0_ms = turno.t0_ms.min(t);
-                            turno.src.clone_from(&ev.src);
-                            let andou =
-                                turno.trabalho > 0 || turno.outras > 0 || turno.subagentes > 0;
-                            if !andou && turno.stop.is_none() {
-                                sessao.estado = EstadoSessao::Pensando;
+                    Alvo::Aberto => {
+                        let origem = classificar(
+                            ev.src.as_deref(),
+                            ev.orig.as_deref(),
+                            sessao.corrente.is_some(),
+                            sessao.agendamentos,
+                            evidencia,
+                        );
+                        match sessao.turno.as_mut() {
+                            Some(turno) if turno.implicito => {
+                                turno.implicito = false;
+                                turno.t0_ms = turno.t0_ms.min(t);
+                                turno.src.clone_from(&ev.src);
+                                turno.origem = origem;
+                                if !turno.comp.andou() && turno.stop.is_none() {
+                                    sessao.estado = EstadoSessao::Pensando;
+                                }
                             }
+                            _ => ignorado = Some("prompt_repetido"),
                         }
-                        _ => ignorado = Some("prompt_repetido"),
-                    },
+                    }
                     Alvo::Trocado => ignorado = Some("prompt_repetido"),
                     Alvo::Fechado => ignorado = Some("turno_fechado"),
                 }
@@ -1013,16 +1472,23 @@ impl Cerebro {
                 sessao.contadores.ferramentas += 1;
                 let falhou = ev.e == "PostToolUseFailure";
                 if ev.agente {
-                    match sessao.turno_do_agente(ev.aid.as_deref(), id) {
-                        Some(turno) => turno.contar_ferramenta(ev, falhou),
-                        None => ignorado = Some("ferramenta_de_agente_fora_do_turno"),
+                    // A ferramenta de um subagente conta no turno em que ele
+                    // nasceu; fechado o turno, na corrente dele (decisão
+                    // 0073).
+                    if let Some(turno) = sessao.turno_do_agente(ev.aid.as_deref(), id) {
+                        turno.comp.contar_ferramenta(ev, falhou);
+                    } else if let Some(c) = sessao.corrente_do_agente(ev.aid.as_deref(), id) {
+                        c.fundo.contar_ferramenta(ev, falhou);
+                        c.ultimo_mono = agora.mono_ms;
+                    } else {
+                        ignorado = Some("ferramenta_de_agente_fora_do_turno");
                     }
                 } else {
                     let interrompeu = falhou && ev.intr;
                     match sessao.alvo(id, t, continua) {
                         Alvo::Trocado => {
                             if let Some(trocado) = sessao.trocado.as_mut() {
-                                trocado.turno.contar_ferramenta(ev, falhou);
+                                trocado.turno.comp.contar_ferramenta(ev, falhou);
                             }
                             if interrompeu && let Some(trocado) = sessao.trocado.take() {
                                 let turno = trocado.turno;
@@ -1042,7 +1508,7 @@ impl Cerebro {
                                 sessao.abrir(id, t, agora, modo, &mut fechamentos);
                             }
                             if let Some(turno) = sessao.turno.as_mut() {
-                                turno.contar_ferramenta(ev, falhou);
+                                turno.comp.contar_ferramenta(ev, falhou);
                                 // Atrasado (antes do Stop pendente): conta,
                                 // mas a sessão segue parada.
                                 if turno.stop.is_none() {
@@ -1062,10 +1528,18 @@ impl Cerebro {
                     }
                 }
             }
+            // Um agente já visto acordou em segundo plano: só a corrente dele
+            // anda (decisão 0073).
+            "SubagentStart" if agente_conhecido => {
+                if let Some(c) = sessao.corrente_do_agente(ev.aid.as_deref(), id) {
+                    c.ultimo_mono = agora.mono_ms;
+                }
+            }
             "SubagentStart" => match sessao.alvo(id, t, continua) {
                 Alvo::Trocado => {
                     let nascimento = sessao.trocado.as_mut().map(|trocado| {
-                        trocado.turno.subagentes = trocado.turno.subagentes.saturating_add(1);
+                        trocado.turno.comp.subagentes =
+                            trocado.turno.comp.subagentes.saturating_add(1);
                         trocado.turno.id.clone()
                     });
                     if let (Some(nascimento), Some(aid)) = (nascimento, &ev.aid) {
@@ -1078,7 +1552,7 @@ impl Cerebro {
                         sessao.abrir(id, t, agora, modo, &mut fechamentos);
                     }
                     let nascimento = sessao.turno.as_mut().map(|turno| {
-                        turno.subagentes = turno.subagentes.saturating_add(1);
+                        turno.comp.subagentes = turno.comp.subagentes.saturating_add(1);
                         turno.id.clone()
                     });
                     if let (Some(nascimento), Some(aid)) = (nascimento, &ev.aid) {
@@ -1124,24 +1598,26 @@ impl Cerebro {
             }
             "Stop" => match sessao.alvo(id, t, false) {
                 // O Stop atrasado do turno trocado: comemora na hora (o turno
-                // novo já começou).
+                // novo já começou). Se o novo é de máquina, ele não resolve o
+                // pronto deste (decisão 0073).
                 Alvo::Trocado => {
+                    if ev.crn.is_some() {
+                        sessao.agendamentos = ev.crn;
+                    }
                     if let Some(trocado) = sessao.trocado.take() {
                         let mut turno = trocado.turno;
-                        turno.stop = Some(StopPendente {
-                            ts_ms: t,
-                            prazo_mono: agora.mono_ms,
-                            sha: ev.sha,
-                            bg: ev.bg,
-                        });
-                        fechamentos.push(sessao.fechar_turno(
-                            turno,
-                            Fim::Stop,
-                            t,
-                            agora,
-                            modo,
-                            false,
-                        ));
+                        turno.stop = Some(StopPendente::do_evento(ev, t, agora.mono_ms));
+                        let f = sessao.fechar_turno(turno, Fim::Stop, t, agora, modo, false);
+                        let novo_de_maquina =
+                            sessao.turno.as_ref().is_some_and(|n| n.origem.maquina());
+                        if f.pronto && novo_de_maquina {
+                            sessao.aviso = Some(Aviso {
+                                tipo: TipoAviso::Pronto,
+                                desde_ms: t,
+                                desde_mono: agora.mono_ms,
+                            });
+                        }
+                        fechamentos.push(f);
                     }
                 }
                 Alvo::Fechado => ignorado = Some("stop_repetido"),
@@ -1153,13 +1629,15 @@ impl Cerebro {
                         if turno.stop.is_some() {
                             ignorado = Some("stop_repetido");
                         } else {
-                            turno.stop = Some(StopPendente {
-                                ts_ms: t,
-                                prazo_mono: agora.mono_ms + ACOMODACAO_MS,
-                                sha: ev.sha,
-                                bg: ev.bg,
-                            });
+                            turno.stop = Some(StopPendente::do_evento(
+                                ev,
+                                t,
+                                agora.mono_ms + ACOMODACAO_MS,
+                            ));
                             sessao.estado = EstadoSessao::Parada;
+                            if ev.crn.is_some() {
+                                sessao.agendamentos = ev.crn;
+                            }
                         }
                     }
                 }
@@ -1200,11 +1678,19 @@ impl Cerebro {
                     EstadoSessao::Erro => Some(TipoAviso::Erro),
                     _ => None,
                 };
-                sessao.aviso = tipo.map(|tipo| Aviso {
-                    tipo,
-                    desde_ms: t,
-                    desde_mono: agora.mono_ms,
-                });
+                // Um turno de máquina não resolve o pronto de antes: o Renan
+                // não viu nada (decisão 0073).
+                let de_maquina = sessao.turno.as_ref().is_some_and(|t| t.origem.maquina());
+                let guarda_o_pronto = de_maquina
+                    && tipo.is_none()
+                    && sessao.aviso.is_some_and(|a| a.tipo == TipoAviso::Pronto);
+                if !guarda_o_pronto {
+                    sessao.aviso = tipo.map(|tipo| Aviso {
+                        tipo,
+                        desde_ms: t,
+                        desde_mono: agora.mono_ms,
+                    });
+                }
             }
         }
         if let Some(motivo) = ignorado {
@@ -1254,6 +1740,7 @@ impl Cerebro {
             fechamentos.push(sessao.fechar_trocado(trocado, agora, modo));
         }
         fechamentos.extend(sessao.fechar(Fim::SessaoEncerrada, t, agora, modo));
+        fechamentos.extend(sessao.fechar_corrente(Fim::SessaoEncerrada, t));
         self.registrar(fechamentos, reacoes);
         let sobrou = self.sessoes.keys().any(|(teste, _)| *teste == chave.0);
         if sai && !sobrou && self.config.modo != ModoCelebracao::Desligada {
@@ -1264,6 +1751,7 @@ impl Cerebro {
                 ts: agora.parede_ms,
                 nivel: None,
                 teste: chave.0,
+                discreta: false,
             };
             self.reagir(reacao, reacoes);
         }
@@ -1288,22 +1776,34 @@ impl Cerebro {
             let vencida = sessao
                 .turno
                 .as_ref()
-                .and_then(|t| t.stop)
+                .and_then(|t| t.stop.as_ref())
                 .is_some_and(|s| agora.mono_ms >= s.prazo_mono);
             if vencida {
                 let fim_ms = sessao
                     .turno
                     .as_ref()
-                    .and_then(|t| t.stop)
+                    .and_then(|t| t.stop.as_ref())
                     .map_or(agora.parede_ms, |s| s.ts_ms);
-                fechamentos.extend(sessao.fechar(Fim::Stop, fim_ms, agora, modo));
-                // O Claude terminou e o turno é do Renan: o pronto, com ou
-                // sem festa (decisão 0057).
-                sessao.aviso = Some(Aviso {
-                    tipo: TipoAviso::Pronto,
-                    desde_ms: fim_ms,
-                    desde_mono: agora.mono_ms,
-                });
+                if let Some(f) = sessao.fechar(Fim::Stop, fim_ms, agora, modo) {
+                    // O Claude terminou e o turno é do Renan: o pronto, com ou
+                    // sem festa (decisão 0057); não com a corrente aberta nem
+                    // num turno de máquina (decisão 0073).
+                    if f.pronto {
+                        sessao.aviso = Some(Aviso {
+                            tipo: TipoAviso::Pronto,
+                            desde_ms: fim_ms,
+                            desde_mono: agora.mono_ms,
+                        });
+                    }
+                    fechamentos.push(f);
+                }
+            }
+            if sessao
+                .corrente
+                .as_ref()
+                .is_some_and(|c| agora.mono_ms >= c.ultimo_mono + VIDA_CORRENTE_MS)
+            {
+                fechamentos.extend(sessao.fechar_corrente(Fim::CorrenteExpirou, agora.parede_ms));
             }
             if sessao
                 .aviso
@@ -1335,6 +1835,21 @@ impl Cerebro {
         self.fechados_a_tirar.drain(..).collect()
     }
 
+    /// De onde veio o turno aberto `turno` da sessão `chave` (decisão
+    /// 0073): o Motor só casa a janela da sessão num prompt digitado.
+    pub fn origem_do_turno(
+        &self,
+        chave: &(bool, String),
+        turno: Option<&str>,
+    ) -> Option<OrigemTurno> {
+        self.sessoes
+            .get(chave)?
+            .turno
+            .as_ref()
+            .filter(|t| turno.is_none() || t.id.as_deref() == turno)
+            .map(|t| t.origem)
+    }
+
     /// O cérebro acompanha a sessão (teste, sid).
     pub fn tem_sessao(&self, chave: &(bool, String)) -> bool {
         self.sessoes.contains_key(chave)
@@ -1350,10 +1865,24 @@ impl Cerebro {
                 } else {
                     VIDA_SESSAO_MS
                 };
-                let acomodacao = s.turno.as_ref().and_then(|t| t.stop).map(|p| p.prazo_mono);
+                let acomodacao = s
+                    .turno
+                    .as_ref()
+                    .and_then(|t| t.stop.as_ref())
+                    .map(|p| p.prazo_mono);
                 let trocado = s.trocado.as_ref().map(|x| x.prazo_mono);
                 let aviso = s.aviso.and_then(prazo_do_aviso);
-                [Some(s.ultimo_mono + vida), acomodacao, trocado, aviso]
+                let corrente = s
+                    .corrente
+                    .as_ref()
+                    .map(|c| c.ultimo_mono + VIDA_CORRENTE_MS);
+                [
+                    Some(s.ultimo_mono + vida),
+                    acomodacao,
+                    trocado,
+                    aviso,
+                    corrente,
+                ]
             })
             .flatten()
             .min()
@@ -1412,6 +1941,8 @@ impl Cerebro {
                     ultimo_evento_ms: s.ultimo_parede,
                     contadores: s.contadores.clone(),
                     aviso: s.aviso,
+                    corrente: s.resumo_da_corrente(),
+                    agendamentos: s.agendamentos,
                     janela: None,
                     chave: (s.teste, s.sid.clone()),
                 })
@@ -2053,6 +2584,7 @@ mod testes {
             .turno
             .as_ref()
             .unwrap()
+            .comp
             .arquivos
             .len();
         assert_eq!(lembrados, ARQUIVOS_POR_TURNO, "memória limitada");
@@ -2726,5 +3258,512 @@ mod testes {
             vec![chega(11_000, de("d", notificacao("permission_prompt")))],
         );
         assert!(c.pendencias().iter().all(|p| p.chave.1 != "d"));
+    }
+
+    // --- correntes e turnos de máquina (decisão 0073) ------------------------
+
+    /// O prompt com que o Claude Code acorda a sessão quando uma tarefa em
+    /// segundo plano termina (o `orig` que o hook calcula; decisão 0072).
+    fn aviso_de_tarefa(turno: &str) -> Evento {
+        Evento {
+            src: None,
+            orig: Some(ORIG_NOTIFICACAO.into()),
+            ..prompt(turno)
+        }
+    }
+
+    /// Um prompt do hook do M5 (`orig = comum`), sem `src` (o 2.1.288).
+    fn comum(turno: &str) -> Evento {
+        Evento {
+            src: None,
+            orig: Some("comum".into()),
+            ..prompt(turno)
+        }
+    }
+
+    /// Um prompt do hook de antes do M5: sem `src` e sem `orig`.
+    fn antigo(turno: &str) -> Evento {
+        Evento {
+            src: None,
+            ..prompt(turno)
+        }
+    }
+
+    /// Um Stop com as tarefas em segundo plano (tipo, id) e os agendamentos.
+    fn stop_com(turno: &str, tarefas: &[(&str, &str)], crn: u64) -> Evento {
+        Evento {
+            bg: Some(tarefas.len() as u64),
+            bgt: tarefas.iter().map(|(t, _)| (*t).to_owned()).collect(),
+            bgi: tarefas.iter().map(|(_, i)| (*i).to_owned()).collect(),
+            crn: Some(crn),
+            ..stop(turno)
+        }
+    }
+
+    fn nasce(turno: &str, aid: &str) -> Evento {
+        Evento {
+            turno: Some(turno.into()),
+            agente: true,
+            aid: Some(aid.into()),
+            ..ev("SubagentStart")
+        }
+    }
+
+    fn do_agente(turno: &str, aid: &str, tool: &str, dur: u64) -> Evento {
+        Evento {
+            agente: true,
+            aid: Some(aid.into()),
+            ..ferramenta(turno, tool, None, dur)
+        }
+    }
+
+    #[test]
+    fn a_origem_do_prompt() {
+        use OrigemTurno::*;
+        let longe = Evidencia {
+            ausente: true,
+            outra_janela: false,
+        };
+        let outra = Evidencia {
+            ausente: false,
+            outra_janela: true,
+        };
+        let nada = Evidencia::default();
+        for (src, orig, corrente, crons, evidencia, esperado) in [
+            // O `source`, se um Claude Code mandar, vale primeiro.
+            (
+                Some("user"),
+                Some(ORIG_NOTIFICACAO),
+                true,
+                Some(1),
+                longe,
+                Digitado,
+            ),
+            (Some("system"), None, false, None, nada, Sistema),
+            (Some("loop_wakeup"), None, false, None, nada, Tique),
+            (Some("schedule_wakeup"), None, false, None, nada, Tique),
+            (Some("poll_event"), None, false, None, nada, Tique),
+            // O hook do M5: a notificação pela forma.
+            (None, Some(ORIG_NOTIFICACAO), false, None, nada, Notificacao),
+            (None, Some("comum"), true, None, nada, Digitado),
+            // Tique: só com agendamento pendente e prova de que não foi
+            // digitado.
+            (None, Some("comum"), false, Some(1), longe, Tique),
+            (None, Some("comum"), false, Some(2), outra, Tique),
+            (None, Some("comum"), false, Some(1), nada, Digitado),
+            (None, Some("comum"), false, Some(0), longe, Digitado),
+            (None, Some("comum"), false, None, longe, Digitado),
+            // O hook antigo: sem `orig`, a corrente aberta decide.
+            (None, None, true, None, nada, Notificacao),
+            (None, None, false, Some(3), longe, Digitado),
+            // Um `orig` de um hook mais novo vale como comum.
+            (None, Some("outra_forma"), false, None, nada, Digitado),
+        ] {
+            assert_eq!(
+                classificar(src, orig, corrente, crons, evidencia),
+                esperado,
+                "{src:?} {orig:?} corrente={corrente} crons={crons:?} {evidencia:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn o_agente_em_segundo_plano_festeja_uma_vez_so_no_fim() {
+        // A sequência real da pesquisa (decisão 0071): o pedido lança um
+        // agente em segundo plano e acaba com ele em voo; o agente deixa um
+        // shell rodando; a notificação acorda o turno principal com o shell
+        // ainda em voo; o agente acorda quando o shell acaba e, no fim, outra
+        // notificação. Uma festa só, no último Stop, pela soma.
+        let mut c = novo();
+        let saida = rodar(
+            &mut c,
+            vec![
+                chega(0, comum("p3")),
+                chega(2_199, nasce("p3", "x1")),
+                chega(2_205, ferramenta("p3", "Agent", None, 6)),
+                chega(3_624, stop_com("p3", &[("subagent", "x1")], 0)),
+                chega(7_441, do_agente("p3", "x1", "Bash", 41)),
+                chega(8_680, aviso_de_tarefa("p4")),
+                chega(11_587, stop_com("p4", &[("shell", "x2")], 0)),
+                chega(32_534, nasce("p4", "x1")),
+                chega(33_347, aviso_de_tarefa("p5")),
+                chega(34_682, stop_com("p5", &[], 0)),
+                Ate(40_000),
+            ],
+        );
+        // O Stop de p4 não tem agente em voo (o shell é do agente, mas o fio
+        // não diz de quem é): a corrente fecha em p4, com a festa; p5, a
+        // última notificação, é um turno de máquina sem corrente, e o T0
+        // dele não reage.
+        assert_eq!(saida, vec![(12_387, PULINHO)]);
+        let r = c.resumo();
+        assert!(r.ignorados.is_empty(), "{:?}", r.ignorados);
+        let p3 = registro(&r, "p3");
+        assert_eq!(
+            (p3.fim, p3.nivel, p3.reacao, p3.corrente),
+            (
+                Fim::Stop,
+                None,
+                None,
+                Some(ResumoCorrente {
+                    aberta: true,
+                    turnos: 1
+                })
+            ),
+            "o pedido entra na corrente sem festa"
+        );
+        let p4 = registro(&r, "p4");
+        assert_eq!(
+            (p4.fim, p4.nivel, p4.reacao, p4.origem),
+            (
+                Fim::Stop,
+                Some(Nivel::T1),
+                Some(PULINHO),
+                OrigemTurno::Notificacao
+            )
+        );
+        assert_eq!(
+            p4.corrente,
+            Some(ResumoCorrente {
+                aberta: false,
+                turnos: 2
+            })
+        );
+        // A soma: o Agent e o Bash do agente (depois do Stop do pedido), um
+        // subagente (o que acordou não conta de novo), o t0 do pedido.
+        assert_eq!(
+            (
+                p4.trabalho,
+                p4.outras,
+                p4.subagentes,
+                p4.de_agentes,
+                p4.dur_ms
+            ),
+            (1, 1, 1, 1, 47)
+        );
+        assert_eq!(p4.t0_ms, BASE, "o t0 do primeiro turno");
+        assert!(
+            p4.teto.is_empty(),
+            "a corrente nasceu de um prompt digitado"
+        );
+        let p5 = registro(&r, "p5");
+        assert_eq!(
+            (p5.nivel, p5.reacao, p5.origem, p5.teto.clone()),
+            (
+                Some(Nivel::T0),
+                None,
+                OrigemTurno::Notificacao,
+                vec!["maquina"]
+            )
+        );
+        // O pronto é o do fim da corrente; a notificação de p5 não o tira
+        // nem abre outro.
+        let aviso = c.resumo().sessoes[0].aviso.unwrap();
+        assert_eq!(
+            (aviso.tipo, aviso.desde_ms),
+            (TipoAviso::Pronto, BASE + 11_587)
+        );
+    }
+
+    #[test]
+    fn a_corrente_espera_o_ultimo_agente_e_soma_o_trabalho_dele() {
+        // Dois agentes em segundo plano; o Stop do turno que volta com um
+        // deles ainda em voo não festeja; o último fecha.
+        let mut c = novo();
+        let saida = rodar(
+            &mut c,
+            vec![
+                chega(0, comum("p1")),
+                chega(1_000, nasce("p1", "a1")),
+                chega(1_100, nasce("p1", "a2")),
+                chega(
+                    2_000,
+                    stop_com("p1", &[("subagent", "a1"), ("workflow", "w1")], 0),
+                ),
+                chega(5_000, do_agente("p1", "a1", "Edit", 30)),
+                chega(6_000, do_agente("p1", "a2", "Write", 20)),
+                chega(9_000, aviso_de_tarefa("p2")),
+                chega(10_000, ferramenta("p2", "Edit", Some("aaaaaaaaaaa1"), 40)),
+                chega(12_000, stop_com("p2", &[("workflow", "w1")], 0)),
+                chega(60_000, aviso_de_tarefa("p3")),
+                chega(62_000, stop_com("p3", &[("shell", "s9")], 0)),
+                Ate(70_000),
+            ],
+        );
+        assert_eq!(saida, vec![(62_800, PULINHO)], "uma festa, no fim");
+        let r = c.resumo();
+        let p3 = registro(&r, "p3");
+        assert_eq!(
+            p3.corrente,
+            Some(ResumoCorrente {
+                aberta: false,
+                turnos: 3
+            })
+        );
+        assert_eq!(
+            (p3.trabalho, p3.subagentes, p3.de_agentes, p3.arquivos),
+            (3, 2, 2, 1)
+        );
+        assert_eq!(
+            registro(&r, "p2").corrente,
+            Some(ResumoCorrente {
+                aberta: true,
+                turnos: 2
+            })
+        );
+        assert!(c.resumo().sessoes[0].corrente.is_none(), "fechou");
+    }
+
+    #[test]
+    fn shell_e_monitor_nunca_seguram_a_festa() {
+        // Um servidor de desenvolvimento rodando em segundo plano: todo Stop
+        // vem com `bg ≥ 1`, e as festas são as de sempre.
+        let mut c = novo();
+        let servidor = [("shell", "srv"), ("monitor", "mon"), ("dream", "d1")];
+        let saida = rodar(
+            &mut c,
+            vec![
+                chega(0, comum("p1")),
+                chega(1_000, ferramenta("p1", "Bash", None, 14)),
+                chega(2_000, stop_com("p1", &servidor, 0)),
+                chega(10_000, comum("p2")),
+                chega(11_000, stop_com("p2", &servidor, 0)),
+                Ate(15_000),
+            ],
+        );
+        assert_eq!(saida, vec![(2_800, PULINHO), (11_800, ACENO)]);
+        assert!(c.resumo().sessoes[0].corrente.is_none());
+    }
+
+    #[test]
+    fn turno_de_maquina_sem_corrente_e_discreto_e_nao_mexe_no_pronto() {
+        let mut c = novo();
+        let saida = rodar(
+            &mut c,
+            vec![
+                // O pedido do Renan, com o pronto.
+                chega(0, comum("p1")),
+                chega(1_000, ferramenta("p1", "Edit", Some("aaaaaaaaaaa1"), 30)),
+                chega(2_000, stop_com("p1", &[("shell", "s1")], 0)),
+                Ate(3_000),
+                // O shell acaba: a notificação acorda a sessão, que edita.
+                chega(30_000, aviso_de_tarefa("p2")),
+                chega(31_000, ferramenta("p2", "Edit", Some("aaaaaaaaaaa2"), 30)),
+                chega(31_500, ferramenta("p2", "Bash", None, 900)),
+                chega(33_000, stop_com("p2", &[], 0)),
+                Ate(34_000),
+                // Outra notificação, sem trabalho: T0 de máquina, calado.
+                chega(50_000, aviso_de_tarefa("p3")),
+                chega(51_000, stop_com("p3", &[], 0)),
+                Ate(60_000),
+            ],
+        );
+        assert_eq!(saida, vec![(2_800, PULINHO), (33_800, PULINHO)]);
+        let r = c.resumo();
+        let p2 = registro(&r, "p2");
+        assert_eq!(
+            (p2.nivel, p2.origem, p2.teto.clone()),
+            (Some(Nivel::T1), OrigemTurno::Notificacao, vec!["maquina"])
+        );
+        assert!(c.resumo().ultima_reacao.unwrap().discreta);
+        // O pronto continua o de p1: as notificações não o tiraram nem
+        // abriram outro.
+        let aviso = c.resumo().sessoes[0].aviso.unwrap();
+        assert_eq!(
+            (aviso.tipo, aviso.desde_ms),
+            (TipoAviso::Pronto, BASE + 2_000)
+        );
+        // Um prompt digitado resolve.
+        rodar(&mut c, vec![chega(70_000, comum("p4"))]);
+        assert_eq!(aviso_de(&c), None);
+    }
+
+    #[test]
+    fn com_o_hook_antigo_o_prompt_com_corrente_aberta_e_continuacao() {
+        let mut c = novo();
+        let saida = rodar(
+            &mut c,
+            vec![
+                chega(0, antigo("p1")),
+                chega(500, nasce("p1", "a1")),
+                chega(1_000, stop_com("p1", &[("subagent", "a1")], 0)),
+                Ate(2_000),
+                // A notificação, no hook antigo: um prompt sem marca.
+                chega(9_000, antigo("p2")),
+                chega(10_000, stop_com("p2", &[], 0)),
+                Ate(11_000),
+                // Sem corrente, um prompt sem marca é digitado.
+                chega(20_000, antigo("p3")),
+                chega(21_000, stop_com("p3", &[], 0)),
+                Ate(22_000),
+            ],
+        );
+        assert_eq!(saida, vec![(10_800, PULINHO), (21_800, ACENO)]);
+        let r = c.resumo();
+        assert_eq!(registro(&r, "p2").origem, OrigemTurno::Notificacao);
+        assert_eq!(registro(&r, "p3").origem, OrigemTurno::Digitado);
+    }
+
+    #[test]
+    fn o_agente_que_acorda_nao_reabre_nem_segura_a_acomodacao() {
+        // O SubagentStart de um agente já visto, depois do Stop, é o agente
+        // acordando em segundo plano: não cancela a acomodação nem reabre o
+        // turno comemorado (o M3 o tomava pela thread principal).
+        let mut c = novo();
+        let saida = rodar(
+            &mut c,
+            vec![
+                chega(0, comum("p1")),
+                chega(500, nasce("p1", "a1")),
+                chega(1_000, stop_com("p1", &[], 0)),
+                chega(1_300, nasce("p1", "a1")),
+                Ate(5_000),
+                chega(6_000, nasce("p1", "a1")),
+                Ate(8_000),
+            ],
+        );
+        assert_eq!(saida, vec![(1_800, PULINHO)]);
+        let r = c.resumo();
+        assert_eq!(
+            (
+                registro(&r, "p1").continuacoes,
+                registro(&r, "p1").subagentes
+            ),
+            (0, 1)
+        );
+        assert!(!r.sessoes[0].turno_aberto);
+        // Um agente novo depois do Stop continua sendo a thread principal.
+        let mut c = novo();
+        let saida = rodar(
+            &mut c,
+            vec![
+                chega(0, comum("p1")),
+                chega(1_000, stop_com("p1", &[], 0)),
+                chega(1_300, nasce("p1", "a9")),
+                Ate(5_000),
+            ],
+        );
+        assert!(saida.is_empty(), "{saida:?}");
+    }
+
+    #[test]
+    fn a_corrente_expira_em_12_h_e_o_fim_da_sessao_a_fecha_sem_festa() {
+        let mut c = novo();
+        let abrir = || {
+            vec![
+                chega(0, comum("p1")),
+                chega(1_000, stop_com("p1", &[("subagent", "a1")], 0)),
+                Ate(2_000),
+            ]
+        };
+        assert!(rodar(&mut c, abrir()).is_empty());
+        // A sessão continua viva (o Renan usa o terminal, o idle_prompt), e
+        // o agente nunca volta: a corrente expira 12 h depois do último
+        // evento dela (o fechamento do Stop, na acomodação).
+        let ocioso = Evento {
+            nt: Some("idle_prompt".into()),
+            ..ev("Notification")
+        };
+        let hora = 60 * 60 * 1000;
+        let saida = rodar(
+            &mut c,
+            vec![
+                chega(6 * hora, ocioso.clone()),
+                chega(11 * hora, ocioso),
+                Ate(1_800 + VIDA_CORRENTE_MS - 1),
+            ],
+        );
+        assert!(saida.is_empty());
+        assert!(c.resumo().sessoes[0].corrente.is_some(), "ainda aberta");
+        assert_eq!(c.proximo_prazo(), Some(1_800 + VIDA_CORRENTE_MS));
+        let saida = rodar(&mut c, vec![Ate(1_800 + VIDA_CORRENTE_MS)]);
+        assert!(saida.is_empty());
+        let r = c.resumo();
+        assert_eq!(r.turnos[0].fim, Fim::CorrenteExpirou);
+        assert_eq!(
+            r.turnos[0].corrente,
+            Some(ResumoCorrente {
+                aberta: false,
+                turnos: 1
+            })
+        );
+        // O fim da sessão fecha a corrente: registro, sem festa nem tchau
+        // de corrente (o tchau é da sessão).
+        let mut c = novo();
+        rodar(&mut c, abrir());
+        let saida = rodar(&mut c, vec![chega(5_000, ev("SessionEnd"))]);
+        assert_eq!(saida, vec![(5_000, TCHAU)]);
+        let r = c.resumo();
+        assert_eq!(
+            (r.turnos[0].fim, r.turnos[0].reacao),
+            (Fim::SessaoEncerrada, None)
+        );
+    }
+
+    #[test]
+    fn o_tique_do_laco_com_o_renan_longe_e_de_maquina() {
+        let mut c = novo();
+        let longe = Evidencia {
+            ausente: true,
+            outra_janela: false,
+        };
+        // O /loop agenda um cron: o Stop traz crn = 1.
+        rodar(
+            &mut c,
+            vec![
+                chega(0, comum("p1")),
+                chega(1_000, ferramenta("p1", "CronCreate", None, 1)),
+                chega(2_000, stop_com("p1", &[], 1)),
+                Ate(3_000),
+            ],
+        );
+        assert_eq!(c.resumo().sessoes[0].agendamentos, Some(1));
+        // O tique chega com o Renan longe: de máquina, discreto, sem pronto.
+        let tique = comum("p2");
+        c.receber_com(&tique, BASE + 60_000, em(60_000), longe);
+        c.receber(
+            &ferramenta("p2", "Edit", Some("aaaaaaaaaaa1"), 20),
+            BASE + 61_000,
+            em(61_000),
+        );
+        c.receber(&stop_com("p2", &[], 1), BASE + 62_000, em(62_000));
+        let saida = c.tique(em(62_800));
+        assert_eq!(saida.len(), 1);
+        assert!(saida[0].discreta);
+        let r = c.resumo();
+        assert_eq!(registro(&r, "p2").origem, OrigemTurno::Tique);
+        // Com o Renan no teclado e na janela certa, é digitado.
+        c.receber_com(
+            &comum("p3"),
+            BASE + 120_000,
+            em(120_000),
+            Evidencia::default(),
+        );
+        c.receber(&stop_com("p3", &[], 1), BASE + 121_000, em(121_000));
+        let saida = c.tique(em(121_800));
+        assert!(!saida[0].discreta);
+        assert_eq!(registro(&c.resumo(), "p3").origem, OrigemTurno::Digitado);
+    }
+
+    #[test]
+    fn a_corrente_que_nasce_de_maquina_fica_no_teto() {
+        // Uma notificação sem corrente lança um agente: a corrente nasce de
+        // máquina e a festa dela é discreta, sem pronto.
+        let mut c = novo();
+        let saida = rodar(
+            &mut c,
+            vec![
+                chega(0, aviso_de_tarefa("p1")),
+                chega(500, nasce("p1", "a1")),
+                chega(1_000, stop_com("p1", &[("subagent", "a1")], 0)),
+                chega(5_000, do_agente("p1", "a1", "Edit", 30)),
+                chega(9_000, aviso_de_tarefa("p2")),
+                chega(10_000, stop_com("p2", &[], 0)),
+                Ate(12_000),
+            ],
+        );
+        assert_eq!(saida, vec![(10_800, PULINHO)]);
+        assert!(c.resumo().ultima_reacao.unwrap().discreta);
+        assert_eq!(aviso_de(&c), None, "sem pronto");
     }
 }

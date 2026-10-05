@@ -1,0 +1,137 @@
+{"cenario": "workflow-longo", "descricao": "um pedido que roda um workflow com três agentes em segundo plano por 20 min: o Stop do pedido e o da primeira notificação ficam na corrente, sem festa; a última notificação (src=system) fecha a corrente com a soma de tudo", "padrao": {"sid": "s1", "ent": "cli", "proj": "api"}}
+{"t": 0, "evento": {"e": "SessionStart", "src": "startup"}}
+{"t": 2000, "evento": {"e": "UserPromptSubmit", "turno": "p1", "orig": "comum"}}
+{"t": 5000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Workflow", "dur": 12}}
+{"t": 5500, "evento": {"e": "SubagentStart", "turno": "p1", "agente": true, "aid": "a1"}}
+{"t": 5600, "evento": {"e": "SubagentStart", "turno": "p1", "agente": true, "aid": "a2"}}
+{"t": 5700, "evento": {"e": "SubagentStart", "turno": "p1", "agente": true, "aid": "a3"}}
+{"t": 8000, "evento": {"e": "Stop", "turno": "p1", "bg": 4, "bgt": ["workflow", "subagent", "subagent", "subagent"], "bgi": ["w1", "a1", "a2", "a3"], "crn": 0}}
+{"t": 10000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000000"}}
+{"t": 19000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Bash", "dur": 24000}}
+{"t": 28000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Read", "dur": 5}}
+{"t": 37000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000001"}}
+{"t": 46000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Read", "dur": 5}}
+{"t": 55000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Bash", "dur": 24000}}
+{"t": 64000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000002"}}
+{"t": 73000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Read", "dur": 5}}
+{"t": 82000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Read", "dur": 5}}
+{"t": 91000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000003"}}
+{"t": 100000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Read", "dur": 5}}
+{"t": 109000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Read", "dur": 5}}
+{"t": 118000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000004"}}
+{"t": 127000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Bash", "dur": 24000}}
+{"t": 136000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Read", "dur": 5}}
+{"t": 145000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000005"}}
+{"t": 154000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Read", "dur": 5}}
+{"t": 163000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Bash", "dur": 24000}}
+{"t": 172000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000006"}}
+{"t": 181000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Read", "dur": 5}}
+{"t": 190000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Read", "dur": 5}}
+{"t": 199000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000007"}}
+{"t": 208000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Read", "dur": 5}}
+{"t": 217000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Read", "dur": 5}}
+{"t": 226000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000008"}}
+{"t": 235000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Bash", "dur": 24000}}
+{"t": 244000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Read", "dur": 5}}
+{"t": 253000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000009"}}
+{"t": 262000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Read", "dur": 5}}
+{"t": 271000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Bash", "dur": 24000}}
+{"t": 280000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a0000000000a"}}
+{"t": 289000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Read", "dur": 5}}
+{"t": 298000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Read", "dur": 5}}
+{"t": 307000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a0000000000b"}}
+{"t": 316000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Read", "dur": 5}}
+{"t": 325000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Read", "dur": 5}}
+{"t": 334000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a0000000000c"}}
+{"t": 343000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Bash", "dur": 24000}}
+{"t": 352000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Read", "dur": 5}}
+{"t": 361000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a0000000000d"}}
+{"t": 370000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Read", "dur": 5}}
+{"t": 379000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Bash", "dur": 24000}}
+{"t": 388000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a0000000000e"}}
+{"t": 397000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Read", "dur": 5}}
+{"t": 406000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Read", "dur": 5}}
+{"t": 415000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000000"}}
+{"t": 424000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Read", "dur": 5}}
+{"t": 433000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Read", "dur": 5}}
+{"t": 442000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000001"}}
+{"t": 451000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Bash", "dur": 24000}}
+{"t": 460000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Read", "dur": 5}}
+{"t": 469000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000002"}}
+{"t": 478000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Read", "dur": 5}}
+{"t": 487000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Bash", "dur": 24000}}
+{"t": 496000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000003"}}
+{"t": 505000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Read", "dur": 5}}
+{"t": 514000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Read", "dur": 5}}
+{"t": 523000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000004"}}
+{"t": 532000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Read", "dur": 5}}
+{"t": 541000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Read", "dur": 5}}
+{"t": 550000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000005"}}
+{"t": 559000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Bash", "dur": 24000}}
+{"t": 568000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Read", "dur": 5}}
+{"t": 577000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000006"}}
+{"t": 586000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Read", "dur": 5}}
+{"t": 595000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Bash", "dur": 24000}}
+{"t": 600500, "evento": {"e": "UserPromptSubmit", "turno": "p2", "orig": "notificacao"}}
+{"t": 602000, "evento": {"e": "PostToolUse", "turno": "p2", "tool": "Read", "dur": 8}}
+{"t": 603000, "evento": {"e": "Stop", "turno": "p2", "bg": 3, "bgt": ["workflow", "subagent", "subagent"], "bgi": ["w1", "a2", "a3"], "crn": 0}}
+{"t": 604000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000007"}}
+{"t": 613000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Read", "dur": 5}}
+{"t": 622000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Read", "dur": 5}}
+{"t": 631000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000008"}}
+{"t": 640000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Read", "dur": 5}}
+{"t": 649000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Read", "dur": 5}}
+{"t": 658000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000009"}}
+{"t": 667000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Bash", "dur": 24000}}
+{"t": 676000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Read", "dur": 5}}
+{"t": 685000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a0000000000a"}}
+{"t": 694000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Read", "dur": 5}}
+{"t": 703000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Bash", "dur": 24000}}
+{"t": 712000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a0000000000b"}}
+{"t": 721000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Read", "dur": 5}}
+{"t": 730000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Read", "dur": 5}}
+{"t": 739000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a0000000000c"}}
+{"t": 748000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Read", "dur": 5}}
+{"t": 757000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Read", "dur": 5}}
+{"t": 766000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a0000000000d"}}
+{"t": 775000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Bash", "dur": 24000}}
+{"t": 784000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Read", "dur": 5}}
+{"t": 793000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a0000000000e"}}
+{"t": 802000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Read", "dur": 5}}
+{"t": 811000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Bash", "dur": 24000}}
+{"t": 820000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000000"}}
+{"t": 829000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Read", "dur": 5}}
+{"t": 838000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Read", "dur": 5}}
+{"t": 847000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000001"}}
+{"t": 856000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Read", "dur": 5}}
+{"t": 865000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Read", "dur": 5}}
+{"t": 874000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000002"}}
+{"t": 883000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Bash", "dur": 24000}}
+{"t": 892000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Read", "dur": 5}}
+{"t": 901000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000003"}}
+{"t": 910000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Read", "dur": 5}}
+{"t": 919000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Bash", "dur": 24000}}
+{"t": 928000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000004"}}
+{"t": 937000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Edit", "dur": 35, "arq": "a00000000005"}}
+{"t": 946000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Edit", "dur": 35, "arq": "a00000000006"}}
+{"t": 955000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Edit", "dur": 35, "arq": "a00000000007"}}
+{"t": 964000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Edit", "dur": 35, "arq": "a00000000008"}}
+{"t": 973000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Edit", "dur": 35, "arq": "a00000000009"}}
+{"t": 982000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Bash", "dur": 24000}}
+{"t": 991000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Bash", "dur": 24000}}
+{"t": 1000000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Bash", "dur": 24000}}
+{"t": 1009000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Bash", "dur": 24000}}
+{"t": 1018000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Bash", "dur": 24000}}
+{"t": 1027000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Bash", "dur": 24000}}
+{"t": 1036000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Bash", "dur": 24000}}
+{"t": 1045000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Bash", "dur": 24000}}
+{"t": 1054000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Bash", "dur": 24000}}
+{"t": 1063000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a1", "tool": "Bash", "dur": 24000}}
+{"t": 1072000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a2", "tool": "Bash", "dur": 24000}}
+{"t": 1081000, "evento": {"e": "PostToolUse", "turno": "p1", "agente": true, "aid": "a3", "tool": "Bash", "dur": 24000}}
+{"t": 1201000, "evento": {"e": "UserPromptSubmit", "turno": "p3", "src": "system"}}
+{"t": 1203000, "evento": {"e": "PostToolUse", "turno": "p3", "tool": "Edit", "dur": 40, "arq": "b00000000001"}}
+{"t": 1204000, "evento": {"e": "PostToolUse", "turno": "p3", "tool": "Edit", "dur": 40, "arq": "b00000000002"}}
+{"t": 1210000, "evento": {"e": "PostToolUse", "turno": "p3", "tool": "Bash", "dur": 5800}}
+{"t": 1213000, "evento": {"e": "Stop", "turno": "p3", "bg": 0, "crn": 0}}
+{"t": 1220000, "fim": true}

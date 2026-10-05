@@ -1,0 +1,4 @@
+{"t":8800,"i":"turno","sid8":"s1","turno8":"p1","fim":"stop","corrente":{"aberta":true,"turnos":1}}
+{"t":603800,"i":"turno","sid8":"s1","turno8":"p2","fim":"stop","origem":"notificacao","corrente":{"aberta":true,"turnos":2}}
+{"t":1213800,"i":"turno","sid8":"s1","turno8":"p3","fim":"stop","nivel":"T1","reacao":"done_small","origem":"sistema","corrente":{"aberta":false,"turnos":3}}
+{"t":1213800,"i":"reacao","nome":"done_small","motivo":"fim","sid8":"s1","nivel":"T1"}

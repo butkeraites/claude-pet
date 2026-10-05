@@ -1,0 +1,16 @@
+{"cenario": "servidor-em-segundo-plano", "descricao": "um servidor de desenvolvimento em segundo plano não segura festa nenhuma: todo Stop vem com o shell em voo, e as festas são as de sempre; o shell curto que acaba acorda a sessão com uma notificação, um turno de máquina discreto", "padrao": {"sid": "s1", "ent": "cli", "proj": "api"}}
+{"t": 0, "evento": {"e": "UserPromptSubmit", "turno": "p1", "orig": "comum"}}
+{"t": 1500, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Bash", "dur": 14}}
+{"t": 2500, "evento": {"e": "Stop", "turno": "p1", "bg": 1, "bgt": ["shell"], "bgi": ["srv"], "crn": 0}}
+{"t": 20000, "evento": {"e": "UserPromptSubmit", "turno": "p2", "orig": "comum"}}
+{"t": 25000, "evento": {"e": "PostToolUse", "turno": "p2", "tool": "Edit", "dur": 30, "arq": "aaaaaaaaaaa1"}}
+{"t": 26000, "evento": {"e": "PostToolUse", "turno": "p2", "tool": "Edit", "dur": 30, "arq": "aaaaaaaaaaa2"}}
+{"t": 29000, "evento": {"e": "Stop", "turno": "p2", "bg": 1, "bgt": ["shell"], "bgi": ["srv"], "crn": 0}}
+{"t": 40000, "evento": {"e": "UserPromptSubmit", "turno": "p3", "orig": "comum"}}
+{"t": 41000, "evento": {"e": "PostToolUse", "turno": "p3", "tool": "Bash", "dur": 17}}
+{"t": 42000, "evento": {"e": "Stop", "turno": "p3", "bg": 2, "bgt": ["shell", "shell"], "bgi": ["srv", "curto"], "crn": 0}}
+{"t": 48000, "evento": {"e": "UserPromptSubmit", "turno": "p4", "orig": "notificacao"}}
+{"t": 49000, "evento": {"e": "Stop", "turno": "p4", "bg": 1, "bgt": ["shell"], "bgi": ["srv"], "crn": 0}}
+{"t": 60000, "evento": {"e": "UserPromptSubmit", "turno": "p5", "orig": "comum"}}
+{"t": 62000, "evento": {"e": "Stop", "turno": "p5", "bg": 1, "bgt": ["shell"], "bgi": ["srv"], "crn": 0}}
+{"t": 70000, "fim": true}

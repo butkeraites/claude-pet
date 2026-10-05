@@ -2238,3 +2238,101 @@ fn o_arraste_faz_commits_no_ritmo_do_ponteiro_e_para_ao_soltar() {
     );
     assert!(motor.arraste.prazo().is_none(), "nada do arraste armado");
 }
+
+// --- a origem do prompt e a janela da sessão (decisão 0073) ---------------
+
+fn prompt_de(sid: &str, orig: &str, ms: u64) -> Evento {
+    Evento {
+        orig: Some(orig.into()),
+        ..evento_de("UserPromptSubmit", sid, None, ms)
+    }
+}
+
+#[test]
+fn so_o_prompt_digitado_casa_a_janela_da_sessao() {
+    // O 2.1.288 não manda o `source`: a notificação de uma tarefa e um
+    // prompt que chega com o Renan longe do teclado não casam a sessão com a
+    // janela em foco (o navegador); o prompt digitado, com ele presente, sim.
+    let mut motor = Motor::novo(ConfigCerebro::default());
+    motor.acertar_relogio(em(0));
+    ligar_desktop(&mut motor, 0);
+    ocioso(&mut motor, false, 0);
+    ativou(&mut motor, Some("f00d01"), 1_000);
+    let p = prompt_de("sessao-a", "comum", 2_000);
+    motor.evento(&p, PAREDE + 2_000, em(2_000));
+    assert_eq!(
+        janela_da(&motor, "sessao-a").unwrap().endereco.as_deref(),
+        Some("f00d01")
+    );
+    ativou(&mut motor, Some("f00d03"), 3_000);
+    let aviso = prompt_de("sessao-a", "notificacao", 40_000);
+    motor.evento(&aviso, PAREDE + 40_000, em(40_000));
+    assert_eq!(
+        janela_da(&motor, "sessao-a").unwrap().endereco.as_deref(),
+        Some("f00d01"),
+        "a notificação não casa"
+    );
+    ocioso(&mut motor, true, 50_000);
+    let longe = prompt_de("sessao-a", "comum", 60_000);
+    motor.evento(&longe, PAREDE + 60_000, em(60_000));
+    assert_eq!(
+        janela_da(&motor, "sessao-a").unwrap().endereco.as_deref(),
+        Some("f00d01"),
+        "longe do teclado ninguém digitou"
+    );
+    ocioso(&mut motor, false, 70_000);
+    let digitado = prompt_de("sessao-a", "comum", 80_000);
+    motor.evento(&digitado, PAREDE + 80_000, em(80_000));
+    assert_eq!(
+        janela_da(&motor, "sessao-a").unwrap().endereco.as_deref(),
+        Some("f00d03"),
+        "o prompt digitado troca (o --resume noutro terminal)"
+    );
+}
+
+#[test]
+fn o_tique_do_laco_pela_janela_certa_fora_de_foco() {
+    // Com agendamento pendente (o Stop com crn = 1), um prompt comum com a
+    // janela certa da sessão fora de foco é um tique: discreto, e a janela
+    // da sessão fica.
+    let mut motor = Motor::novo(ConfigCerebro::default());
+    motor.acertar_relogio(em(0));
+    ligar_desktop(&mut motor, 0);
+    ocioso(&mut motor, false, 0);
+    ativou(&mut motor, Some("f00d01"), 1_000);
+    let p = prompt_de("sessao-a", "comum", 2_000);
+    motor.evento(&p, PAREDE + 2_000, em(2_000));
+    let parar = Evento {
+        crn: Some(1),
+        bg: Some(0),
+        ..evento_de("Stop", "sessao-a", None, 2_000)
+    };
+    motor.evento(&parar, PAREDE + 3_000, em(3_000));
+    assert!(!motor.tique(em(3_800))[0].discreta);
+    ativou(&mut motor, Some("f00d03"), 10_000);
+    let tique = prompt_de("sessao-a", "comum", 60_000);
+    motor.evento(&tique, PAREDE + 60_000, em(60_000));
+    let parar = Evento {
+        crn: Some(1),
+        bg: Some(0),
+        tool: None,
+        ..evento_de("Stop", "sessao-a", None, 60_000)
+    };
+    let editou = Evento {
+        tool: Some("Edit".into()),
+        arq: Some("aaaaaaaaaaa1".into()),
+        dur: Some(20),
+        ..evento_de("PostToolUse", "sessao-a", None, 60_000)
+    };
+    motor.evento(&editou, PAREDE + 60_500, em(60_500));
+    motor.evento(&parar, PAREDE + 61_000, em(61_000));
+    let reacoes = motor.tique(em(61_800));
+    assert_eq!(reacoes.len(), 1);
+    assert!(reacoes[0].discreta, "o tique é de máquina");
+    assert_eq!(
+        janela_da(&motor, "sessao-a").unwrap().endereco.as_deref(),
+        Some("f00d01")
+    );
+    let resumo = motor.resumo();
+    assert_eq!(resumo.turnos[0].origem, cerebro::OrigemTurno::Tique);
+}

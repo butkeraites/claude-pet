@@ -15,7 +15,7 @@ use std::collections::VecDeque;
 
 use serde::Serialize;
 
-use crate::cerebro::{Fim, Nivel, RegistroTurno};
+use crate::cerebro::{Fim, Nivel, OrigemTurno, RegistroTurno, ResumoCorrente};
 
 /// Intenções guardadas para o `/v1/estado` (as mais novas).
 pub const GUARDADAS: usize = 200;
@@ -45,6 +45,12 @@ pub enum Tipo {
         nivel: Option<Nivel>,
         #[serde(skip_serializing_if = "Option::is_none")]
         reacao: Option<&'static str>,
+        /// De onde veio o prompt, se não foi digitado (decisão 0073).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        origem: Option<OrigemTurno>,
+        /// A corrente de agentes do turno, se há uma.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        corrente: Option<ResumoCorrente>,
         #[serde(skip_serializing_if = "eh_falso")]
         teste: bool,
     },
@@ -85,6 +91,8 @@ impl Tipo {
             fim: r.fim,
             nivel: r.nivel,
             reacao: r.reacao,
+            origem: r.origem.maquina().then_some(r.origem),
+            corrente: r.corrente,
             teste: r.teste,
         }
     }

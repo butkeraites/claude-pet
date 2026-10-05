@@ -1,0 +1,9 @@
+{"t":3300,"i":"turno","sid8":"s1","turno8":"p1","fim":"stop","nivel":"T1","reacao":"done_small"}
+{"t":3300,"i":"reacao","nome":"done_small","motivo":"fim","sid8":"s1","nivel":"T1"}
+{"t":29800,"i":"turno","sid8":"s1","turno8":"p2","fim":"stop","nivel":"T1","reacao":"done_small"}
+{"t":29800,"i":"reacao","nome":"done_small","motivo":"fim","sid8":"s1","nivel":"T1"}
+{"t":42800,"i":"turno","sid8":"s1","turno8":"p3","fim":"stop","nivel":"T1","reacao":"done_small"}
+{"t":42800,"i":"reacao","nome":"done_small","motivo":"fim","sid8":"s1","nivel":"T1"}
+{"t":49800,"i":"turno","sid8":"s1","turno8":"p4","fim":"stop","nivel":"T0","origem":"notificacao"}
+{"t":62800,"i":"turno","sid8":"s1","turno8":"p5","fim":"stop","nivel":"T0","reacao":"nod"}
+{"t":62800,"i":"reacao","nome":"nod","motivo":"fim","sid8":"s1","nivel":"T0"}
