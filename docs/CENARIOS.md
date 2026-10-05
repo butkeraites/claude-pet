@@ -112,5 +112,8 @@ metadados; vazio sem o pet na tela): `base` e `ritmo` (do animador),
 `confete` (quantos pedaços na tela). É o que o Motor manda a janela
 desenhar, pelo relógio: com a tela apagada o compositor não pede quadros e o
 `commits_total` não anda (decisão 0018), mas o `desenho` sim; com a sessão
-bloqueada, é por ele que se confere o desenho sem olhar a tela.
+bloqueada, é por ele que se confere o desenho sem olhar a tela. Sem quadros,
+o `/v1/estado` sai a cada lote do laço (um evento, um prazo) e no batimento
+de 5 s: o confete de uma festa pode cair entre dois (o `bin/pet testar` olha
+por até 6 s).
 

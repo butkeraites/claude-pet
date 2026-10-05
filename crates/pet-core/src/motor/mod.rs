@@ -638,6 +638,10 @@ impl Motor {
     /// escondido, na proteção de tela, na soneca nem com o "não perturbe"; um
     /// de cada vez. A célula anda e a casa volta no fim: nada grava posição.
     fn comecar_voo(&mut self, motivo: &'static str, agora_ms: u64) {
+        // Um voo que acabou sem quadros (a tela apagada, a sessão bloqueada:
+        // o desenho espera o compositor) termina agora, pelo relógio, e não
+        // segura o próximo (a volta do Renan).
+        self.andar_voo(agora_ms);
         if self.voo.is_some()
             || !self.na_tela()
             || self.arraste.segurando()
@@ -2704,8 +2708,13 @@ impl Motor {
         };
         let base = pet.base();
         let fileira = self.fileira(agora_ms);
+        // O voo pelo relógio: o que acabou sem quadros (a tela apagada) sai
+        // no próximo desenho, e a fileira volta nele.
+        let voando = self
+            .voo
+            .and_then(|v| v.fase(agora_ms).map(|fase| (v.motivo, fase)));
         let selos =
-            (self.voo.is_none() && self.seguir.fase().is_none() && !fileira.vazia()).then(|| {
+            (voando.is_none() && self.seguir.fase().is_none() && !fileira.vazia()).then(|| {
                 PainelFileira {
                     aviso: fileira.aviso.map(|a| match a {
                         selos::Aviso::Normal => "normal",
@@ -2721,11 +2730,9 @@ impl Motor {
             base: Some(base.estado.clone()),
             ritmo: Some(base.ritmo.nome()),
             selos,
-            voo: self.voo.and_then(|v| {
-                v.fase(agora_ms).map(|fase| PainelVoo {
-                    fase: fase.nome(),
-                    motivo: v.motivo,
-                })
+            voo: voando.map(|(motivo, fase)| PainelVoo {
+                fase: fase.nome(),
+                motivo,
             }),
             confete: self.confete_na_tela(agora_ms),
         }

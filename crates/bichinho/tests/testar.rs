@@ -64,8 +64,9 @@ fn medio_voa_com_confete_e_grande_chove_e_o_segundo_vira_t2() {
     assert!(ok, "grande falhou: {saida}{erro}");
     assert!(saida.contains("✓ grande → done_big"), "{saida}");
     assert!(saida.contains(r#""confete":40"#), "{saida}");
+    // Sem compositor o pet não está na tela: o testar não espera a chuva.
     assert!(
-        saida.contains("confete na tela (o máximo em 2 s)"),
+        saida.contains("confete na tela: nenhum (o pet não está na tela)"),
         "{saida}"
     );
     // O segundo T3 de teste em 10 min vira T2, e o testar explica.

@@ -3551,6 +3551,18 @@ longe; num monitor que repinta inteiro a cada commit (decisão 0005), ele tem
 de ser uma rajada curta e regular, e nunca pode deixar o pet longe de onde o
 Renan o pôs.
 
+**Atualização (2026-10-05, T5.20): o voo que acaba sem quadros.** Com a
+sessão bloqueada ou a tela apagada, o compositor não pede quadros (decisão
+0018): o voo da L3 começava, o primeiro quadro ficava em voo e a máquina só
+andava no desenho seguinte, que não vinha. O voo velho continuava "no ar" e
+segurava o próximo: a volta do Renan (o voo na hora em que ele volta) não
+saía, e o `/v1/estado.desenho` escondia a fileira de selos. Agora o voo que
+já devia ter acabado termina pelo relógio antes de outro começar (o pouso,
+como no desenho, só toca até 1 s depois do fim, senão o pet pousaria do nada
+quando a tela acendesse), e o `desenho` mostra o voo e a fileira pelo
+relógio, como o próximo quadro vai desenhar. Um teste com o quadro preso em
+voo e a volta 80 s depois reprova sem cada uma das duas correções.
+
 ## 0085 — A festa na tela: a fonte de 12 confetes do T2, a chuva de 40 do T3 e o passo de 34 ms (2026-10-05)
 
 **Problema:** a festa (decisão 0076) pede, além da reação e do balão que já

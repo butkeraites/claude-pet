@@ -4022,3 +4022,30 @@ fn nitidez_dos_desenhos_novos_com_o_zeca_de_producao() {
         Some(4)
     );
 }
+
+#[test]
+fn um_voo_que_acabou_sem_quadros_nao_segura_a_volta_do_renan() {
+    // A sessão bloqueada: o primeiro quadro do voo fica em voo (o
+    // compositor não pede outro), e o voo da L3 acaba só pelo relógio.
+    let l3 = 2_000 + escalada::L3_APOS_MS;
+    let (mut motor, mut janela) = esperando_ate(l3 - 1);
+    janela.em_voo = true;
+    motor.tique(em(l3));
+    let primeiro = *motor.voo().expect("a L3 pediu o voo");
+    // O `/v1/estado.desenho` segue o relógio: no meio, o voo; depois do fim,
+    // a fileira com o aviso, como o próximo quadro vai desenhar.
+    let pairando = primeiro.inicio_ms + voo::SUBIDA_MS + 100;
+    let d = motor.painel(Some(&janela), pairando).desenho;
+    assert_eq!((d.voo.map(|v| v.fase), d.selos), (Some("pairando"), None));
+    let d = motor.painel(Some(&janela), primeiro.fim_ms() + 1).desenho;
+    assert_eq!(d.voo, None);
+    assert_eq!(d.selos.and_then(|s| s.aviso), Some("normal"));
+    // Bem depois do fim dele, o Renan volta (60 s longe, fora do terminal do
+    // Claude): o voo da volta sai, no lugar do que ficou parado.
+    ocioso(&mut motor, true, l3 + 10_000);
+    let volta = l3 + 80_000;
+    ocioso(&mut motor, false, volta);
+    let v = motor.voo().expect("o voo da volta");
+    assert_eq!(v.motivo, "voltou");
+    assert!(v.inicio_ms > primeiro.fim_ms());
+}
