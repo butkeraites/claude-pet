@@ -496,9 +496,10 @@ impl<T> Caixa<T> {
     }
 }
 
-/// Uma janela de mentira para os testes: a do Motor aqui, e a do núcleo do
-/// daemon com a feature `teste` (só nos testes; o binário nunca a tem).
-#[cfg(any(test, feature = "teste"))]
+/// Uma janela de mentira para os testes: a do Motor aqui, a do núcleo do
+/// daemon com a feature `teste` (só nos testes) e a do `bichinho simular`
+/// com a feature `simulacao` (só o subcomando offline a usa; decisão 0078).
+#[cfg(any(test, feature = "teste", feature = "simulacao"))]
 pub mod falsa {
     use super::*;
     use crate::geometria::para_logico_por_fora;

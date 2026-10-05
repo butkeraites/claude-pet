@@ -19,8 +19,11 @@ sha2.workspace = true
 
 [features]
 # A janela de mentira (`plataforma::falsa`) para os testes de outros crates
-# (o núcleo do daemon). Só entra nos testes: o binário nunca a tem.
+# (o núcleo do daemon). Só entra nos testes.
 teste = []
+# O executor dos cenários (`cenario`) com a janela de mentira, para o
+# `bichinho simular` (offline; decisão 0078).
+simulacao = []
 
 [lints]
 workspace = true

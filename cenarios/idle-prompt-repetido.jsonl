@@ -1,0 +1,10 @@
+{"cenario": "idle-prompt-repetido", "descricao": "o idle_prompt chega a cada ~60 s: depois de uma festa não faz nada; com o turno aberto sem Stop (s2), fecha sem festa uma vez", "padrao": {"ent": "cli"}}
+{"t": 0, "evento": {"e": "UserPromptSubmit", "sid": "s1", "proj": "api", "turno": "p1", "orig": "comum"}}
+{"t": 4000, "evento": {"e": "PostToolUse", "sid": "s1", "proj": "api", "turno": "p1", "tool": "Write", "dur": 20, "arq": "aaaaaaaaaaa1"}}
+{"t": 6000, "evento": {"e": "Stop", "sid": "s1", "proj": "api", "turno": "p1", "bg": 0, "crn": 0}}
+{"t": 66000, "evento": {"e": "Notification", "sid": "s1", "proj": "api", "turno": "p1", "nt": "idle_prompt"}}
+{"t": 126000, "evento": {"e": "Notification", "sid": "s1", "proj": "api", "turno": "p1", "nt": "idle_prompt"}}
+{"t": 130000, "evento": {"e": "UserPromptSubmit", "sid": "s2", "proj": "web", "turno": "q1", "orig": "comum"}}
+{"t": 190000, "evento": {"e": "Notification", "sid": "s2", "proj": "web", "turno": "q1", "nt": "idle_prompt"}}
+{"t": 250000, "evento": {"e": "Notification", "sid": "s2", "proj": "web", "turno": "q1", "nt": "idle_prompt"}}
+{"t": 260000, "fim": true}

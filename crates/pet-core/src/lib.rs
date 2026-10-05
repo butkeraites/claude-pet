@@ -13,6 +13,10 @@ pub mod animador;
 pub mod aprovacao;
 pub mod aviso;
 pub mod cena;
+/// Os cenários dourados e o `bichinho simular` (decisões 0077 e 0078): o
+/// executor usa a janela de mentira.
+#[cfg(any(test, feature = "teste", feature = "simulacao"))]
+pub mod cenario;
 pub mod cerebro;
 pub mod confete;
 pub mod config;

@@ -1,0 +1,5 @@
+{"cenario": "rapido", "descricao": "uma resposta sem ferramenta nenhuma: o aceno discreto (T0) na acomodação do Stop", "padrao": {"sid": "s1", "ent": "cli", "proj": "api"}}
+{"t": 0, "evento": {"e": "SessionStart", "src": "startup"}}
+{"t": 2000, "evento": {"e": "UserPromptSubmit", "turno": "p1"}}
+{"t": 32000, "evento": {"e": "Stop", "turno": "p1", "bg": 0, "crn": 0}}
+{"t": 40000, "fim": true}

@@ -231,6 +231,7 @@ impl Compartilhado {
             "soneca_restante_s": painel.soneca_restante_s,
             "focando": painel.focando,
             "desktop": painel.desktop,
+            "intencoes": painel.intencoes,
             "eventos": self.eventos_json(),
             "sessoes": do_cerebro("sessoes", json!([])),
             "ultima_reacao": do_cerebro("ultima_reacao", Value::Null),

@@ -1,0 +1,7 @@
+{"cenario": "pequeno", "descricao": "um Edit num arquivo e um Bash de 0,9 s: o pulinho (T1)", "padrao": {"sid": "s1", "ent": "cli", "proj": "api"}}
+{"t": 0, "evento": {"e": "UserPromptSubmit", "turno": "p1", "orig": "comum"}}
+{"t": 8000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Read", "dur": 21}}
+{"t": 9000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Edit", "dur": 40, "arq": "aaaaaaaaaaa1"}}
+{"t": 12000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Bash", "dur": 900}}
+{"t": 15000, "evento": {"e": "Stop", "turno": "p1", "bg": 0, "crn": 0}}
+{"t": 20000, "fim": true}

@@ -89,6 +89,8 @@ pub const VIDA_AVISO_MS: u64 = 2 * 60 * 60 * 1000;
 pub const ARQUIVOS_POR_TURNO: usize = 1024;
 /// Turnos fechados lembrados por sessão, para o dedupe do Stop.
 const FECHADOS_POR_SESSAO: usize = 32;
+/// Turnos fechados que esperam o Motor tirar ([`Cerebro::tirar_turnos_fechados`]).
+const FECHADOS_A_TIRAR: usize = 64;
 /// Subagentes lembrados por sessão (para atribuir ferramentas ao turno).
 const AGENTES_POR_SESSAO: usize = 32;
 /// Teto de sessões acompanhadas de cada tipo (real ou teste); acima disso
@@ -807,6 +809,9 @@ pub struct Cerebro {
     /// (teste, sid) → sessão: eventos de teste nunca tocam sessões reais.
     sessoes: BTreeMap<(bool, String), Sessao>,
     turnos: VecDeque<RegistroTurno>,
+    /// Os turnos fechados desde que o Motor tirou da última vez (as
+    /// intenções; decisão 0077).
+    fechados_a_tirar: VecDeque<RegistroTurno>,
     ultima_reacao: Option<Reacao>,
     ignorados: BTreeMap<String, u64>,
 }
@@ -847,6 +852,7 @@ impl Cerebro {
             config,
             sessoes: BTreeMap::new(),
             turnos: VecDeque::new(),
+            fechados_a_tirar: VecDeque::new(),
             ultima_reacao: None,
             ignorados: BTreeMap::new(),
         }
@@ -887,6 +893,10 @@ impl Cerebro {
             if self.turnos.len() == TURNOS_GUARDADOS {
                 self.turnos.pop_front();
             }
+            if self.fechados_a_tirar.len() == FECHADOS_A_TIRAR {
+                self.fechados_a_tirar.pop_front();
+            }
+            self.fechados_a_tirar.push_back(f.registro.clone());
             self.turnos.push_back(f.registro);
             if let Some(reacao) = f.reacao {
                 self.reagir(reacao, reacoes);
@@ -1317,6 +1327,12 @@ impl Cerebro {
             self.ignorar("sessao_expirada");
         }
         reacoes
+    }
+
+    /// Os turnos que fecharam desde a última vez, do mais velho ao mais novo
+    /// (o Motor os anota nas intenções).
+    pub fn tirar_turnos_fechados(&mut self) -> Vec<RegistroTurno> {
+        self.fechados_a_tirar.drain(..).collect()
     }
 
     /// O cérebro acompanha a sessão (teste, sid).
