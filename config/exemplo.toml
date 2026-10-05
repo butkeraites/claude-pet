@@ -5,7 +5,16 @@
 # `bin/pet estado` mostra o valor efetivo de cada chave e de onde ele veio.
 
 [aparencia]
-# Personagem: nome da pasta em skins/ ou skins-locais/.
+# Personagem: nome da pasta em skins/ ou skins-locais/. Cada skin só aparece
+# depois de aprovada pela folha de contato (bin/pet skin-aprovar <id>).
+#   "zeca-livre-escuro"  o Zeca original (CC0, no repositório) para tema
+#                        escuro, com o anel de 1 px por fora: no tema escuro,
+#                        sempre esta (sem o anel o contorno some no fundo)
+#   "zeca-livre"         o Zeca original para tema claro
+#   "zeca"               o Zeca do pack Cute Parrots! (bin/pet skin-instalar;
+#                        fora do git); o padrão quando a chave falta
+#   "zeca-contorno"      o do pack com contorno creme
+# Trocar para uma skin já aprovada: bin/pet parar && bin/pet subir.
 skin = "zeca"
 # Tamanho do pet na tela: pequeno (~10% da altura do monitor), normal (~12%)
 # ou grande (~16%). Muda só o D (pixels do monitor por pixel de arte, sempre

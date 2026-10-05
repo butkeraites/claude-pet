@@ -2672,3 +2672,310 @@ o pet ao monitor certo.
 ele (o monitor, o foco, os avisos de verdade), e a troca depois do merge
 tem de manter o config dele; e uma promessa de orçamento que não tem teste
 é só uma frase.
+
+## 0065 — O Zeca original entra no repositório como arte livre (CC0), gerado e conferido, com as correções da crítica e as transições pelo rig (2026-10-04)
+
+**Problema:** o Zeca de hoje é derivado do pack *Cute Parrots!*, que não pode
+ser redistribuído (decisão 0011): fica fora do git, e o lançamento aberto
+precisa de um personagem livre (M9, T9.0 e T9.2). Uma arte original do Zeca
+foi desenhada do zero, sem nenhum pixel do pack, por um gerador em Python
+(paleta, grades de texto das peças e um rig que compõe cada quadro), e
+refinada até a nota 8,4/10 do diretor de arte, "publicável". A crítica final
+pediu duas correções rápidas (o trecho `respira` do manifesto repetia
+quadros e perdia o atraso do chapéu em uma expiração de cada duas; um confete
+caía por cima do bico no `hop_08`) e listou o que o próprio rig resolve (o
+tufo esquerdo do pouso colado no rabo; as transições da pose neutra para os
+laços de trabalho, sono, chamada e voo, que trocavam de uma vez). O resto
+(bicos girados, ícone pequeno, pose-base em S, penas) pede um pixel artist.
+O Renan viu a prancha e os GIFs e decidiu, em 2026-10-04: a arte original sai
+em **CC0 1.0**, com o crédito de cortesia "arte original feita com o Claude
+para o projeto bichinho"; na máquina dele ficam as duas skins, e a original
+é o padrão ("Ter os dois e deixar o original como default").
+
+**Escolha (TS.1):**
+- **`arte/zeca-livre/` no git:** `zeca.py` (a fonte da arte), `anims.json`
+  (o manifesto: quadros e durações, trechos do repouso, transições de cada
+  laço, gatilhos sugeridos), `notas.md` e `LICENSE` (a dedicação CC0, o
+  crédito de cortesia e o texto legal). O `NOTICE.md` ganha a seção. A regra
+  de arte do pack continua: nada derivado dele entra nesta pasta.
+- **PNG nunca editado à mão:** tudo sai do gerador. `python3 zeca.py` grava
+  quadros, folhas, GIFs e vitrine em `tmp/zeca-livre/` (fora do git);
+  `python3 zeca.py --quadros DIR` grava só os quadros dos dois visuais e o
+  manifesto, sem o ImageMagick, e sai 1 se a verificação da arte reprovar
+  (furo de fundo, recorte na borda ou solto, órfão, mais de 16 cores, margem,
+  e a regra nova abaixo, nos dois visuais).
+- **Determinismo conferido:** `cargo xtask zeca-livre` roda o gerador numa
+  pasta temporária (sem `__pycache__`, com `PYTHONHASHSEED=0`) e grava o
+  manifesto; `cargo xtask zeca-livre --conferir` não grava nada: roda duas
+  vezes, compara os bytes de tudo o que o gerador escreveu e confere que o que
+  está no git é o que sai dele agora. O `bin/pet verificar` roda o
+  `--conferir` quando há `python3` (sem ele, avisa e pula, como o
+  shellcheck). Os GIFs e a vitrine passam pelo ImageMagick, que grava data
+  nos arquivos: são prévias, fora da comparação.
+- **As correções, no gerador:** trecho `respira` = quadros 0-3 (a costura 3→0
+  é o chapéu assentando); o confete do `hop_08` saiu (os dois confetes acabam
+  no `hop_07`); o tufo esquerdo do pouso foi para trás da ponta da cauda, o
+  único lugar com folga ((1, 42) e, no quadro seguinte, (1, 41)); e uma regra
+  nova no lint: efeito sem contorno (confete, faísca e ponto do trabalho, z
+  do sono) e poeira não são pintados por cima de peça do Zeca, porque leem
+  como marca no corpo (os de contorno fechado e os adereços que ele toca, o
+  grão e a tecla, podem passar na frente). A regra achou mais um, o confete
+  pintado na ponta da asa erguida do `hop_06`, que agora passa atrás dela.
+- **Pelo rig, com as peças de sempre:** um aceno próprio (`nod`, a "tirada de
+  chapéu": a cabeça abaixa e o chapéu tomba; o respira e a ginga sobem a
+  cabeça, então o aceno não se confunde com o repouso, o problema da skin do
+  pack), o tchau de asa (`wave`), o bocejo (`yawn`), o acordar espreguiçando
+  (`wake`) e as transições de cada laço (`work_in`/`work_out`,
+  `sleep_in`/`sleep_out`, `attention_in`/`attention_out`,
+  `takeoff`/`landing`), listadas em `uso.transicoes.lacos`. Todo gesto
+  começa e termina na pose neutra. São 22 animações e 134 quadros.
+- **Para um pixel artist (T9.2):** os bicos girados, o ícone de 16/32/64 px,
+  a pose-base em S, as penas e o take do susto ficam anotados em
+  `notas.md`, seção 11.
+- **A T9.2 em parte para agora:** a skin padrão livre nasce nesta branch
+  (`skin-zeca-livre`, TS.1–TS.3). Embutir a skin no binário, aprovada pelo
+  build, e o `bichinho skin instalar` continuam no M9.
+
+**Por quê:** a arte livre só é livre de verdade se a fonte estiver no git e
+qualquer um puder refazer os mesmos bytes; o gerador é a fonte, e conferir o
+determinismo a cada commit impede que um PNG mexido à mão ou um gerador
+mudado sem regenerar passe calado. As correções e as transições cabem no rig
+sem desenho novo; o que pede desenho fica anotado em vez de improvisado.
+
+## 0066 — A skin livre `zeca-livre`, a variante do tema escuro como segunda skin e o mapa dos estados com o aceno próprio (2026-10-04)
+
+**Problema:** a arte original (decisão 0065) só vira personagem como skin: a
+folha no formato do pet, o `skin.json` com os estados que o core toca e a
+aprovação pela folha de contato. O diretor de arte manda usar no tema escuro
+**sempre** os quadros com o anel de 1 px `#5E5A86` (o contorno `#2B2136` tem
+1,27:1 contra o fundo escuro), e o Renan usa o tema escuro (hackerman):
+faltava decidir como o pet escolhe a variante. E o mapa precisava cobrir
+cada estado do catálogo, com o aceno do T0 sem se confundir com o repouso
+(no Zeca do pack, o `nod` é um pedaço da rajada `stand_look_sit`).
+
+**Escolha (TS.2):**
+- **A variante é uma segunda skin, `zeca-livre-escuro`,** ao lado da
+  `zeca-livre`, como o `zeca-contorno` do pack (decisão 0025): a mesma arte,
+  o mesmo toque e o mesmo `corpo_px` (o tamanho na tela não muda) e o `pe` uma
+  linha abaixo (o anel debaixo dos pés vira o chão). Quem escolhe é o
+  `aparencia.skin` do config; a aprovação continua por id e pelo conteúdo
+  exato (decisões 0026 e 0029). Nada muda no core, no formato do `skin.json`
+  (que recusa campo desconhecido) nem na impressão digital, então a aprovação
+  do Zeca do pack fica intacta. **Rejeitado por agora:** um campo de variante
+  na skin com um `aparencia.tema = escuro|claro`, que pediria mudar o
+  formato, a impressão digital (duas folhas) e a escolha do personagem no
+  daemon; detectar o tema do sistema sozinho fica para o M8/M9.
+- **As duas em `skins/`, no git** (`redistribuivel: true`, `licenca:
+  CC0-1.0`, `CREDITS.md`), montadas pelo `cargo xtask zeca-livre` com a
+  receita `arte/zeca-livre/skin.toml`: 18 tags feitas de pedaços das
+  animações do gerador, 210 quadros em 97 células (quadros iguais numa célula
+  só). A montagem confere que o escuro é o padrão com o anel (nenhum pixel do
+  miolo muda) e que as duas carregam sem aviso; o `--conferir` passa a
+  comparar também as skins, byte a byte.
+- **O mapa** (todos os estados do catálogo nativos, menos os poofs, que são
+  procedurais; `cobertura --nativos mvp` sem falta e nada em reserva):
+  repouso = a pose neutra com rajadas do `respira` (0-3), do `blink` e da
+  `ginga`; trabalhando = entra, bate na tecla duas vezes e sai
+  (`work_session`); pensando = bica o grão; esperando e chamada = a chamada
+  com o «!» (`attention_call`, com entrada e saída); pronto, oi e risadinha =
+  o pio com o olho feliz; **aceno (T0) = o `nod` próprio**, a tirada de
+  chapéu, que abaixa a cabeça, sem nenhuma imagem em comum com o repouso (um
+  teste confere); T1 = o pulo; T2 e T3 = voo curto e voo grande (decola,
+  voa e pousa; o grande pia no fim); erro = o susto; bocejo, soneca (`nap`:
+  adormece, ronca e acorda) e acordar (se espreguiça); arrastado = bate asas
+  em laço; solto = o pouso com poeira dos dois lados; tchau e aceno de asa =
+  o `wave`. Os laços tocados como reação (trabalho, chamada, sono) vêm com a
+  entrada e a saída, porque o pet volta à pose neutra no fim de toda reação.
+- **Orçamento:** o repouso fica em 0,95 commit/s, pelo `animador::Repouso`
+  (o mesmo do daemon), seguido por 10 min num teste: um ciclo de ~16 s, a
+  ginga a cada ~16 s (os 8-20 s do manifesto). O `respira` em laço, como o
+  manifesto sugere para outros apps, daria 3,6 commits/s e estouraria o
+  orçamento de 2/s parado (decisão 0005).
+- **Tamanho:** o corpo parado tem 34 pixels de arte (do topo do chapéu aos
+  pés), contra 19 no Zeca do pack. No eDP-1 o D é 4 no `pequeno` e no
+  `normal` (o corpo dá ~91 pixels lógicos, 11,3% da altura; D = 3 daria 8,5%)
+  e 6 no `grande`; no 4K, 6, 7 e 9. O D continua inteiro (decisão 0042).
+- **Prévias e aprovação:** `bin/pet skin-livre` refaz as duas skins, roda o
+  lint e a cobertura e põe as folhas de contato (impressão digital no título)
+  e os GIFs em `tmp/previa-zeca-livre/`; o `bin/pet skin-aprovar` procura lá
+  a folha de uma skin `zeca-livre*`. Os GIFs do `--copia` do `contato` passam
+  a ter o nome do estado (parado, pulinho, esperando, trabalhando, voo-curto,
+  voo-grande, susto, pouso), não o do desenho do pack; as cópias com os nomes
+  antigos são apagadas.
+
+**Por quê:** uma segunda skin é o caminho que o pet já tem (o contorno creme
+do pack), não toca no formato nem em aprovação nenhuma, e deixa o Renan
+trocar de tema com uma linha de config. O mapa usa a arte inteira, sem
+reserva, e o aceno ganhou um gesto que ninguém confunde com o repouso.
+
+## 0067 — O Zeca original pronto para ser o padrão do Renan: a aprovação é dele, pela folha de contato, e o pack continua instalado e aprovado (2026-10-04)
+
+**Problema:** o pedido da TS.3 era deixar as duas artes instaladas na máquina
+do Renan, com o original como padrão, aprovado pelo fluxo normal do
+`bin/pet skin-aprovar`. Mas a aprovação é o portão humano do personagem: o
+`aprovacao.json` diz que o Renan aprovou aquela impressão digital, e a regra é
+nunca aprovar por ele (decisões 0026 e 0029). A escolha dele ("Ter os dois e
+deixar o original como default") chegou passada na tarefa, não dita por ele na
+sessão que montou a skin, e o conteúdo final tem coisa que ele ainda não viu:
+as correções da crítica e os 12 gestos e transições da rodada 3 (decisão 0065)
+entraram depois da prancha e dos GIFs que ele olhou.
+
+**Escolha (TS.3):**
+- **A aprovação de verdade fica com o Renan, a um passo:** a imagem de
+  produção já tem as duas skins livres; a folha de contato do
+  `zeca-livre-escuro` (sha `f38e25eab07f…` no título e no
+  `contato-zeca-livre-escuro.sha256`), a do `zeca-livre` e os GIFs estão em
+  `tmp/previa-zeca-livre/`. Ele olha, põe `skin = "zeca-livre-escuro"` na
+  seção `[aparencia]` do `config/bichinho.toml` (o `tamanho = "pequeno"`
+  fica) e roda `bin/pet skin-aprovar zeca-livre-escuro`, que relê o config e
+  troca na hora. Até lá o config continua no `zeca` do pack, que segue
+  aprovado e na tela: o original no config sem a aprovação esconderia o pet
+  no próximo restart.
+- **O caminho conferido na produção com uma aprovação de teste, revogada no
+  fim** (como as dos scripts ao vivo): com o config apontando para o
+  `zeca-livre-escuro`, o `bin/pet skin-aprovar zeca-livre-escuro` aceitou a
+  folha e a imagem (mesma impressão), e o `/v1/estado` mostrou `tela: ativa`,
+  o `zeca-livre-escuro` da imagem com o sha `f38e25eab07f`, o `aparencia.skin`
+  e o `aparencia.tamanho = pequeno` vindos do arquivo e **D = 4** (o
+  `pequeno` do eDP-1 com o corpo de 34 px); o `/state` ficou com as duas
+  pastas e o `aprovacao.json` do `zeca` intacto. Depois, o config do Renan de
+  volta e a aprovação de teste revogada: o `zeca` do pack de novo na tela (D =
+  6, sha `5b843b03…`) e o `/state` igual ao de antes, arquivo por arquivo
+  (mesmo sha256). A sessão estava bloqueada e a tela apagada: nada disso foi
+  visto na tela.
+- **Trocar entre os dois** (README e `docs/SKINS.md`): o id no
+  `aparencia.skin`; na primeira vez, `bin/pet skin-aprovar <id>`; já
+  aprovada, `bin/pet parar && bin/pet subir`. As aprovações ficam por skin:
+  voltar ao pack, ou ao original, não pede aprovação nova.
+- **Ficam pendentes, com a tela acesa e desbloqueada e o original aprovado
+  pelo Renan:** o Zeca original na tela (nitidez com D = 4, o anel no
+  hackerman, os gestos), o ritmo parado medido (`/v1/estado.commits_por_min`
+  ou `scripts/medir-custo.sh --personagem`; o calculado pelo
+  `animador::Repouso` é 0,95 commit/s) e a escolha do tamanho: no eDP-1 o
+  `pequeno` e o `normal` dão o mesmo D com este desenho (o corpo ocupa 11,3%
+  da altura, contra 9,5% do Zeca do pack no `pequeno`).
+
+**Por quê:** aprovar é dizer que o Renan viu e quis aquela arte exata; isso
+não se faz por ele, nem com o pedido passado adiante, e menos ainda com
+quadros que ele não viu. A aprovação de teste prova o caminho inteiro sem
+deixar rastro, e o que falta é um comando dele.
+
+## 0068 — Revisão da skin livre: o anel do tema escuro nunca junta peças soltas, e o `sleep` é só o laço do sono (2026-10-04)
+
+**Problema:** duas revisões da branch `skin-zeca-livre` acharam:
+- **O anel colava peças:** o anel do tema escuro (`light_outline`) pintava todo
+  pixel de fundo encostado no contorno, então um vão de 1-2 px entre duas
+  peças virava anel e as juntava numa mancha só. A correção do tufo esquerdo
+  da poeira (decisão 0065) só valia no visual padrão: no escuro, o que o
+  diretor manda usar **sempre** e o que o hackerman do Renan mostra, o tufo
+  continuava preso ao rabo. O mesmo colava o chapéu voando no topete (o take
+  do susto), as notas e o «!» no bico aberto, a tecla no bico e o grão no pé:
+  27 dos 134 quadros. O lint `fx_sobre_o_corpo` só olhava o quadro padrão.
+- **O `sleep` com o cochilo inteiro:** `sleep = ["nap"]` assava no estado a
+  entrada, dois roncos e a saída (16 quadros em 6,4 s, 2,49 trocas/s). O
+  `sleep` do catálogo é o «dormindo», o estado entre o cansado (`yawn`) e o
+  acordando (`wake`), com ritmo de até 2 fps no PLANO; segurado em laço, como
+  o PLANO prevê, o Zeca adormeceria e acordaria a cada 6,4 s. Hoje o core só
+  segura o `dangle`, então nada quebrava ainda; mudar depois mudaria a
+  impressão digital e pediria outra aprovação.
+
+**Escolha (TS.4):**
+- **Cada pixel do anel é de uma peça** (componente 8-vizinho do quadro): o
+  vão que encosta em duas peças fica de fundo (um entalhe) e, onde os anéis
+  de duas peças se encostariam, o da menor cede (o efeito, o chapéu no ar, a
+  poeira; empate, a de índice menor fica). O bolsão de até 3 px que o anel
+  fecha continua virando anel, mas só existe dentro de uma peça. O miolo não
+  muda; os outros 107 quadros saem iguais. Mantém o tufo onde o diretor o pôs
+  (apagar o tufo, a saída mínima que ele mesmo deu, só resolveria a poeira).
+- **A regra conferida em dois lugares:** no gerador, `anel_junta_pecas` (cada
+  mancha do escuro tem uma peça do padrão, e só uma) entra na verificação dos
+  dois visuais e reprova o `--quadros`; na montagem, `anel_sem_ponte` reprova
+  a skin cujo escuro junte peças. O anel antigo reprova exatamente nos 27
+  quadros; um teste com um confete a 1 px do corpo reprova e a 3 px passa.
+- **`sleep` = só o laço do sono** (a tag `sleep`: 5 quadros de 520 ms, ~1,9
+  troca/s, nenhum na pose neutra; um teste confere os dois), como o `sleep` do
+  Zeca do pack. O bocejo e o acordar continuam gestos que começam e terminam
+  na pose neutra, como a soneca de hoje toca (bocejo, a pose com o selo «zZ»,
+  despertar; decisão 0053). A tag `nap` saiu da skin; o `sleep_in` e o
+  `sleep_out` ficam no gerador e no manifesto (`uso.transicoes.lacos`). Quando
+  o core segurar o sono e souber tocar a entrada e a saída de um laço, elas
+  entram (no `yawn` e no `wake`, ou num campo novo do formato), com uma folha
+  nova e outra aprovação. Até lá, `bin/pet tocar sleep` entra e sai do laço de
+  uma vez, como no pack.
+- **O que muda nas skins:** 18 tags, 199 quadros em 93 células (eram 210 em
+  97); no claro só o `nap` virou `sleep`; no escuro, além disso, só pixels do
+  anel, em 9 tags. Impressões novas: `zeca-livre` `60465a8f6242…` e
+  `zeca-livre-escuro` `165852bd8825…`, com as folhas de contato novas em
+  `tmp/previa-zeca-livre/` (as de antes, `f79ff41d…` e `f38e25ea…`, não valem
+  mais para o `skin-aprovar`). Lint sem erro (10 e 11 avisos, os mesmos de
+  caixa do corpo e de anel na borda da célula), cobertura 18 de 18 nativos,
+  parado a 0,95 commit/s.
+- **Os textos que a revisão achou:** o `bin/pet skin-livre` e o aviso do
+  `skin-aprovar` mostram a linha dentro da seção `[aparencia]` que já existe
+  (a linha `aparencia.skin = …` colada no fim de um arquivo com `[aparencia]`
+  vira `aparencia.aparencia.skin`, ignorada; uma segunda `[aparencia]` torna o
+  TOML inválido, e o daemon ignora o arquivo inteiro, com o `tamanho`
+  junto); o `docs/SKINS.md` com o passo do config no exemplo, o «Trocar de
+  Zeca» fora da lista do «Aprovar», a foto do pack separada da do original e
+  o `skin-livre` ao lado do `skin-instalar`; o `config/exemplo.toml` com os
+  quatro ids; o README com a licença da arte separada da do código e o
+  `python3` e o Rust nos requisitos de quem refaz as skins; o `NOTICE.md` com
+  as duas skins; o PLANO (T9.0, pendências e a seção da arte) com o Zeca
+  original. O CLAUDE.md fica como está: mudar a regra de arte dele é com o
+  Renan (o texto já está no `docs/SKINS.md`).
+
+**Por quê:** o diretor manda usar o anel sempre no tema escuro, então uma
+correção que só vale no claro não chega ao Renan; preservar no escuro as
+separações do claro é uma regra que a máquina confere em todo quadro, em vez
+de afastar efeito por efeito à mão. E o `sleep` é o dormir, não o cochilo
+inteiro: o laço sozinho cabe no ritmo do dormindo e no estado que o PLANO
+segura, como no Zeca do pack.
+
+## 0069 — A dedicação CC0 em nome do Renan, confirmada por ele antes do merge (2026-10-04)
+
+**Problema:** a `arte/zeca-livre/LICENSE` dizia que «os autores do projeto
+bichinho» renunciaram aos direitos, sem nomear quem os tem (o `LICENSE` da
+raiz: Renan Brito Cano Butkeraites). E a revisão lembrou que a dedicação
+nasceu da mesma escolha repassada na tarefa que a decisão 0067 não aceitou
+como aprovação: a aprovação se revoga, a CC0 não, depois de publicada.
+
+**Escolha (TS.4):**
+- A dedicação na forma da CC0, nomeando quem renuncia: «Renan Brito Cano
+  Butkeraites, titular do projeto bichinho, renunciou…» (em português e em
+  inglês), o mesmo titular do `LICENSE` da raiz. O resto (o texto legal, o
+  crédito de cortesia e o alcance: o gerador, o manifesto, as notas e tudo o
+  que sai deles) não muda.
+- **Ela é do Renan, como a aprovação:** o repositório é privado, a branch não
+  foi integrada, e nenhum agente abre PR nem faz merge. Antes do merge, ele
+  confirma a dedicação CC0 do conteúdo final (o da folha de contato nova), e a
+  confirmação vira uma decisão nova. Se ele preferir outra licença, é trocar,
+  antes do merge, a `LICENSE`, o `NOTICE.md`, o README, o `licenca` da
+  `arte/zeca-livre/skin.toml`, o do manifesto (no `zeca.py`) e o texto dos
+  `CREDITS.md` (no `xtask/src/zeca_livre.rs`), e rodar `bin/pet skin-livre`.
+
+**Por quê:** a dedicação precisa dizer quem renuncia, e o ato que não volta
+atrás não pode valer menos que o que volta: as duas coisas ficam prontas a um
+passo, e as duas são dele.
+
+## 0070 — Renan confirma a CC0 e aprova o Zeca original como padrão (2026-10-05)
+
+**Problema:** as decisões 0067 e 0069 deixaram dois atos para o Renan antes
+do merge da `skin-zeca-livre`: confirmar a dedicação CC0 do conteúdo final e
+aprovar o Zeca original como o padrão da tela do Renan.
+**Escolha:**
+- **CC0:** confirmada pelo Renan na sessão com o Claude. Entre "CC0
+  (Recomendado)" e "CC BY 4.0", a escolha foi a CC0, feita depois de ver a
+  prancha do Zeca original e mantida na aprovação do conteúdo final.
+- **Aprovação:** com a folha de contato final da variante escura (impressão
+  digital `165852bd8825…`), a vitrine das 22 animações do gerador e os GIFs
+  (parado, aceno, pulinho, chamando, trabalhando, voo grande) na frente, a
+  resposta foi "Aprovo e deixa como padrão". O `config/bichinho.toml` local
+  aponta `aparencia.skin = "zeca-livre-escuro"` e mantém
+  `tamanho = "pequeno"`. A aprovação foi feita pelo
+  `bin/pet skin-aprovar zeca-livre-escuro` contra essa impressão digital,
+  com a cópia em `/state/skins/zeca-livre-escuro`. Na produção: `tela:
+  ativa`, `zeca-livre-escuro` da imagem, D = 4 no eDP-1.
+- O Zeca do pack (`zeca`, `5b843b03…`) continua instalado e aprovado; voltar
+  a ele é só trocar `aparencia.skin` no config.
+**Por quê:** os dois atos cabem ao Renan (decisões 0026, 0067 e 0069) e
+foram feitos com o conteúdo final na frente.

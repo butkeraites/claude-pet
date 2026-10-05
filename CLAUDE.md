@@ -19,17 +19,35 @@ O plano completo, com marcos M0–M9 e como verificar cada um, está em
 
 ## Estado do repositório
 
-**Na `main` (tags `v0.1.0`–`v0.3.1`):** M0 (fundação), M1 (overlay nítido e
-barato; portão fechado com a tela acesa, decisão 0005), M2 (o Zeca, aprovado
-pelo Renan pela folha de contato, decisões 0023–0029), M3 (hooks → reação:
-plugin `bichinho`, cérebro mínimo com `nod`, `done_small` e `bye`, `bin/pet
-testar`, decisões 0019–0022 e 0030–0034) e a preparação multiplataforma
-(PR #4, `v0.3.1`, decisões 0035–0046): a costura de plataforma (T8.0: o
-Motor e os traits no `pet-core`, o Wayland em `pet-wayland`), o hook nativo
-`bichinho avisar` em exec form (T8.1) e o tamanho do Zeca no config (TP.2,
-`aparencia.tamanho`). O plugin instalado é o 0.2.0 (exec form), da worktree
-estável na `main`, com o `~/.local/bin/bichinho` dela. O andamento por
-tarefa está no `PROGRESS.md`.
+**Na `main` (tags `v0.1.0`–`v0.4.1`):**
+- M0 (fundação) e M1 (overlay nítido e barato; portão fechado com a tela
+  acesa, decisão 0005);
+- M2 (o Zeca do pack, aprovado pelo Renan pela folha de contato, decisões
+  0023–0029);
+- M3 (hooks → reação: plugin `bichinho`, cérebro mínimo com `nod`,
+  `done_small` e `bye`, `bin/pet testar`, decisões 0019–0022 e 0030–0034);
+- a preparação multiplataforma (PR #4, `v0.3.1`, decisões 0035–0046): a
+  costura de plataforma (T8.0: o Motor e os traits no `pet-core`, o Wayland
+  em `pet-wayland`), o hook nativo `bichinho avisar` em exec form (T8.1) e o
+  tamanho do Zeca no config (TP.2, `aparencia.tamanho`);
+- o M4 (PR #5, `v0.4.0`, decisões 0047–0064): arrastar com posições salvas
+  por monitor, seguir o monitor ativo pelo socket2 com o poof, a fonte
+  monogram e o balão mínimo, a proteção de tela e a soneca, a janela de cada
+  sessão (`term` no fio v1 e o anel de ativações), o clique que foca o
+  terminal pelo foreign-toplevel com o mapeamento do Hyprland, a presença
+  pelo `ext_idle_notifier_v1` e os avisos em ciclo;
+- o **Zeca original** em CC0 (PR #6, `v0.4.1`, decisões 0065–0070): o
+  gerador em `arte/zeca-livre/` e as skins `zeca-livre` (tema claro) e
+  `zeca-livre-escuro` (com o anel), redistribuíveis.
+
+O plugin instalado é o 0.2.0 (exec form), da worktree estável na `main`, com
+o `~/.local/bin/bichinho` dela. O andamento por tarefa está no
+`PROGRESS.md`.
+
+**Na tela do Renan:** o `zeca-livre-escuro` no tamanho `pequeno` (D = 4 no
+eDP-1), aprovado em 2026-10-05 (decisão 0070). O `zeca` do pack continua
+instalado e aprovado: para voltar, é só trocar `aparencia.skin` no
+`config/bichinho.toml`.
 
 O Zeca só aparece com a skin da imagem aprovada (`bin/pet skin-aprovar`, que
 só aprova a skin da folha de contato vista; decisões 0026 e 0029). Sem
@@ -42,29 +60,21 @@ em `docs/SKINS.md`.
 **Rumo (2026-10-03, decisões 0035–0042):** lançamento open source para
 Linux, macOS e Windows, com o app **bichinho** (o personagem continua Zeca);
 o PLANO tem o M8 (multiplataforma) e o M9 (publicação). A pesquisa está em
-`docs/pesquisa/09-multiplataforma.md`.
+`docs/pesquisa/09-multiplataforma.md`. O próximo marco é o M5 (cérebro
+completo).
 
-**Na branch `m4-arrastar-seguir` (T4.1–T4.11, decisões 0047–0058; revisão
-em 2026-10-04, decisões 0059–0064):** o M4 — arrastar com posições salvas
-por monitor, seguir o monitor ativo pelo socket2 com o poof, a fonte
-monogram e o balão mínimo, a proteção de tela e a soneca, os ids de terminal
-no fio v1 (`term`) com a janela de cada sessão casada pelo anel de
-ativações, o foco pelo foreign-toplevel com o mapeamento do Hyprland, a
-presença do Renan pelo `ext_idle_notifier_v1` e os avisos com o clique em
-ciclo. A produção roda a branch; a conferência na tela
-(`scripts/verificar-m4.sh` e `--manual`, com o checklist do HDMI, da tampa e
-da suspensão) e o `scripts/e2e-monitor.sh --autorizo` ficaram pendentes
-(sessão bloqueada; o e2e pede o Renan digitando «sim» a cada vez). A troca
-depois do merge (o plugin não muda) está no README e na decisão 0064.
-
-**Pendentes** (pedem a tela acesa e desbloqueada, ou o Renan): a
-conferência na tela do M4 (acima), a da arte revista, das reações com o
-Zeca e do tamanho pequeno, a medição de custo com o personagem e a regressão do T8.0
-(`scripts/verificar-ao-vivo.sh --personagem` e `scripts/medir-custo.sh
---personagem`, que aprovam só para o teste e revogam no fim), e o aceno
-(`nod`, levanta e senta), que é um pedaço da rajada do repouso
-(`stand_look_sit`) e dá para confundir: mudar pede uma folha de contato nova
-e a reaprovação do Renan.
+**Pendentes** (pedem a tela acesa e desbloqueada, ou o Renan):
+- a conferência na tela do M4 (`scripts/verificar-m4.sh` e `--manual`, com
+  o checklist do HDMI, da tampa e da suspensão) e o
+  `scripts/e2e-monitor.sh --autorizo` (o Renan digita «sim» a cada vez);
+- a conferência do Zeca original na tela (nitidez, reações, tamanho
+  `pequeno`), a medição de custo com o personagem e a regressão do T8.0
+  (`scripts/verificar-ao-vivo.sh --personagem` e `scripts/medir-custo.sh
+  --personagem`, que aprovam só para o teste e revogam no fim);
+- no Zeca do pack, o aceno (`nod`, levanta e senta) é um pedaço da rajada
+  do repouso (`stand_look_sit`) e dá para confundir: mudar pede uma folha de
+  contato nova e a reaprovação do Renan. No Zeca original o aceno é a
+  tirada de chapéu, sem imagem em comum com o repouso.
 
 ## Comandos
 
@@ -180,9 +190,13 @@ Fora dele, use `~/.cargo/bin/cargo`.
   `omarchy` e com consentimento do Renan.
 - **Arte:** o pack e tudo derivado dele (sheet, GIFs, folhas de contato,
   fotos) ficam em `skins-locais/` ou `tmp/` (gitignored), nunca no git nem
-  em `docs/`; o xtask recusa gravar arte de pack em outra pasta do repo. Só
-  `arte/zeca/` (acessórios, âncoras, trajetórias) é nossa e vai para o git.
-  A skin `_teste` nunca vira personagem.
+  em `docs/`; o xtask recusa gravar arte de pack em outra pasta do repo. É
+  nossa e vai para o git: `arte/zeca/` (acessórios, âncoras, trajetórias do
+  Zeca do pack) e o **Zeca original** em CC0 (`arte/zeca-livre/`, com o
+  gerador `zeca.py`, e as skins `skins/zeca-livre` e `skins/zeca-livre-escuro`,
+  refeitas por `bin/pet skin-livre` e conferidas por
+  `cargo xtask zeca-livre --conferir`). Arte do Zeca original se muda no
+  gerador, nunca à mão nos PNGs. A skin `_teste` nunca vira personagem.
 - **Nome do personagem:** é o Zeca, um papagaio malandro com visual próprio.
   Nunca o chame nem o descreva como personagem de terceiros, e nunca cite
   nome, estúdio ou família de um, em código, docs, balões, commits ou PRs. O

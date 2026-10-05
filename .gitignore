@@ -12,9 +12,12 @@
 # Relatório de `cargo xtask cobertura` (gerado, não vai para o git)
 /skins/*/cobertura.md
 
-# Saídas temporárias (fotos, prévias, capturas)
+# Saídas temporárias (fotos, prévias, capturas; a saída do gerador da arte
+# livre vai para tmp/zeca-livre/)
 /tmp/
 /previa/
+# Cache do Python, se alguém importar o arte/zeca-livre/zeca.py
+__pycache__/
 
 # Editores
 *.swp

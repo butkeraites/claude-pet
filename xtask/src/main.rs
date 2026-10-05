@@ -3,7 +3,8 @@
 //! Os comandos chegam junto com os marcos que precisam deles (PLANO.md):
 //! `skin-teste` e `nitidez` no M1; `skin-importar`, `zeca`, `lint-skin`,
 //! `cobertura` e `contato` no M2; `fonte` (a monogram dos balões) e
-//! `globais` (os protocolos que o compositor oferece) no M4.
+//! `globais` (os protocolos que o compositor oferece) no M4; `zeca-livre` (o
+//! Zeca original, CC0, do gerador em `arte/zeca-livre/`) na skin livre (TS.1).
 
 mod args;
 mod carga;
@@ -19,6 +20,7 @@ mod lint;
 mod nitidez;
 mod skin_teste;
 mod zeca;
+mod zeca_livre;
 mod zip;
 
 use std::path::PathBuf;
@@ -40,6 +42,10 @@ const COMANDOS: &[(&str, &str)] = &[
         "importa um pack (.aseprite ou tiras PNG) (M2)",
     ),
     ("zeca", "recolore o pack e encaixa chapéu e gravata (M2)"),
+    (
+        "zeca-livre",
+        "o Zeca original (CC0) do gerador arte/zeca-livre/zeca.py; --conferir só confere",
+    ),
     ("lint-skin", "valida uma skin (M2)"),
     (
         "cobertura",
@@ -128,6 +134,15 @@ fn main() -> ExitCode {
             Err(e) => {
                 eprintln!("zeca: {e}");
                 eprintln!("{}", zeca::USO);
+                ExitCode::FAILURE
+            }
+        },
+        Some("zeca-livre") => match zeca_livre::executar(&args[1..]) {
+            Ok(true) => ExitCode::SUCCESS,
+            Ok(false) => ExitCode::FAILURE,
+            Err(e) => {
+                eprintln!("zeca-livre: {e}");
+                eprintln!("{}", zeca_livre::USO);
                 ExitCode::FAILURE
             }
         },
