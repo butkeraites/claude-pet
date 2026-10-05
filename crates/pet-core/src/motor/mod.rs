@@ -1047,9 +1047,9 @@ impl Motor {
     /// próximo passo dela), e a base da espera sai depois de
     /// [`tela::ESPERA_VISTA_NA_BASE_MS`] (decisão 0090).
     fn ver_a_espera(&mut self, agora_ms: u64) {
-        if !self
+        if self
             .prazo_da_espera_vista()
-            .is_some_and(|prazo| agora_ms >= prazo)
+            .is_none_or(|prazo| agora_ms < prazo)
         {
             return;
         }

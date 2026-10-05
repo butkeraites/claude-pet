@@ -442,6 +442,10 @@ impl Nucleo {
                 }
                 let _ = feito.try_send(());
             }
+            // O laço sem janela trata o encerramento sozinho (sai do laço e
+            // grava a memória); aqui não há nada a fazer. No Linux o sinal
+            // chega pelo pipe do calloop, não pela caixa (decisão 0040).
+            Comando::Encerrar => {}
         }
     }
 

@@ -4166,3 +4166,71 @@ restaurava sessões com prazos fora do relógio do laço.
 passou, e o `idle_prompt` é a prova, mandada pela própria sessão, de que não
 há diálogo na tela: o primeiro evento depois de um turno perdido. E nada lido
 do disco pode pôr um prazo fora do relógio do laço.
+
+## 0100 — macOS: o build, os testes e o `bin/pet verificar` verdes no Mac, sem mexer no Linux (2026-10-05)
+
+**Problema:** o M8 pede o Zeca nativo no Mac (Apple Silicon), antes do M6
+(pedido do Renan em 2026-10-05). No clone do macOS, `cargo build`, `cargo
+test` e `bin/pet verificar` não passavam, por diferenças de sistema, não de
+lógica:
+- o `xtask` puxava o `smithay-client-toolkit` (cliente Wayland do host, dos
+  comandos `carga` e `globais`) sem `cfg`, e ele nem compila no macOS (o
+  `rustix` esconde o `pipe_with` em `apple`): a compilação do workspace
+  inteiro quebrava;
+- a memória das sessões (decisão 0093) ficava desligada sem um boot id, que
+  só vinha do `/proc` do Linux;
+- o laço sem janela (`sem_janela`, Windows e macOS) não tratava SIGTERM: o
+  processo morria sem gravar a memória das sessões na saída;
+- a entrada HTTP respondia 413 a um corpo grande sem drenar o resto, e o
+  fechamento com dados por ler virava um RST que engolia a resposta no
+  macOS;
+- vários testes eram do Linux/Hyprland (socket2, `hyprland.lock`, o "não
+  perturbe" do Omarchy) ou usavam o `sha256sum`, que o macOS não tem, e o
+  `AF_UNIX` do macOS tem o caminho mais curto (`SUN_LEN` 104, não 108);
+- o `bin/pet` roda no bash 3.2 do macOS, que, sem locale UTF-8, lia um byte
+  do `»` logo depois de `$id` como parte do nome da variável (`set -u` →
+  "unbound variable"); e o `verificar` validava o compose, que só vale no
+  Linux.
+
+**Escolha (parte macOS da T8.2, o build e o CI):**
+- **Build.** O `smithay-client-toolkit` e o `rustix` do `xtask` ficam sob
+  `cfg(target_os = "linux")`, e `carga`/`globais` (clientes Wayland do host)
+  avisam que só rodam no Linux fora dele. O `pet-wayland` já era vazio no
+  macOS (decisão 0040); agora o workspace inteiro compila no Mac.
+- **Boot id do macOS.** `memoria::boot_id()` lê o `kern.bootsessionuuid` pelo
+  `sysctl` (só a `std`, sem `unsafe` no daemon): um UUID que muda a cada
+  partida da máquina, como o `/proc/sys/kernel/random/boot_id` do Linux.
+  Assim a memória das sessões funciona no Mac. Windows continua sem boot id
+  (a memória fica desligada) até ter o seu.
+- **Encerrar sem janela.** O `sem_janela` trata SIGTERM/SIGINT numa thread
+  (`signal-hook`, agora em todo Unix): o sinal manda `Comando::Encerrar` pela
+  caixa, o laço sai e grava a memória das sessões, como o `encerrar` do laço
+  do Linux (decisão 0093). E publica o estado inicial antes da primeira
+  espera, para a restauração aparecer no `/v1/estado` na hora, não só no
+  batimento.
+- **Fechamento gracioso da entrada.** Fora do Linux, depois de responder a
+  entrada HTTP meia-fecha a escrita e drena um pouco do corpo por ler, para o
+  413 (e os outros erros) chegarem ao cliente no macOS sem um RST no meio. No
+  Linux o fechamento de antes já entrega a resposta: lá nada muda.
+- **Testes.** Os testes do socket2 e da janela de cada sessão (instância de
+  mentira do Hyprland) e o canário do "não perturbe" do Omarchy ficam só no
+  Linux (`cfg`); o canário do `avisar.sh` usa o `shasum` no macOS (o próximo
+  da ordem do script, que já caía nele). Nada do comportamento do daemon
+  muda: o que saiu são provas de peças que só existem no Linux.
+- **`bin/pet verificar`.** As referências `$id»`/`$pedida»` viraram
+  `${id}»`/`${pedida}»` (o bash 3.2 em locale C parava nelas); o `compose` e
+  o `compose dev` são pulados com aviso fora do Linux (no Mac o bichinho é
+  app nativo, o container é uma VM sem tela). O resto (fmt, clippy, testes,
+  clippy dos alvos Windows e macOS, lint-skin, arte livre, marketplace,
+  plugin, shellcheck) roda igual.
+- **Clippy.** O `rust-toolchain.toml` é `stable` flutuante (decisão 0015); o
+  stable deste Mac (1.96) acusou um `nonminimal_bool` num `!…is_some_and` do
+  M5 (`motor::ver_a_espera`), trocado pela sugestão do próprio clippy
+  (`is_none_or`), que é estável desde a 1.82 (a MSRV é 1.85) e não muda o
+  comportamento. Toca código do M5, que corre em paralelo no Linux: a troca é
+  de uma linha e idêntica no efeito.
+
+**Por quê:** o porte não pode mudar o que o pet faz; estas são todas
+diferenças de sistema (ferramenta ausente, sinal, locale, limite de socket,
+lint de uma versão de clippy mais nova) resolvidas atrás de `cfg`, de uma
+fonte equivalente ou de uma escrita portável, com o Linux byte a byte igual.

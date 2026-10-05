@@ -82,15 +82,31 @@ pub fn boot_id() -> Option<String> {
     boot_id_de(&fs::read_to_string("/proc/sys/kernel/random/boot_id").ok()?)
 }
 
-/// Sem o boot id (Windows e macOS até o M8), nada é guardado: não daria para
-/// saber se a máquina reiniciou.
-#[cfg(not(target_os = "linux"))]
+/// No macOS, o `kern.bootsessionuuid`: um UUID que muda a cada partida da
+/// máquina (M8). Lido pelo `sysctl` (só a `std`, sem `unsafe` no daemon);
+/// falha calada volta `None`, e aí a memória das sessões fica desligada, como
+/// no Linux sem o `/proc`.
+#[cfg(target_os = "macos")]
+pub fn boot_id() -> Option<String> {
+    let saida = std::process::Command::new("/usr/sbin/sysctl")
+        .args(["-n", "kern.bootsessionuuid"])
+        .output()
+        .ok()?;
+    if !saida.status.success() {
+        return None;
+    }
+    boot_id_de(&String::from_utf8(saida.stdout).ok()?)
+}
+
+/// Sem o boot id (Windows até o M8), nada é guardado: não daria para saber se
+/// a máquina reiniciou.
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub fn boot_id() -> Option<String> {
     None
 }
 
-/// O boot id lido do arquivo, se é um.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+/// O boot id lido do arquivo (Linux) ou do `sysctl` (macOS), se é um.
+#[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
 fn boot_id_de(texto: &str) -> Option<String> {
     let id = texto.trim();
     memoria::eh_boot(id).then(|| id.to_owned())
@@ -160,5 +176,10 @@ mod testes {
         assert_eq!(boot_id_de("não é um id"), None);
         #[cfg(target_os = "linux")]
         assert!(boot_id().is_some(), "o /proc deste Linux tem o boot id");
+        #[cfg(target_os = "macos")]
+        assert!(
+            boot_id().is_some(),
+            "o kern.bootsessionuuid deste macOS tem o boot id"
+        );
     }
 }

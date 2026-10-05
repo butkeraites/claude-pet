@@ -674,6 +674,10 @@ fn teste_so_com_pet_teste_1() {
     }
 }
 
+// O "não perturbe" vem do Omarchy (Hyprland), só no Linux; no macOS o hook
+// sempre manda `dnd:false` (não há essa fonte). O canário de privacidade dele
+// (nenhuma notificação vaza) vale só onde o campo é lido.
+#[cfg(target_os = "linux")]
 #[test]
 fn nao_perturbe_do_omarchy() {
     let banca = Banca::nova();

@@ -27,6 +27,14 @@ use serde_json::{Value, json};
 
 const SH: &str = "/bin/sh";
 
+/// A ferramenta de hash que o `avisar.sh` acha neste sistema para a banca de
+/// PATH mutilado: no Linux o `sha256sum`; no macOS, que não o tem, o `shasum`
+/// (o próximo da ordem do script: `sha256sum` → `shasum -a 256` → `openssl`).
+#[cfg(target_os = "macos")]
+const HASHER: &str = "shasum";
+#[cfg(not(target_os = "macos"))]
+const HASHER: &str = "sha256sum";
+
 fn script() -> PathBuf {
     comum::raiz().join("plugin/scripts/avisar.sh")
 }
@@ -66,8 +74,8 @@ impl Banca {
         .unwrap();
         std::fs::set_permissions(&curl, std::fs::Permissions::from_mode(0o755)).unwrap();
         for (nome, programas) in [
-            ("sem-jq", &["date", "cat", "cut", "sha256sum"][..]),
-            ("sem-curl", &["date", "cat", "cut", "sha256sum", "jq"][..]),
+            ("sem-jq", &["date", "cat", "cut", HASHER][..]),
+            ("sem-curl", &["date", "cat", "cut", HASHER, "jq"][..]),
         ] {
             let dir = pasta.join(nome);
             std::fs::create_dir_all(&dir).unwrap();

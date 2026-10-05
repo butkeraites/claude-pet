@@ -36,6 +36,11 @@ pub fn rodar(
 ) -> ExitCode {
     aviso!("{motivo}: seguindo sem janela (o cérebro e o /v1/estado funcionam)");
     let (caixa, recebe) = Caixa::nova(comando::CAPACIDADE, Arc::new(SemDespertador));
+    // Os sinais acordam o laço pela própria caixa (não há calloop aqui): um
+    // SIGTERM manda `Encerrar`, o laço sai e grava a memória das sessões antes
+    // de o processo morrer (decisões 0040 e 0093).
+    #[cfg(unix)]
+    instalar_sinais(caixa.clone());
     if let Err(e) = daemon::iniciar_entrada(&ambiente, &comp, ouvinte, caixa) {
         erro!("{e}");
         return ExitCode::FAILURE;
@@ -56,12 +61,48 @@ pub fn rodar(
         ambiente.porta_publica
     );
     laco(&mut nucleo, &recebe);
+    // Na saída (sinal ou caixa fechada), a memória das sessões vai para o
+    // disco, como o `encerrar` do laço do Linux faz (decisão 0093).
+    nucleo.guardar_memoria(true);
     ExitCode::SUCCESS
+}
+
+/// Uma thread que espera SIGTERM/SIGINT e manda `Encerrar` pela caixa (uma
+/// vez). Sem calloop, é o jeito de o `recv` do laço acordar na hora do sinal.
+#[cfg(unix)]
+fn instalar_sinais(caixa: Caixa<Comando>) {
+    use signal_hook::consts::{SIGINT, SIGTERM};
+    use signal_hook::iterator::Signals;
+
+    let mut sinais = match Signals::new([SIGTERM, SIGINT]) {
+        Ok(s) => s,
+        Err(e) => {
+            aviso!("não consegui tratar SIGTERM/SIGINT: {e}");
+            return;
+        }
+    };
+    let feito = std::thread::Builder::new()
+        .name("sinais".into())
+        .spawn(move || {
+            if sinais.forever().next().is_some() {
+                info!("encerrando: sinal recebido");
+                // Se a caixa já fechou, o laço já está saindo: nada a fazer.
+                let _ = caixa.mandar(Comando::Encerrar);
+            }
+        });
+    if let Err(e) = feito {
+        aviso!("não consegui iniciar a thread de sinais: {e}");
+    }
 }
 
 /// Roda até a caixa fechar: os comandos da caixa primeiro, depois o prazo
 /// que venceu (decisão 0032), e o painel a cada volta.
 pub fn laco(nucleo: &mut Nucleo, recebe: &mpsc::Receiver<Comando>) {
+    // O estado inicial (as sessões restauradas e as intenções da partida) sai
+    // antes da primeira espera: sem eventos, o `recv` abaixo dormiria até o
+    // batimento, e o `/v1/estado` só mostraria a restauração 5 s depois. O laço
+    // do Linux já publica no `assentar` da partida.
+    nucleo.publicar(None);
     loop {
         nucleo.comp.bater();
         let espera = nucleo
@@ -72,8 +113,14 @@ pub fn laco(nucleo: &mut Nucleo, recebe: &mpsc::Receiver<Comando>) {
             .min(BATIMENTO);
         match recebe.recv_timeout(espera) {
             Ok(comando) => {
+                if matches!(comando, Comando::Encerrar) {
+                    return;
+                }
                 nucleo.comando(comando, None);
                 while let Ok(comando) = recebe.try_recv() {
+                    if matches!(comando, Comando::Encerrar) {
+                        return;
+                    }
                     nucleo.comando(comando, None);
                 }
             }
