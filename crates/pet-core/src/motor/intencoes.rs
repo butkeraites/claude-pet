@@ -169,8 +169,8 @@ pub enum Tipo {
         tirou_balao: bool,
     },
     /// A memória das sessões na partida do pet (decisão 0093): quantas
-    /// sessões e avisos voltaram e quantas ficaram de fora (expiradas, de
-    /// outra origem, com um campo ruim), se a memória era velha (`velha`,
+    /// sessões e avisos voltaram e quantas ficaram de fora (as razões de
+    /// [`super::Restauracao::de_fora`]), se a memória era velha (`velha`,
     /// gravada há mais de 60 s: as esperas voltam vistas e as janelas sem o
     /// endereço), o sossego que voltou (`nao_perturbe`, `soneca`,
     /// `discricao`; decisão 0095), ou o `motivo` de nada voltar

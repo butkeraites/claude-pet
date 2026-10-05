@@ -361,8 +361,10 @@ pub struct Restauracao {
     pub avisos: usize,
     /// As sessões que voltaram com a janela do terminal.
     pub janelas: usize,
-    /// As que ficaram de fora: expiradas, de outra origem, repetidas, além
-    /// do teto ou com um campo ruim no arquivo.
+    /// As que ficaram de fora: expiradas (uma semana sem evento, decisão
+    /// 0096), de outra origem, repetidas, além do teto, com um campo ruim no
+    /// arquivo, com uma hora mais de 6 h adiante (decisão 0094) ou com um
+    /// instante do laço depois da gravação (decisão 0095).
     pub de_fora: usize,
     /// A memória era velha (decisão 0095): as esperas voltaram vistas e as
     /// janelas sem o endereço.
@@ -2595,8 +2597,10 @@ impl Motor {
     }
 
     /// O pronto e o erro das sessões cujo terminal está em foco há
-    /// [`VISTO_PELO_FOCO_MS`] saem: o Renan já viu. O "esperando você" fica
-    /// (só um evento da sessão ou o clique o tiram).
+    /// [`VISTO_PELO_FOCO_MS`] saem: o Renan já viu. O "esperando você" fica:
+    /// o terminal em foco só dá o diálogo por visto (decisão 0090), e a espera
+    /// sai quando a sessão anda (o `idle_prompt` inclusive, decisão 0094), com
+    /// o clique, ou 12 h sem evento nenhum dela (decisão 0096).
     fn ver_pelo_foco(&mut self, agora_ms: u64) {
         for (p, prazo) in self.vistas_pelo_foco() {
             if agora_ms >= prazo {

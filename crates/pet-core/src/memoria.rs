@@ -337,7 +337,8 @@ impl Memoria {
 
     /// A memória é desta partida da máquina: o boot id da gravação é o de
     /// agora. Sem um dos dois, não se sabe, e nada volta (uma sessão
-    /// fantasma por 12 h é pior que esquecer).
+    /// fantasma por até uma semana, a vida de uma sessão sem evento, decisão
+    /// 0096, é pior que esquecer).
     pub fn conferir_boot(&self, agora: Option<&str>) -> Result<(), Recusa> {
         match (self.boot.as_deref(), agora) {
             (Some(gravado), Some(agora)) if gravado == agora => Ok(()),

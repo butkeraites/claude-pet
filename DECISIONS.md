@@ -4434,3 +4434,101 @@ erro contrário ao da decisão 0090, e a parada longa (decisão 0095) só pode
 quietar o que ela pode ter mudado, não o que chega depois dela. Com a vista
 em cada espera, as regras das decisões 0090 e 0095 valem para todas, sem
 depender de qual tem a vez.
+
+## 0099 — A última rodada antes do merge do M5: o refresco da memória pela parede, os dias na lista, o `idle_prompt` de uma vez por turno e a soneca que volta (2026-10-05)
+
+**Problema:** a última leitura do M5 antes do merge achou:
+- **O refresco da memória contava só o relógio do laço.** A idade da memória
+  (`Volta::velha`, 60 s) e a parada contam pela parede, e o refresco de 30 s
+  (decisão 0095) contava pelo relógio do laço, que não anda com a máquina
+  suspensa. Depois de uma noite suspensa com a memória parada, o arquivo
+  ficava com a gravação de antes da suspensão até 30 s acordados depois da
+  volta: um crash ali traria a memória como de horas atrás (as esperas
+  vistas, as janelas sem o endereço e a noite contada como parada, gastando
+  prazos que o pet de pé, no tempo acordado, não gasta). A asserção de
+  compilação que somava o refresco e o batimento contra a memória velha
+  misturava os dois relógios e só valia com a máquina acordada.
+- **A lista do clique dizia até "167 h":** desde a decisão 0096 uma sessão
+  sem evento fica uma semana, e a `balao::duracao` parava nas horas.
+- **O `idle_prompt` "se repete a cada ~60 s"** na pegadinha do CLAUDE.md, na
+  lista do PLANO, no comentário de um teste do cérebro e na descrição do
+  cenário `idle-prompt-repetido`. Isso veio de relatos de antes do M5
+  (`docs/pesquisa/07-desenho-sintese.md`); no 2.1.288 ele sai uma vez por
+  turno, uns 60 s depois do Stop, e nunca com um diálogo na tela
+  (`docs/pesquisa/10-cerebro-m5.md`, T5.1 e T5.7). A decisão 0094 apoiou
+  nisso o pronto e o erro que ficam com ele ("ele se repete").
+- **A soneca volta com a memória das sessões** (decisão 0095), mas a decisão
+  0053 diz que ela não persiste num restart, e o PLANO deixa a persistência
+  para os comandos `soneca` e `acordar` do M7.
+- **Comentários com as regras de antes das decisões 0094 e 0096:** o
+  "esperando você" que "nunca" sai sozinho (`prazo_do_aviso`,
+  `ver_pelo_foco`), as 12 h de vida da sessão (`reconfigurar`, um teste da
+  memória no cérebro, `Memoria::conferir_boot`) e as listas do que fica de
+  fora na volta (`Restauradas::de_fora`, `Restauracao::de_fora`, a intenção
+  e o `docs/CENARIOS.md`) sem as horas do futuro (decisão 0094) ou o instante
+  do laço depois da gravação (decisão 0095).
+- **Nenhum teste dizia** que as 12 h da espera (decisão 0096) contam do
+  último evento da sessão, e não do começo do aviso.
+
+**Escolha:**
+- **O refresco olha os dois relógios:** a decisão de gravar é uma função
+  pura (`nucleo::gravar_memoria_agora`) da última gravação no relógio do
+  laço e na parede, de agora, do que mudou, de haver algo a lembrar e da
+  saída. A memória que não mudou é regravada quando o relógio do laço **ou a
+  parede** andou 30 s (`REFRESCO_MEMORIA_MS`) desde a última gravação, a
+  parede para qualquer lado (o relógio que volta também regrava); o mínimo
+  de 4 s entre gravações continua no relógio do laço, e a saída grava sempre.
+  Na volta de uma suspensão, o primeiro batimento (em até 5 s acordados)
+  regrava. O batimento passa a ser um só (`nucleo::BATIMENTO_MS`, que o laço
+  do Linux e o sem janela usam), e as asserções de compilação dizem o que
+  vale: o mínimo entre gravações é menor que o batimento, e o refresco mais
+  o batimento ficam abaixo da memória velha, os dois pela parede com a
+  máquina acordada.
+- **Os dias na lista:** de 24 h em diante, a duração sai em dias ("2 d"),
+  arredondada para baixo como as outras unidades.
+- **O `idle_prompt` de uma vez por turno** nas docs e nos comentários. Isto
+  corrige a premissa da decisão 0094: o pronto e o erro continuam com ele,
+  não porque ele se repete, mas porque ele não diz que o Renan viu nada
+  (quem os tira é o clique, o terminal da sessão em foco, o próximo prompt
+  ou as 2 h). O cenário `idle-prompt-repetido` fica, como a prova de que um
+  repetido não faz nada (um Claude Code que repetisse, ou o mesmo evento duas
+  vezes).
+- **A soneca** do clique direito volta num reinício do pet, com a memória
+  das sessões (não depois de um boot da máquina): corrige a decisão 0053. O
+  PLANO diz isso, e do M7 ficam os comandos `soneca` e `acordar` do `bin/pet`.
+- **Os comentários** com as regras das decisões 0094 a 0096.
+- **O estado do repositório escrito para a `main` depois do merge** (como no
+  TS.5), no CLAUDE.md e no README: o M5 na lista da `main` (PR #7, `v0.5.0`,
+  decisões 0071–0099), a produção na `main` com o estado do Renan, o hook
+  com o `orig` e o `crn` pelo `bin/pet instalar-host` (o plugin continua
+  0.2.0), as conferências na tela pendentes e o próximo passo: o macOS na
+  branch `m8-macos`, escrita no Mac do Renan (decisões de 0100 em diante, de
+  lá), e depois o M6. Sai a pendência de reescrever o estado antes do merge.
+
+**Testes:** no núcleo, a decisão de gravar (8 h e 5 s depois na parede e 5 s
+no relógio do laço, com a memória igual: grava; sem nada a lembrar, não;
+acordada, só aos 30 s; a parede que volta; o que mudou nunca a menos de 4 s;
+a saída; a primeira gravação) e, pelo `Nucleo`, a memória parada regravada no
+primeiro batimento depois de uma suspensão: os dois reprovaram com a regra de
+antes, só pelo relógio do laço. No balão, os dias ("23 h", "1 d", "6 d", "7
+d" e a linha da lista). No cérebro, a espera que sai 12 h depois do último
+evento da sessão: um evento do subagente 3 h depois da permissão empurra o
+prazo e não muda a hora do aviso, no pet de pé e na volta da memória (13 h
+depois do aviso e 10 h depois do último evento, a espera volta e sai 2 h
+depois da partida). O código já contava do último evento: o teste passou de
+primeira, e três mutações o reprovaram (o prazo do pet de pé contado do
+aviso, a volta contada do aviso, o evento do agente que não conta). Nenhum
+dourado mudou.
+
+**Limites:** um crash nos primeiros segundos depois de uma suspensão, antes
+do primeiro batimento, ainda traz a memória velha, e uma suspensão com o pet
+fora continua contando como parada (decisão 0095). A lista em dias perde as
+horas (uma sessão de 1 d e 23 h mostra "1 d").
+
+**Por quê:** a idade da memória é pela parede, e o refresco que a mantém
+fresca tem de olhar o mesmo relógio: senão uma suspensão, que o pet de pé
+atravessa sem perder nada, vira uma parada longa no primeiro crash. "167 h"
+não se lê de relance. E as docs têm de dizer o que o Claude Code manda de
+verdade e o que o pet faz hoje: um `idle_prompt` que "se repete" ensinaria a
+tratá-lo como lembrete, e uma soneca que "não persiste" esconderia que ela
+volta.

@@ -54,7 +54,7 @@ use crate::nucleo::Nucleo;
 use crate::{daemon, vigia};
 
 /// Batimento do laço principal (o vigia aborta com 60 s sem batimento).
-pub const BATIMENTO: Duration = Duration::from_secs(5);
+pub const BATIMENTO: Duration = Duration::from_millis(crate::nucleo::BATIMENTO_MS);
 /// Intervalo da descoberta enquanto espera o compositor.
 pub const INTERVALO_DESCOBERTA: Duration = Duration::from_secs(2);
 /// Quantos comandos o laço tira da caixa de uma vez (o resto vem no próximo

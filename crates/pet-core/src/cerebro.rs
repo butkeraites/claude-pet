@@ -657,8 +657,10 @@ pub struct Restauradas {
     pub avisos: usize,
     /// Com o último evento há [`VIDA_SESSAO_MS`] ou mais.
     pub expiradas: usize,
-    /// De uma origem que o config não aceita mais, repetidas ou além de
-    /// [`MAX_SESSOES`].
+    /// De uma origem que o config não aceita mais, repetidas, além de
+    /// [`MAX_SESSOES`], com uma hora mais de [`JANELA_TS_MS`] adiante
+    /// (decisão 0094) ou com um instante do laço depois da gravação (decisão
+    /// 0095).
     pub de_fora: usize,
 }
 
@@ -1640,8 +1642,11 @@ pub fn hora_do_evento(ts: Option<u64>, recebido_ms: u64) -> u64 {
     }
 }
 
-/// Quando um aviso some sozinho: o pronto e o erro em [`VIDA_AVISO_MS`]; o
-/// "esperando você", nunca (só um evento da sessão ou visto).
+/// Quando um aviso some sozinho pela idade dele: o pronto e o erro em
+/// [`VIDA_AVISO_MS`]. O "esperando você" não tem prazo pela idade: sai quando
+/// a sessão anda (o `idle_prompt` inclusive, decisão 0094), visto, ou com a
+/// espera, [`VIDA_ESPERA_MS`] depois do último evento da sessão, o de um
+/// subagente também ([`Sessao::prazo_da_espera`], decisão 0096).
 fn prazo_do_aviso(aviso: Aviso) -> Option<u64> {
     (aviso.tipo != TipoAviso::Esperando).then(|| depois(aviso.desde_mono, VIDA_AVISO_MS))
 }
@@ -1682,8 +1687,8 @@ impl Cerebro {
     /// Troca a configuração: o config relido a cada aprovação de personagem
     /// (decisão 0029) vale também aqui (decisão 0030). Uma sessão de origem
     /// que deixou de contar sai na hora, sem reação: os eventos dela seriam
-    /// ignorados dali em diante e ela só sumiria em 12 h. As outras seguem
-    /// como estavam.
+    /// ignorados dali em diante e ela só sairia depois de uma semana sem evento
+    /// ([`VIDA_SESSAO_MS`], decisão 0096). As outras seguem como estavam.
     pub fn reconfigurar(&mut self, config: ConfigCerebro) {
         self.sessoes.retain(|_, sessao| {
             let origem = sessao.ent.as_deref().unwrap_or("desconhecida");
@@ -3930,8 +3935,9 @@ mod testes {
         rodar(&mut c, vec![chega(160_000, notificacao("idle_prompt"))]);
         assert_eq!(c.resumo().sessoes[0].estado, EstadoSessao::Parada);
         assert_eq!(aviso_de(&c), None);
-        // O pronto e o erro ficam com o idle_prompt (ele se repete; quem os
-        // tira é o Renan).
+        // O pronto e o erro ficam com o idle_prompt: ele sai uma vez por turno,
+        // uns 60 s depois do Stop, e não diz que o Renan viu nada; quem os tira
+        // é o Renan (decisão 0099).
         rodar(
             &mut c,
             vec![
@@ -3985,7 +3991,79 @@ mod testes {
     }
 
     #[test]
-    fn o_pronto_e_o_erro_somem_em_2_h_e_o_esperando_fica() {
+    fn a_espera_sai_12_h_depois_do_ultimo_evento_da_sessao_e_nao_do_aviso() {
+        // A espera sai sem evento nenhum da sessão por 12 h (decisão 0096): o
+        // subagente lançado antes da permissão, que segue trabalhando, empurra
+        // o prazo; a hora do aviso não conta.
+        const H: u64 = 60 * 60 * 1000;
+        let do_agente = |e: Evento| Evento {
+            agente: true,
+            aid: Some("ag1".into()),
+            ..e
+        };
+        let mut a = novo();
+        rodar(
+            &mut a,
+            vec![
+                chega(0, prompt("p1")),
+                chega(
+                    50,
+                    do_agente(Evento {
+                        turno: Some("p1".into()),
+                        ..ev("SubagentStart")
+                    }),
+                ),
+                chega(100, permissao("p1")),
+                chega(3 * H, do_agente(ferramenta("p1", "Read", None, 5))),
+            ],
+        );
+        let espera = |c: &Cerebro| {
+            c.resumo()
+                .sessoes
+                .first()
+                .map(|s| (s.estado, s.aviso.map(|a| (a.tipo, a.desde_ms))))
+        };
+        let esperando = Some((
+            EstadoSessao::Esperando,
+            Some((TipoAviso::Esperando, BASE + 100)),
+        ));
+        let parada = Some((EstadoSessao::Parada, None));
+        assert_eq!(
+            espera(&a),
+            esperando,
+            "o evento do agente não muda o estado nem a hora do aviso"
+        );
+        assert_eq!(a.proximo_prazo(), Some(3 * H + VIDA_ESPERA_MS));
+        // Na volta da memória, a mesma conta: gravada às 4 h e de volta às 13
+        // h (13 h depois do aviso, 10 h depois do último evento), a espera
+        // volta e sai 2 h depois da partida.
+        let memoria = gravada(&a, em(4 * H));
+        let volta = BASE + 13 * H;
+        let mut b = novo();
+        restaurar_em(&mut b, &memoria, depois_da_volta(volta, 0));
+        assert_eq!(espera(&b), esperando, "13 h depois do aviso: volta");
+        assert_eq!(b.proximo_prazo(), Some(2 * H));
+        // No pet de pé: 12 h depois do aviso, a espera fica; 12 h depois do
+        // último evento, sai, e a sessão fica.
+        rodar(&mut a, vec![Ate(100 + VIDA_ESPERA_MS)]);
+        assert_eq!(espera(&a), esperando);
+        rodar(&mut a, vec![Ate(3 * H + VIDA_ESPERA_MS - 1)]);
+        assert_eq!(espera(&a), esperando);
+        rodar(&mut a, vec![Ate(3 * H + VIDA_ESPERA_MS)]);
+        assert_eq!(espera(&a), parada);
+        assert_eq!(
+            a.resumo().sessoes[0].estado_desde_ms,
+            BASE + 3 * H + VIDA_ESPERA_MS
+        );
+        // Na volta, na mesma hora de parede.
+        b.tique(depois_da_volta(volta, 2 * H - 1));
+        assert_eq!(espera(&b), esperando);
+        b.tique(depois_da_volta(volta, 2 * H));
+        assert_eq!(espera(&b), parada);
+    }
+
+    #[test]
+    fn o_pronto_e_o_erro_somem_em_2_h_e_a_espera_em_12_h_sem_evento() {
         let mut c = novo();
         rodar(
             &mut c,
@@ -5339,7 +5417,8 @@ mod testes {
         assert!(sessao(&b, "aaaaaaaa").aviso.is_some());
         b.tique(em(fim_do_pronto));
         assert!(sessao(&b, "aaaaaaaa").aviso.is_none());
-        // E as sessões saem 12 h depois do último evento de antes.
+        // E as sessões saem uma semana depois do último evento de antes
+        // (decisão 0096).
         let fim_de_s1 = VIDA_SESSAO_MS + 160_000 - 630_000;
         let fim_de_s2 = VIDA_SESSAO_MS + 500_000 - 630_000;
         assert_eq!(b.proximo_prazo(), Some(fim_de_s1));
@@ -5561,7 +5640,7 @@ mod testes {
                 antes(11 * H),
                 Some(TipoAviso::Esperando)
             )),
-            "o esperando você não vence sozinho"
+            "a espera de 11 h com um evento há 1 min fica: sai 12 h depois do último evento"
         );
         assert_eq!(estado("do-sdk"), None);
         assert_eq!(estado("sem-origem"), None);

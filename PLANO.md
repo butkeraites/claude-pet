@@ -553,7 +553,7 @@ claude-pet/
   - a skin de teste nunca vira personagem.
 - Pegadinhas:
   - estouro de 64 eventos no socket2;
-  - `idle_prompt` repete a cada ~60 s;
+  - `idle_prompt` sai uma vez por turno, uns 60 s depois do Stop, nunca com um diálogo na tela (no 2.1.288; decisão 0099);
   - Stop não vem depois de Esc;
   - `hyprctl output create` não aceita nome;
   - nunca usar `compose.override.yml`;
@@ -583,6 +583,8 @@ claude-pet/
 | `plugin-atualizar` | atualiza a worktree estável do plugin |
 | `subir`, `parar`, `logs`, `reconstruir`, `dev` | atalhos do compose |
 | `verificar` | portão antes de commit |
+
+*Correção (2026-10-05, decisão 0099):* a soneca do clique direito já sobrevive a um reinício do pet, com a memória das sessões (decisão 0095; como as sessões, não a um boot da máquina). Do M7 ficam os comandos `soneca [30m]` e `acordar` do `bin/pet`.
 
 **`verificar` roda:**
 - `cargo fmt --check`;
@@ -808,6 +810,7 @@ Atualizado em 2026-10-05 com a pesquisa do M5 (`docs/pesquisa/10-cerebro-m5.md`,
 
 **Revisão final** (a revisão final do M5 antes do merge; decisões 0097 em diante):
 - **T5.27** o diálogo novo numa espera que a memória trouxe chama, como no pet de pé (decisão 0097); a espera vista não segura a vez da que o Renan não viu, e cada espera guarda a vista dela, também na memória (decisão 0098); as docs (o CLAUDE.md, o README, a tabela de verificação reconciliada com os dourados das decisões 0095 a 0098) e a produção refeita da branch com o estado do Renan intacto.
+- **T5.28** a última rodada antes do merge (decisão 0099): o refresco da memória das sessões também pela parede (a memória parada regravada no primeiro batimento depois de uma suspensão), os dias na lista do clique ("2 d"), o teste da espera que sai 12 h depois do último evento da sessão (não do aviso), as docs e os comentários com o `idle_prompt` de uma vez por turno, a soneca que volta com a memória e as regras das decisões 0094 e 0096, e o estado do repositório escrito para a `main` depois do merge.
 
 **Verificação:** `bin/pet verificar` verde a cada commit e `cargo test -p pet-core` com os cenários. Tabelas, exemplos de pontuação (decisão 0074) e cenários:
 
@@ -823,7 +826,7 @@ Atualizado em 2026-10-05 com a pesquisa do M5 (`docs/pesquisa/10-cerebro-m5.md`,
 | `pergunta-noutro-terminal` | o Renan no terminal de outra sessão: a escalada segue; 5 s no terminal dela e nada mais escala (decisão 0090) |
 | `pergunta-dispensada` | o Esc no terminal: visto, sem escalada com o Renan longe; a pose sai e o pet dorme (decisão 0090) |
 | `pergunta-com-protetor-de-tela` | a volta com a proteção de tela ainda aberta voa quando o pet aparece (decisão 0090) |
-| `idle-prompt-repetido` | — |
+| `idle-prompt-repetido` | um `idle_prompt` repetido não faz nada (o 2.1.288 manda um por turno, decisão 0099): depois de uma festa, nada; com o turno aberto sem Stop, o primeiro fecha sem festa |
 | `servidor-em-segundo-plano` | festas normais com um dev server rodando |
 | `workflow-longo` | T3 no Stop final da corrente (a notificação que a fecha) |
 | `workflow-agentes-depois-do-stop` | os agentes que o workflow lança depois do Stop são da corrente: T3 no fim (decisão 0089) |

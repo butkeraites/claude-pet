@@ -33,6 +33,10 @@ use crate::personagem::{self, Escolha, NaTela, Onde, mesma_tela};
 const VOLTAS_DE_EVENTOS: usize = 8;
 /// As posições do pet por monitor, em `/state` (decisão 0049).
 pub const ARQUIVO_POSICOES: &str = "posicoes.json";
+/// O batimento do laço principal de cada sistema (no Linux, o `laco`; sem
+/// janela, o `sem_janela`): alimenta o vigia e o `/saude` e chama a gravação
+/// da memória das sessões.
+pub const BATIMENTO_MS: u64 = 5_000;
 /// A memória das sessões é gravada no máximo a cada tanto (o batimento de 5
 /// s chama; decisão 0093), e na saída.
 pub const INTERVALO_MEMORIA_MS: u64 = 4_000;
@@ -40,9 +44,58 @@ pub const INTERVALO_MEMORIA_MS: u64 = 4_000;
 /// da gravação diz até quando o pet sabia, e depois de um crash a parada
 /// conta dali, não da última mudança.
 pub const REFRESCO_MEMORIA_MS: u64 = 30_000;
-/// O refresco (com o batimento de 5 s que o chama) cabe na memória fresca:
-/// a parada de um crash não a faz velha.
-const _: () = assert!(REFRESCO_MEMORIA_MS + 5_000 < MEMORIA_VELHA_MS);
+/// O intervalo mínimo nunca pula um batimento: o refresco sai no primeiro
+/// batimento depois dele.
+const _: () = assert!(INTERVALO_MEMORIA_MS < BATIMENTO_MS);
+/// A idade da memória é pela parede ([`pet_core::memoria::Volta::velha`]), e
+/// o refresco também olha a parede ([`gravar_memoria_agora`], decisão 0099).
+/// Com a máquina acordada, o batimento anda com a parede: a gravação fica no
+/// máximo um refresco e um batimento atrás dela, dentro da memória fresca, e
+/// a parada de um crash com o pet de pé não a faz velha. (Suspensa, nada roda;
+/// na volta, o primeiro batimento regrava.)
+const _: () = assert!(REFRESCO_MEMORIA_MS + BATIMENTO_MS < MEMORIA_VELHA_MS);
+
+/// Quando a memória das sessões foi gravada (ou tentada) por último, nos dois
+/// relógios.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Ultima {
+    /// No relógio do laço, que não anda com a máquina suspensa.
+    laco_ms: u64,
+    /// Na parede, que mede a idade da memória.
+    parede_ms: u64,
+}
+
+/// Se a memória das sessões é gravada agora (decisões 0093, 0095 e 0099),
+/// pelos dois relógios da última gravação (`ultima`, ou nenhuma ainda) e de
+/// `agora`: na saída, sempre; no batimento, nunca a menos de
+/// [`INTERVALO_MEMORIA_MS`] da última pelo relógio do laço, e então se ela
+/// mudou ou, com algo a lembrar (`vazia` falso), no refresco, quando o relógio
+/// do laço **ou a parede** andou [`REFRESCO_MEMORIA_MS`] desde a última (a
+/// parede para qualquer lado: o relógio que volta também regrava). Só o
+/// relógio do laço não basta: ele não anda com a máquina suspensa, e uma
+/// memória parada ficaria com a gravação de antes da suspensão, velha pela
+/// parede, até 30 s acordados depois da volta; um crash ali traria as esperas
+/// vistas e a noite suspensa contada como parada.
+fn gravar_memoria_agora(
+    ultima: Option<Ultima>,
+    agora: Agora,
+    mudou: bool,
+    vazia: bool,
+    na_saida: bool,
+) -> bool {
+    if na_saida {
+        return true;
+    }
+    let Some(ultima) = ultima else {
+        return mudou || !vazia;
+    };
+    let laco = agora.mono_ms.saturating_sub(ultima.laco_ms);
+    if laco < INTERVALO_MEMORIA_MS {
+        return false;
+    }
+    let parede = agora.parede_ms.abs_diff(ultima.parede_ms);
+    mudou || (!vazia && laco.max(parede) >= REFRESCO_MEMORIA_MS)
+}
 
 /// Lê as posições salvas; sem arquivo, ou com um que não serve, o pet
 /// começa no canto padrão de cada monitor.
@@ -103,8 +156,8 @@ struct Guarda {
     /// A última memória gravada (ou a do arquivo, na partida): só grava o que
     /// mudou, fora o refresco.
     gravada: Option<Memoria>,
-    /// Quando gravou (ou tentou) por último, no relógio do laço.
-    ultima_ms: Option<u64>,
+    /// Quando gravou (ou tentou) por último, no relógio do laço e na parede.
+    ultima: Option<Ultima>,
     /// O último erro de disco: o aviso sai uma vez, não a cada 5 s.
     erro: Option<String>,
 }
@@ -213,35 +266,31 @@ impl Nucleo {
         }
     }
 
-    /// Grava a memória das sessões em `/state` (decisões 0093 e 0095): no
-    /// batimento (`na_saida` falso), se ela mudou desde a última gravação, no
-    /// máximo a cada [`INTERVALO_MEMORIA_MS`], ou se não mudou há
-    /// [`REFRESCO_MEMORIA_MS`] e há algo a lembrar (a hora da gravação diz até
-    /// quando o pet sabia); na saída (o SIGTERM), sempre, sem esperar. Só o
-    /// laço principal grava: nunca a entrada HTTP nem o hook.
+    /// Grava a memória das sessões em `/state` (decisões 0093, 0095 e 0099):
+    /// no batimento (`na_saida` falso), se ela mudou desde a última gravação,
+    /// no máximo a cada [`INTERVALO_MEMORIA_MS`], ou se não mudou há
+    /// [`REFRESCO_MEMORIA_MS`] no relógio do laço ou na parede e há algo a
+    /// lembrar (a hora da gravação diz até quando o pet sabia); na saída (o
+    /// SIGTERM), sempre, sem esperar ([`gravar_memoria_agora`]). Só o laço
+    /// principal grava: nunca a entrada HTTP nem o hook.
     pub fn guardar_memoria(&mut self, na_saida: bool) {
         let Some(boot) = self.guarda.boot.clone() else {
             return;
         };
         let agora = self.agora();
-        let desde_a_ultima = self
-            .guarda
-            .ultima_ms
-            .map(|u| agora.mono_ms.saturating_sub(u));
-        if !na_saida && desde_a_ultima.is_some_and(|d| d < INTERVALO_MEMORIA_MS) {
-            return;
-        }
         let memoria = self.motor.memoria(agora, Some(boot));
         let mudou = !self
             .guarda
             .gravada
             .as_ref()
             .is_some_and(|g| g.mesmo_conteudo(&memoria));
-        let refrescar = !memoria.vazia() && desde_a_ultima.is_none_or(|d| d >= REFRESCO_MEMORIA_MS);
-        if !na_saida && !mudou && !refrescar {
+        if !gravar_memoria_agora(self.guarda.ultima, agora, mudou, memoria.vazia(), na_saida) {
             return;
         }
-        self.guarda.ultima_ms = Some(agora.mono_ms);
+        self.guarda.ultima = Some(Ultima {
+            laco_ms: agora.mono_ms,
+            parede_ms: agora.parede_ms,
+        });
         match crate::memoria::gravar(&self.onde.estado, &memoria) {
             Ok(()) => {
                 if na_saida {
@@ -1189,6 +1238,90 @@ mod testes {
             serde_json::from_str(&fs::read_to_string(&arquivo).unwrap()).unwrap();
         assert!(gravada["gravada_ms"].as_u64().unwrap() >= agora);
         assert!(gravada["laco_ms"].as_u64().unwrap() >= 91_000, "{gravada}");
+    }
+
+    #[test]
+    fn o_refresco_da_memoria_olha_tambem_a_parede() {
+        // Decisão 0099: o relógio do laço não anda com a máquina suspensa, e a
+        // idade da memória é pela parede.
+        const H: u64 = 60 * 60 * 1000;
+        const PAREDE: u64 = 1_790_000_000_000;
+        let ultima = Some(Ultima {
+            laco_ms: 100_000,
+            parede_ms: PAREDE,
+        });
+        // `laco` ms depois no relógio do laço e `parede` ms depois na parede.
+        let depois = |laco: u64, parede: u64| Agora {
+            mono_ms: 100_000 + laco,
+            parede_ms: PAREDE + parede,
+        };
+        let gravar = |agora: Agora, mudou: bool, vazia: bool| {
+            gravar_memoria_agora(ultima, agora, mudou, vazia, false)
+        };
+        // A máquina acordou de uma noite suspensa: o primeiro batimento, 5 s
+        // depois no relógio do laço e 8 h e 5 s depois na parede, regrava a
+        // memória que não mudou (antes, só 30 s acordados depois da volta).
+        let volta = depois(5_000, 8 * H + 5_000);
+        assert!(gravar(volta, false, false), "a parede andou 8 h");
+        assert!(!gravar(volta, false, true), "sem nada a lembrar, não");
+        // Acordada, os dois relógios andam juntos: o refresco aos 30 s.
+        assert!(!gravar(depois(25_000, 25_000), false, false));
+        assert!(gravar(depois(30_000, 30_000), false, false));
+        // O relógio de parede que voltou também regrava (a memória com a hora
+        // adiante seria velha).
+        let voltou = Agora {
+            mono_ms: 105_000,
+            parede_ms: PAREDE - 60_000,
+        };
+        assert!(gravar(voltou, false, false));
+        // O que mudou grava, mas nunca a menos de 4 s no relógio do laço, nem
+        // com a parede longe.
+        assert!(gravar(depois(4_000, 4_000), true, true));
+        assert!(!gravar(depois(3_999, 8 * H), true, false));
+        // Na saída, sempre; sem gravação ainda, o que mudou ou o que há a
+        // lembrar.
+        let ja = depois(0, 0);
+        assert!(gravar_memoria_agora(ultima, ja, false, true, true));
+        assert!(gravar_memoria_agora(None, ja, false, false, false));
+        assert!(gravar_memoria_agora(None, ja, true, true, false));
+        assert!(!gravar_memoria_agora(None, ja, false, true, false));
+    }
+
+    #[test]
+    fn a_memoria_parada_e_regravada_no_primeiro_batimento_depois_de_uma_suspensao() {
+        let a = Ambiente::novo("nucleo-memoria-suspensa");
+        let config = a.raiz.join("config");
+        fs::create_dir_all(&config).unwrap();
+        let (mut nucleo, mut janela) = ligado(&a, &config);
+        let arquivo = a.estado.join(pet_core::memoria::ARQUIVO);
+        let agora = agora_desde_1970_ms();
+        mandar(
+            &mut nucleo,
+            &mut janela,
+            do_claude("UserPromptSubmit", "s1", "p1", agora),
+        );
+        nucleo.guardar_memoria(false);
+        assert!(arquivo.exists(), "mudou: grava");
+        fs::remove_file(&arquivo).unwrap();
+        // A máquina dormiu 8 h: a última gravação ficou 8 h para trás na
+        // parede, e o relógio do laço só andou o batimento.
+        let ultima = nucleo.guarda.ultima.expect("gravou");
+        nucleo.guarda.ultima = Some(Ultima {
+            parede_ms: ultima.parede_ms - 8 * 60 * 60 * 1000,
+            ..ultima
+        });
+        envelhecer(&mut nucleo, 5);
+        nucleo.guardar_memoria(false);
+        assert!(
+            arquivo.exists(),
+            "a memória que não mudou é regravada na volta da suspensão"
+        );
+        let gravada: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&arquivo).unwrap()).unwrap();
+        assert!(
+            gravada["gravada_ms"].as_u64().unwrap() >= agora,
+            "{gravada}"
+        );
     }
 
     #[test]
