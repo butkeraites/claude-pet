@@ -3322,3 +3322,184 @@ fn o_selo_do_aviso_aparece_na_chamada_e_pulsa_uma_troca_por_segundo_na_l4() {
     let na_cena = cores_na_cena(&janela);
     assert!(!na_cena.contains(&amarelo) && !na_cena.contains(&vermelho));
 }
+
+// --- o voo da escalada (decisão 0084) ---------------------------------------
+
+/// Um Motor ligado com uma permissão pedida em 2 s e o Renan longe de um
+/// terminal do Claude (a escalada sobe), desenhado até `ate`.
+fn esperando_ate(ate: u64) -> (Motor, Falsa) {
+    let (mut motor, mut janela) = ligado();
+    motor.acertar_relogio(em(0));
+    olhando(&mut motor, false, 0);
+    ocioso(&mut motor, false, 0);
+    mandar(
+        &mut motor,
+        hook_de("s1", "api", "UserPromptSubmit", 1_000),
+        1_000,
+    );
+    hook_em(&mut motor, "s1", "api", "PermissionRequest", 2_000);
+    janela.mostrou();
+    quadros_entre(&mut motor, &mut janela, 0, ate);
+    (motor, janela)
+}
+
+fn celula(motor: &Motor) -> (i32, i32) {
+    let palco = motor.palco.expect("o palco");
+    (palco.x, palco.y)
+}
+
+#[test]
+fn o_voo_da_escalada_vai_ao_alto_centro_e_volta_sem_mexer_na_posicao_salva() {
+    let l3 = 2_000 + escalada::L3_APOS_MS;
+    let (mut motor, mut janela) = esperando_ate(l3 - 1);
+    let casa = celula(&motor);
+    let toque_em_casa = janela.toque.expect("o toque");
+    assert!(motor.voo().is_none());
+    let quadros = quadros_entre(&mut motor, &mut janela, l3 - 1, l3 + voo::SUBIDA_MS + 100);
+    let v = *motor.voo().expect("o voo da L3");
+    assert_eq!((v.motivo, v.casa), ("escalada", casa));
+    // Lá em cima, no meio: o corpo no centro do monitor, perto do alto.
+    let la = celula(&motor);
+    assert_eq!(la, v.alvo);
+    assert_eq!(
+        ((la.0 - casa.0) % 5, (la.1 - casa.1) % 5),
+        (0, 0),
+        "múltiplos de D"
+    );
+    let toque = janela.toque.expect("o toque");
+    assert!(
+        (toque.x + toque.w / 2 - 960).abs() <= 5,
+        "no centro: {toque:?}"
+    );
+    assert!(toque.y < 200, "no alto: {toque:?}");
+    assert_ne!(toque, toque_em_casa, "a área de toque segue o pet");
+    // O "!!" aceso em blocos de D, em cima da cabeça, dentro do monitor.
+    let amarelo = [0x3F, 0xD2, 0xFF, 0xFF];
+    let exclamacoes: Vec<Ret> = janela
+        .cena
+        .as_ref()
+        .unwrap()
+        .iter()
+        .filter_map(|e| match e {
+            Elemento::Bloco { ret, cor } if *cor == amarelo => Some(*ret),
+            _ => None,
+        })
+        .collect();
+    assert!(!exclamacoes.is_empty(), "o «!!» na cena");
+    assert!(
+        exclamacoes
+            .iter()
+            .all(|r| r.w % 5 == 0 && r.h == 5 && r.y >= 0 && r.baixo() <= toque.y)
+    );
+    // Os quadros do voo: nunca dois a menos de 34 ms.
+    let voando: Vec<u64> = quadros.iter().copied().filter(|&t| t >= l3).collect();
+    assert!(voando.len() > 20, "{voando:?}");
+    assert!(
+        voando
+            .windows(2)
+            .all(|j| j[1] - j[0] >= animador::DURACAO_MIN_MS),
+        "{voando:?}"
+    );
+    // Paira, volta e pousa na casa; nada gravado.
+    let fim = v.fim_ms();
+    let resto = quadros_entre(
+        &mut motor,
+        &mut janela,
+        l3 + voo::SUBIDA_MS + 100,
+        fim + 2_000,
+    );
+    assert!(
+        resto
+            .windows(2)
+            .all(|j| j[1] - j[0] >= animador::DURACAO_MIN_MS)
+    );
+    assert!(motor.voo().is_none());
+    assert_eq!(celula(&motor), casa);
+    assert_eq!(janela.toque, Some(toque_em_casa));
+    assert_eq!(
+        motor.posicoes_para_gravar(),
+        None,
+        "a posição salva intacta"
+    );
+    assert!(
+        resto.iter().filter(|&&t| t <= fim).count() < 140,
+        "uma rajada curta: {} quadros",
+        resto.len()
+    );
+}
+
+#[test]
+fn a_resposta_no_meio_do_voo_manda_o_pet_de_volta_e_o_arraste_pega_ele_no_ar() {
+    let l3 = 2_000 + escalada::L3_APOS_MS;
+    let (mut motor, mut janela) = esperando_ate(l3 + 500);
+    let casa = motor.voo().expect("voando").casa;
+    // A permissão foi respondida: a escalada acaba e o pet desce já.
+    let rodou = Evento {
+        tool: Some("Bash".into()),
+        dur: Some(10),
+        ..hook_de("s1", "api", "PostToolUse", l3 + 600)
+    };
+    mandar(&mut motor, rodou, l3 + 600);
+    let voltando = *motor.voo().expect("descendo");
+    assert_eq!(voltando.fase(l3 + 600), Some(voo::Fase::Descendo));
+    quadros_entre(
+        &mut motor,
+        &mut janela,
+        l3 + 600,
+        l3 + 600 + voo::DESCIDA_MS + 100,
+    );
+    assert!(motor.voo().is_none());
+    assert_eq!(celula(&motor), casa);
+    // Outro voo (a volta do Renan, depois de 60 s longe), pego no ar.
+    let (mut motor, mut janela) = esperando_ate(l3 + 500);
+    let antes = celula(&motor);
+    let (x, y) = meio_do_corpo(&janela);
+    ponteiro(&mut motor, &mut janela, apertou(x, y), l3 + 520);
+    janela.mostrou();
+    ponteiro(&mut motor, &mut janela, moveu(x + 40, y + 40), l3 + 560);
+    assert!(motor.voo().is_none(), "o arraste acaba o voo");
+    assert!(motor.arrastando());
+    assert_ne!(
+        celula(&motor),
+        casa_do_canto(&motor),
+        "segue de onde estava"
+    );
+    let _ = antes;
+}
+
+/// A célula do canto padrão do monitor (a casa sem posição salva).
+fn casa_do_canto(motor: &Motor) -> (i32, i32) {
+    let pet = motor.pet.as_ref().unwrap();
+    let palco = pet.palco(&edp(), motor.tamanho);
+    (palco.x, palco.y)
+}
+
+#[test]
+fn nao_voa_arrastando_e_a_soneca_manda_de_volta() {
+    let l3 = 2_000 + escalada::L3_APOS_MS;
+    // Segurando o pet quando a L3 chega: a intenção fica, o voo não sai.
+    let (mut motor, mut janela) = esperando_ate(l3 - 300);
+    let (x, y) = meio_do_corpo(&janela);
+    ponteiro(&mut motor, &mut janela, apertou(x, y), l3 - 200);
+    janela.mostrou();
+    ponteiro(&mut motor, &mut janela, moveu(x - 30, y), l3 - 100);
+    assert!(motor.arrastando());
+    motor.tique(em(l3));
+    assert!(
+        motor
+            .intencoes()
+            .any(|i| matches!(i.tipo, intencoes::Tipo::Voo { .. })),
+        "a escalada pediu"
+    );
+    assert!(motor.voo().is_none(), "arrastando, não voa");
+    // No ar, o botão direito (a soneca) manda de volta.
+    let (mut motor, mut janela) = esperando_ate(l3 + 300);
+    assert!(motor.voo().is_some());
+    janela.mostrou();
+    motor.clicar(&mut janela, Botao::Direito, l3 + 400);
+    assert!(motor.soneca(l3 + 400).is_some());
+    assert_eq!(
+        motor.voo().unwrap().fase(l3 + 400),
+        Some(voo::Fase::Descendo)
+    );
+}

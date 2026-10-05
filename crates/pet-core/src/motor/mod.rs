@@ -41,6 +41,7 @@ mod ritmo;
 pub mod selos;
 pub mod tela;
 pub mod viagem;
+pub mod voo;
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -340,6 +341,8 @@ pub struct Motor {
     sorteio: Sorteio,
     /// Desde quando o selo do aviso pulsa (a L4; decisão 0083).
     pulso_desde: Option<u64>,
+    /// O voo da escalada até o alto-centro, se há um (decisão 0084).
+    voo: Option<voo::Voo>,
 }
 
 impl Motor {
@@ -381,6 +384,7 @@ impl Motor {
             tela: tela::Tela::default(),
             sorteio: Sorteio::default(),
             pulso_desde: None,
+            voo: None,
         }
     }
 
@@ -554,6 +558,86 @@ impl Motor {
         let desde = self.pulso_desde.filter(|_| self.chamando.is_some())?;
         let passos = agora_ms.saturating_sub(desde) / PULSO_MS;
         Some(desde + (passos + 1) * PULSO_MS)
+    }
+
+    // --- o voo da escalada (decisão 0084) -------------------------------------
+
+    /// O voo até o alto-centro do monitor e de volta (a L3 e a volta do
+    /// Renan). Nunca arrastando, viajando entre monitores (o poof inclusive),
+    /// escondido, na proteção de tela, na soneca nem com o "não perturbe"; um
+    /// de cada vez. A célula anda e a casa volta no fim: nada grava posição.
+    fn comecar_voo(&mut self, motivo: &'static str, agora_ms: u64) {
+        if self.voo.is_some()
+            || !self.na_tela()
+            || self.arraste.segurando()
+            || self.seguir.em_viagem()
+            || self.soneca(agora_ms).is_some()
+            || self.nao_perturbe
+            || self.estresse.is_some()
+        {
+            return;
+        }
+        let (Some(palco), Some(pet)) = (self.palco, self.pet.as_mut()) else {
+            return;
+        };
+        let alvo = alvo_do_voo(&palco, pet);
+        pet.segurar(ARRASTADO, agora_ms);
+        let voo = voo::Voo::novo(agora_ms, (palco.x, palco.y), alvo, palco.d, motivo);
+        info!(
+            "voo da escalada ({motivo}): da célula em ({}, {}) a ({}, {})",
+            voo.casa.0, voo.casa.1, voo.alvo.0, voo.alvo.1
+        );
+        self.voo = Some(voo);
+        self.redesenhar_ja(agora_ms);
+    }
+
+    /// O voo anda até `agora_ms`: a célula na posição dele; no fim, a casa, o
+    /// pet larga o voo e pousa.
+    fn andar_voo(&mut self, agora_ms: u64) {
+        let Some(voo) = self.voo else {
+            return;
+        };
+        let Some(palco) = self.palco.as_mut() else {
+            self.voo = None;
+            return;
+        };
+        (palco.x, palco.y) = voo.posicao(agora_ms);
+        if voo.fase(agora_ms).is_none() {
+            self.voo = None;
+            if let Some(pet) = self.pet.as_mut() {
+                pet.largar(agora_ms);
+                pet.tocar(SOLTO, agora_ms);
+            }
+        }
+    }
+
+    /// O voo acaba já: o pet larga o voo e, com `restaurar`, volta para a
+    /// casa (esconder, viajar); sem, fica onde está (o arraste pegou ele no
+    /// ar; um palco novo é montado na posição salva).
+    fn cancelar_voo(&mut self, restaurar: bool, agora_ms: u64) {
+        let Some(voo) = self.voo.take() else {
+            return;
+        };
+        if restaurar && let Some(palco) = self.palco.as_mut() {
+            (palco.x, palco.y) = voo.casa;
+        }
+        if let Some(pet) = self.pet.as_mut() {
+            pet.largar(agora_ms);
+        }
+    }
+
+    /// Manda o voo de volta para a casa (a escalada acabou, a soneca, o "não
+    /// perturbe").
+    fn voltar_do_voo(&mut self, agora_ms: u64) {
+        if let Some(voo) = self.voo.as_mut() {
+            voo.voltar(agora_ms);
+            self.redesenhar_ja(agora_ms);
+        }
+    }
+
+    /// O voo em curso, se há um.
+    pub fn voo(&self) -> Option<&voo::Voo> {
+        self.voo.as_ref()
     }
 
     // --- posições salvas (decisão 0049) --------------------------------------
@@ -818,6 +902,7 @@ impl Motor {
     /// A escalada acabou: o pulso desliga e o nível volta a 0.
     fn encerrar_escalada(&mut self, c: Chamando, motivo: &'static str, agora_ms: u64) {
         self.pulso_desde = None;
+        self.voltar_do_voo(agora_ms);
         if c.escalada.pulso {
             self.anotar(
                 agora_ms,
@@ -875,11 +960,15 @@ impl Motor {
                         nivel,
                     }
                 }
-                escalada::Passo::Voo { volta } => intencoes::Tipo::Voo {
-                    destino: "alto_centro",
-                    motivo: if volta { "voltou" } else { "escalada" },
-                    sid8: Some(sid8.clone()),
-                },
+                escalada::Passo::Voo { volta } => {
+                    let motivo = if volta { "voltou" } else { "escalada" };
+                    self.comecar_voo(motivo, agora_ms);
+                    intencoes::Tipo::Voo {
+                        destino: "alto_centro",
+                        motivo,
+                        sid8: Some(sid8.clone()),
+                    }
+                }
                 escalada::Passo::Pulso(ligado) => {
                     self.pulso_desde = ligado.then_some(agora_ms);
                     intencoes::Tipo::Pulso {
@@ -933,6 +1022,10 @@ impl Motor {
         self.acertar_relogio(agora);
         // O "não perturbe" do Omarchy vem em todo evento (decisão 0075).
         self.nao_perturbe = ev.dnd;
+        if self.nao_perturbe {
+            // Com o "não perturbe", nenhum voo pela tela (decisão 0075).
+            self.voltar_do_voo(agora.mono_ms);
+        }
         // Um evento de uma sessão que o cérebro acompanha acorda o pet
         // (decisão 0076).
         let aceito = ev.sid.is_some()
@@ -1114,6 +1207,7 @@ impl Motor {
     pub fn desconectou(&mut self) {
         self.pet = None;
         self.palco = None;
+        self.voo = None;
         self.focando.clear();
         self.coracao_ate = None;
         // Quem contava se o Renan está era a conexão (decisão 0062).
@@ -1185,6 +1279,7 @@ impl Motor {
                 self.desenhar(ov, agora_ms, true);
             }
             Passo::ApagarEDestruir => {
+                self.cancelar_voo(true, agora_ms);
                 self.largar_o_arraste(agora_ms);
                 self.proximo_quadro = None;
                 self.estresse = None;
@@ -1200,6 +1295,7 @@ impl Motor {
                 }
             }
             Passo::Destruir => {
+                self.cancelar_voo(true, agora_ms);
                 self.largar_o_arraste(agora_ms);
                 self.proximo_quadro = None;
                 self.estresse = None;
@@ -1273,6 +1369,7 @@ impl Motor {
         let Some(monitor) = ov.pronta() else {
             return;
         };
+        self.cancelar_voo(false, agora_ms);
         self.montar_palco(&monitor);
         self.desenhar(ov, agora_ms, true);
     }
@@ -1289,6 +1386,9 @@ impl Motor {
                 if self.pet.is_some()
                     && let Some(monitor) = ov.pronta()
                 {
+                    // Um palco novo (outro monitor, outra escala): o voo
+                    // acaba, e o pet volta para a posição salva.
+                    self.cancelar_voo(false, agora_ms);
                     if self.seguir.fase() == Some(FaseViagem::Chegando) {
                         self.chegar(ov, &monitor, agora_ms);
                     } else {
@@ -1340,6 +1440,7 @@ impl Motor {
     /// Começa a viagem para o monitor em foco: o poof de saída (se o pet está
     /// desenhado e a viagem não é rápida) ou a saída direta.
     fn comecar_viagem(&mut self, ov: &mut dyn Overlay, pouso: Option<Pouso>, agora_ms: u64) {
+        self.cancelar_voo(true, agora_ms);
         self.largar_o_arraste(agora_ms);
         self.balao = None;
         self.coracao_ate = None;
@@ -1487,6 +1588,9 @@ impl Motor {
             Gesto::Comecou => {
                 self.balao = None;
                 self.coracao_ate = None;
+                // Pegou o pet no meio do voo: o voo acaba onde ele está, e o
+                // arraste segue dali (decisão 0084).
+                self.cancelar_voo(false, agora_ms);
                 if let Some(pet) = self.pet.as_mut() {
                     pet.segurar(ARRASTADO, agora_ms);
                 }
@@ -1854,6 +1958,8 @@ impl Motor {
         } else {
             self.soneca_ate = Some(agora_ms + SONECA_MS);
             info!("soneca de {} min", SONECA_MS / 60_000);
+            // Na soneca, nenhum voo (decisão 0075).
+            self.voltar_do_voo(agora_ms);
             BOCEJO
         };
         self.anotar(
@@ -2007,6 +2113,8 @@ impl Motor {
     /// não chega, e o pet fica sem commit nenhum até ela acender (decisão
     /// 0018). `forcar` faz o commit mesmo com um quadro em voo.
     pub fn desenhar(&mut self, ov: &mut dyn Overlay, agora_ms: u64, forcar: bool) {
+        // O voo da escalada leva a célula (decisão 0084).
+        self.andar_voo(agora_ms);
         let Some(palco) = self.palco else {
             return;
         };
@@ -2040,8 +2148,9 @@ impl Motor {
             }
         }
         // Os selos ao lado do corpo (decisão 0083), parados; o do aviso
-        // pulsa na L4, uma troca por segundo.
+        // pulsa na L4, uma troca por segundo. No voo, só o "!!".
         if poof.is_none()
+            && self.voo.is_none()
             && let Some(corpo) = pet.toque_no_palco(&palco)
         {
             let fileira = self.fileira(agora_ms);
@@ -2056,6 +2165,18 @@ impl Motor {
             if let Some(prazo) = self.proxima_troca_do_pulso(agora_ms) {
                 proxima = Some(proxima.map_or(prazo, |p| p.min(prazo)));
             }
+        }
+        // O "!!" do voo em cima da cabeça, piscando, andando com o corpo.
+        if let Some(voo) = self.voo
+            && voo.exclamacoes_acesas(agora_ms)
+            && let Some(corpo) = pet.toque_no_palco(&palco)
+        {
+            let (w, h) = selos::tamanho_das_exclamacoes(palco.d);
+            let x = (corpo.x + corpo.w / 2 - w / 2)
+                .min(palco.area.direita() - w)
+                .max(palco.area.x);
+            let y = (corpo.y - h - 2 * palco.d).max(palco.area.y);
+            cena.extend(selos::exclamacoes(x, y, palco.d));
         }
         // O selo "zZ" da soneca, parado, enquanto ela durar.
         if let Some(ate) = self.soneca(agora_ms)
@@ -2095,9 +2216,19 @@ impl Motor {
             let prazo = estresse.proximo_prazo();
             proxima = Some(proxima.map_or(prazo, |p| p.min(prazo)));
         }
+        // No voo, os quadros andam na grade de 34 ms dele: os passos, o
+        // pisca e o resto (as asas, o balão) entram no passo seguinte, e nunca
+        // saem dois quadros a menos de 34 ms (até 30 por segundo).
+        if let Some(voo) = self.voo {
+            if let Some(p) = voo.proxima(agora_ms) {
+                proxima = Some(proxima.map_or(p, |q| q.min(p)));
+            }
+            proxima = proxima.map(|p| voo.na_grade(p));
+        }
         // Arrastando, a área de toque é o palco inteiro: o arraste continua
         // até numa área de trabalho vazia, onde o compositor pode perder a
-        // pegada implícita. Ao soltar, volta ao corpo.
+        // pegada implícita. Ao soltar, volta ao corpo. No voo, ela anda com o
+        // corpo.
         let toque = if self.arraste.arrastando() {
             Some(Ret::novo(0, 0, palco.tela.0, palco.tela.1))
         } else {
@@ -2415,6 +2546,19 @@ impl Motor {
             rgba: cena::rgba_do_sprite(pet.skin(), sprite, area),
         })
     }
+}
+
+/// A célula lá em cima no voo da escalada: o corpo no meio da área útil, com
+/// o topo dele logo abaixo do "!!" (a margem da borda, o "!!" e dois pixels de
+/// arte), preso para o corpo ficar na área.
+fn alvo_do_voo(palco: &Palco, pet: &Pet) -> (i32, i32) {
+    let d = palco.d;
+    let toque = pet.skin().ancoras.toque(false);
+    let (_, altura) = selos::tamanho_das_exclamacoes(d);
+    let margem = crate::geometria::para_dispositivo(crate::geometria::MARGEM_LOGICA, palco.escala);
+    let x = palco.area.x + palco.area.w / 2 - (toque.x * d + toque.w * d / 2);
+    let y = palco.area.y + margem + altura + 2 * d - toque.y * d;
+    pet.prender(palco, x, y)
 }
 
 #[cfg(test)]

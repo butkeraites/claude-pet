@@ -3503,3 +3503,50 @@ base de quem manda, e ao lado do corpo eles não brigam com o balão (em cima)
 nem com o "zZ" e o coração (nos cantos de cima). O selo do aviso fora da
 cabeça funciona nas duas skins, e a troca a cada segundo ainda é um
 batimento que o olho pega de canto, dentro do orçamento da espera.
+
+## 0084 — O voo da escalada: até o alto-centro com o "!!", na grade de 34 ms, e de volta para a casa (2026-10-05)
+
+**Problema:** a L3 (decisão 0075) e a volta do Renan (decisão 0079) pedem o
+voo até o alto-centro do monitor com "!!" piscando a no máximo 2 Hz, e de
+volta, até 3 vezes; o Motor anotava a intenção `voo`, e nada voava. O voo
+mexe na célula do pet: tem de andar em múltiplos de D (nitidez), a até 30
+quadros por segundo e curto (orçamento), com a área de toque seguindo o pet,
+sem nunca gravar posição (a do Renan fica), e sem brigar com o arraste, a
+viagem entre monitores, o poof, o pet escondido, a proteção de tela, a soneca
+e o "não perturbe".
+**Escolha:**
+- **`motor::voo::Voo`**, puro: da casa ao alvo em 30 passos de 34 ms (1,02
+  s, suave no começo e no fim), pairando 2,18 s com o "!!" trocando a cada
+  272 ms (8 passos: 1,84 Hz, abaixo dos 2 Hz) e de volta em 30 passos; ~4,2 s
+  ao todo. Toda duração é múltiplo do passo a partir do começo: nenhum quadro
+  do voo sai a menos de 34 ms do anterior. A célula é sempre a casa mais um
+  múltiplo de D em cada eixo.
+- **O alvo:** o meio do corpo no meio da área útil, com o topo do corpo logo
+  abaixo do "!!" (a margem de 16 px lógicos da borda, o "!!" e dois pixels de
+  arte), preso na área e trazido para a grade de D da casa.
+- **No Motor:** a intenção `voo` da escalada começa o voo (um de cada vez), se
+  o pet está na tela, solto, fora de uma viagem (o poof inclusive), fora da
+  soneca e sem o "não perturbe"; senão a intenção fica e o voo não sai. O pet
+  segura o `dangle` (o voo da skin) e, no fim, larga e pousa (`land`). O
+  desenho move a célula (`andar_voo`); a área de toque é a do corpo onde ele
+  está; enquanto voa, os prazos do desenho (as asas, o balão, o pulso) entram
+  no passo seguinte da grade do voo, e a fileira de selos dá lugar ao "!!",
+  em blocos de D, em cima da cabeça. Nada grava posição: a casa volta no fim.
+- **Interrupções:** o fim da escalada (a resposta, o clique que vê o aviso),
+  a soneca e o "não perturbe" mandam de volta já (da célula de agora até a
+  casa, em 30 passos); esconder e viajar acabam o voo na casa; um palco novo
+  (outro monitor, outra escala) acaba o voo na posição salva; o arraste que
+  pega o pet no ar acaba o voo onde ele está, e o arraste segue dali (soltar
+  grava, como todo arraste).
+- **Testes:** o voo puro (múltiplos de D, as fases, o fim na casa, os passos
+  de pelo menos 34 ms e o pisca abaixo de 2 Hz, a volta antes da hora e a
+  grade dela); no Motor, a L3 voando ao alto-centro com o "!!" em blocos de D
+  e a área de toque junto, nenhum quadro a menos de 34 ms, a volta à casa sem
+  nada para gravar e menos de 140 quadros no voo; a resposta no meio
+  mandando de volta e o arraste pegando no ar; arrastando, a intenção fica e o
+  voo não sai; a soneca manda de volta. Duas mutações reprovaram (voar
+  arrastando; os prazos fora da grade do voo).
+**Por quê:** o voo é o movimento grande da escalada, o que o olho pega de
+longe; num monitor que repinta inteiro a cada commit (decisão 0005), ele tem
+de ser uma rajada curta e regular, e nunca pode deixar o pet longe de onde o
+Renan o pôs.
