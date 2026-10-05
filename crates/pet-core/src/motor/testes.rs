@@ -2114,6 +2114,31 @@ fn quadros_entre(motor: &mut Motor, janela: &mut Falsa, de: u64, ate: u64) -> Ve
     panic!("um milhão de prazos até {ate}: o laço giraria");
 }
 
+/// Como [`quadros_entre`], tocando as reações dos prazos do cérebro como o
+/// laço do daemon (a festa, a rajada, o bocejo): o pior caso de verdade.
+fn quadros_como_o_laco(motor: &mut Motor, janela: &mut Falsa, de: u64, ate: u64) -> Vec<u64> {
+    let mut horas = Vec::new();
+    let mut t = de;
+    for _ in 0..1_000_000 {
+        let Some(prazo) = motor.proximo_prazo().filter(|&p| p <= ate) else {
+            return horas;
+        };
+        t = prazo.max(t);
+        janela.mostrou();
+        let antes = janela.quadros();
+        if motor.prazo_do_cerebro().is_some_and(|p| p <= t) {
+            for r in motor.tique(em(t)) {
+                janela.mostrou();
+                motor.reagir(Some(&mut *janela), r.nome, t);
+            }
+        }
+        janela.mostrou();
+        motor.vencer(janela, t);
+        horas.extend(std::iter::repeat_n(t, janela.quadros() - antes));
+    }
+    panic!("um milhão de prazos até {ate}: o laço giraria");
+}
+
 /// Dois Motores ligados e assentados até 1 s, com o compositor mostrando
 /// tudo: um para a peça, outro de controle.
 fn dois_ligados() -> ((Motor, Falsa), (Motor, Falsa)) {
@@ -3502,4 +3527,167 @@ fn nao_voa_arrastando_e_a_soneca_manda_de_volta() {
         motor.voo().unwrap().fase(l3 + 400),
         Some(voo::Fase::Descendo)
     );
+}
+
+// --- o confete da festa (decisão 0085) ---------------------------------------
+
+/// Um turno com `bash_ms` de Bash e uma edição, com o Stop em `ms + 1 s`: com
+/// 4 min de Bash dá 4,8 pontos (T2); com 12 min, 12,8 (T3).
+fn turno_de(motor: &mut Motor, sid: &str, proj: &str, ms: u64, bash_ms: u64) {
+    mandar(motor, hook_de(sid, proj, "UserPromptSubmit", ms), ms);
+    let bash = Evento {
+        tool: Some("Bash".into()),
+        dur: Some(bash_ms),
+        ..hook_de(sid, proj, "PostToolUse", ms + 500)
+    };
+    mandar(motor, bash, ms + 500);
+    let edit = Evento {
+        tool: Some("Edit".into()),
+        arq: Some(format!("{:0>12}", sid.len())),
+        dur: Some(30),
+        ..hook_de(sid, proj, "PostToolUse", ms + 600)
+    };
+    mandar(motor, edit, ms + 600);
+    mandar(motor, hook_de(sid, proj, "Stop", ms + 1_000), ms + 1_000);
+}
+
+/// Os blocos de confete da cena (as cores do confete).
+fn pedacos_na_cena(janela: &Falsa) -> Vec<Ret> {
+    janela
+        .cena
+        .as_ref()
+        .map(|c| {
+            c.iter()
+                .filter_map(|e| match e {
+                    Elemento::Bloco { ret, cor } if crate::confete::CORES.contains(cor) => {
+                        Some(*ret)
+                    }
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_festa_t2_solta_a_fonte_e_a_t3_a_chuva_a_ate_30_quadros_por_segundo() {
+    let (mut motor, mut janela) = ligado();
+    motor.acertar_relogio(em(0));
+    janela.mostrou();
+    quadros_entre(&mut motor, &mut janela, 0, 1_000);
+    turno_de(&mut motor, "s1", "api", 1_000, 240_000);
+    let festa = 2_000 + crate::cerebro::ACOMODACAO_MS;
+    quadros_como_o_laco(&mut motor, &mut janela, 1_000, festa + 100);
+    let nivel = motor.intencoes().find_map(|i| match i.tipo {
+        intencoes::Tipo::Festa { nivel, confete, .. } => Some((nivel, confete)),
+        _ => None,
+    });
+    assert_eq!(nivel, Some((Nivel::T2, tela::CONFETES_T2)));
+    let palco = motor.palco.unwrap();
+    let pedacos = pedacos_na_cena(&janela);
+    assert!(!pedacos.is_empty() && pedacos.len() <= 12, "{pedacos:?}");
+    for r in &pedacos {
+        assert_eq!(
+            ((r.x - palco.x) % 5, (r.y - palco.y) % 5),
+            (0, 0),
+            "na grade de D"
+        );
+        assert_eq!((r.w, r.h), (2 * 5, 2 * 5));
+    }
+    // Anda de 100 em 100 ms: os quadros nunca a menos de 34 ms, e o confete
+    // acaba em menos de 4,5 s.
+    let mut horas = Vec::new();
+    let mut acabou = None;
+    let mut t = festa + 100;
+    while t < festa + 6_000 {
+        horas.extend(quadros_como_o_laco(&mut motor, &mut janela, t, t + 100));
+        t += 100;
+        if acabou.is_none() && motor.confete_na_tela() == 0 {
+            acabou = Some(t);
+        }
+    }
+    assert!(
+        horas
+            .windows(2)
+            .all(|j| j[1] - j[0] >= animador::DURACAO_MIN_MS)
+    );
+    let acabou = acabou.expect("o confete acaba");
+    assert!(
+        acabou <= festa + CONFETE_MAX_MS,
+        "curto: {}",
+        acabou - festa
+    );
+    assert!(pedacos_na_cena(&janela).is_empty());
+    // O T3 de outra sessão: a chuva pela tela inteira.
+    turno_de(&mut motor, "s2", "web", 20_000, 720_000);
+    let festa = 21_000 + crate::cerebro::ACOMODACAO_MS;
+    let mut mais = 0;
+    let mut horas = Vec::new();
+    let mut t = festa;
+    while t < festa + 6_000 {
+        horas.extend(quadros_como_o_laco(&mut motor, &mut janela, t, t + 100));
+        mais = mais.max(pedacos_na_cena(&janela).len());
+        t += 100;
+    }
+    assert!(mais >= 20 && mais <= tela::CONFETES_T3 as usize, "{mais}");
+    assert!(
+        horas
+            .windows(2)
+            .all(|j| j[1] - j[0] >= animador::DURACAO_MIN_MS)
+    );
+    assert!(
+        horas
+            .iter()
+            .filter(|&&t| t <= festa + CONFETE_MAX_MS)
+            .count()
+            <= 135,
+        "até 30 por segundo por 4,5 s"
+    );
+    assert_eq!(motor.confete_na_tela(), 0);
+}
+
+#[test]
+fn sem_confete_na_soneca_e_numa_janela_pequena_e_o_nivel_que_sobe_troca_a_fonte_pela_chuva() {
+    // Na soneca, a festa é o aceno, sem confete.
+    let (mut motor, mut janela) = ligado();
+    motor.acertar_relogio(em(0));
+    janela.mostrou();
+    motor.alternar_soneca(&mut janela, 0);
+    turno_de(&mut motor, "s1", "api", 1_000, 240_000);
+    quadros_entre(&mut motor, &mut janela, 0, 3_000);
+    assert_eq!(motor.confete_na_tela(), 0);
+    // Numa janela pequena (o palco transitório é do M8), nada pela tela.
+    let mut motor = Motor::novo(ConfigCerebro::default());
+    motor.definir_skin(Some(skin_teste()));
+    let mut janela = Falsa::pequena();
+    motor.conectou(0);
+    motor.aplicar_visibilidade(&mut janela, 0);
+    janela.pronta = Some(edp());
+    motor.evento_overlay(&mut janela, EventoOverlay::Pronta, 0);
+    motor.acertar_relogio(em(0));
+    turno_de(&mut motor, "s1", "api", 1_000, 240_000);
+    quadros_entre(&mut motor, &mut janela, 0, 3_000);
+    assert_eq!(motor.confete_na_tela(), 0);
+    assert!(pedacos_na_cena(&janela).is_empty());
+    // A festa mesclada que sobe do T2 ao T3: a chuva no lugar da fonte.
+    let (mut motor, mut janela) = ligado();
+    motor.acertar_relogio(em(0));
+    janela.mostrou();
+    turno_de(&mut motor, "s1", "api", 1_000, 240_000);
+    turno_de(&mut motor, "s2", "web", 2_500, 720_000);
+    quadros_entre(&mut motor, &mut janela, 0, 4_400);
+    let mescladas: Vec<(Nivel, u32)> = motor
+        .intencoes()
+        .filter_map(|i| match i.tipo {
+            intencoes::Tipo::FestaMesclada { nivel, confete, .. } => Some((nivel, confete)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(mescladas, vec![(Nivel::T3, tela::CONFETES_T3)]);
+    let mut mais = 0;
+    for t in (4_400..9_000).step_by(100) {
+        quadros_entre(&mut motor, &mut janela, t, t + 100);
+        mais = mais.max(pedacos_na_cena(&janela).len());
+    }
+    assert!(mais > 12, "a chuva do T3: {mais}");
 }

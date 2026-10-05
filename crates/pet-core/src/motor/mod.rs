@@ -54,7 +54,7 @@ use crate::cerebro::{
     self, Agora, Cerebro, ConfigCerebro, EstadoSessao, Evidencia, Pendencia, Reacao, Resumo,
     TipoAviso, TipoEspera,
 };
-use crate::confete::{Chuva, Grade};
+use crate::confete::{self, Chuva, Grade};
 use crate::evento::Evento;
 use crate::geometria::{Ret, Tamanho};
 use crate::plataforma::{
@@ -118,6 +118,13 @@ pub const CHAMADA: &str = "alert";
 /// O selo do aviso pulsa na L4 trocando de cor a cada tanto: um commit por
 /// segundo (decisão 0083).
 pub const PULSO_MS: u64 = 1_000;
+/// Um passo do confete da festa: até 30 quadros por segundo (decisão 0085).
+pub const PASSO_CONFETE_MS: u64 = 34;
+/// O confete da festa acaba no máximo isto depois de começar.
+pub const CONFETE_MAX_MS: u64 = 4_500;
+/// O lado dos pedaços, em pixels de arte: a fonte do T2 e a chuva do T3.
+pub const LADO_FONTE: i32 = 2;
+pub const LADO_CHUVA: i32 = 3;
 
 /// O que o pet publica para o `/v1/estado` (o laço publica; a entrada HTTP
 /// só lê).
@@ -222,6 +229,24 @@ struct Focando {
     proj: Option<String>,
     tipo: TipoAviso,
     ate_ms: u64,
+}
+
+/// O confete de uma festa na tela (decisão 0085): os pedaços andam um passo a
+/// cada [`PASSO_CONFETE_MS`], contados do começo.
+#[derive(Debug, Clone)]
+struct EfeitoFesta {
+    confete: confete::Festa,
+    inicio_ms: u64,
+    passos: u64,
+    fim_ms: u64,
+}
+
+/// `t` levado para a frente, até a grade de `passo` que começa em `base`.
+fn na_grade(base: u64, passo: u64, t: u64) -> u64 {
+    if t <= base {
+        return base;
+    }
+    base + (t - base).div_ceil(passo) * passo
 }
 
 /// O aviso de espera que o pet está chamando (decisão 0075): o mais velho
@@ -343,6 +368,8 @@ pub struct Motor {
     pulso_desde: Option<u64>,
     /// O voo da escalada até o alto-centro, se há um (decisão 0084).
     voo: Option<voo::Voo>,
+    /// O confete da festa na tela, se há um (decisão 0085).
+    efeito: Option<EfeitoFesta>,
 }
 
 impl Motor {
@@ -385,6 +412,7 @@ impl Motor {
             sorteio: Sorteio::default(),
             pulso_desde: None,
             voo: None,
+            efeito: None,
         }
     }
 
@@ -638,6 +666,54 @@ impl Motor {
     /// O voo em curso, se há um.
     pub fn voo(&self) -> Option<&voo::Voo> {
         self.voo.as_ref()
+    }
+
+    // --- o confete da festa (decisão 0085) ------------------------------------
+
+    /// O confete de uma festa: a chuva do alto (o T3) ou a fonte da cabeça (o
+    /// T2), com `quantos` pedaços, no lugar de um que estiver caindo (a festa
+    /// mesclada que sobe de nível).
+    pub(super) fn comecar_confete(&mut self, chuva: bool, quantos: u32, agora_ms: u64) {
+        let (Some(palco), Some(pet)) = (self.palco, self.pet.as_ref()) else {
+            return;
+        };
+        if quantos == 0 {
+            return;
+        }
+        let grade = Grade {
+            x: palco.x,
+            y: palco.y,
+            d: palco.d,
+        };
+        let toque = pet.skin().ancoras.toque(false);
+        let semente = self.sorteio.proximo();
+        let confete = if chuva {
+            confete::Festa::chuva(quantos as usize, palco.tela, grade, LADO_CHUVA, semente)
+        } else {
+            let cabeca = (toque.x + toque.w / 2, toque.y);
+            confete::Festa::fonte(
+                quantos as usize,
+                palco.tela,
+                grade,
+                cabeca,
+                LADO_FONTE,
+                semente,
+            )
+        };
+        self.efeito = Some(EfeitoFesta {
+            confete,
+            inicio_ms: agora_ms,
+            passos: 0,
+            fim_ms: agora_ms + CONFETE_MAX_MS,
+        });
+        self.redesenhar_ja(agora_ms);
+    }
+
+    /// Os pedaços de confete na tela agora (0 sem festa).
+    pub fn confete_na_tela(&self) -> usize {
+        self.efeito
+            .as_ref()
+            .map_or(0, |e| e.confete.na_tela().count())
     }
 
     // --- posições salvas (decisão 0049) --------------------------------------
@@ -1208,6 +1284,7 @@ impl Motor {
         self.pet = None;
         self.palco = None;
         self.voo = None;
+        self.efeito = None;
         self.focando.clear();
         self.coracao_ate = None;
         // Quem contava se o Renan está era a conexão (decisão 0062).
@@ -1280,6 +1357,7 @@ impl Motor {
             }
             Passo::ApagarEDestruir => {
                 self.cancelar_voo(true, agora_ms);
+                self.efeito = None;
                 self.largar_o_arraste(agora_ms);
                 self.proximo_quadro = None;
                 self.estresse = None;
@@ -1296,6 +1374,7 @@ impl Motor {
             }
             Passo::Destruir => {
                 self.cancelar_voo(true, agora_ms);
+                self.efeito = None;
                 self.largar_o_arraste(agora_ms);
                 self.proximo_quadro = None;
                 self.estresse = None;
@@ -1370,6 +1449,7 @@ impl Motor {
             return;
         };
         self.cancelar_voo(false, agora_ms);
+        self.efeito = None;
         self.montar_palco(&monitor);
         self.desenhar(ov, agora_ms, true);
     }
@@ -1387,8 +1467,10 @@ impl Motor {
                     && let Some(monitor) = ov.pronta()
                 {
                     // Um palco novo (outro monitor, outra escala): o voo
-                    // acaba, e o pet volta para a posição salva.
+                    // acaba, e o pet volta para a posição salva; o confete,
+                    // que anda na grade do palco velho, sai.
                     self.cancelar_voo(false, agora_ms);
+                    self.efeito = None;
                     if self.seguir.fase() == Some(FaseViagem::Chegando) {
                         self.chegar(ov, &monitor, agora_ms);
                     } else {
@@ -1441,6 +1523,7 @@ impl Motor {
     /// desenhado e a viagem não é rápida) ou a saída direta.
     fn comecar_viagem(&mut self, ov: &mut dyn Overlay, pouso: Option<Pouso>, agora_ms: u64) {
         self.cancelar_voo(true, agora_ms);
+        self.efeito = None;
         self.largar_o_arraste(agora_ms);
         self.balao = None;
         self.coracao_ate = None;
@@ -2206,6 +2289,30 @@ impl Motor {
             ));
             proxima = Some(proxima.map_or(balao.ate_ms, |p| p.min(balao.ate_ms)));
         }
+        // O confete da festa (decisão 0085), no fim da cena: os passos que
+        // venceram andam todos; acaba quando o último pedaço sai da tela, no
+        // prazo, ou numa janela que não cobre o monitor (o palco transitório
+        // é do M8).
+        if let Some(efeito) = self.efeito.as_mut() {
+            let devidos = agora_ms.saturating_sub(efeito.inicio_ms) / PASSO_CONFETE_MS;
+            while efeito.passos < devidos && !efeito.confete.acabou() {
+                efeito.confete.passo();
+                efeito.passos += 1;
+            }
+        }
+        if self
+            .efeito
+            .as_ref()
+            .is_some_and(|e| e.confete.acabou() || agora_ms >= e.fim_ms)
+            || !ov.capacidades().tela_inteira
+        {
+            self.efeito = None;
+        }
+        if let Some(efeito) = self.efeito.as_ref() {
+            cena.extend(efeito.confete.elementos());
+            let prazo = efeito.inicio_ms + (efeito.passos + 1) * PASSO_CONFETE_MS;
+            proxima = Some(proxima.map_or(prazo, |p| p.min(prazo)));
+        }
         if self.estresse.as_ref().is_some_and(|e| agora_ms >= e.fim_ms) {
             self.estresse = None;
             info!("debug: estresse acabou");
@@ -2224,6 +2331,9 @@ impl Motor {
                 proxima = Some(proxima.map_or(p, |q| q.min(p)));
             }
             proxima = proxima.map(|p| voo.na_grade(p));
+        } else if let Some(efeito) = self.efeito.as_ref() {
+            // O mesmo com o confete: os quadros na grade dele.
+            proxima = proxima.map(|p| na_grade(efeito.inicio_ms, PASSO_CONFETE_MS, p));
         }
         // Arrastando, a área de toque é o palco inteiro: o arraste continua
         // até numa área de trabalho vazia, onde o compositor pode perder a

@@ -3550,3 +3550,47 @@ e o "não perturbe".
 longe; num monitor que repinta inteiro a cada commit (decisão 0005), ele tem
 de ser uma rajada curta e regular, e nunca pode deixar o pet longe de onde o
 Renan o pôs.
+
+## 0085 — A festa na tela: a fonte de 12 confetes do T2, a chuva de 40 do T3 e o passo de 34 ms (2026-10-05)
+
+**Problema:** a festa (decisão 0076) pede, além da reação e do balão que já
+iam para a tela, 12 confetes no T2 e a chuva de confete no T3 (até 60
+partículas, PLANO "Efeitos e balão"; a intenção diz 40), e a festa mesclada
+que sobe de nível pede os efeitos do nível novo. O confete do M1 só servia ao
+estresse (pedaços que quicam pela tela). O voo atravessando a tela e o
+holofote "PRONTO!" são do M6; a reação do nível (`done_medium`,
+`done_big`) já é um voo dentro da célula nas duas skins. Rajadas têm de
+ficar em até 30 quadros por segundo e curtas (decisão 0005), e a reação
+anima ao mesmo tempo que o confete.
+**Escolha:**
+- **`confete::Festa`:** pedaços que caem na grade de arte do pet (múltiplos
+  de D a partir da célula, como o confete do estresse), nas cores do
+  confete: a **fonte** (o T2: 12 pedaços de 2 pixels de arte saindo da
+  cabeça, para cima, que a gravidade puxa de volta) e a **chuva** (o T3: 40
+  pedaços de 3 pixels caindo do alto da tela inteira, em alturas
+  diferentes). O que sai pelos lados ou por baixo some; o que ainda está
+  acima da borda não aparece; a festa acaba quando o último pedaço sai.
+  Determinístico pela semente (a do sorteio do Motor).
+- **No Motor:** a festa com confete (a nova, ou a mesclada que subiu de
+  nível, no lugar da de antes) começa o efeito; os passos andam um a cada 34
+  ms contados do começo (os que venceram andam todos de uma vez), no fim da
+  cena (para os índices dos outros elementos não mudarem), por no máximo 4,5
+  s. Enquanto ele anda, os prazos do desenho entram no passo seguinte da
+  grade dele (a reação, o balão): nunca dois quadros a menos de 34 ms. O voo
+  da escalada, se houver, manda na grade. Esconder, viajar, um palco novo e o
+  fim da conexão tiram o confete; uma janela que não cobre o monitor (o M8)
+  não mostra confete nenhum.
+- **O que não muda:** a soneca dá o aceno sem confete, o "não perturbe" só
+  tira o voo (decisão 0080), o fim de máquina e o modo discreto continuam
+  pequenos (o pulinho sem balão, sem confete), e escondido nada toca.
+- **Testes:** a fonte (sobe, cai, acaba entre 15 e 80 passos, na grade e na
+  tela) e a chuva (pela tela inteira, mais de 20 pedaços juntos, acaba em
+  até 130 passos); no Motor, com as reações tocando como no laço, o T2 com
+  até 12 pedaços na grade de D e o T3 com a chuva, os dois acabando em até
+  4,5 s e sem quadros a menos de 34 ms; sem confete na soneca e numa janela
+  pequena; a festa mesclada do T2 ao T3 trocando a fonte pela chuva. Uma
+  mutação (os prazos fora da grade do confete) reprovou.
+**Por quê:** o confete é o que diz "foi grande" de canto de olho, e a chuva
+pela tela é a parte do T3 que cabe no M5 sem arte nova; no relógio de 34 ms,
+o pior caso (a reação mais o confete) continua uma rajada de até 30 quadros
+por segundo, que acaba sozinha.

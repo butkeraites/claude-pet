@@ -431,6 +431,10 @@ impl Motor {
                     faixa: e.faixa,
                 },
             );
+            // Subiu: o confete do nível novo no lugar do de antes.
+            if e.confete > 0 {
+                self.comecar_confete(f.nivel == Nivel::T3, e.confete, agora_ms);
+            }
             if f.nivel > Nivel::T0 {
                 let linhas = self.linhas_da_festa(&f.sessoes);
                 self.balao_decidido(linhas, "festa", agora_ms);
@@ -460,6 +464,10 @@ impl Motor {
                 escondida: false,
             },
         );
+        // O T2 com a fonte de confete, o T3 com a chuva (decisão 0085).
+        if e.confete > 0 {
+            self.comecar_confete(nivel == Nivel::T3, e.confete, agora_ms);
+        }
         if nivel > Nivel::T0 {
             let linhas = self.linhas_da_festa(&sessoes);
             self.balao_decidido(linhas, "festa", agora_ms);
