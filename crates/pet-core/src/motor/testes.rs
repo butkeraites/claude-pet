@@ -4855,3 +4855,109 @@ fn a_memoria_que_nao_mudou_grava_igual_com_a_parede_andando_diferente() {
         (Some(PAREDE + 9_000), Some(9_000))
     );
 }
+
+// --- a revisão final (decisão 0098) ----------------------------------------------
+
+#[test]
+fn cada_espera_vista_vai_para_a_memoria_e_solta_a_pose_dela() {
+    // Duas esperas voltam vistas na gravação de uma memória velha: a pose de
+    // nenhuma das duas segura a base (as duas saíram 2 min depois da
+    // gravação), e a memória seguinte leva as duas vistas, cada uma com a
+    // hora dela, não só a da vez (decisão 0098).
+    let duas = |m: &mut Motor, _: &mut Falsa| {
+        ocioso(m, false, 4_500);
+        ativou(m, Some("f00d02"), 5_000);
+        prompt_em(m, "sessao-b", "web", 6_500);
+        ativou(m, Some("f00d03"), 7_000);
+        ocioso(m, true, 7_500);
+        hook_em(m, "sessao-b", "web", "PermissionRequest", 8_000);
+    };
+    let (mut motor, volta) = reinicio_com_espera(duas, false, 10 * 60_000);
+    assert_eq!(motor.painel(None, 0).fotografia.base, "idle");
+    let memoria = motor.memoria(na_volta(volta, 1_000), Some("boot-1".into()));
+    let vistas: Vec<(&str, Option<u64>, Option<i64>)> = memoria
+        .sessoes
+        .iter()
+        .map(|g| {
+            let a = g.aviso.expect("a espera");
+            (g.sid.as_str(), a.vista_ms, a.vista_laco_ms)
+        })
+        .collect();
+    let na_gravacao = (Some(PAREDE + 20_000), Some(-(10 * 60_000)));
+    assert_eq!(
+        vistas,
+        vec![
+            ("sessao-a", na_gravacao.0, na_gravacao.1),
+            ("sessao-b", na_gravacao.0, na_gravacao.1)
+        ]
+    );
+}
+
+#[test]
+fn vista_a_espera_da_vez_a_que_o_renan_nao_viu_escala_na_hora() {
+    // Duas permissões, cada uma no terminal dela, com o Renan noutra janela:
+    // a da api escala (a mais velha). Ele vai ao terminal da api e fica 5 s:
+    // vista, ela não passa mais da L1, e a vez passa na hora à da web, que ele
+    // não viu (antes, ela esperava a da api sair, e o Esc não manda nada;
+    // decisão 0098). A da web já tem 38 s: a L2 sai no mesmo instante.
+    let (mut motor, _janela) = ligado();
+    motor.acertar_relogio(em(0));
+    ligar_desktop(&mut motor, 0);
+    ocioso(&mut motor, false, 0);
+    ativou(&mut motor, Some("f00d01"), 0);
+    prompt_em(&mut motor, "sessao-a", "api", 1_000);
+    ativou(&mut motor, Some("f00d02"), 2_500);
+    prompt_em(&mut motor, "sessao-b", "web", 3_500);
+    ativou(&mut motor, Some("f00d03"), 5_000);
+    hook_em(&mut motor, "sessao-a", "api", "PermissionRequest", 6_000);
+    hook_em(&mut motor, "sessao-b", "web", "PermissionRequest", 7_000);
+    for sid in ["sessao-a", "sessao-b"] {
+        assert_eq!(
+            janela_da(&motor, sid).map(|j| j.certeza),
+            Some(janelas::Certeza::Certa),
+            "{sid}"
+        );
+    }
+    andar(&mut motor, 40_000);
+    assert_eq!(motor.nivel_da_escalada(), 2, "a da api, na L2");
+    ativou(&mut motor, Some("f00d01"), 40_000);
+    let reacoes = andar(&mut motor, 45_000);
+    assert_eq!(
+        chamadas_desde(&motor, 45_000),
+        vec![
+            r#"{"i":"escalada","sid8":"sessao-a","nivel":2,"motivo":"vista"}"#,
+            r#"{"i":"escalada","sid8":"sessao-a","nivel":0,"motivo":"outro_aviso"}"#,
+            r#"{"i":"escalada","sid8":"sessao-b","nivel":1,"espera":"permissao","motivo":"vez"}"#,
+            r#"{"i":"escalada","sid8":"sessao-b","nivel":2,"motivo":"tempo"}"#,
+            r#"{"i":"rajada","sid8":"sessao-b","nivel":2}"#,
+        ]
+    );
+    assert_eq!(reacoes, vec![(45_000, CHAMADA)], "a rajada da web");
+    let escalada = motor.painel_da_tela(45_000).escalada.expect("a da web");
+    assert!(escalada.sid8 == "sessao-b" && !escalada.vista);
+    // Ele vai ao terminal da web: vista também, e a vez fica com ela (com
+    // as duas vistas, a que já tinha a vez; nada de ir e voltar).
+    ativou(&mut motor, Some("f00d02"), 46_000);
+    andar(&mut motor, 52_000);
+    assert_eq!(
+        chamadas_desde(&motor, 46_000),
+        vec![r#"{"i":"escalada","sid8":"sessao-b","nivel":2,"motivo":"vista"}"#]
+    );
+    // A da web respondida: a vez volta à da api, vista, sem escalar.
+    let rodou = Evento {
+        tool: Some("Bash".into()),
+        dur: Some(50),
+        ..hook_de("sessao-b", "web", "PostToolUse", 60_000)
+    };
+    mandar(&mut motor, rodou, 60_000);
+    let escalada = motor.painel_da_tela(60_000).escalada.expect("a da api");
+    assert!(escalada.sid8 == "sessao-a" && escalada.vista && escalada.nivel == 1);
+    andar(&mut motor, 10 * 60_000);
+    assert!(
+        chamadas_desde(&motor, 60_001)
+            .iter()
+            .all(|l| !l.contains("rajada") && !l.contains("voo") && !l.contains("pulso")),
+        "{:?}",
+        chamadas_desde(&motor, 60_001)
+    );
+}

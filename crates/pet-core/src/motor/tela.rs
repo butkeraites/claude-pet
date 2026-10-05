@@ -532,9 +532,9 @@ impl Motor {
     // --- a base, os selos e o sono ------------------------------------------
 
     /// Até quando o aviso de espera da sessão `s` segura a base (decisão
-    /// 0090): até o teto da escalada (o fim da L4); o que o Renan viu no
-    /// terminal da sessão, até [`ESPERA_VISTA_NA_BASE_MS`] depois. `None`:
-    /// a sessão não tem aviso de espera.
+    /// 0090): até o teto da escalada (o fim da L4); o que o Renan viu, até
+    /// [`ESPERA_VISTA_NA_BASE_MS`] depois, cada espera pela vista dela, a da
+    /// vez ou não (decisão 0098). `None`: a sessão não tem aviso de espera.
     fn fim_da_espera_na_base(&self, s: &ResumoSessao) -> Option<u64> {
         let aviso = s.aviso.filter(|a| a.tipo == TipoAviso::Esperando)?;
         let teto = cerebro::depois(
@@ -542,10 +542,8 @@ impl Motor {
             escalada::L4_APOS_MS + escalada::L4_DURA_MS,
         );
         let vista = self
-            .chamando
-            .as_ref()
-            .filter(|c| c.chave == s.chave && c.desde_ms == aviso.desde_ms)
-            .and_then(|c| c.vista_ms);
+            .vista_da_espera(&s.chave, aviso.desde_ms)
+            .map(|v| v.laco);
         Some(vista.map_or(teto, |v| {
             cerebro::depois(v, ESPERA_VISTA_NA_BASE_MS).min(teto)
         }))
@@ -975,7 +973,7 @@ impl Motor {
                 nivel: c.escalada.nivel,
                 espera: c.espera,
                 pulso: c.escalada.pulso,
-                vista: c.vista_ms.is_some(),
+                vista: self.vista_da_espera(&c.chave, c.desde_ms).is_some(),
             }),
             festa: self
                 .tela

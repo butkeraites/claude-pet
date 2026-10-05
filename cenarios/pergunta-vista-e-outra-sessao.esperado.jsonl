@@ -1,0 +1,24 @@
+{"t":3000,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s2"}
+{"t":5000,"i":"selos","mais":1,"bandeiras":[],"corrente":false}
+{"t":9000,"i":"reacao","nome":"alert","motivo":"aviso","sid8":"s1"}
+{"t":9000,"i":"balao","linhas":["api: pergunta pra você"],"motivo":"aviso"}
+{"t":9000,"i":"escalada","sid8":"s1","nivel":1,"espera":"pergunta","motivo":"aviso"}
+{"t":9000,"i":"base","estado":"waiting","prioridade":"esperando","sid8":"s1"}
+{"t":14000,"i":"escalada","sid8":"s1","nivel":1,"motivo":"vista"}
+{"t":110000,"i":"reacao","nome":"alert","motivo":"aviso","sid8":"s2"}
+{"t":110000,"i":"balao","linhas":["web: pergunta pra você"],"motivo":"aviso"}
+{"t":110000,"i":"escalada","sid8":"s1","nivel":0,"motivo":"outro_aviso"}
+{"t":110000,"i":"escalada","sid8":"s2","nivel":1,"espera":"pergunta","motivo":"aviso"}
+{"t":140000,"i":"escalada","sid8":"s2","nivel":2,"motivo":"tempo"}
+{"t":140000,"i":"rajada","sid8":"s2","nivel":2}
+{"t":146000,"i":"rajada","sid8":"s2","nivel":2}
+{"t":152000,"i":"rajada","sid8":"s2","nivel":2}
+{"t":158000,"i":"rajada","sid8":"s2","nivel":2}
+{"t":164000,"i":"rajada","sid8":"s2","nivel":2}
+{"t":200000,"i":"escalada","sid8":"s2","nivel":3,"motivo":"tempo"}
+{"t":200000,"i":"voo","destino":"alto_centro","motivo":"escalada","sid8":"s2"}
+{"t":260000,"i":"voo","destino":"alto_centro","motivo":"escalada","sid8":"s2"}
+{"t":300000,"i":"voo","destino":"alto_centro","motivo":"voltou","sid8":"s2"}
+{"t":310000,"i":"escalada","sid8":"s2","nivel":0,"motivo":"andou"}
+{"t":310000,"i":"escalada","sid8":"s1","nivel":1,"espera":"pergunta","motivo":"vez"}
+{"t":310000,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s2"}

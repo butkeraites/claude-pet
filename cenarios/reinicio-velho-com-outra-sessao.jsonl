@@ -1,0 +1,18 @@
+{"cenario": "reinicio-velho-com-outra-sessao", "descricao": "a api pergunta com o Renan noutra janela; o pet fica 10 min fora, e a memória é velha: a pergunta volta vista na gravação (nada acima da L1) e segue na lista; o Renan sai, e a web pergunta: a espera vista da api não segura a vez da web, que o Renan não viu: a chamada, a L2, a L3 e o voo da volta quando ele volta; respondida a web, a vez volta à api, vista, sem escalar (decisão 0098)", "padrao": {"ent": "cli"}}
+{"t": 0, "desktop": {"ligado": true}}
+{"t": 0, "desktop": {"ocioso": false}}
+{"t": 0, "desktop": {"janela_ativa": "a0a0a0"}}
+{"t": 1000, "evento": {"e": "UserPromptSubmit", "sid": "s1", "proj": "api", "turno": "p1", "orig": "comum"}}
+{"t": 2000, "desktop": {"janela_ativa": "b0b0b0"}}
+{"t": 3000, "evento": {"e": "UserPromptSubmit", "sid": "s2", "proj": "web", "turno": "q1", "orig": "comum"}}
+{"t": 5000, "desktop": {"janela_ativa": "c0c0c0"}}
+{"t": 10000, "evento": {"e": "PreToolUse", "sid": "s1", "proj": "api", "turno": "p1", "tool": "AskUserQuestion"}}
+{"t": 20000, "reinicio": {"parado_ms": 600000}}
+{"t": 620000, "desktop": {"ligado": true}}
+{"t": 620000, "desktop": {"ocioso": false}}
+{"t": 620000, "desktop": {"janela_ativa": "c0c0c0"}}
+{"t": 650000, "desktop": {"ocioso": true}}
+{"t": 710000, "evento": {"e": "PreToolUse", "sid": "s2", "proj": "web", "turno": "q1", "tool": "AskUserQuestion"}}
+{"t": 900000, "desktop": {"ocioso": false}}
+{"t": 910000, "evento": {"e": "PostToolUse", "sid": "s2", "proj": "web", "turno": "q1", "tool": "AskUserQuestion", "dur": 0}}
+{"t": 1100000, "fim": true}

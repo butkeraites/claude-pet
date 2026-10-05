@@ -1395,3 +1395,114 @@ fn outro_dialogo_depois_da_volta_chama_como_no_pet_de_pe() {
     assert_eq!(so(&linha, "rajada").len(), 5);
     assert_eq!(so(&linha, "voo").len(), 1);
 }
+
+/// As escaladas, em ordem: (instante, sessão, nível, motivo).
+fn escaladas(linha: &[Intencao]) -> Vec<(u64, String, u8, &'static str)> {
+    linha
+        .iter()
+        .filter_map(|x| match &x.tipo {
+            Tipo::Escalada {
+                sid8,
+                nivel,
+                motivo,
+                ..
+            } => Some((x.t_ms, sid8.clone(), *nivel, *motivo)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_espera_vista_nao_segura_a_vez_da_que_o_renan_nao_viu() {
+    // A api tem uma espera vista: na gravação de uma memória velha, ou 5 s no
+    // terminal dela e dispensada com o Esc (que não manda nada). A web
+    // pergunta com o Renan longe: a vez é dela, que ele não viu (a chamada, a
+    // L2, a L3 e o voo da volta); respondida, a vez volta à api, que continua
+    // vista e não escala (decisão 0098).
+    for (nome, pergunta, volta, resposta) in [
+        ("reinicio-velho-com-outra-sessao", 710_000, 900_000, 910_000),
+        ("pergunta-vista-e-outra-sessao", 110_000, 300_000, 310_000),
+    ] {
+        let linha = linha_do_tempo(nome);
+        let depois: Vec<_> = escaladas(&linha)
+            .into_iter()
+            .filter(|e| e.0 >= pergunta)
+            .collect();
+        let esperado =
+            |t: u64, sid: &str, nivel: u8, motivo: &'static str| (t, sid.to_owned(), nivel, motivo);
+        assert_eq!(
+            depois,
+            vec![
+                esperado(pergunta, "s1", 0, "outro_aviso"),
+                esperado(pergunta, "s2", 1, "aviso"),
+                esperado(pergunta + 30_000, "s2", 2, "tempo"),
+                esperado(pergunta + 90_000, "s2", 3, "tempo"),
+                esperado(resposta, "s2", 0, "andou"),
+                esperado(resposta, "s1", 1, "vez"),
+            ],
+            "{nome}"
+        );
+        let voos: Vec<(u64, &str)> = so(&linha, "voo")
+            .iter()
+            .map(|x| match x.tipo {
+                Tipo::Voo { motivo, .. } => (x.t_ms, motivo),
+                _ => unreachable!(),
+            })
+            .collect();
+        assert_eq!(
+            voos,
+            vec![
+                (pergunta + 90_000, "escalada"),
+                (pergunta + 150_000, "escalada"),
+                (volta, "voltou")
+            ],
+            "{nome}"
+        );
+        assert_eq!(so(&linha, "rajada").len(), 5, "{nome}: as da L2");
+        assert!(
+            barulho_entre(&linha, resposta, u64::MAX).is_empty(),
+            "{nome}: a vista não escala"
+        );
+    }
+}
+
+#[test]
+fn cada_espera_vista_continua_vista_no_reinicio_seguinte() {
+    // Duas esperas voltam vistas de uma memória velha: a pose de espera das
+    // duas sai 2 min depois da gravação (aos 140 s). O reinício seguinte (a
+    // memória fresca) traz as duas vistas, cada uma com a hora dela: a vez
+    // da web chega quando a api é respondida, e nada escala (decisão 0098).
+    let linha = linha_do_tempo("reinicio-duas-vezes-com-duas-esperas");
+    let restauracoes: Vec<(u64, bool)> = so(&linha, "restauracao")
+        .iter()
+        .map(|x| match x.tipo {
+            Tipo::Restauracao { velha, .. } => (x.t_ms, velha),
+            _ => unreachable!(),
+        })
+        .collect();
+    assert_eq!(restauracoes, vec![(90_000, true), (160_000, false)]);
+    let bases: Vec<(u64, &str)> = so(&linha, "base")
+        .iter()
+        .map(|x| match x.tipo {
+            Tipo::Base { estado, .. } => (x.t_ms, estado),
+            _ => unreachable!(),
+        })
+        .filter(|(t, _)| *t >= 90_000)
+        .collect();
+    assert_eq!(
+        bases,
+        vec![
+            (90_000, "waiting"),
+            (140_000, "idle"),
+            (170_000, "working"),
+            (470_000, "idle")
+        ]
+    );
+    assert!(
+        escaladas(&linha).contains(&(170_000, "s2".to_owned(), 1, "vez")),
+        "{:?}",
+        escaladas(&linha)
+    );
+    assert!(barulho_entre(&linha, 0, u64::MAX).is_empty());
+    assert!(tocou_entre(&linha, 20_000, u64::MAX).is_empty());
+}

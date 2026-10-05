@@ -1,0 +1,15 @@
+{"cenario": "pergunta-vista-e-outra-sessao", "descricao": "a api pergunta com o Renan no terminal dela: 5 s lá e a pergunta é vista; ele a dispensa com o Esc (nenhum evento) e sai; a web pergunta com ele longe: a espera vista da api não segura a vez da web, que ele não viu: a chamada, a L2, a L3 e o voo da volta quando ele volta; respondida a web, a vez volta à api, vista, sem escalar (decisão 0098)", "padrao": {"ent": "cli"}}
+{"t": 0, "desktop": {"ligado": true}}
+{"t": 0, "desktop": {"ocioso": false}}
+{"t": 0, "desktop": {"janela_ativa": "b0b0b0"}}
+{"t": 3000, "evento": {"e": "UserPromptSubmit", "sid": "s2", "proj": "web", "turno": "q1", "orig": "comum"}}
+{"t": 4000, "desktop": {"janela_ativa": "a0a0a0"}}
+{"t": 5000, "evento": {"e": "UserPromptSubmit", "sid": "s1", "proj": "api", "turno": "p1", "orig": "comum"}}
+{"t": 9000, "evento": {"e": "PreToolUse", "sid": "s1", "proj": "api", "turno": "p1", "tool": "AskUserQuestion"}}
+# Vista aos 14 s; o Esc numa pergunta não manda evento nenhum (2.1.288).
+{"t": 30000, "desktop": {"janela_ativa": "c0c0c0"}}
+{"t": 50000, "desktop": {"ocioso": true}}
+{"t": 110000, "evento": {"e": "PreToolUse", "sid": "s2", "proj": "web", "turno": "q1", "tool": "AskUserQuestion"}}
+{"t": 300000, "desktop": {"ocioso": false}}
+{"t": 310000, "evento": {"e": "PostToolUse", "sid": "s2", "proj": "web", "turno": "q1", "tool": "AskUserQuestion", "dur": 0}}
+{"t": 400000, "fim": true}

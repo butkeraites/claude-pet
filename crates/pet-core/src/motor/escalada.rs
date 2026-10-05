@@ -2,7 +2,8 @@
 //! teto, e só para quem não está olhando o terminal do Claude.
 //!
 //! Uma máquina pura, no relógio do laço, para o aviso de espera que o Motor
-//! mostra (o mais velho; os outros viram o "+N"). A fase vem do tempo desde
+//! mostra (o da vez: o mais velho que o Renan ainda não viu, decisão 0098;
+//! os outros viram o "+N"). A fase vem do tempo desde
 //! o aviso; o que cada fase faz depende de o Renan precisar ser chamado
 //! ([`Contexto::chama`]: não está olhando o terminal da sessão que espera, ou
 //! está sem mexer há 60 s ou mais; e não viu o diálogo lá, decisão 0090):

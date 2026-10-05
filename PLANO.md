@@ -414,6 +414,8 @@ As outras sessões aparecem como selos: um contador "+N", uma bandeirinha com a 
 
 *Correção (2026-10-05, revisão, decisão 0090):* "olhando o terminal do Claude" é olhar o terminal da sessão que espera, quando a janela dela é certa (o de outra sessão não vale); 5 s nele com o Renan presente contam como o diálogo visto, e daí nada passa da L1 (o Esc numa pergunta e o plano recusado não mandam evento nenhum no 2.1.288, e são feitos ali). A pose de espera vem do aviso e dura até o teto da escalada, ou 2 min depois de o diálogo ser visto; o clique que vê o aviso a solta, e o pet pode dormir com o selo "!". Os voos da volta têm a conta deles (até 3), fora dos 3 da L3, e esperam o pet aparecer na tela (a proteção de tela que fecha depois do primeiro toque, a sessão bloqueada).
 
+*Correção (2026-10-05, revisão final, decisão 0098):* a escalada é da espera mais velha que o Renan ainda não viu, não só da mais velha: uma espera vista (no terminal dela, ou de volta de uma memória velha) não segura a vez de uma nova de outra sessão, e vista a da vez, a seguinte escala na hora. Cada espera guarda a vista dela (na memória também), e a pose de cada uma sai 2 min depois da dela.
+
 **Presença:**
 - `olhando_claude` = o título da janela focada começa com ✳, ◐ ou ◑ (vem do `activewindow` do socket2).
   - Fica guardado só esse booleano, nunca o título.
@@ -803,7 +805,7 @@ Atualizado em 2026-10-05 com a pesquisa do M5 (`docs/pesquisa/10-cerebro-m5.md`,
 - **T5.26** as docs e a conferência: o CLAUDE.md (o estado, as pegadinhas da memória e do `/reload-plugins`), o README, a conferência ao vivo num daemon de rascunho com uma sessão aninhada, e a produção refeita da branch e reiniciada com as sessões reais do Renan na lista antes e depois.
 
 **Revisão final** (a revisão final do M5 antes do merge; decisões 0097 em diante):
-- **T5.27** o diálogo novo numa espera que a memória trouxe chama, como no pet de pé (decisão 0097).
+- **T5.27** o diálogo novo numa espera que a memória trouxe chama, como no pet de pé (decisão 0097); a espera vista não segura a vez da que o Renan não viu, e cada espera guarda a vista dela, também na memória (decisão 0098).
 
 **Verificação:** `bin/pet verificar` verde a cada commit e `cargo test -p pet-core` com os cenários. Tabelas, exemplos de pontuação (decisão 0074) e cenários:
 
@@ -839,6 +841,8 @@ Atualizado em 2026-10-05 com a pesquisa do M5 (`docs/pesquisa/10-cerebro-m5.md`,
 | `reinicio-da-maquina`, `reinicio-com-arquivo-corrompido` | nada volta |
 | `reinicio-com-outro-compositor` | a sessão volta sem a janela de antes; o próximo prompt casa a nova |
 | `reinicio-com-outro-dialogo` | a resposta se perde com o pet fora; o diálogo seguinte, o primeiro evento depois da volta, chama na hora e escala (decisão 0097) |
+| `reinicio-velho-com-outra-sessao`, `pergunta-vista-e-outra-sessao` | uma espera vista (de volta de uma memória velha, ou vista no terminal e dispensada com o Esc) e a pergunta nova de outra sessão com o Renan longe: a nova escala (a L2, a L3 e o voo da volta); respondida, a vez volta à vista, sem escalar (decisão 0098) |
+| `reinicio-duas-vezes-com-duas-esperas` | duas esperas vistas de uma memória velha: a pose das duas sai 2 min depois da gravação, e no reinício seguinte as duas seguem vistas (nada escala na vez da segunda; decisão 0098) |
 
 **Verificação da segunda metade:** o desenho não muda as intenções (os dourados e o teste que roda todos os cenários sem personagem); o orçamento em relógio falso, com o compositor mostrando cada quadro na hora (o pior caso): trabalhando por 20 min, na espera da L4 por 10 min e parado por 30 min, em média até 2 commits/s, o sono profundo sem commit nenhum, e as rajadas (o voo, o confete) curtas e sem dois quadros a menos de 34 ms; cada desenho novo em blocos inteiros (D, ou a metade dele nos selos) e dentro do monitor; o canário do socket2 com segredos no `screencastv2`; ao vivo, `bin/pet testar medio|grande|pergunta|dois-prontos` com a reação e o nível no `/v1/estado`; com a tela acesa e desbloqueada, `bin/pet foto`, a nitidez e o `scripts/medir-custo.sh`.
 

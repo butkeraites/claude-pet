@@ -4370,3 +4370,67 @@ e o Claude parado num diálogo que o Renan nunca viu, com o pet dormindo, é o
 erro contrário ao da decisão 0090. O tempo entre os gatilhos de um diálogo é
 medido (T5.1), e a marca só vale para a espera que a memória trouxe, a única em
 que a resposta pode ter se perdido.
+
+## 0098 — Revisão final da escalada: a espera vista não segura a vez da que o Renan não viu (2026-10-05)
+
+**Problema:** a revisão final do M5 achou, e o `bichinho simular` reproduziu,
+três defeitos de uma raiz só: "vista" (o diálogo 5 s no terminal da sessão,
+decisão 0090; a espera que volta de uma memória velha, decisão 0095) morava
+só na escalada da espera da vez.
+- **A espera vista segurava a vez.** Só a espera mais velha escala (decisão
+  0079), e a vista não passa da L1: a mais velha vista ficava com a vez, e a
+  pergunta nova de outra sessão ganhava só a L1, sem rajada, voo, o pulso da
+  L4 nem o voo da volta do Renan. Durava até a vista sair, com um evento da
+  sessão dela (o Esc numa pergunta não manda nenhum, decisão 0090) ou nas 12 h
+  da decisão 0096. Acontecia com o pet de pé (a pergunta vista e dispensada
+  com o Esc) e, muito mais, depois de toda parada de mais de 60 s, em que as
+  esperas voltam vistas. Reproduzido: a api pergunta, o pet fica 10 min fora,
+  e a web pergunta com o Renan longe: só a chamada da L1 (sem o reinício: a
+  L2, a L3 e o voo da volta).
+- **A vista das outras se perdia.** Só a da vez ia para o arquivo da memória:
+  numa memória velha com duas esperas, um reinício curto depois trazia a
+  segunda sem a vista, e quando a vez chegava a ela, ela escalava na hora até
+  a L3 e a L4 pela idade (a decisão 0095 diz que elas nunca passam da L1,
+  "também quando a vez delas chega depois").
+- **A pose das outras vistas não saía.** A pose de espera sai 2 min depois da
+  vista (decisão 0090) só na da vez: uma segunda espera vista segurava a pose
+  até o teto, 35 min depois de aberta, e o pet não dormia.
+**Escolha:**
+- **Cada espera guarda a vista dela** (`motor::Vista`: o aviso, a hora no
+  relógio do laço e na parede), uma por sessão, até a espera sair: a vista no
+  terminal da sessão, a da memória velha (na gravação) e a que vem no arquivo.
+- **A vez é da espera mais velha que o Renan ainda não viu** (corrige a
+  decisão 0079). Com todas vistas, a que já tinha a vez (nada de ir e
+  voltar), ou a mais velha: o selo "!" e o clique ficam, e nada passa da L1.
+  A espera nova de outra sessão pega a vez de uma vista (a escalada da vista
+  acaba com o motivo `outro_aviso`, e a nova chama e escala desde a L1);
+  vista a da vez, a vez passa na hora à seguinte que ele não viu, no relógio
+  dela (como quando a mais velha sai); respondida a nova, a vez volta à vista
+  (`vez`), que continua sem escalar.
+- **A memória leva a vista de cada espera** (o `vista_ms` e o
+  `vista_laco_ms` de todas, não só da vez), e a volta devolve cada uma; o
+  formato do arquivo não muda.
+- **A pose de cada espera** sai 2 min depois da vista dela, seja ou não a da
+  vez.
+**Testes:** no Motor, a vista que passa a vez na hora (a seguinte já na L2),
+a vez que fica com a que a tinha quando as duas são vistas, a que volta à
+vista sem escalar, e a memória que leva as duas vistas e solta a pose das
+duas; três dourados novos: `reinicio-velho-com-outra-sessao` (a memória velha
+e a pergunta de outra sessão: a L2, a L3 e o voo da volta),
+`pergunta-vista-e-outra-sessao` (o mesmo com o pet de pé: a pergunta vista e
+o Esc) e `reinicio-duas-vezes-com-duas-esperas` (duas esperas vistas de uma
+memória velha: a pose das duas sai 2 min depois da gravação, e no reinício
+seguinte as duas seguem vistas; nada escala na vez da segunda). Nenhum outro
+dourado mudou. Seis mutações reprovaram (a vista que segura a vez, a vez que
+vai e volta, a vista que não passa a vez na hora, a memória só com a vista da
+vez, a volta que esquece a vista do arquivo, a pose que só olha a da vez).
+**Limites:** "vista" continua sendo só a do terminal da sessão da vez (outro
+terminal de sessão em foco não conta até a vez chegar a ela, como antes). Um
+arquivo gravado antes desta decisão traz só a vista da que tinha a vez: numa
+parada curta, as outras voltam sem a vista, como antes.
+**Por quê:** a espera que o Renan viu já cumpriu o trabalho da escalada;
+segurar a vez para ela calava o pet justamente no diálogo que ele não viu, o
+erro contrário ao da decisão 0090, e a parada longa (decisão 0095) só pode
+quietar o que ela pode ter mudado, não o que chega depois dela. Com a vista
+em cada espera, as regras das decisões 0090 e 0095 valem para todas, sem
+depender de qual tem a vez.
