@@ -73,8 +73,12 @@ e os prazos no tempo acordado, como o pet que não reinicia; a memória
 gravada há mais de 60 s volta com as esperas vistas e sem os endereços das
 janelas; nada volta depois de um boot da máquina, e as janelas de outro
 compositor saem. Uma sessão sem evento só sai depois de uma semana (a
-espera, em 12 h). A produção roda a branch (com o estado do Renan intacto);
-a conferência na tela pede a sessão desbloqueada. Para voltar a produção para a `main` antes do merge:
+espera, em 12 h). A revisão final (T5.27, decisões 0097 e 0098): o diálogo
+novo numa espera que voltou da memória chama como no pet de pé, e a espera
+que o Renan já viu não segura a vez da que ele não viu (cada espera guarda a
+vista dela, também na memória). A produção roda a branch (com o estado do
+Renan intacto); a conferência na tela pede a sessão desbloqueada. Para voltar
+a produção para a `main` antes do merge:
 `git -C ~/Documents/claude-pet switch main && bin/pet subir`, no clone (nunca
 na worktree estável; nunca mexa no `/state`), e depois `switch m5-cerebro`
 de novo para trabalhar.
@@ -103,7 +107,11 @@ atravessando a tela, a variedade parada).
 **Pendentes** (pedem a tela acesa e desbloqueada, ou o Renan):
 - o PR do M5 (`m5-cerebro` → `main`, corpo conferido pelo `NOMES_DE_TERCEIROS`
   antes do `gh pr create`), a revisão do Renan e, depois do merge, a troca do
-  README (o hook mudou: `bin/pet instalar-host`);
+  README (o hook mudou: `bin/pet instalar-host`). Antes do merge, já com o
+  número do PR, o último commit da branch reescreve o estado do repositório
+  para a `main`, aqui e no README (como no TS.5: o M5 na lista da `main`, sem
+  a branch "sem PR", sem a produção na branch e a volta para a `main`, e o
+  rumo no M6), senão a `main` herda o estado da branch;
 - a conferência na tela do M5: `bin/pet foto` da base, dos selos, do voo da
   L3 e da volta com o "!!", do confete do T2 e da chuva do T3, a nitidez
   (`cargo xtask nitidez`) e o `scripts/medir-custo.sh --personagem` (com as
@@ -433,9 +441,13 @@ Fora dele, use `~/.cargo/bin/cargo`.
   evento da sessão, e a intenção `restauracao` diz quantas e o que mais
   voltou. A memória gravada há mais de 60 s é velha (`velha` na intenção e no
   log): as esperas voltam vistas (nada acima da L1) e as janelas sem o
-  endereço. O turno aberto na parada não volta: a sessão fica no estado dela
-  até 5 min depois do último evento, ou até o `idle_prompt` (que também tira
-  a espera que sobrou: ele nunca sai com um diálogo na tela; decisão 0094).
+  endereço. Cada espera vista vai para o arquivo com a hora dela, e uma vista
+  não segura a vez de uma espera que o Renan não viu (decisão 0098). Na
+  espera que voltou, um gatilho de diálogo mais de 10 s depois dela é outro
+  diálogo e chama, como no pet de pé (decisão 0097). O turno aberto na
+  parada não volta: a sessão fica no estado dela até 5 min depois do último
+  evento, ou até o `idle_prompt` (que também tira a espera que sobrou: ele
+  nunca sai com um diálogo na tela; decisão 0094).
   Outro boot id: nada volta (`maquina_reiniciou`); outra instância do
   Hyprland: as sessões ficam sem as janelas. O arquivo é do volume do Renan:
   leia (`docker compose exec -T bichinho cat /state/sessoes.json`, só

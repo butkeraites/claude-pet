@@ -410,6 +410,8 @@ As outras sessões aparecem como selos: um contador "+N", uma bandeirinha com a 
 
 **Saída da escalada:** qualquer evento da própria sessão ou um clique no aviso exibido.
 
+*Correção (2026-10-05, decisão 0096):* a espera de uma sessão sem evento nenhum por 12 h sai sozinha (`expirou`), e a sessão fica.
+
 *Correção (2026-10-05, decisão 0094):* o `idle_prompt` também tira o aviso de espera que sobrou (ele nunca sai com um diálogo na tela: a espera é de um diálogo que acabou sem o evento chegar, como o respondido com o pet fora); o pronto e o erro continuam com ele.
 
 *Correção (2026-10-05, revisão, decisão 0090):* "olhando o terminal do Claude" é olhar o terminal da sessão que espera, quando a janela dela é certa (o de outra sessão não vale); 5 s nele com o Renan presente contam como o diálogo visto, e daí nada passa da L1 (o Esc numa pergunta e o plano recusado não mandam evento nenhum no 2.1.288, e são feitos ali). A pose de espera vem do aviso e dura até o teto da escalada, ou 2 min depois de o diálogo ser visto; o clique que vê o aviso a solta, e o pet pode dormir com o selo "!". Os voos da volta têm a conta deles (até 3), fora dos 3 da L3, e esperam o pet aparecer na tela (a proteção de tela que fecha depois do primeiro toque, a sessão bloqueada).
@@ -805,7 +807,7 @@ Atualizado em 2026-10-05 com a pesquisa do M5 (`docs/pesquisa/10-cerebro-m5.md`,
 - **T5.26** as docs e a conferência: o CLAUDE.md (o estado, as pegadinhas da memória e do `/reload-plugins`), o README, a conferência ao vivo num daemon de rascunho com uma sessão aninhada, e a produção refeita da branch e reiniciada com as sessões reais do Renan na lista antes e depois.
 
 **Revisão final** (a revisão final do M5 antes do merge; decisões 0097 em diante):
-- **T5.27** o diálogo novo numa espera que a memória trouxe chama, como no pet de pé (decisão 0097); a espera vista não segura a vez da que o Renan não viu, e cada espera guarda a vista dela, também na memória (decisão 0098).
+- **T5.27** o diálogo novo numa espera que a memória trouxe chama, como no pet de pé (decisão 0097); a espera vista não segura a vez da que o Renan não viu, e cada espera guarda a vista dela, também na memória (decisão 0098); as docs (o CLAUDE.md, o README, a tabela de verificação reconciliada com os dourados das decisões 0095 a 0098) e a produção refeita da branch com o estado do Renan intacto.
 
 **Verificação:** `bin/pet verificar` verde a cada commit e `cargo test -p pet-core` com os cenários. Tabelas, exemplos de pontuação (decisão 0074) e cenários:
 
@@ -837,9 +839,13 @@ Atualizado em 2026-10-05 com a pesquisa do M5 (`docs/pesquisa/10-cerebro-m5.md`,
 | `reinicio-com-pergunta` | a escalada segue do tempo que passou, sem chamar de novo; os voos e a L4 nas horas deles |
 | `reinicio-com-pergunta-respondida-fora` | a resposta e o Stop se perdem com o pet fora: a espera volta e sai no `idle_prompt`, sem festa (decisão 0094) |
 | `reinicio-com-pronto-e-erro` | o pronto e o erro voltam sem festa nem susto; o clique leva aos terminais de antes |
-| `reinicio-depois-de-13-h` | a sessão de 13 h não volta; a de 11 h sai na hora dela |
+| `reinicio-depois-de-13-h` | as duas sessões (13 h e 11 h sem evento) voltam, com a memória velha, e ficam na lista do clique (decisão 0096; antes, a de 13 h não voltava e a de 11 h saía nas 12 h dela) |
 | `reinicio-da-maquina`, `reinicio-com-arquivo-corrompido` | nada volta |
 | `reinicio-com-outro-compositor` | a sessão volta sem a janela de antes; o próximo prompt casa a nova |
+| `reinicio-com-nao-perturbe`, `reinicio-na-soneca`, `reinicio-compartilhando` | o "não perturbe", a soneca e a discrição da tela compartilhada voltam com a memória e seguram a espera na L1 até acabar; depois, a L4 na hora dela (decisão 0095) |
+| `reinicio-depois-de-uma-pausa` | 10 min fora (a memória velha): a espera volta vista, sem a pose, e a janela sem o endereço (o clique diz que não a viu); o prompt seguinte casa de novo (decisão 0095) |
+| `reinicio-na-acomodacao` | a parada nos 0,8 s da acomodação do Stop traz o pronto, sem festa (decisão 0095) |
+| `espera-de-uma-noite` | ninguém responde: a escalada até o teto, o sono com o selo, e 12 h depois do último evento a espera sai (`expirou`) e a sessão fica na lista (decisão 0096) |
 | `reinicio-com-outro-dialogo` | a resposta se perde com o pet fora; o diálogo seguinte, o primeiro evento depois da volta, chama na hora e escala (decisão 0097) |
 | `reinicio-velho-com-outra-sessao`, `pergunta-vista-e-outra-sessao` | uma espera vista (de volta de uma memória velha, ou vista no terminal e dispensada com o Esc) e a pergunta nova de outra sessão com o Renan longe: a nova escala (a L2, a L3 e o voo da volta); respondida, a vez volta à vista, sem escalar (decisão 0098) |
 | `reinicio-duas-vezes-com-duas-esperas` | duas esperas vistas de uma memória velha: a pose das duas sai 2 min depois da gravação, e no reinício seguinte as duas seguem vistas (nada escala na vez da segunda; decisão 0098) |

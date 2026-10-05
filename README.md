@@ -324,7 +324,9 @@ pede que você digite «sim» no terminal).
   bloqueada, depois que ela some). Com 5 s no terminal da sessão, ele dá o
   diálogo por visto e não escala mais (um Esc numa pergunta ou um plano
   recusado não mandam evento nenhum, e a pose de espera sai 2 min depois);
-  o clique que leva ao terminal também a tira. Com o "não perturbe" do
+  o clique que leva ao terminal também a tira. Com mais de uma sessão
+  esperando, a chamada cresce para a mais antiga que você ainda não viu; a
+  que você já viu fica no «!» e no clique. Com o "não perturbe" do
   Omarchy ou na soneca, só a primeira chamada. O "não perturbe" vem com os
   eventos do Claude: ligado no meio de uma espera, vale no próximo evento de
   qualquer sessão; para calar na hora, o clique direito (a soneca).
@@ -343,11 +345,12 @@ pede que você digite «sim» no terminal).
   espera segue a chamada de onde parou. Se o pet ficou parado mais de 1 min
   (a pergunta pode ter sido respondida nesse meio-tempo), a espera volta
   quieta (o «!» e o clique, sem chamar de novo), e o terminal de cada sessão
-  só volta com o próximo prompt. O turno que estava no meio não volta: a
-  sessão fica trabalhando até 5 min depois do último evento, e o próximo
-  evento dela segue normalmente. Depois de reiniciar a máquina, ele começa
-  vazio (todo Claude de antes acabou); depois de sair e entrar de novo na
-  sessão gráfica, as sessões voltam sem o terminal de antes até o próximo
+  só volta com o próximo prompt. Um diálogo novo depois da volta, da mesma
+  sessão ou de outra, chama como sempre. O turno que estava no meio não
+  volta: a sessão fica trabalhando até 5 min depois do último evento, e o
+  próximo evento dela segue normalmente. Depois de reiniciar a máquina, ele
+  começa vazio (todo Claude de antes acabou); depois de sair e entrar de novo
+  na sessão gráfica, as sessões voltam sem o terminal de antes até o próximo
   prompt.
 - **Todas as sessões abertas** ficam na lista do clique, mesmo paradas há
   dias: uma sessão só sai quando o Claude dela fecha (também fechando o
