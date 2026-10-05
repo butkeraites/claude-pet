@@ -338,13 +338,21 @@ pede que você digite «sim» no terminal).
 - **Quando o pet reinicia** (uma atualização, um crash), as sessões abertas
   do Claude não somem: elas voltam de `/state/sessoes.json` (só metadados:
   ids opacos, a pasta do projeto, o estado, os avisos e o terminal de cada
-  uma), no estado em que estavam, sem festa nem chamada de novo; uma espera
-  segue a chamada de onde parou. O turno que estava no meio não volta: a
+  uma), no estado em que estavam, sem festa nem chamada de novo, com o "não
+  perturbe", a soneca e a discrição da tela compartilhada de antes; uma
+  espera segue a chamada de onde parou. Se o pet ficou parado mais de 1 min
+  (a pergunta pode ter sido respondida nesse meio-tempo), a espera volta
+  quieta (o «!» e o clique, sem chamar de novo), e o terminal de cada sessão
+  só volta com o próximo prompt. O turno que estava no meio não volta: a
   sessão fica trabalhando até 5 min depois do último evento, e o próximo
   evento dela segue normalmente. Depois de reiniciar a máquina, ele começa
   vazio (todo Claude de antes acabou); depois de sair e entrar de novo na
   sessão gráfica, as sessões voltam sem o terminal de antes até o próximo
   prompt.
+- **Todas as sessões abertas** ficam na lista do clique, mesmo paradas há
+  dias: uma sessão só sai quando o Claude dela fecha (também fechando o
+  terminal) ou depois de uma semana sem nada; uma espera sem nenhum sinal da
+  sessão por 12 h sai sozinha.
 
 `bin/pet testar medio`, `grande`, `pergunta` e `dois-prontos` mostram cada
 uma dessas coisas com sessões de teste (que somem em 60 s), e o
