@@ -164,6 +164,10 @@ claude plugin install bichinho@bichinho-local
 claude plugin list                    # bichinho@bichinho-local habilitado
 ```
 
+Uma sessão do Claude aberta antes da instalação não manda nada ao pet até um
+`/reload-plugins` nela, e mesmo depois só aparece com o próximo evento (um
+prompt).
+
 **Depois de cada merge** (e, na primeira vez, a troca do `avisar.sh` pelo
 hook nativo, plugin 0.2.0), com o clone na `main`:
 
@@ -331,6 +335,16 @@ pede que você digite «sim» no terminal).
   s de compartilhamento, e até 5 min depois que ele acaba: no Hyprland 0.56 o
   sinal pisca quando a tela fica parada), e ele fica discreto como no "não
   perturbe": só a primeira chamada e nenhum voo.
+- **Quando o pet reinicia** (uma atualização, um crash), as sessões abertas
+  do Claude não somem: elas voltam de `/state/sessoes.json` (só metadados:
+  ids opacos, a pasta do projeto, o estado, os avisos e o terminal de cada
+  uma), no estado em que estavam, sem festa nem chamada de novo; uma espera
+  segue a chamada de onde parou. O turno que estava no meio não volta: a
+  sessão fica trabalhando até 5 min depois do último evento, e o próximo
+  evento dela segue normalmente. Depois de reiniciar a máquina, ele começa
+  vazio (todo Claude de antes acabou); depois de sair e entrar de novo na
+  sessão gráfica, as sessões voltam sem o terminal de antes até o próximo
+  prompt.
 
 `bin/pet testar medio`, `grande`, `pergunta` e `dois-prontos` mostram cada
 uma dessas coisas com sessões de teste (que somem em 60 s), e o

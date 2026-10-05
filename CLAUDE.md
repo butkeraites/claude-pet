@@ -65,8 +65,12 @@ terminal da sessão a soltam), a escalada olha o terminal da sessão que
 espera, os voos da volta têm a conta deles e só saem com o pet na tela, a
 espera cabe no orçamento (o ritmo atento e a pose parada da L2 em diante), a
 tela compartilhada é discreta como o "não perturbe" e o
-`scripts/medir-custo.sh` mede o pet acordado. A produção roda a branch (com
-o estado do Renan intacto); a conferência na tela pede a sessão
+`scripts/medir-custo.sh` mede o pet acordado. Depois da revisão, a memória
+das sessões (T5.25–T5.26, decisões 0093 e 0094): o pet que reinicia devolve,
+quietas, as sessões abertas do Claude de `/state/sessoes.json` (só
+metadados), com os prazos refeitos pela hora de parede; nada volta depois de
+um boot da máquina, e as janelas de outro compositor saem. A produção roda a
+branch (com o estado do Renan intacto); a conferência na tela pede a sessão
 desbloqueada. Para voltar a produção para a `main` antes do merge:
 `git -C ~/Documents/claude-pet switch main && bin/pet subir`, no clone (nunca
 na worktree estável; nunca mexa no `/state`), e depois `switch m5-cerebro`
@@ -107,8 +111,8 @@ atravessando a tela, a variedade parada).
   `~/.claude/projects/-home-barbaruiva-Documents-claude-pet-tmp-m5-pesquisa-sessao-{a,b,c}`
   e `/tmp/claude-1000/-home-barbaruiva-Documents-claude-pet-tmp-m5-pesquisa-sessao-{a,b,c}`,
   o plano `~/.claude/plans/planeje-como-criar-um-lazy-stream.md` e as linhas
-  delas no `~/.claude/history.jsonl` (as da revisão, `tmp/m5-revisao`,
-  também);
+  delas no `~/.claude/history.jsonl` (as da revisão, `tmp/m5-revisao`, e as
+  duas da conferência da memória, `tmp/m5-memoria/sessao`, também);
 - a conferência na tela do M4 (`scripts/verificar-m4.sh` e `--manual`, com
   o checklist do HDMI, da tampa e da suspensão) e o
   `scripts/e2e-monitor.sh --autorizo` (o Renan digita «sim» a cada vez);
@@ -415,6 +419,32 @@ Fora dele, use `~/.cargo/bin/cargo`.
   janela ativa na conexão). Sem conexão Wayland o socket2 continua lido: todo
   prazo que o Motor anuncia tem de vencer também no
   `Motor::vencer_sem_conexao`, senão o laço gira a 100% de CPU.
+- **A memória das sessões** (`/state/sessoes.json`, decisão 0093): o pet
+  grava no batimento de 5 s quando ela muda e no SIGTERM (um `kill -9` perde
+  os últimos segundos), e lê na partida, antes de achar o compositor. Volta
+  só o que ainda vale pelas regras de sempre, quieto (nem festa, nem chamada
+  de novo; a escalada segue do tempo que passou), marcado `restaurada` no
+  `/v1/estado.sessoes` até o próximo evento da sessão, e a intenção
+  `restauracao` diz quantas. O turno aberto na parada não volta: a sessão
+  fica no estado dela até 5 min depois do último evento, ou até o
+  `idle_prompt` (que também tira a espera que sobrou: ele nunca sai com um
+  diálogo na tela; decisão 0094). Outro boot id: nada volta
+  (`maquina_reiniciou`); outra instância do Hyprland: as sessões ficam sem as
+  janelas. O arquivo é do
+  volume do Renan: leia (`docker compose exec -T bichinho cat
+  /state/sessoes.json`, só metadados), nunca mexa nele na produção.
+- **Uma sessão do Claude aberta antes de o plugin ser instalado** não manda
+  nada até um `/reload-plugins` nela (a sessão principal do Renan só chegou
+  ao pet em 2026-10-05, depois de um), e mesmo depois só aparece no pet com o
+  próximo evento (um prompt): a memória não ajuda aí, porque o pet nunca a
+  viu.
+- Para conferir a memória ao vivo sem tocar na produção: um daemon de
+  rascunho da branch na 27391 (`PET_ESCUTA`, `PET_PORTA_PUBLICA`,
+  `PET_ESTADO` e `PET_CONFIG` numa pasta de `tmp/`, `PET_HOST_RUNTIME=/nao/existe`),
+  parado pelo PID com SIGTERM, e uma sessão aninhada com `PET_PORTA=27391`;
+  para simular um boot, troque o `boot` no arquivo do rascunho. Nos
+  cenários, o passo `reinicio` faz o mesmo em relógio falso (um evento com o
+  pet fora se perde; a linha do tempo continua no `t` do cenário).
 - O `shellcheck` não está instalado no host (o `bin/pet verificar` pula).
   Rodado pela imagem oficial, que depois foi removida:
   `docker run --rm --network none -v "$PWD:/mnt:ro" -w /mnt
