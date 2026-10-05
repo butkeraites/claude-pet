@@ -17,9 +17,10 @@
 
 use std::collections::{BTreeMap, VecDeque};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::evento::Terminal;
+use crate::memoria::JanelaGuardada;
 use crate::plataforma::Alca;
 
 /// Trocas guardadas (só trocas de verdade: o mesmo endereço repetido não
@@ -225,7 +226,7 @@ pub fn origem(e: &str, src: Option<&str>) -> Option<Origem> {
 }
 
 /// O quanto se sabe da janela de uma sessão (decisão 0055).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Certeza {
     /// A janela ativa na hora do prompt, sem troca perto.
@@ -265,6 +266,10 @@ pub struct Identidade {
     pub terminal: Option<Terminal>,
     /// Hora (parede) do último prompt casado.
     pub em_ms: u64,
+    /// A instância do compositor em que a janela foi vista (no Hyprland, a
+    /// assinatura; decisão 0093): noutra instância, o mesmo endereço não é a
+    /// mesma janela.
+    pub compositor: Option<String>,
 }
 
 /// A identidade de uma sessão no `/v1/estado.sessoes`.
@@ -281,6 +286,8 @@ pub struct ResumoJanela {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Identidades {
     mapa: BTreeMap<Chave, Identidade>,
+    /// A instância do compositor de agora, se se sabe (decisão 0093).
+    compositor: Option<String>,
 }
 
 impl Identidades {
@@ -300,11 +307,13 @@ impl Identidades {
         ts: u64,
         origem: Origem,
     ) {
+        let compositor = self.compositor.clone();
         let atual = self.mapa.entry(chave).or_insert(Identidade {
             janela: None,
             certeza: Certeza::SemAnel,
             terminal: None,
             em_ms: ts,
+            compositor: None,
         });
         if ts < atual.em_ms {
             return;
@@ -319,6 +328,7 @@ impl Identidades {
             {
                 atual.janela = Some(janela);
                 atual.certeza = Certeza::Certa;
+                atual.compositor = compositor;
             }
             // O começo da sessão não troca uma janela certa.
             Achado::Janela(_) => {}
@@ -354,6 +364,64 @@ impl Identidades {
             certeza: i.certeza,
             terminal: i.terminal.clone(),
         })
+    }
+
+    /// A instância do compositor de agora (decisão 0093): as janelas vistas
+    /// noutra (um logout e um login sem reiniciar a máquina; a memória das
+    /// sessões de antes) saem, e a sessão fica sem janela até o próximo
+    /// prompt casar de novo (as sessões do tmux sobrevivem ao logout). Sem
+    /// instância (o compositor caiu), nada muda. Devolve quantas saíram.
+    pub fn definir_compositor(&mut self, instancia: Option<String>) -> usize {
+        let Some(agora) = instancia else {
+            return 0;
+        };
+        let mut sairam = 0;
+        for identidade in self.mapa.values_mut() {
+            if identidade.janela.is_some() && identidade.compositor.as_ref() != Some(&agora) {
+                identidade.janela = None;
+                identidade.certeza = Certeza::Fechou;
+                sairam += 1;
+            }
+        }
+        self.compositor = Some(agora);
+        sairam
+    }
+
+    /// A instância do compositor de agora, se se sabe.
+    pub fn compositor(&self) -> Option<&str> {
+        self.compositor.as_deref()
+    }
+
+    /// A janela da sessão para a memória das sessões (decisão 0093).
+    pub fn guardada(&self, chave: &Chave) -> Option<JanelaGuardada> {
+        self.mapa.get(chave).map(|i| JanelaGuardada {
+            endereco: i.janela.as_ref().map(|a| a.0.clone()),
+            compositor: i.compositor.clone(),
+            certeza: i.certeza,
+            em_ms: i.em_ms,
+            terminal: i.terminal.clone(),
+        })
+    }
+
+    /// A janela de uma sessão que a memória restaurou. Uma janela de outra
+    /// instância do compositor (já conhecida) sai na hora; com o compositor
+    /// ainda por achar (a partida da máquina), ela espera a instância dele.
+    pub fn restaurar(&mut self, chave: Chave, guardada: &JanelaGuardada) {
+        let mut identidade = Identidade {
+            janela: guardada.endereco.clone().map(Alca),
+            certeza: guardada.certeza,
+            terminal: guardada.terminal.clone(),
+            em_ms: guardada.em_ms,
+            compositor: guardada.compositor.clone(),
+        };
+        if let Some(agora) = &self.compositor
+            && identidade.janela.is_some()
+            && identidade.compositor.as_ref() != Some(agora)
+        {
+            identidade.janela = None;
+            identidade.certeza = Certeza::Fechou;
+        }
+        self.mapa.insert(chave, identidade);
     }
 }
 

@@ -24,6 +24,8 @@
 //! esta máquina devolve sempre muda alguma coisa quando vence, ou é futuro:
 //! nunca um prazo vencido que fica.
 
+use crate::cerebro::{Instante, depois, instante};
+
 /// A L2 começa aqui.
 pub const L2_APOS_MS: u64 = 30_000;
 /// Entre as rajadas da L2.
@@ -84,8 +86,9 @@ pub enum Passo {
 /// A escalada de um aviso de espera.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Escalada {
-    /// Quando o aviso abriu (relógio do laço).
-    pub desde: u64,
+    /// Quando o aviso abriu (relógio do laço; de antes da partida num aviso
+    /// restaurado, decisão 0093).
+    pub desde: Instante,
     /// O nível anunciado.
     pub nivel: u8,
     rajadas_l2: u8,
@@ -102,7 +105,7 @@ pub struct Escalada {
 
 impl Escalada {
     /// A escalada de um aviso aberto em `desde`, em L1.
-    pub fn nova(desde: u64) -> Escalada {
+    pub fn nova(desde: Instante) -> Escalada {
         Escalada {
             desde,
             nivel: 1,
@@ -117,6 +120,43 @@ impl Escalada {
         }
     }
 
+    /// A escalada de um aviso que a memória das sessões restaurou (decisão
+    /// 0093), aberto em `desde` (de antes da partida) e olhada em `agora`:
+    /// segue do tempo que passou, quieta. O nível é o de antes (`nivel`, o
+    /// que o pet chamava na gravação; sem ele, a L1); as rajadas e os voos
+    /// cuja hora já passou contam como gastos, e o próximo de cada um sai um
+    /// intervalo inteiro depois de agora. Nada sai na hora da partida: a fase
+    /// de agora sobe o nível no próximo [`Self::vencer`], com o Renan a
+    /// chamar, e o pulso da L4 liga ali se ainda for a hora dele.
+    pub fn retomada(desde: Instante, nivel: Option<u8>, agora: u64) -> Escalada {
+        let mut e = Escalada::nova(desde);
+        e.nivel = nivel.unwrap_or(1).clamp(1, 4);
+        let idade = e.idade(agora);
+        let fase = e.fase(agora);
+        if fase >= 2 {
+            let passadas = (idade - L2_APOS_MS) / RAJADA_L2_CADA_MS + 1;
+            e.rajadas_l2 = if fase == 2 {
+                u8::try_from(passadas).map_or(RAJADAS_L2, |n| n.min(RAJADAS_L2))
+            } else {
+                RAJADAS_L2
+            };
+            e.proxima_l2 = Some(agora + RAJADA_L2_CADA_MS);
+        }
+        if fase >= 3 {
+            let passados = (idade - L3_APOS_MS) / VOO_CADA_MS + 1;
+            e.voos = if fase == 3 {
+                u8::try_from(passados).map_or(VOOS_MAX, |n| n.min(VOOS_MAX))
+            } else {
+                VOOS_MAX
+            };
+            e.ultimo_voo = Some(agora);
+        }
+        if fase == 4 {
+            e.proxima_l4 = Some(agora + RAJADA_L4_CADA_MS);
+        }
+        e
+    }
+
     /// O voo da volta, agora; o próximo voo da L3 espera os 60 s dele.
     fn voar_na_volta(&mut self, agora: u64, passos: &mut Vec<Passo>) {
         self.volta_pendente = None;
@@ -126,8 +166,13 @@ impl Escalada {
         self.ultimo_voo = Some(agora);
     }
 
+    /// Quanto tempo o aviso tem em `agora`.
+    fn idade(&self, agora: u64) -> u64 {
+        u64::try_from(instante(agora).saturating_sub(self.desde)).unwrap_or(0)
+    }
+
     fn fase(&self, agora: u64) -> u8 {
-        let e = agora.saturating_sub(self.desde);
+        let e = self.idade(agora);
         if e >= L4_APOS_MS {
             4
         } else if e >= L3_APOS_MS {
@@ -140,7 +185,7 @@ impl Escalada {
     }
 
     fn fim_l4(&self) -> u64 {
-        self.desde + L4_APOS_MS + L4_DURA_MS
+        depois(self.desde, L4_APOS_MS + L4_DURA_MS)
     }
 
     fn subir(&mut self, nivel: u8, passos: &mut Vec<Passo>) {
@@ -250,8 +295,8 @@ impl Escalada {
         if pode {
             // A próxima fase (o nível e o pulso mudam nela).
             for limite in [L2_APOS_MS, L3_APOS_MS, L4_APOS_MS] {
-                if agora < self.desde + limite {
-                    c.push(self.desde + limite);
+                if agora < depois(self.desde, limite) {
+                    c.push(depois(self.desde, limite));
                     break;
                 }
             }
@@ -478,5 +523,83 @@ mod testes {
         };
         assert!(e.vencer(11_000, quieto).is_empty());
         assert_eq!(e.proximo(11_000, CHAMA), Some(30_000), "só a L2");
+    }
+
+    /// Os passos que não são só o nível e o pulso: as rajadas e os voos.
+    fn efeitos(saida: &[(u64, Passo)]) -> Vec<(u64, Passo)> {
+        saida
+            .iter()
+            .filter(|(_, p)| matches!(p, Passo::Rajada | Passo::Voo { .. }))
+            .copied()
+            .collect()
+    }
+
+    #[test]
+    fn a_retomada_segue_do_tempo_que_passou_sem_repetir_nada() {
+        // Um aviso de 10 min, restaurado num pet que acabou de partir (o
+        // relógio do laço em 0, o aviso de antes dele; decisão 0093): na
+        // hora, nada; a L4 sobe no próximo vencer, com o pulso, e a rajada
+        // sai um minuto inteiro depois.
+        let desde: Instante = -600_000;
+        let mut e = Escalada::retomada(desde, Some(4), 0);
+        assert_eq!((e.nivel, e.voos, e.rajadas_l2), (4, VOOS_MAX, RAJADAS_L2));
+        assert_eq!(
+            e.vencer(0, CHAMA),
+            vec![Passo::Pulso(true)],
+            "o pulso da L4"
+        );
+        let saida = rodar(&mut e, 0, 2 * 60 * 60 * 1000, CHAMA);
+        let rajadas: Vec<u64> = efeitos(&saida).iter().map(|(t, _)| *t).collect();
+        assert_eq!(
+            rajadas.first(),
+            Some(&60_000),
+            "um minuto depois da partida"
+        );
+        assert!(efeitos(&saida).iter().all(|(_, p)| *p == Passo::Rajada));
+        // O teto conta do aviso de antes: 35 min depois dele, não da partida.
+        let fim = depois(desde, L4_APOS_MS + L4_DURA_MS);
+        assert_eq!(fim, 1_500_000);
+        assert_eq!(rajadas.last(), Some(&1_440_000));
+        assert!(saida.contains(&(fim, Passo::Pulso(false))));
+        // Sem o nível de antes, a L1; com o Renan a chamar, a fase de agora
+        // sobe sem rajada nem voo na hora.
+        let mut e = Escalada::retomada(-100_000, None, 0);
+        assert_eq!(e.nivel, 1);
+        assert_eq!(e.voos, 1, "o voo dos 90 s já passou");
+        assert!(
+            e.vencer(0, CHAMA).is_empty(),
+            "o próximo voo só daqui a 60 s"
+        );
+        let saida = rodar(&mut e, 0, 199_999, CHAMA);
+        assert_eq!(
+            efeitos(&saida),
+            vec![
+                (60_000, Passo::Voo { volta: false }),
+                (120_000, Passo::Voo { volta: false })
+            ]
+        );
+        // Na L2, as rajadas que já deviam ter saído contam: 40 s depois do
+        // aviso, duas (30 e 36 s); as outras três, de 6 em 6 s depois da partida.
+        let mut e = Escalada::retomada(-40_000, Some(2), 0);
+        assert_eq!(e.rajadas_l2, 2);
+        let saida = rodar(&mut e, 0, 49_999, CHAMA);
+        assert_eq!(
+            efeitos(&saida),
+            vec![
+                (6_000, Passo::Rajada),
+                (12_000, Passo::Rajada),
+                (18_000, Passo::Rajada)
+            ]
+        );
+        // Olhando o terminal da sessão: nada, como antes.
+        let mut e = Escalada::retomada(-600_000, Some(1), 0);
+        let olhando = Contexto {
+            chama: false,
+            ..CHAMA
+        };
+        assert!(rodar(&mut e, 0, 60 * 60 * 1000, olhando).is_empty());
+        // Restaurado depois do teto: o selo parado, nada mais.
+        let mut e = Escalada::retomada(-3_000_000, Some(4), 0);
+        assert!(rodar(&mut e, 0, 60 * 60 * 1000, CHAMA).is_empty());
     }
 }

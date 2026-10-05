@@ -102,7 +102,8 @@ claude (foot) + plugin bichinho                            PID1 docker-init (ini
 
 **Falhas esperadas, tratadas dentro do processo:**
 - compositor some ou cai o EOF do socket2: espera e reconecta;
-- skin com defeito: usa o último snapshot aprovado ou se esconde, **nunca** a skin de teste.
+- skin com defeito: usa o último snapshot aprovado ou se esconde, **nunca** a skin de teste;
+- o pet reinicia (uma atualização, um crash): as sessões abertas do Claude voltam da memória em `/state/sessoes.json`, quietas; depois de um boot da máquina, não (decisão 0093).
 
 **Bugs:**
 - usam `panic = "abort"`, e o `restart: unless-stopped` do Docker traz o processo de volta;
@@ -337,6 +338,7 @@ Essa pasta do Omarchy **nunca** é montada no container, porque guarda o histór
 **Sessões:**
 - Contam só sessões com `ent = cli`. Execuções `claude -p`, SDK e IDE são ignoradas por padrão (config `sessoes.origens`).
 - **SessionEnd sempre** limpa os avisos e o turno daquela sessão; só o "tchau" depende do motivo.
+- *Acréscimo (2026-10-05, decisão 0093):* o pet que reinicia não esquece as sessões abertas. A memória das sessões (`/state/sessoes.json`, só metadados das sessões reais, com o boot id da máquina) é gravada pelo laço principal quando muda (no batimento de 5 s) e no SIGTERM, e lida na partida, antes do compositor. Volta o que ainda vale pelas regras de sempre, contadas das horas de parede de antes (o relógio do laço recomeça do zero): a sessão de até 12 h, o estado com o prazo dele, o pronto e o erro de até 2 h, a espera; nada de turno, corrente ou festa, e a volta é quieta (a escalada segue do tempo que passou). Outra partida da máquina (outro boot id): nada volta; outro compositor: as sessões ficam, sem as janelas de antes.
 
 **Turnos:**
 - A chave é o `prompt_id`.
@@ -791,6 +793,10 @@ Atualizado em 2026-10-05 com a pesquisa do M5 (`docs/pesquisa/10-cerebro-m5.md`,
 - **T5.23** a tela: o orçamento da espera (o ritmo atento na L1 e no erro, só a pose da L2 em diante), o "+N" que não pisca na acomodação, o erro e o cansado que não tocam escondidos, o erro que não segura o sono, a tela compartilhada discreta como o "não perturbe" e o `scripts/medir-custo.sh` com o pet acordado e as fases do M5 (decisão 0091);
 - **T5.24** o que ficou da revisão: o T3 que não tocou não gasta o intervalo, o log da reação do próprio pet, o comentário partido do `bin/pet`, a regra do "✳" fora, a presença no casamento da janela, os limites conhecidos (o tique na mesma janela, as mensagens de teammate e de canal, o "não perturbe" que só chega com os eventos) e as docs (PLANO, CLAUDE.md, README) reconciliadas (decisão 0092).
 
+**A memória das sessões** (relatado pelo Renan em 2026-10-05: cada reinício do pet esquecia as sessões abertas, e o clique dizia "nenhuma sessão do Claude aberta"; decisão 0093):
+- **T5.25** a memória das sessões: `pet_core::memoria` (o formato com versão, só metadados das sessões reais, até 64 sessões e 256 KiB, conferido campo a campo), os instantes do laço com sinal no cérebro e na escalada (`cerebro::Instante`, `Agora::no_laco`, `cerebro::depois`), o `Cerebro::restaurar` pelas regras de sempre, o `Motor::restaurar` quieto (a `Escalada::retomada`, a intenção `restauracao`, a marca `restaurada` no `/v1/estado.sessoes`), a instância do compositor nas janelas (`Motor::definir_compositor`), no daemon a gravação de uma vez pelo laço (no batimento, quando muda, e no SIGTERM) e o boot id do Linux; o passo `reinicio` nos cenários (e no `docs/CENARIOS.md`) e os dourados de reinício, o teste do daemon de verdade e o canário;
+- **T5.26** as docs e a conferência: o CLAUDE.md (o estado, as pegadinhas da memória e do `/reload-plugins`), o README, a conferência ao vivo num daemon de rascunho com uma sessão aninhada, e a produção refeita da branch e reiniciada com as sessões reais do Renan na lista antes e depois.
+
 **Verificação:** `bin/pet verificar` verde a cada commit e `cargo test -p pet-core` com os cenários. Tabelas, exemplos de pontuação (decisão 0074) e cenários:
 
 | Cenário | Esperado |
@@ -816,6 +822,13 @@ Atualizado em 2026-10-05 com a pesquisa do M5 (`docs/pesquisa/10-cerebro-m5.md`,
 | `protetor-de-tela` | a festa não toca escondida; o pronto fica |
 | `compartilhando-tela` | balão sem nome de projeto |
 | `real-*` (da pesquisa, pseudonimizados) | o agente em segundo plano numa festa só; o servidor e a notificação do shell; o laço; a pergunta e o plano; o Esc; o `/compact` |
+| `reinicio-sessao-parada` | o pet reinicia: a sessão parada volta na lista do clique com o tempo de antes, sem tocar nada; a de teste não volta (decisão 0093) |
+| `reinicio-no-meio-do-turno` | o turno aberto não volta; a sessão volta trabalhando até o prazo dela; o próximo evento abre um turno implícito e o Stop festeja o que veio depois; o Stop perdido com o pet fora espera o `idle_prompt` |
+| `reinicio-com-pergunta` | a escalada segue do tempo que passou, sem chamar de novo; os voos e a L4 nas horas deles |
+| `reinicio-com-pronto-e-erro` | o pronto e o erro voltam sem festa nem susto; o clique leva aos terminais de antes |
+| `reinicio-depois-de-13-h` | a sessão de 13 h não volta; a de 11 h sai na hora dela |
+| `reinicio-da-maquina`, `reinicio-com-arquivo-corrompido` | nada volta |
+| `reinicio-com-outro-compositor` | a sessão volta sem a janela de antes; o próximo prompt casa a nova |
 
 **Verificação da segunda metade:** o desenho não muda as intenções (os dourados e o teste que roda todos os cenários sem personagem); o orçamento em relógio falso, com o compositor mostrando cada quadro na hora (o pior caso): trabalhando por 20 min, na espera da L4 por 10 min e parado por 30 min, em média até 2 commits/s, o sono profundo sem commit nenhum, e as rajadas (o voo, o confete) curtas e sem dois quadros a menos de 34 ms; cada desenho novo em blocos inteiros (D, ou a metade dele nos selos) e dentro do monitor; o canário do socket2 com segredos no `screencastv2`; ao vivo, `bin/pet testar medio|grande|pergunta|dois-prontos` com a reação e o nível no `/v1/estado`; com a tela acesa e desbloqueada, `bin/pet foto`, a nitidez e o `scripts/medir-custo.sh`.
 

@@ -124,7 +124,8 @@ impl Prioridade {
             _ => {}
         }
         if aviso.is_some_and(|a| {
-            a.tipo == TipoAviso::Pronto && agora_ms < a.desde_mono + PRONTO_NA_BASE_MS
+            a.tipo == TipoAviso::Pronto
+                && agora_ms < cerebro::depois(a.desde_mono, PRONTO_NA_BASE_MS)
         }) {
             return Prioridade::Pronto;
         }
@@ -535,13 +536,18 @@ impl Motor {
     /// a sessão não tem aviso de espera.
     fn fim_da_espera_na_base(&self, s: &ResumoSessao) -> Option<u64> {
         let aviso = s.aviso.filter(|a| a.tipo == TipoAviso::Esperando)?;
-        let teto = aviso.desde_mono + escalada::L4_APOS_MS + escalada::L4_DURA_MS;
+        let teto = cerebro::depois(
+            aviso.desde_mono,
+            escalada::L4_APOS_MS + escalada::L4_DURA_MS,
+        );
         let vista = self
             .chamando
             .as_ref()
             .filter(|c| c.chave == s.chave && c.desde_ms == aviso.desde_ms)
             .and_then(|c| c.vista_ms);
-        Some(vista.map_or(teto, |v| (v + ESPERA_VISTA_NA_BASE_MS).min(teto)))
+        Some(vista.map_or(teto, |v| {
+            cerebro::depois(v, ESPERA_VISTA_NA_BASE_MS).min(teto)
+        }))
     }
 
     /// A tela como ela deveria estar em `agora_ms`, do que o cérebro sabe.
@@ -605,7 +611,7 @@ impl Motor {
         let mut mais = 0;
         for s in &sessoes {
             if let Some(a) = s.aviso.filter(|a| a.tipo == TipoAviso::Pronto) {
-                let fim = a.desde_mono + PRONTO_NA_BASE_MS;
+                let fim = cerebro::depois(a.desde_mono, PRONTO_NA_BASE_MS);
                 if fim > agora_ms {
                     proxima.push(fim);
                 }

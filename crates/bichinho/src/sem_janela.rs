@@ -87,6 +87,9 @@ pub fn laco(nucleo: &mut Nucleo, recebe: &mpsc::Receiver<Comando>) {
             nucleo.vencer(None);
         }
         nucleo.publicar(None);
+        // A memória das sessões, se mudou (no máximo a cada 4 s; decisão
+        // 0093).
+        nucleo.guardar_memoria(false);
     }
 }
 

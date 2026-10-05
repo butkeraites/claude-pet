@@ -421,6 +421,8 @@ impl Laco {
                 let janela = laco.viva.as_ref().map(|viva| &viva.sessao as &dyn Punho);
                 laco.nucleo.publicar(janela);
             }
+            // A memória das sessões, se mudou (decisão 0093).
+            laco.nucleo.guardar_memoria(false);
             TimeoutAction::ToDuration(BATIMENTO)
         }) {
             Ok(token) => self.batimento = Some(token),
@@ -476,8 +478,10 @@ impl Laco {
             }
         };
         // O socket2 da instância é lido desde já, mesmo se a conexão Wayland
-        // falhar e tiver de esperar o backoff.
+        // falhar e tiver de esperar o backoff. As janelas das sessões vistas
+        // noutra instância (um logout e um login) saem (decisão 0093).
         self.garantir_leitor(&instancia.assinatura, &instancia.eventos);
+        self.nucleo.definir_compositor(&instancia.assinatura);
         let assinatura = instancia.assinatura;
         let nome_wayland = instancia.nome_wayland;
         let conexao = match pet_wayland::conectar(instancia.wayland, self.nucleo.inicio()) {
@@ -536,6 +540,9 @@ impl Laco {
     /// camada e espera, com prazo, o compositor confirmar que processou tudo,
     /// para o fade de saída do Hyprland sair vazio.
     fn encerrar(&mut self) {
+        // A memória das sessões primeiro: o disco é rápido, e o compositor
+        // pode demorar (o `stop_grace_period` é de 5 s; decisão 0093).
+        self.nucleo.guardar_memoria(true);
         if let Some(viva) = self.viva.as_mut() {
             self.nucleo.encerrar(&mut viva.sessao);
         }

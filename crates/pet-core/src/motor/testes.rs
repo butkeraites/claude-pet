@@ -4368,3 +4368,263 @@ fn um_voo_que_acabou_sem_quadros_nao_segura_a_volta_do_renan() {
     assert_eq!(v.motivo, "voltou");
     assert!(v.inicio_ms > primeiro.fim_ms());
 }
+
+// --- a memória das sessões (decisão 0093) ------------------------------------
+
+/// O relógio de um pet que partiu na hora de parede `volta`, `mono_ms`
+/// depois: o do laço recomeçou do zero.
+fn na_volta(volta: u64, mono_ms: u64) -> Agora {
+    Agora {
+        parede_ms: volta + mono_ms,
+        mono_ms,
+    }
+}
+
+/// O que tocou ou foi dito: as intenções de reação, rajada, voo, festa e
+/// balão.
+fn tocou(motor: &Motor) -> Vec<intencoes::Intencao> {
+    motor
+        .intencoes()
+        .filter(|i| {
+            matches!(
+                i.tipo,
+                intencoes::Tipo::Reacao { .. }
+                    | intencoes::Tipo::Rajada { .. }
+                    | intencoes::Tipo::Voo { .. }
+                    | intencoes::Tipo::Festa { .. }
+                    | intencoes::Tipo::FestaMesclada { .. }
+                    | intencoes::Tipo::Balao { .. }
+            )
+        })
+        .cloned()
+        .collect()
+}
+
+#[test]
+fn a_memoria_leva_so_metadados_das_sessoes_reais_com_a_janela_e_a_escalada() {
+    let mut motor = Motor::novo(ConfigCerebro::default());
+    motor.acertar_relogio(em(0));
+    motor.definir_compositor(Some("hyprland-a".into()));
+    ligar_desktop(&mut motor, 0);
+    ocioso(&mut motor, false, 0);
+    ativou(&mut motor, Some("f00d01"), 1_000);
+    let mut prompt = hook_de("sessao-a", "api", "UserPromptSubmit", 2_000);
+    prompt.term = Some(crate::evento::Terminal {
+        tmux: Some("%7".into()),
+        ..Default::default()
+    });
+    mandar(&mut motor, prompt, 2_000);
+    // O Renan noutra janela: a permissão chama e escala até a L2.
+    ativou(&mut motor, Some("f00d03"), 3_000);
+    hook_em(&mut motor, "sessao-a", "api", "PermissionRequest", 4_000);
+    andar(&mut motor, 40_000);
+    assert_eq!(motor.nivel_da_escalada(), 2);
+    let teste = Evento {
+        teste: true,
+        ..hook_de("sessao-de-teste", "demo", "UserPromptSubmit", 41_000)
+    };
+    mandar(&mut motor, teste, 41_000);
+    let memoria = motor.memoria(em(41_000), Some("boot-1".into()));
+    assert_eq!(memoria.gravada_ms, PAREDE + 41_000);
+    assert_eq!(memoria.boot.as_deref(), Some("boot-1"));
+    assert_eq!(memoria.sessoes.len(), 1, "a de teste nunca vai");
+    let g = &memoria.sessoes[0];
+    assert_eq!(
+        (g.sid.as_str(), g.proj.as_deref(), g.estado),
+        ("sessao-a", Some("api"), EstadoSessao::Esperando)
+    );
+    let j = g.janela.as_ref().expect("a janela");
+    assert_eq!(
+        (
+            j.endereco.as_deref(),
+            j.compositor.as_deref(),
+            j.certeza,
+            j.terminal.as_ref().and_then(|t| t.tmux.as_deref())
+        ),
+        (
+            Some("f00d01"),
+            Some("hyprland-a"),
+            janelas::Certeza::Certa,
+            Some("%7")
+        )
+    );
+    let a = g.aviso.expect("o aviso");
+    assert_eq!(
+        (a.tipo, a.desde_ms, a.nivel, a.vista_ms),
+        (TipoAviso::Esperando, PAREDE + 4_000, Some(2), None)
+    );
+    let texto = memoria.texto();
+    assert!(
+        !texto.contains("teste") && !texto.contains("demo"),
+        "{texto}"
+    );
+    // O texto volta igual pela leitura.
+    assert_eq!(crate::memoria::ler(&texto).unwrap().memoria, memoria);
+}
+
+/// Um Motor com a sessão `sessao-a` no foot1 esperando uma permissão desde 4
+/// s, o Renan no terminal dela e presente: o diálogo visto aos 9 s.
+fn espera_vista() -> Motor {
+    let mut motor = Motor::novo(ConfigCerebro::default());
+    motor.acertar_relogio(em(0));
+    motor.definir_compositor(Some("hyprland-a".into()));
+    ligar_desktop(&mut motor, 0);
+    ocioso(&mut motor, false, 0);
+    ativou(&mut motor, Some("f00d01"), 1_000);
+    prompt_em(&mut motor, "sessao-a", "api", 2_000);
+    hook_em(&mut motor, "sessao-a", "api", "PermissionRequest", 4_000);
+    andar(&mut motor, 20_000);
+    assert!(
+        motor
+            .painel_da_tela(20_000)
+            .escalada
+            .is_some_and(|e| e.vista)
+    );
+    motor
+}
+
+#[test]
+fn a_volta_e_quieta_e_o_dialogo_visto_continua_visto() {
+    let antes = espera_vista();
+    let texto = antes.memoria(em(20_000), Some("boot-1".into())).texto();
+    let lida = crate::memoria::ler(&texto).unwrap();
+    assert_eq!(
+        lida.memoria.sessoes[0].aviso.and_then(|a| a.vista_ms),
+        Some(PAREDE + 9_000)
+    );
+    // O pet volta 10 s depois, com o personagem na tela.
+    let volta = PAREDE + 30_000;
+    let (mut motor, _janela) = ligado();
+    motor.gravar_todas_as_intencoes();
+    let r = motor
+        .restaurar(&lida, Some("boot-1"), na_volta(volta, 0))
+        .unwrap();
+    assert_eq!(
+        r,
+        Restauracao {
+            sessoes: 1,
+            avisos: 1,
+            janelas: 1,
+            de_fora: 0
+        }
+    );
+    motor.definir_compositor(Some("hyprland-a".into()));
+    assert!(tocou(&motor).is_empty(), "nada toca na volta");
+    let escalada = motor.painel_da_tela(0).escalada.expect("a escalada segue");
+    assert!(escalada.vista && escalada.nivel == 1);
+    // O Renan sai: visto, nada escala (nem rajada, nem voo, nem pulso).
+    ocioso(&mut motor, true, 1_000);
+    let mut t = 1_000;
+    while let Some(p) = motor.prazo_do_cerebro().filter(|p| *p <= 10 * 60_000) {
+        motor.tique(na_volta(volta, p));
+        t = p;
+    }
+    assert!(t > 0);
+    let tocou_depois: Vec<_> = tocou(&motor)
+        .into_iter()
+        .filter(|i| !matches!(i.tipo, intencoes::Tipo::Reacao { nome: ref n, .. } if n == BOCEJO))
+        .collect();
+    assert!(tocou_depois.is_empty(), "{tocou_depois:?}");
+    // A pose de espera sai 2 min depois de visto (os 9 s de antes): 99 s
+    // depois da volta, não 2 min depois dela.
+    let bases: Vec<(u64, &str)> = motor
+        .intencoes()
+        .filter_map(|i| match i.tipo {
+            intencoes::Tipo::Base { estado, .. } => Some((i.t_ms, estado)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(bases.first(), Some(&(0, "waiting")));
+    assert!(bases.contains(&(99_000, "idle")), "{bases:?}");
+}
+
+#[test]
+fn a_memoria_de_outra_partida_da_maquina_nao_volta() {
+    let antes = espera_vista();
+    let lida =
+        crate::memoria::ler(&antes.memoria(em(20_000), Some("boot-1".into())).texto()).unwrap();
+    let (mut motor, _janela) = ligado();
+    motor.gravar_todas_as_intencoes();
+    let volta = PAREDE + 30_000;
+    assert_eq!(
+        motor.restaurar(&lida, Some("boot-2"), na_volta(volta, 0)),
+        Err(crate::memoria::Recusa::MaquinaReiniciou)
+    );
+    assert_eq!(
+        motor.restaurar(&lida, None, na_volta(volta, 0)),
+        Err(crate::memoria::Recusa::SemBoot)
+    );
+    assert!(motor.resumo().sessoes.is_empty());
+    assert!(motor.painel_da_tela(0).escalada.is_none());
+    let motivos: Vec<Option<&str>> = motor
+        .intencoes()
+        .filter_map(|i| match i.tipo {
+            intencoes::Tipo::Restauracao { motivo, .. } => Some(motivo),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(motivos, vec![Some("maquina_reiniciou"), Some("sem_boot")]);
+}
+
+#[test]
+fn outra_instancia_do_compositor_tira_as_janelas_de_antes() {
+    // Ao vivo: um logout e um login com o pet de pé.
+    let mut motor = Motor::novo(ConfigCerebro::default());
+    motor.acertar_relogio(em(0));
+    motor.definir_compositor(Some("hyprland-a".into()));
+    ligar_desktop(&mut motor, 0);
+    ativou(&mut motor, Some("f00d01"), 1_000);
+    prompt_em(&mut motor, "sessao-a", "api", 2_000);
+    assert_eq!(
+        janela_da(&motor, "sessao-a").unwrap().endereco.as_deref(),
+        Some("f00d01")
+    );
+    assert_eq!(motor.definir_compositor(Some("hyprland-a".into())), 0);
+    assert_eq!(
+        motor.definir_compositor(None),
+        0,
+        "sem instância, nada muda"
+    );
+    assert_eq!(motor.definir_compositor(Some("hyprland-b".into())), 1);
+    let j = janela_da(&motor, "sessao-a").unwrap();
+    assert_eq!(
+        (j.endereco, j.certeza),
+        (None, janelas::Certeza::Fechou),
+        "a sessão fica; a janela era da outra instância"
+    );
+    assert!(
+        motor.desktop().anel.ativa().is_none(),
+        "o anel era da outra"
+    );
+    assert!(motor.desktop().janela_ativa.is_none());
+    // A memória: a janela de uma instância ainda por achar espera por ela.
+    let mut antes = Motor::novo(ConfigCerebro::default());
+    antes.acertar_relogio(em(0));
+    antes.definir_compositor(Some("hyprland-a".into()));
+    ligar_desktop(&mut antes, 0);
+    ativou(&mut antes, Some("f00d01"), 1_000);
+    prompt_em(&mut antes, "sessao-a", "api", 2_000);
+    let lida = crate::memoria::ler(&antes.memoria(em(3_000), Some("b".into())).texto()).unwrap();
+    for (instancia, endereco) in [("hyprland-a", Some("f00d01")), ("hyprland-b", None)] {
+        let mut motor = Motor::novo(ConfigCerebro::default());
+        let r = motor
+            .restaurar(&lida, Some("b"), na_volta(PAREDE + 5_000, 0))
+            .unwrap();
+        assert_eq!(r.janelas, 1, "a partida não espera o compositor");
+        motor.definir_compositor(Some(instancia.into()));
+        assert_eq!(
+            janela_da(&motor, "sessao-a")
+                .and_then(|j| j.endereco)
+                .as_deref(),
+            endereco,
+            "{instancia}"
+        );
+    }
+    // Com a instância já conhecida na partida, a de outra sai na hora.
+    let mut motor = Motor::novo(ConfigCerebro::default());
+    motor.definir_compositor(Some("hyprland-c".into()));
+    let r = motor
+        .restaurar(&lida, Some("b"), na_volta(PAREDE + 5_000, 0))
+        .unwrap();
+    assert_eq!(r.janelas, 0);
+}

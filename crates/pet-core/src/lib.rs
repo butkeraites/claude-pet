@@ -24,6 +24,7 @@ pub mod estados;
 pub mod evento;
 pub mod fonte;
 pub mod geometria;
+pub mod memoria;
 pub mod motor;
 pub mod plataforma;
 pub mod raster;

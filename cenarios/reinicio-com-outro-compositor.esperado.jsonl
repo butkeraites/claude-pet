@@ -1,0 +1,19 @@
+{"t":2000,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":10000,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
+{"t":12800,"i":"turno","sid8":"s1","turno8":"p1","fim":"stop","nivel":"T1","pontuacao":0.65,"reacao":"done_small"}
+{"t":12800,"i":"festa","sid8":"s1","nivel":"T1","reacao":"done_small"}
+{"t":12800,"i":"balao","linhas":["Prontinho! api"],"motivo":"festa"}
+{"t":12800,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}
+{"t":50000,"i":"restauracao","sessoes":1,"avisos":1}
+{"t":50000,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}
+{"t":60000,"i":"balao","linhas":["api: pronto","a janela dela fechou","api: pronto (48 s)"],"motivo":"sem_foco"}
+{"t":60000,"i":"clique","resultado":"nao_focou","sid8":"s1"}
+{"t":75000,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":80000,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
+{"t":85800,"i":"turno","sid8":"s1","turno8":"p2","fim":"stop","nivel":"T1","pontuacao":0.17,"reacao":"done_small"}
+{"t":85800,"i":"festa","sid8":"s1","nivel":"T1","reacao":"done_small"}
+{"t":85800,"i":"balao","linhas":["Prontinho! api"],"motivo":"festa"}
+{"t":85800,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}
+{"t":90000,"i":"reacao","nome":"giggle","motivo":"clique"}
+{"t":90000,"i":"clique","resultado":"focou","sid8":"s1"}
+{"t":90500,"i":"base","estado":"idle","prioridade":"parado"}

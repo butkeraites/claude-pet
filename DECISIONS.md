@@ -3989,3 +3989,139 @@ outros.
 ninguém cumpre; melhor dizer por quê e o que a substitui. Os limites são o que
 a semana de calibração do M7 vai encontrar: escritos, não são defeitos a
 descobrir de novo.
+
+## 0093 — A memória das sessões: o pet que reinicia não esquece as sessões abertas do Claude (2026-10-05)
+
+**Problema:** o cérebro guarda as sessões só na memória do processo. Cada
+reinício do pet (toda atualização refaz a produção, um crash, um `docker
+restart`) esquecia todas as sessões abertas, e uma sessão parada não manda
+nada (o `idle_prompt` sai uma vez por turno, ~60 s depois do Stop): o clique
+no Zeca dizia "nenhuma sessão do Claude aberta" com o Renan cheio de sessões
+abertas, até cada uma ser usada de novo (relatado pelo Renan em 2026-10-05).
+O Zeca tem de acompanhar todas as sessões abertas (decisão do Renan). E os
+prazos do cérebro contam num relógio monotônico que recomeça do zero com o
+processo: guardar os instantes dele não serviria.
+**Escolha:**
+- **O arquivo** `/state/sessoes.json` (`pet_core::memoria`, versão 1, no
+  máximo 64 sessões, `MAX_SESSOES`, em até 256 KiB): só as sessões reais,
+  nunca as de teste, e só metadados: o `sid` inteiro (opaco, para casar os
+  próximos eventos; no `/v1/estado` continua só o `sid8`), o nome da pasta do
+  projeto, a origem, o estado e desde quando, a hora do último evento, os
+  agendamentos do último Stop (o `crn`, que separa o tique do prompt
+  digitado), o aviso pendente (o tipo, a espera, desde quando e, no aviso que
+  o pet chamava, o nível da escalada e a hora em que o Renan viu o diálogo),
+  a janela do terminal (o endereço, a instância do compositor a que ele
+  pertence, a certeza e a hora do casamento) e os ids de terminal. Nada de
+  prompt, título de janela ou caminho; os tempos são de parede. O boot id da
+  máquina vai junto.
+- **A gravação** é só do laço principal, nunca da entrada HTTP nem do hook:
+  no batimento de 5 s, se a memória mudou desde a última gravação (no máximo
+  a cada 4 s), e no SIGTERM, antes do adeus ao compositor (o
+  `stop_grace_period` é de 5 s). De uma vez: um arquivo temporário na mesma
+  pasta, só do dono (0600), e o `rename`. Um `kill -9` perde no máximo os
+  últimos segundos.
+- **A leitura** é na partida, antes de achar o compositor (no boot o pet sobe
+  antes dele; nada espera por ele). A conferência é a do fio v1, campo a
+  campo: uma sessão com um campo ruim fica de fora; o arquivo que não é este
+  JSON, de outra versão ou grande demais é ignorado inteiro, com um aviso que
+  não cita o conteúdo, e o pet começa vazio. A primeira gravação troca o
+  arquivo ruim, e um que falta é só a primeira partida.
+- **Os relógios:** a hora de parede gravada vira o instante do relógio novo
+  (`Agora::no_laco`), negativo quando é de antes da partida. O cérebro passa a
+  guardar o último evento, a entrada no estado e o aviso como `Instante` (ms
+  com sinal), e a escalada o começo do aviso; todo prazo sai deles
+  (`cerebro::depois`), e um prazo de antes da partida já venceu. Assim os
+  prazos restaurados são os de antes, contados no relógio novo, e nada muda
+  para o pet que não reiniciou (os testes e os dourados de antes passaram sem
+  mexer). Um teste restaura com o relógio do laço em 0 e a parede 30 s
+  adiante e confere cada prazo ao milissegundo.
+- **O que volta** (`Cerebro::restaurar`) é o que ainda vale pelas regras de
+  sempre, contadas das horas de antes: a sessão com o último evento há menos
+  de 12 h (`VIDA_SESSAO_MS`) e de uma origem que o config aceita, as mais
+  novas primeiro; o estado com o prazo dele; o pronto e o erro até 2 h; o
+  "esperando você" enquanto a sessão vive. A sessão guarda a hora do último
+  evento de antes (a vida de 12 h e o `SessionEnd` a tiram como antes) e vai
+  marcada `restaurada` no `/v1/estado.sessoes` até o próximo evento dela.
+- **O turno aberto não volta, e a sessão volta no estado dela só pelo prazo
+  dele.** O Stop pode ter se perdido com o pet fora (o hook é assíncrono, não
+  acha o pet e não tenta de novo). Nada de turno, corrente ou festa: a sessão
+  que trabalhava (pensando, trabalhando, compactando) volta assim até 5 min
+  depois do último evento dela, o prazo de sempre de um turno cujo Stop não
+  vem (o do Esc, decisões 0076 e 0092), ou até o `idle_prompt`, que a deixa
+  parada sem festa. O próximo evento do turno abre um turno implícito, como no
+  M3, e o Stop festeja o que veio depois da volta, com o pronto. Voltar
+  parada de cara mostraria "parado" com o Claude trabalhando até o próximo
+  evento; o prazo curto erra menos, e para o mesmo lado de um Stop perdido
+  sem reinício nenhum.
+- **A volta é quieta:** nenhuma reação, festa, olá, balão ou chamada de novo.
+  O erro e o cansado entram como já vistos (sem o susto) e ficam o resto dos
+  60 s deles; os avisos de espera contam como já chamados (sem a L1 de
+  novo). A escalada do aviso de espera mais velho **segue do tempo que
+  passou** (`Escalada::retomada`): o nível de antes; as rajadas e os voos
+  cuja hora já passou contam como gastos; o próximo de cada um sai um
+  intervalo inteiro depois da volta; a fase de agora sobe o nível nas horas
+  dela (a L4 com o pulso aos 5 min do aviso, o teto aos 35, contados do aviso
+  de antes); o diálogo que o Renan já tinha visto continua visto. Recomeçar
+  da base quieta repetiria a L2 e a L3 de um aviso que já passou por elas, e
+  ensinaria o Renan a ignorar o pet (decisão 0090). A intenção `restauracao`
+  diz quantas sessões e avisos voltaram e quantas ficaram de fora (ou por que
+  nada voltou), e a `escalada` com o motivo `restaurada` diz de onde a
+  escalada segue.
+- **A máquina que reiniciou:** depois de um boot todo Claude de antes morreu,
+  e as sessões seriam fantasmas por 12 h. O daemon lê o boot id do Linux
+  (`/proc/sys/kernel/random/boot_id`, o do host também dentro do container),
+  atrás da costura de plataforma; o núcleo só compara. Outro boot id, ou um
+  que falta na gravação ou agora: nada volta (uma sessão fantasma é pior que
+  esquecer). Sem o boot id (Windows e macOS até o M8), nada é guardado.
+- **Outro compositor** (um logout e um login sem reiniciar a máquina; as
+  sessões do tmux sobrevivem): a janela de cada sessão leva a instância do
+  compositor em que foi vista (no Hyprland, a assinatura que a descoberta
+  acha). Quando a descoberta acha uma instância, as janelas vistas noutra
+  saem (a certeza vira "fechou", e o clique diz que a janela dela fechou): a
+  sessão fica, e o próximo prompt digitado casa a janela nova. Vale também
+  com o pet de pé (antes, o endereço velho ficava, e noutra instância poderia
+  ser outra janela), e o anel e a janela ativa da instância de antes saem
+  junto. Na partida, a janela restaurada espera a instância ser achada.
+- **Testes:** no cérebro, a volta com o relógio do laço do zero e a parede
+  adiante (o trabalhando, o pronto e as duas vidas de 12 h ao milissegundo),
+  o próximo evento da restaurada, o que vale e o que não vale de cada regra e
+  o teto; no formato, a ida e a volta, os campos ruins e os arquivos
+  recusados; na escalada, a retomada (a L4 sem rajada na volta, o teto
+  contado do aviso de antes, a L3 e a L2 com o que já passou); no Motor, só
+  metadados, a volta quieta com o diálogo visto, outra partida da máquina e
+  outro compositor (ao vivo e na memória); os dourados
+  `reinicio-sessao-parada` (com uma sessão de teste), `reinicio-no-meio-do-turno`
+  (com o Stop perdido), `reinicio-com-pergunta`, `reinicio-com-pronto-e-erro`,
+  `reinicio-depois-de-13-h`, `reinicio-da-maquina`,
+  `reinicio-com-outro-compositor` e `reinicio-com-arquivo-corrompido` (o
+  executor ganha o passo `reinicio`: o Motor novo com o relógio do laço do
+  zero, a parede adiante e os eventos com o pet fora perdidos); no daemon, a
+  gravação de uma vez e só do dono, o ritmo, os arquivos ruins trocados e o
+  boot id; com o binário de verdade, o SIGTERM que grava e a partida seguinte
+  que devolve; o canário do hook não chega ao arquivo. Dez mutações
+  reprovaram (sem semear os avisos chamados, sem semear os estados vistos, o
+  último evento e o aviso sem ir ao relógio novo, a sessão de teste na
+  memória, sem conferir o boot id, a janela de outro compositor que fica, a
+  escalada que recomeça da L1, o trabalhando sem o prazo dele, a sessão de 13
+  h que volta). Ao vivo, num daemon de rascunho da branch (a 27391) com uma
+  sessão aninhada do 2.1.288: um turno curto, a sessão parada, o SIGTERM, e a
+  partida seguinte com a sessão na lista, restaurada, sem evento nenhum; com o
+  boot id trocado no arquivo, a lista vazia.
+- **Limites:** o T3 de 10 min não é lembrado (o intervalo recomeça na volta);
+  a corrente de agentes aberta não volta (o "…" some, e o fim dela festeja
+  só o turno que a fecha); o turno que estava aberto festeja só o trabalho
+  depois da volta, e um turno de máquina aberto na parada volta como um turno
+  implícito digitado; um evento que chega com o pet fora se perde; os voos da
+  volta do Renan recomeçam a conta. Uma sessão aberta antes de o plugin ser
+  instalado não manda nada até o `/reload-plugins` (a sessão principal do
+  Renan só chegou ao pet hoje, depois dele), e depois dele só aparece no
+  próximo evento: a memória não ajuda aí.
+**Por quê:** o trabalho do Zeca é ficar de olho nas sessões do Claude do
+Renan, e a produção reinicia a cada atualização: esquecer as sessões a cada
+reinício fazia a lista do clique mentir. Guardar só os metadados que a
+lista, os selos e o clique pedem, e refazer cada prazo pela hora de parede,
+mantém as regras de sempre; voltar quieto deixa o reinício como coisa do pet,
+não do Claude (nada de festa nem de chamada por algo que já passou). Depois
+de um boot, esquecer é o certo; depois de um logout, a sessão continua viva
+no tmux, mas o endereço de uma janela de outro compositor nunca é de
+confiança: focar a janela errada é pior que o balão.

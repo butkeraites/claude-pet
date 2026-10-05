@@ -57,6 +57,7 @@ use crate::cerebro::{
 use crate::confete::{self, Chuva, Grade};
 use crate::evento::Evento;
 use crate::geometria::{Ret, Tamanho};
+use crate::memoria::{Lida, Memoria, Recusa};
 use crate::plataforma::{
     Alca, Botao, Cursor, Desenho, ErroFoco, EventoDesktop, EventoOverlay, EventoPonteiro, Fase,
     Monitor, Overlay, Passo, Punho, passo_de_visibilidade,
@@ -314,8 +315,9 @@ struct Chamando {
     desde_ms: u64,
     escalada: Escalada,
     /// Quando o Renan viu o diálogo no terminal da sessão (relógio do laço;
-    /// decisão 0090): daí em diante, nada passa da L1.
-    vista_ms: Option<u64>,
+    /// decisão 0090): daí em diante, nada passa da L1. De antes da partida
+    /// num aviso restaurado (decisão 0093).
+    vista_ms: Option<cerebro::Instante>,
 }
 
 /// O sprite como deveria estar na tela: o RGBA exato, em pixels do monitor,
@@ -334,6 +336,18 @@ pub struct QuadroEsperado {
     pub idade_ms: u64,
     /// RGBA direto, `area.w * area.h * 4` bytes.
     pub rgba: Vec<u8>,
+}
+
+/// O que a memória das sessões trouxe de volta na partida (decisão 0093).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Restauracao {
+    pub sessoes: usize,
+    pub avisos: usize,
+    /// As sessões que voltaram com a janela do terminal.
+    pub janelas: usize,
+    /// As que ficaram de fora: expiradas, de outra origem, repetidas, além
+    /// do teto ou com um campo ruim no arquivo.
+    pub de_fora: usize,
 }
 
 /// O pet inteiro, sem sistema. Os tempos são milissegundos do relógio
@@ -1021,8 +1035,7 @@ impl Motor {
             return None;
         }
         Some(
-            c.escalada
-                .desde
+            cerebro::depois(c.escalada.desde, 0)
                 .max(self.ativa_desde)
                 .max(self.presente_desde)
                 + ESPERA_VISTA_MS,
@@ -1043,7 +1056,7 @@ impl Motor {
         let Some(c) = self.chamando.as_mut() else {
             return;
         };
-        c.vista_ms = Some(agora_ms);
+        c.vista_ms = Some(cerebro::instante(agora_ms));
         let (sid8, nivel) = (c.sid8.clone(), c.escalada.nivel);
         info!("o aviso de espera da sessão {sid8} foi visto no terminal dela");
         self.anotar(
@@ -1417,6 +1430,176 @@ impl Motor {
             sessao.janela = self.identidades.resumo(&sessao.chave);
         }
         resumo
+    }
+
+    // --- a memória das sessões (decisão 0093) ---------------------------------
+
+    /// A memória das sessões de agora, para o daemon gravar em `/state`: as
+    /// sessões reais do cérebro, com a janela de cada uma (o endereço e a
+    /// instância do compositor) e, no aviso de espera que o pet chama, o
+    /// nível da escalada e quando o Renan viu o diálogo. Só metadados.
+    pub fn memoria(&self, agora: Agora, boot: Option<String>) -> Memoria {
+        let mut memoria = Memoria::nova(agora.parede_ms, boot);
+        memoria.sessoes = self.cerebro.guardar();
+        for g in &mut memoria.sessoes {
+            let chave = (false, g.sid.clone());
+            g.janela = self.identidades.guardada(&chave);
+            if let (Some(aviso), Some(c)) = (g.aviso.as_mut(), self.chamando.as_ref())
+                && c.chave == chave
+                && c.desde_ms == aviso.desde_ms
+            {
+                aviso.nivel = Some(c.escalada.nivel);
+                aviso.vista_ms = c.vista_ms.map(|v| agora.na_parede(v));
+            }
+        }
+        memoria
+    }
+
+    /// Restaura a memória das sessões na partida do pet (decisão 0093), em
+    /// `agora` (o relógio do laço recomeçou do zero; a parede andou), se ela
+    /// é desta partida da máquina (o boot id `boot`): as sessões e os avisos
+    /// que ainda valem ([`Cerebro::restaurar`]) e a janela de cada uma. Tudo
+    /// quieto: nenhuma reação, festa, balão nem chamada de novo; a entrada no
+    /// erro e o aviso de espera contam como já vistos, e a escalada do mais
+    /// velho segue do tempo que passou ([`Escalada::retomada`]). A tela
+    /// anuncia a base e os selos de agora. Nada de turno nem corrente.
+    pub fn restaurar(
+        &mut self,
+        lida: &Lida,
+        boot: Option<&str>,
+        agora: Agora,
+    ) -> Result<Restauracao, Recusa> {
+        self.acertar_relogio(agora);
+        if let Err(recusa) = lida.memoria.conferir_boot(boot) {
+            self.recusar_memoria(recusa, agora.mono_ms);
+            return Err(recusa);
+        }
+        let r = self.cerebro.restaurar(&lida.memoria.sessoes, agora);
+        let guardada = |chave: &janelas::Chave| {
+            lida.memoria
+                .sessoes
+                .iter()
+                .find(|g| !chave.0 && g.sid == chave.1)
+        };
+        let mut janelas = 0;
+        for chave in &r.chaves {
+            if let Some(j) = guardada(chave).and_then(|g| g.janela.as_ref()) {
+                self.identidades.restaurar(chave.clone(), j);
+                if self
+                    .identidades
+                    .de(chave)
+                    .is_some_and(|i| i.janela.is_some())
+                {
+                    janelas += 1;
+                }
+            }
+        }
+        // O que a sessão já era não toca de novo: o susto do erro, o bocejo
+        // do cansado e a chamada da espera foram antes da partida.
+        for s in self.cerebro.resumo_das_sessoes() {
+            if !r.chaves.contains(&s.chave) {
+                continue;
+            }
+            self.estados_vistos
+                .insert(s.chave.clone(), (s.estado, s.estado_desde_ms));
+            if let Some(a) = s.aviso.filter(|a| a.tipo == TipoAviso::Esperando) {
+                self.chamados
+                    .insert(s.chave.clone(), (a.desde_ms, a.espera));
+            }
+        }
+        // A escalada do aviso de espera mais velho segue do tempo que passou.
+        let mais_velho = self
+            .cerebro
+            .pendencias()
+            .into_iter()
+            .find(|p| p.aviso.tipo == TipoAviso::Esperando && r.chaves.contains(&p.chave));
+        if self.chamando.is_none()
+            && let Some(p) = mais_velho
+        {
+            let antes = guardada(&p.chave).and_then(|g| g.aviso);
+            let escalada = Escalada::retomada(
+                p.aviso.desde_mono,
+                antes.and_then(|a| a.nivel),
+                agora.mono_ms,
+            );
+            self.anotar(
+                agora.mono_ms,
+                intencoes::Tipo::Escalada {
+                    sid8: p.sid8.clone(),
+                    nivel: escalada.nivel,
+                    espera: p.aviso.espera,
+                    motivo: "restaurada",
+                },
+            );
+            self.chamando = Some(Chamando {
+                chave: p.chave.clone(),
+                sid8: p.sid8.clone(),
+                proj: p.proj.clone(),
+                espera: p.aviso.espera,
+                desde_ms: p.aviso.desde_ms,
+                escalada,
+                vista_ms: antes.and_then(|a| a.vista_ms).map(|v| agora.no_laco(v)),
+            });
+        }
+        let restauracao = Restauracao {
+            sessoes: r.chaves.len(),
+            avisos: r.avisos,
+            janelas,
+            de_fora: r.expiradas + r.de_fora + lida.descartadas,
+        };
+        self.anotar(
+            agora.mono_ms,
+            intencoes::Tipo::Restauracao {
+                sessoes: u32::try_from(restauracao.sessoes).unwrap_or(u32::MAX),
+                avisos: u32::try_from(restauracao.avisos).unwrap_or(u32::MAX),
+                de_fora: u32::try_from(restauracao.de_fora).unwrap_or(u32::MAX),
+                motivo: None,
+            },
+        );
+        // A base e os selos de agora; nada dorme nem acorda num pet que
+        // acabou de nascer.
+        let reacoes = self.observar_tela(agora.mono_ms);
+        debug_assert!(reacoes.is_empty(), "a restauração tocou {reacoes:?}");
+        self.cerebro_mudou = true;
+        Ok(restauracao)
+    }
+
+    /// A memória das sessões não pôde voltar (o arquivo ruim, de outra
+    /// versão, outra partida da máquina): fica nas intenções.
+    pub fn recusar_memoria(&mut self, recusa: Recusa, agora_ms: u64) {
+        self.anotar(
+            agora_ms,
+            intencoes::Tipo::Restauracao {
+                sessoes: 0,
+                avisos: 0,
+                de_fora: 0,
+                motivo: Some(recusa.motivo()),
+            },
+        );
+    }
+
+    /// A instância do compositor de agora (no Hyprland, a assinatura que a
+    /// descoberta achou; decisão 0093). Noutra instância (um logout e um
+    /// login sem reiniciar a máquina), as sessões ficam e as janelas delas
+    /// saem: o mesmo endereço não é mais a mesma janela, e o próximo prompt
+    /// digitado casa de novo. O anel e a janela ativa de antes também eram da
+    /// outra. Devolve quantas janelas saíram.
+    pub fn definir_compositor(&mut self, instancia: Option<String>) -> usize {
+        let antes = self.identidades.compositor().map(str::to_owned);
+        if let (Some(antes), Some(nova)) = (&antes, &instancia)
+            && antes != nova
+        {
+            self.desktop.anel = janelas::Anel::default();
+            self.desktop.janela_ativa = None;
+        }
+        let sairam = self.identidades.definir_compositor(instancia);
+        if sairam > 0 {
+            info!(
+                "outra instância do compositor: {sairam} janela(s) de sessão ficaram sem endereço"
+            );
+            self.cerebro_mudou = true;
+        }
+        sairam
     }
 
     // --- personagem e janela -----------------------------------------------
@@ -2226,9 +2409,7 @@ impl Motor {
             .filter(|p| p.aviso.tipo != TipoAviso::Esperando)
             .filter(|p| self.janela_da_sessao(&p.chave) == Some(ativa))
             .map(|p| {
-                let prazo = p
-                    .aviso
-                    .desde_mono
+                let prazo = cerebro::depois(p.aviso.desde_mono, 0)
                     .max(self.ativa_desde)
                     .max(self.presente_desde)
                     + VISTO_PELO_FOCO_MS;

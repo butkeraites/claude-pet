@@ -18,12 +18,14 @@ use std::time::Instant;
 use pet_core::cerebro::{Agora, ConfigCerebro, Reacao};
 use pet_core::config::ConfigEfetiva;
 use pet_core::evento;
+use pet_core::memoria::SessaoGuardada;
 use pet_core::motor::{Clicou, Motor, Posicoes, Tocou};
 use pet_core::plataforma::{EventoDesktop, EventoOverlay, EventoPonteiro, Overlay, Punho};
 
 use crate::comando::{Comando, Recebido};
 use crate::estado::{Compartilhado, InfoSkin, Painel, Tela};
 use crate::ingress::agora_desde_1970_ms;
+use crate::memoria::Leitura;
 use crate::personagem::{self, Escolha, NaTela, Onde, mesma_tela};
 
 /// Quantas vezes por lote o núcleo esvazia os eventos da janela (um evento
@@ -31,6 +33,9 @@ use crate::personagem::{self, Escolha, NaTela, Onde, mesma_tela};
 const VOLTAS_DE_EVENTOS: usize = 8;
 /// As posições do pet por monitor, em `/state` (decisão 0049).
 pub const ARQUIVO_POSICOES: &str = "posicoes.json";
+/// A memória das sessões é gravada no máximo a cada tanto (o batimento de 5
+/// s chama; decisão 0093), e na saída.
+pub const INTERVALO_MEMORIA_MS: u64 = 4_000;
 
 /// Lê as posições salvas; sem arquivo, ou com um que não serve, o pet
 /// começa no canto padrão de cada monitor.
@@ -83,6 +88,20 @@ fn janela<'a>(p: &'a mut Option<&mut dyn Punho>) -> Option<&'a mut dyn Overlay> 
     }
 }
 
+/// A memória das sessões em disco (decisão 0093).
+#[derive(Debug, Default)]
+struct Guarda {
+    /// O boot id da máquina; sem ele, nada é guardado nem restaurado.
+    boot: Option<String>,
+    /// As sessões da última gravação (ou as do arquivo, na partida): só
+    /// grava o que mudou.
+    gravadas: Option<Vec<SessaoGuardada>>,
+    /// Quando gravou (ou tentou) por último, no relógio do laço.
+    ultima_ms: Option<u64>,
+    /// O último erro de disco: o aviso sai uma vez, não a cada 5 s.
+    erro: Option<String>,
+}
+
 pub struct Nucleo {
     pub comp: Arc<Compartilhado>,
     motor: Motor,
@@ -98,6 +117,7 @@ pub struct Nucleo {
     pasta_config: Option<PathBuf>,
     /// Origem do relógio monotônico do laço (os prazos em ms).
     inicio: Instant,
+    guarda: Guarda,
 }
 
 impl Nucleo {
@@ -125,9 +145,106 @@ impl Nucleo {
             configurada: config.texto("aparencia.skin").to_owned(),
             pasta_config,
             inicio,
+            guarda: Guarda {
+                boot: crate::memoria::boot_id(),
+                ..Guarda::default()
+            },
         };
         nucleo.escolher_personagem(None);
+        nucleo.restaurar_memoria();
         nucleo
+    }
+
+    /// A memória das sessões volta na partida (decisão 0093), antes do
+    /// compositor, que pode nem existir ainda (o pet sobe no boot): as
+    /// sessões abertas do Claude não somem a cada reinício do pet. Tudo
+    /// quieto ([`Motor::restaurar`]). O arquivo ruim, de outra versão ou de
+    /// outra partida da máquina é ignorado com um aviso que não cita nada
+    /// dele.
+    fn restaurar_memoria(&mut self) {
+        let Some(boot) = self.guarda.boot.clone() else {
+            aviso!(
+                "memória das sessões desligada: sem o boot id da máquina, não dá para saber se \
+                 ela reiniciou"
+            );
+            return;
+        };
+        let agora = self.agora();
+        match crate::memoria::ler(&self.onde.estado) {
+            Leitura::Nada => {
+                info!("memória das sessões: nenhuma sessão guardada");
+                self.guarda.gravadas = Some(Vec::new());
+            }
+            Leitura::Erro(e) => aviso!("memória das sessões: não consegui ler: {e}"),
+            Leitura::Recusada(recusa) => {
+                aviso!("memória das sessões ignorada: {recusa}");
+                self.motor.recusar_memoria(recusa, agora.mono_ms);
+            }
+            Leitura::Lida(lida) => match self.motor.restaurar(&lida, Some(&boot), agora) {
+                Ok(r) => {
+                    info!(
+                        "memória das sessões: {} sessão(ões) de volta, com {} aviso(s) e {} \
+                         janela(s); {} de fora",
+                        r.sessoes, r.avisos, r.janelas, r.de_fora
+                    );
+                    self.guarda.gravadas = Some(lida.memoria.sessoes);
+                }
+                Err(recusa) => info!("memória das sessões ignorada: {recusa}"),
+            },
+        }
+    }
+
+    /// Grava a memória das sessões em `/state` se ela mudou desde a última
+    /// gravação, no máximo a cada [`INTERVALO_MEMORIA_MS`] (o batimento
+    /// chama), e na saída (`na_saida`, o SIGTERM), sem esperar o intervalo
+    /// (decisão 0093). Só o laço principal grava: nunca a entrada HTTP nem o
+    /// hook.
+    pub fn guardar_memoria(&mut self, na_saida: bool) {
+        let Some(boot) = self.guarda.boot.clone() else {
+            return;
+        };
+        let agora = self.agora();
+        if !na_saida
+            && self
+                .guarda
+                .ultima_ms
+                .is_some_and(|u| agora.mono_ms < u + INTERVALO_MEMORIA_MS)
+        {
+            return;
+        }
+        let memoria = self.motor.memoria(agora, Some(boot));
+        if self.guarda.gravadas.as_ref() == Some(&memoria.sessoes) {
+            return;
+        }
+        self.guarda.ultima_ms = Some(agora.mono_ms);
+        match crate::memoria::gravar(&self.onde.estado, &memoria) {
+            Ok(()) => {
+                depurar!(
+                    "memória das sessões: {} sessão(ões) gravada(s)",
+                    memoria.sessoes.len()
+                );
+                self.guarda.erro = None;
+                self.guarda.gravadas = Some(memoria.sessoes);
+            }
+            Err(e) => {
+                let erro = e.to_string();
+                if self.guarda.erro.as_ref() != Some(&erro) {
+                    aviso!(
+                        "memória das sessões: não consegui gravar em {}: {erro}",
+                        crate::memoria::caminho(&self.onde.estado).display()
+                    );
+                }
+                self.guarda.erro = Some(erro);
+            }
+        }
+    }
+
+    /// A descoberta achou a instância do compositor (no Hyprland, a
+    /// assinatura; decisão 0093): as janelas das sessões vistas noutra saem.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub fn definir_compositor(&mut self, instancia: &str) {
+        self.motor.definir_compositor(Some(instancia.to_owned()));
+        self.publicar_avisos();
     }
 
     /// Origem do relógio do laço (os prazos em ms).
@@ -830,6 +947,170 @@ mod testes {
         let (mut nucleo3, janela3) = ligado(&a, &config);
         let padrao = nucleo3.motor.painel(Some(&janela3), 0).sprite_disp.unwrap();
         assert_eq!((padrao.x, padrao.y), (antes.x, antes.y));
+    }
+
+    /// Um evento do Claude Code pela caixa, com a hora de parede `ts`.
+    fn mandar(nucleo: &mut Nucleo, janela: &mut JanelaFalsa, evento: pet_core::evento::Evento) {
+        let ts = evento.ts.unwrap_or_else(agora_desde_1970_ms);
+        let recebido = Recebido {
+            evento,
+            recebido_ms: ts,
+            chegada: Instant::now(),
+        };
+        nucleo.comando(Comando::Evento(Box::new(recebido)), Some(janela));
+    }
+
+    fn do_claude(e: &str, sid: &str, turno: &str, ts: u64) -> pet_core::evento::Evento {
+        pet_core::evento::Evento {
+            e: e.into(),
+            sid: Some(sid.into()),
+            turno: Some(turno.into()),
+            ent: Some("cli".into()),
+            proj: Some("agenda".into()),
+            ts: Some(ts),
+            ..pet_core::evento::Evento::default()
+        }
+    }
+
+    #[test]
+    fn a_memoria_das_sessoes_volta_noutro_nucleo_so_com_metadados() {
+        let a = Ambiente::novo("nucleo-memoria");
+        let config = a.raiz.join("config");
+        fs::create_dir_all(&config).unwrap();
+        let (mut nucleo, mut janela) = ligado(&a, &config);
+        let agora = agora_desde_1970_ms();
+        let real = "0123456789abcdef-real";
+        mandar(
+            &mut nucleo,
+            &mut janela,
+            do_claude("UserPromptSubmit", real, "p1", agora - 3_000),
+        );
+        mandar(
+            &mut nucleo,
+            &mut janela,
+            do_claude("PermissionRequest", real, "p1", agora - 2_000),
+        );
+        let mut teste = do_claude("UserPromptSubmit", "sessao-de-teste", "x1", agora - 1_000);
+        teste.teste = true;
+        mandar(&mut nucleo, &mut janela, teste);
+        // A saída (o SIGTERM): grava já.
+        nucleo.guardar_memoria(true);
+        let arquivo = a.estado.join(pet_core::memoria::ARQUIVO);
+        let texto = fs::read_to_string(&arquivo).expect("a memória gravada");
+        assert!(
+            texto.contains(real),
+            "o sid inteiro, opaco, para casar os próximos eventos"
+        );
+        assert!(!texto.contains("sessao-de-teste"), "a de teste nunca vai");
+        assert!(texto.contains(r#""boot": ""#));
+        // Outro núcleo com o mesmo /state (o pet reiniciou): a sessão volta,
+        // marcada como restaurada, com o aviso, e nada toca.
+        let (mut outro, outra_janela) = ligado(&a, &config);
+        outro.publicar(Some(&outra_janela));
+        let estado = outro.comp.estado_json();
+        let sessoes = estado["sessoes"].as_array().unwrap();
+        assert_eq!(sessoes.len(), 1, "{estado:#}");
+        assert_eq!(sessoes[0]["sid8"], "01234567");
+        assert_eq!(sessoes[0]["restaurada"], true);
+        assert_eq!(sessoes[0]["aviso"]["tipo"], "esperando");
+        assert!(
+            !estado.to_string().contains(real),
+            "no /v1/estado, só o sid curto"
+        );
+        let intencoes = estado["intencoes"].as_array().unwrap();
+        assert!(
+            intencoes
+                .iter()
+                .any(|i| i["i"] == "restauracao" && i["sessoes"] == 1)
+        );
+        assert!(
+            intencoes
+                .iter()
+                .all(|i| i["i"] != "reacao" && i["i"] != "balao"),
+            "a volta é quieta: {intencoes:#?}"
+        );
+        assert_eq!(estado["ultima_reacao"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn a_memoria_so_grava_o_que_mudou_e_no_maximo_a_cada_4_s() {
+        let a = Ambiente::novo("nucleo-memoria-ritmo");
+        let config = a.raiz.join("config");
+        fs::create_dir_all(&config).unwrap();
+        let (mut nucleo, mut janela) = ligado(&a, &config);
+        let arquivo = a.estado.join(pet_core::memoria::ARQUIVO);
+        // Nada guardado e nada mudou: nada a gravar.
+        nucleo.guardar_memoria(false);
+        assert!(!arquivo.exists());
+        let agora = agora_desde_1970_ms();
+        mandar(
+            &mut nucleo,
+            &mut janela,
+            do_claude("UserPromptSubmit", "s1", "p1", agora),
+        );
+        nucleo.guardar_memoria(false);
+        assert!(arquivo.exists(), "mudou: grava");
+        fs::remove_file(&arquivo).unwrap();
+        nucleo.guardar_memoria(false);
+        assert!(!arquivo.exists(), "nada mudou desde a gravação");
+        mandar(
+            &mut nucleo,
+            &mut janela,
+            do_claude("UserPromptSubmit", "s2", "q1", agora + 1),
+        );
+        nucleo.guardar_memoria(false);
+        assert!(!arquivo.exists(), "mudou, mas há menos de 4 s");
+        nucleo.guardar_memoria(true);
+        assert!(arquivo.exists(), "na saída, sem esperar");
+    }
+
+    #[test]
+    fn a_memoria_ruim_ou_de_outra_partida_da_maquina_nao_volta_e_e_trocada() {
+        let a = Ambiente::novo("nucleo-memoria-ruim");
+        let config = a.raiz.join("config");
+        fs::create_dir_all(&config).unwrap();
+        let arquivo = a.estado.join(pet_core::memoria::ARQUIVO);
+        let agora = agora_desde_1970_ms();
+        let sessao = serde_json::json!({
+            "sid": "s1", "ent": "cli", "estado": "parada",
+            "estado_desde_ms": agora - 1_000, "ultimo_evento_ms": agora - 1_000
+        });
+        for (texto, motivo) in [
+            ("{\"versao\": 1, \"SEGREDO".to_owned(), "arquivo_ruim"),
+            (
+                serde_json::json!({"versao": 2, "gravada_ms": agora, "sessoes": [sessao]})
+                    .to_string(),
+                "versao",
+            ),
+            (
+                serde_json::json!({
+                    "versao": 1, "gravada_ms": agora, "boot": "outra-partida", "sessoes": [sessao]
+                })
+                .to_string(),
+                "maquina_reiniciou",
+            ),
+        ] {
+            fs::write(&arquivo, &texto).unwrap();
+            let (mut nucleo, janela) = ligado(&a, &config);
+            nucleo.publicar(Some(&janela));
+            let estado = nucleo.comp.estado_json();
+            assert!(
+                estado["sessoes"].as_array().is_none_or(|s| s.is_empty()),
+                "{motivo}: {estado:#}"
+            );
+            let intencoes = estado["intencoes"].as_array().unwrap();
+            assert!(
+                intencoes
+                    .iter()
+                    .any(|i| i["i"] == "restauracao" && i["motivo"] == motivo),
+                "{motivo}: {intencoes:#?}"
+            );
+            assert!(!estado.to_string().to_lowercase().contains("segredo"));
+            // O arquivo de antes é trocado pelo de agora na primeira gravação.
+            nucleo.guardar_memoria(false);
+            let novo = fs::read_to_string(&arquivo).unwrap();
+            assert!(novo.contains(r#""sessoes": []"#), "{motivo}: {novo}");
+        }
     }
 
     #[test]

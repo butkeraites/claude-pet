@@ -1,0 +1,18 @@
+{"t":2000,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":5000,"i":"selos","mais":1,"bandeiras":[],"corrente":false}
+{"t":10800,"i":"turno","sid8":"s2","turno8":"q1","fim":"stop","nivel":"T0","pontuacao":0.0,"reacao":"nod"}
+{"t":10800,"i":"festa","sid8":"s2","nivel":"T0","reacao":"nod"}
+{"t":10800,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s2"}
+{"t":20000,"i":"reacao","nome":"alert","motivo":"aviso","sid8":"s1"}
+{"t":20000,"i":"balao","linhas":["api: pergunta pra você"],"motivo":"aviso"}
+{"t":20000,"i":"escalada","sid8":"s1","nivel":1,"espera":"pergunta","motivo":"aviso"}
+{"t":20000,"i":"base","estado":"waiting","prioridade":"esperando","sid8":"s1"}
+{"t":20000,"i":"selos","mais":0,"bandeiras":[1],"corrente":false}
+{"t":20800,"i":"selos","mais":0,"bandeiras":[],"corrente":false}
+{"t":50000,"i":"escalada","sid8":"s1","nivel":2,"motivo":"tempo"}
+{"t":50000,"i":"rajada","sid8":"s1","nivel":2}
+{"t":56000,"i":"rajada","sid8":"s1","nivel":2}
+{"t":150000,"i":"restauracao","sessoes":0,"motivo":"maquina_reiniciou"}
+{"t":160000,"i":"reacao","nome":"giggle","motivo":"clique"}
+{"t":160000,"i":"balao","linhas":["nenhuma sessão do Claude aberta"],"motivo":"lista"}
+{"t":160000,"i":"clique","resultado":"lista"}

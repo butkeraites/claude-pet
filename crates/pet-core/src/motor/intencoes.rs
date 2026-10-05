@@ -91,7 +91,9 @@ pub enum Tipo {
     /// velho saiu e este passou a ser o mais velho), 2 a 4 quando sobe
     /// (`tempo`, `voltou`) e 0 quando acaba (`andou`: a sessão andou; `visto`:
     /// o clique; `sessao_saiu`; `outro_aviso`: um mais urgente passou à
-    /// frente).
+    /// frente). `restaurada`, com o nível de antes: a memória das sessões
+    /// trouxe o aviso na partida do pet, e a escalada segue do tempo que
+    /// passou, sem chamar de novo (decisão 0093).
     Escalada {
         sid8: String,
         nivel: u8,
@@ -165,6 +167,20 @@ pub enum Tipo {
         ligada: bool,
         #[serde(skip_serializing_if = "eh_falso")]
         tirou_balao: bool,
+    },
+    /// A memória das sessões na partida do pet (decisão 0093): quantas
+    /// sessões e avisos voltaram e quantas ficaram de fora (expiradas, de
+    /// outra origem, com um campo ruim), ou o `motivo` de nada voltar
+    /// (`maquina_reiniciou`, `sem_boot`, `arquivo_ruim`, `versao`, `grande`).
+    /// Nada toca: nem reação, nem festa, nem balão.
+    Restauracao {
+        sessoes: u32,
+        #[serde(skip_serializing_if = "eh_zero")]
+        avisos: u32,
+        #[serde(skip_serializing_if = "eh_zero")]
+        de_fora: u32,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        motivo: Option<&'static str>,
     },
 }
 

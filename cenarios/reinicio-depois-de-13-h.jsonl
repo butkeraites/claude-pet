@@ -1,0 +1,11 @@
+{"cenario": "reinicio-depois-de-13-h", "descricao": "o pet volta 11 h depois de parar: a sessão com o último evento há 13 h não volta (a vida de 12 h conta do último evento, de antes da partida); a de 11 h volta e sai sozinha na hora dela, 12 h depois do último evento", "padrao": {"ent": "cli"}}
+{"t": 0, "desktop": {"ligado": true}}
+{"t": 0, "desktop": {"ocioso": false}}
+{"t": 1000, "evento": {"e": "SessionStart", "sid": "s1", "proj": "velha", "src": "startup"}}
+{"t": 7201000, "evento": {"e": "SessionStart", "sid": "s2", "proj": "api", "src": "startup"}}
+{"t": 7210000, "reinicio": {"parado_ms": 39600000}}
+{"t": 46810000, "desktop": {"ligado": true}}
+{"t": 46810000, "desktop": {"ocioso": false}}
+{"t": 46820000, "clique": "esquerdo"}
+{"t": 50410000, "clique": "esquerdo"}
+{"t": 50420000, "fim": true}

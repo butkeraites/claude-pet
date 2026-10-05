@@ -138,6 +138,19 @@ fn le_o_formato_e_recusa_o_que_nao_serve() {
         ),
         (r#"{"t": 1, "desktop": {"nuvem": true}}"#, "não conheço"),
         (r#"{"t": 1, "clique": "meio"}"#, "esquerdo ou direito"),
+        (r#"{"t": 1, "reinicio": {}}"#, "falta o parado_ms"),
+        (
+            r#"{"t": 1, "reinicio": {"parado_ms": 5, "nuvem": true}}"#,
+            "não conheço",
+        ),
+        (
+            r#"{"t": 1, "reinicio": {"parado_ms": 5, "arquivo": "sumido"}}"#,
+            "corrompido",
+        ),
+        (
+            r#"{"t": 1, "reinicio": {"parado_ms": 5, "maquina": 1}}"#,
+            "true ou false",
+        ),
         (r#"{"evento": {"e": "Stop"}}"#, "falta o t"),
         (
             r#"{"cenario": "x", "config": {"celebracao.modo": "exagerada"}}"#,
@@ -869,4 +882,295 @@ fn sem_personagem_a_linha_do_tempo_e_a_mesma() {
             "{nome}"
         );
     }
+}
+
+// --- a memória das sessões (decisão 0093) -----------------------------------
+
+/// Os cenários de reinício e o instante em que o pet volta em cada um.
+const REINICIOS: [(&str, u64); 8] = [
+    ("reinicio-sessao-parada", 60_000),
+    ("reinicio-no-meio-do-turno", 75_000),
+    ("reinicio-com-pergunta", 120_000),
+    ("reinicio-com-pronto-e-erro", 70_000),
+    ("reinicio-depois-de-13-h", 46_810_000),
+    ("reinicio-da-maquina", 150_000),
+    ("reinicio-com-outro-compositor", 50_000),
+    ("reinicio-com-arquivo-corrompido", 25_000),
+];
+
+/// O que tocou entre `de` e `ate`: uma reação, uma rajada, um voo, uma festa
+/// ou um balão.
+fn tocou_entre(linha: &[Intencao], de: u64, ate: u64) -> Vec<&Intencao> {
+    linha
+        .iter()
+        .filter(|x| {
+            (de..ate).contains(&x.t_ms)
+                && matches!(
+                    x.tipo,
+                    Tipo::Reacao { .. }
+                        | Tipo::Rajada { .. }
+                        | Tipo::Voo { .. }
+                        | Tipo::Festa { .. }
+                        | Tipo::FestaMesclada { .. }
+                        | Tipo::Balao { .. }
+                )
+        })
+        .collect()
+}
+
+/// A restauração de um cenário: (sessões, avisos, de fora, motivo).
+fn restauracao(linha: &[Intencao]) -> (u32, u32, u32, Option<&'static str>) {
+    let r = so(linha, "restauracao");
+    assert_eq!(r.len(), 1, "uma restauração por reinício");
+    match r[0].tipo {
+        Tipo::Restauracao {
+            sessoes,
+            avisos,
+            de_fora,
+            motivo,
+        } => (sessoes, avisos, de_fora, motivo),
+        _ => unreachable!(),
+    }
+}
+
+/// As listas do clique (o balão de motivo `lista`), com o instante.
+fn listas(linha: &[Intencao]) -> Vec<(u64, Vec<String>)> {
+    linha
+        .iter()
+        .filter_map(|x| match &x.tipo {
+            Tipo::Balao {
+                linhas,
+                motivo: "lista",
+            } => Some((x.t_ms, linhas.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn o_pet_que_reinicia_volta_quieto() {
+    // Nada toca na volta: nem reação, nem festa, nem balão, nem rajada ou
+    // voo, em nenhum dos reinícios (decisão 0093); o que vem depois é pelos
+    // eventos e pelos prazos de sempre.
+    for (nome, volta) in REINICIOS {
+        let linha = linha_do_tempo(nome);
+        let na_volta = tocou_entre(&linha, volta, volta + 1);
+        assert!(na_volta.is_empty(), "{nome}: tocou na volta: {na_volta:?}");
+        let r = so(&linha, "restauracao");
+        assert_eq!(
+            r.iter().map(|x| x.t_ms).collect::<Vec<_>>(),
+            vec![volta],
+            "{nome}: a restauração na volta"
+        );
+    }
+}
+
+#[test]
+fn a_sessao_parada_volta_na_lista_com_o_tempo_de_antes_e_a_de_teste_nao() {
+    let linha = linha_do_tempo("reinicio-sessao-parada");
+    assert_eq!(restauracao(&linha), (1, 0, 0, None));
+    assert_eq!(
+        listas(&linha),
+        vec![(70_000, vec!["api: parado (50 s)".to_owned()])],
+        "parada desde o Stop de antes (20 s), sem a sessão de teste"
+    );
+    // O prompt seguinte é um turno como outro qualquer.
+    assert_eq!(
+        festas(&linha).last().map(|f| (f.0, f.2)),
+        Some((90_800, crate::cerebro::Nivel::T1))
+    );
+}
+
+#[test]
+fn o_turno_aberto_na_parada_nao_volta_e_o_stop_perdido_espera_o_idle_prompt() {
+    let linha = linha_do_tempo("reinicio-no-meio-do-turno");
+    assert_eq!(restauracao(&linha), (2, 0, 0, None));
+    // As duas voltam trabalhando (o último evento de cada uma há menos de 5
+    // min), a base com a de evento mais novo.
+    assert!(so(&linha, "base").iter().any(|x| x.t_ms == 75_000
+        && matches!(&x.tipo, Tipo::Base { estado: "working", sid8: Some(s), .. } if s == "s2")));
+    // A de api segue o turno: o Stop festeja só o que veio depois da volta
+    // (20 s de Bash: 0,48), num turno implícito, com o pronto.
+    assert!(so(&linha, "turno").iter().any(|x| x.t_ms == 100_800
+        && matches!(&x.tipo, Tipo::Turno { turno8: Some(t), pontuacao: Some(p), .. }
+            if t == "p1" && (*p - 0.48).abs() < 1e-9)));
+    // O Stop da web se perdeu com o pet fora: nenhum turno dela fecha, e o
+    // idle_prompt a deixa parada (o "+1" some) sem festa.
+    assert!(
+        !so(&linha, "turno")
+            .iter()
+            .any(|x| matches!(&x.tipo, Tipo::Turno { sid8, .. } if sid8 == "s2"))
+    );
+    assert!(
+        so(&linha, "selos")
+            .iter()
+            .any(|x| x.t_ms == 130_000 && matches!(&x.tipo, Tipo::Selos(s) if s.mais == 0))
+    );
+    assert_eq!(festas(&linha).len(), 1);
+}
+
+#[test]
+fn a_pergunta_volta_e_a_escalada_segue_do_tempo_que_passou() {
+    let linha = linha_do_tempo("reinicio-com-pergunta");
+    assert_eq!(restauracao(&linha), (1, 1, 0, None));
+    assert_eq!(
+        chamadas(&linha),
+        1,
+        "a chamada da L1 não se repete na volta"
+    );
+    assert!(
+        so(&linha, "escalada").iter().any(|x| x.t_ms == 120_000
+            && matches!(
+                x.tipo,
+                Tipo::Escalada {
+                    nivel: 3,
+                    motivo: "restaurada",
+                    ..
+                }
+            )),
+        "o nível de antes, sem chamar"
+    );
+    let voos: Vec<(u64, &str)> = so(&linha, "voo")
+        .iter()
+        .map(|x| match x.tipo {
+            Tipo::Voo { motivo, .. } => (x.t_ms, motivo),
+            _ => unreachable!(),
+        })
+        .collect();
+    assert_eq!(
+        voos,
+        vec![
+            (100_000, "escalada"),
+            (180_000, "escalada"),
+            (240_000, "escalada"),
+            (700_000, "voltou")
+        ],
+        "o voo de antes conta; os outros dois saem um minuto inteiro depois da volta"
+    );
+    // A L4 na hora dela: 5 min depois do aviso de antes da partida.
+    assert!(
+        niveis(&linha).contains(&(310_000, 4)),
+        "{:?}",
+        niveis(&linha)
+    );
+    assert!(tocou_entre(&linha, 110_000, 180_000).is_empty());
+    assert!(
+        so(&linha, "pulso")
+            .iter()
+            .any(|x| x.t_ms == 310_000 && matches!(x.tipo, Tipo::Pulso { ligado: true, .. }))
+    );
+}
+
+#[test]
+fn o_pronto_e_o_erro_voltam_sem_festa_nem_susto_e_o_clique_leva_aos_terminais() {
+    let linha = linha_do_tempo("reinicio-com-pronto-e-erro");
+    assert_eq!(restauracao(&linha), (2, 2, 0, None));
+    // O susto só na hora do erro, uma vez; a festa, uma.
+    let sustos = so(&linha, "reacao")
+        .iter()
+        .filter(|x| matches!(&x.tipo, Tipo::Reacao { nome, .. } if nome == "error"))
+        .count();
+    assert_eq!(sustos, 1);
+    assert_eq!(festas(&linha).len(), 1);
+    // O erro segura a base até os 60 s dele; depois, o pronto, até 2 min
+    // depois da festa de antes.
+    let bases: Vec<(u64, &str)> = so(&linha, "base")
+        .iter()
+        .map(|x| match x.tipo {
+            Tipo::Base { estado, .. } => (x.t_ms, estado),
+            _ => unreachable!(),
+        })
+        .filter(|(t, _)| *t >= 70_000)
+        .collect();
+    assert_eq!(
+        bases,
+        vec![(70_000, "error"), (100_000, "ready"), (130_500, "idle")]
+    );
+    let cliques: Vec<(u64, &str, Option<String>)> = so(&linha, "clique")
+        .iter()
+        .map(|x| match &x.tipo {
+            Tipo::Clique { resultado, sid8 } => (x.t_ms, *resultado, sid8.clone()),
+            _ => unreachable!(),
+        })
+        .collect();
+    assert_eq!(
+        cliques,
+        vec![
+            (120_000, "focou", Some("s2".to_owned())),
+            (130_000, "focou", Some("s1".to_owned()))
+        ],
+        "o erro primeiro, depois o pronto, cada um no terminal de antes"
+    );
+}
+
+#[test]
+fn depois_de_13_h_a_sessao_nao_volta_e_a_de_11_h_sai_na_hora_dela() {
+    let linha = linha_do_tempo("reinicio-depois-de-13-h");
+    assert_eq!(restauracao(&linha), (1, 0, 1, None));
+    assert_eq!(
+        listas(&linha),
+        vec![
+            (46_820_000, vec!["api: parado (11 h)".to_owned()]),
+            (
+                50_410_000,
+                vec!["nenhuma sessão do Claude aberta".to_owned()]
+            )
+        ],
+        "a de 13 h ficou de fora; a de 11 h saiu 12 h depois do último evento"
+    );
+}
+
+#[test]
+fn a_maquina_que_reiniciou_e_o_arquivo_ruim_nao_trazem_nada() {
+    for (nome, motivo, clique) in [
+        ("reinicio-da-maquina", "maquina_reiniciou", 160_000),
+        ("reinicio-com-arquivo-corrompido", "arquivo_ruim", 30_000),
+    ] {
+        let linha = linha_do_tempo(nome);
+        assert_eq!(restauracao(&linha), (0, 0, 0, Some(motivo)), "{nome}");
+        assert!(
+            listas(&linha).contains(&(clique, vec!["nenhuma sessão do Claude aberta".to_owned()])),
+            "{nome}"
+        );
+    }
+    let linha = linha_do_tempo("reinicio-da-maquina");
+    assert!(
+        so(&linha, "escalada").iter().all(|x| x.t_ms < 60_000),
+        "a escalada de antes não volta"
+    );
+}
+
+#[test]
+fn noutro_compositor_a_sessao_volta_sem_a_janela_ate_o_proximo_prompt() {
+    let linha = linha_do_tempo("reinicio-com-outro-compositor");
+    assert_eq!(restauracao(&linha), (1, 1, 0, None));
+    assert!(
+        baloes(&linha)
+            .iter()
+            .any(|(t, linhas)| *t == 60_000 && linhas.iter().any(|l| l == "a janela dela fechou"))
+    );
+    let cliques: Vec<(u64, &str)> = so(&linha, "clique")
+        .iter()
+        .map(|x| match &x.tipo {
+            Tipo::Clique { resultado, .. } => (x.t_ms, *resultado),
+            _ => unreachable!(),
+        })
+        .collect();
+    assert_eq!(cliques, vec![(60_000, "nao_focou"), (90_000, "focou")]);
+}
+
+#[test]
+fn com_o_pet_fora_do_ar_so_um_evento_se_perde() {
+    let c = ler(
+        "x",
+        r#"{"cenario": "x", "padrao": {"sid": "s1", "ent": "cli"}}
+{"t": 0, "evento": {"e": "UserPromptSubmit", "turno": "p1"}}
+{"t": 1000, "reinicio": {"parado_ms": 5000}}
+{"t": 2000, "evento": {"e": "Stop", "turno": "p1"}}
+{"t": 3000, "clique": "esquerdo"}
+{"t": 9000, "fim": true}"#,
+    )
+    .unwrap();
+    let e = rodar(&c, None).unwrap_err();
+    assert!(e.contains("fora do ar"), "{e}");
 }

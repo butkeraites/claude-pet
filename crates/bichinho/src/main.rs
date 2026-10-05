@@ -30,6 +30,7 @@ mod estado;
 mod ingress;
 #[cfg(target_os = "linux")]
 mod laco;
+mod memoria;
 mod nucleo;
 mod personagem;
 mod privacidade;

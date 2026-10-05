@@ -84,10 +84,11 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::config::{Config, ModoCelebracao, Pesos};
 use crate::evento::{self, Evento, ORIG_NOTIFICACAO};
+use crate::memoria::{AvisoGuardado, SessaoGuardada};
 
 /// Acomodação depois de um Stop, e espera pelo Stop atrasado de um turno
 /// trocado.
@@ -132,8 +133,8 @@ const MEMBROS_POR_CORRENTE: usize = 64;
 /// Agentes em voo lembrados por corrente.
 const AGENTES_POR_CORRENTE: usize = 64;
 /// Teto de sessões acompanhadas de cada tipo (real ou teste); acima disso
-/// a mais parada sai.
-const MAX_SESSOES: usize = 64;
+/// a mais parada sai. É também o teto da memória das sessões (decisão 0093).
+pub const MAX_SESSOES: usize = 64;
 /// Teto de motivos distintos em `ignorados` (cada origem desconhecida é um
 /// motivo): passou disso, conta em `outros`.
 const MAX_MOTIVOS: usize = 32;
@@ -174,6 +175,52 @@ pub const TCHAU: &str = "bye";
 pub struct Agora {
     pub parede_ms: u64,
     pub mono_ms: u64,
+}
+
+impl Agora {
+    /// O instante do relógio do laço em que foi a hora de parede `parede_ms`
+    /// (decisão 0093): o relógio do laço recomeça do zero a cada processo, e
+    /// o que a memória das sessões traz de antes da partida fica negativo.
+    pub fn no_laco(&self, parede_ms: u64) -> Instante {
+        let mono = instante(self.mono_ms);
+        let atras = i64::try_from(self.parede_ms.abs_diff(parede_ms)).unwrap_or(i64::MAX);
+        if parede_ms <= self.parede_ms {
+            mono.saturating_sub(atras)
+        } else {
+            mono.saturating_add(atras)
+        }
+    }
+
+    /// A hora de parede (ms desde 1970) do instante `x` do relógio do laço:
+    /// o contrário de [`Self::no_laco`], para a memória das sessões gravar.
+    pub fn na_parede(&self, x: Instante) -> u64 {
+        let mono = instante(self.mono_ms);
+        let distancia = x.abs_diff(mono);
+        if x <= mono {
+            self.parede_ms.saturating_sub(distancia)
+        } else {
+            self.parede_ms.saturating_add(distancia)
+        }
+    }
+}
+
+/// Um instante do relógio monotônico do laço, em ms, com sinal (decisão
+/// 0093): o relógio do laço recomeça do zero com o processo, e uma sessão que
+/// a memória restaura traz o último evento, o estado e o aviso de antes da
+/// partida. Os prazos que saem dele ([`depois`]) são sempre do relógio do
+/// laço, sem sinal.
+pub type Instante = i64;
+
+/// `mono_ms` do relógio do laço como [`Instante`].
+pub fn instante(mono_ms: u64) -> Instante {
+    i64::try_from(mono_ms).unwrap_or(i64::MAX)
+}
+
+/// O prazo `dura_ms` depois de `desde`, no relógio do laço; um prazo de antes
+/// da partida já venceu (0).
+pub fn depois(desde: Instante, dura_ms: u64) -> u64 {
+    let dura = i64::try_from(dura_ms).unwrap_or(i64::MAX);
+    u64::try_from(desde.saturating_add(dura)).unwrap_or(0)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -434,8 +481,9 @@ pub struct RegistroTurno {
     chave: (bool, String, Option<String>),
 }
 
-/// Estado de uma sessão para o `/v1/estado.sessoes`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+/// Estado de uma sessão para o `/v1/estado.sessoes` (e na memória das
+/// sessões, decisão 0093).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EstadoSessao {
     Parada,
@@ -451,7 +499,7 @@ pub enum EstadoSessao {
 
 /// O que uma sessão pede ao Renan (decisão 0057), do menos ao mais urgente:
 /// o clique no pet vai ao mais urgente primeiro.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TipoAviso {
     /// O Claude terminou o turno (o Stop, depois da acomodação).
@@ -475,7 +523,7 @@ impl TipoAviso {
 
 /// O que a sessão espera do Renan (decisão 0075), do menos ao mais forte: um
 /// gatilho novo do mesmo diálogo só sobe o tipo.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TipoEspera {
     /// Uma permissão (`PermissionRequest`, `permission_prompt`, …).
@@ -515,9 +563,10 @@ pub struct Aviso {
     pub espera: Option<TipoEspera>,
     /// Desde quando (ms desde 1970).
     pub desde_ms: u64,
-    /// Desde quando no relógio monotônico (os prazos).
+    /// Desde quando no relógio monotônico (os prazos); de antes da partida
+    /// num aviso restaurado (decisão 0093).
     #[serde(skip)]
-    pub desde_mono: u64,
+    pub desde_mono: Instante,
 }
 
 /// Uma sessão com aviso, para o clique (decisão 0057).
@@ -567,10 +616,28 @@ pub struct ResumoSessao {
     /// o cérebro não sabe de janelas e deixa vazio.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub janela: Option<crate::motor::janelas::ResumoJanela>,
+    /// Veio da memória das sessões na partida do pet e ainda não mandou
+    /// evento nenhum depois (decisão 0093).
+    #[serde(skip_serializing_if = "eh_falso")]
+    pub restaurada: bool,
     /// (teste, sid) inteiros, para o Motor casar a janela; nunca vai para o
     /// `/v1/estado`.
     #[serde(skip)]
     pub chave: (bool, String),
+}
+
+/// O que a memória das sessões trouxe de volta (decisão 0093).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Restauradas {
+    /// As sessões que voltaram, (teste, sid), da mais nova para a mais velha.
+    pub chaves: Vec<(bool, String)>,
+    /// Os avisos que voltaram com elas.
+    pub avisos: usize,
+    /// Com o último evento há [`VIDA_SESSAO_MS`] ou mais.
+    pub expiradas: usize,
+    /// De uma origem que o config não aceita mais, repetidas ou além de
+    /// [`MAX_SESSOES`].
+    pub de_fora: usize,
 }
 
 /// O que o cérebro publica no `/v1/estado`.
@@ -990,8 +1057,9 @@ struct Sessao {
     estado: EstadoSessao,
     /// Hora (parede) do evento que pôs a sessão no estado de agora.
     estado_desde: u64,
-    /// O mesmo, no relógio monotônico (os prazos do estado).
-    estado_desde_mono: u64,
+    /// O mesmo, no relógio monotônico (os prazos do estado); de antes da
+    /// partida numa sessão restaurada (decisão 0093).
+    estado_desde_mono: Instante,
     turno: Option<Turno>,
     trocado: Option<Trocado>,
     comemorado: Option<Comemorado>,
@@ -1003,12 +1071,16 @@ struct Sessao {
     fechados: VecDeque<String>,
     /// Subagente → turno em que nasceu.
     agentes: VecDeque<(String, Option<String>)>,
-    ultimo_mono: u64,
+    /// O último evento no relógio monotônico (a vida da sessão e os prazos
+    /// do estado); de antes da partida numa sessão restaurada.
+    ultimo_mono: Instante,
     /// Hora do último evento (parede), para o `/v1/estado`.
     ultimo_parede: u64,
     contadores: Contadores,
     /// O espaço de aviso da sessão (decisão 0057).
     aviso: Option<Aviso>,
+    /// Veio da memória das sessões e ainda não mandou evento (decisão 0093).
+    restaurada: bool,
 }
 
 impl Sessao {
@@ -1020,7 +1092,7 @@ impl Sessao {
             ent: None,
             estado: EstadoSessao::Parada,
             estado_desde: agora.parede_ms,
-            estado_desde_mono: agora.mono_ms,
+            estado_desde_mono: instante(agora.mono_ms),
             turno: None,
             trocado: None,
             comemorado: None,
@@ -1028,10 +1100,11 @@ impl Sessao {
             agendamentos: None,
             fechados: VecDeque::new(),
             agentes: VecDeque::new(),
-            ultimo_mono: agora.mono_ms,
+            ultimo_mono: instante(agora.mono_ms),
             ultimo_parede: agora.parede_ms,
             contadores: Contadores::default(),
             aviso: None,
+            restaurada: false,
         }
     }
 
@@ -1485,10 +1558,10 @@ impl Sessao {
     fn prazo_do_estado(&self) -> Option<u64> {
         match self.estado {
             EstadoSessao::Pensando | EstadoSessao::Trabalhando | EstadoSessao::Compactando => {
-                Some(self.ultimo_mono + ATIVA_SEM_EVENTO_MS)
+                Some(depois(self.ultimo_mono, ATIVA_SEM_EVENTO_MS))
             }
             EstadoSessao::Erro | EstadoSessao::Cansado => {
-                Some(self.estado_desde_mono + ERRO_NA_TELA_MS)
+                Some(depois(self.estado_desde_mono, ERRO_NA_TELA_MS))
             }
             EstadoSessao::Parada | EstadoSessao::Esperando => None,
         }
@@ -1534,7 +1607,7 @@ pub fn hora_do_evento(ts: Option<u64>, recebido_ms: u64) -> u64 {
 /// Quando um aviso some sozinho: o pronto e o erro em [`VIDA_AVISO_MS`]; o
 /// "esperando você", nunca (só um evento da sessão ou visto).
 fn prazo_do_aviso(aviso: Aviso) -> Option<u64> {
-    (aviso.tipo != TipoAviso::Esperando).then_some(aviso.desde_mono + VIDA_AVISO_MS)
+    (aviso.tipo != TipoAviso::Esperando).then(|| depois(aviso.desde_mono, VIDA_AVISO_MS))
 }
 
 /// Eventos que mostram o turno andando: cancelam a acomodação quando vêm
@@ -1722,9 +1795,12 @@ impl Cerebro {
             .sessoes
             .entry(chave.clone())
             .or_insert_with(|| Sessao::nova(chave.1.clone(), chave.0, agora));
-        sessao.ultimo_mono = agora.mono_ms;
+        sessao.ultimo_mono = instante(agora.mono_ms);
         sessao.ultimo_parede = t;
         sessao.contadores.eventos += 1;
+        // A sessão restaurada mandou evento: volta a ser uma sessão como as
+        // outras (decisão 0093).
+        sessao.restaurada = false;
         if ev.proj.is_some() {
             sessao.proj.clone_from(&ev.proj);
         }
@@ -1785,7 +1861,7 @@ impl Cerebro {
                                     tipo: TipoAviso::Pronto,
                                     espera: None,
                                     desde_ms: f.registro.fim_ms,
-                                    desde_mono: agora.mono_ms,
+                                    desde_mono: instante(agora.mono_ms),
                                 });
                             }
                         }
@@ -2011,7 +2087,7 @@ impl Cerebro {
                                 tipo: TipoAviso::Pronto,
                                 espera: None,
                                 desde_ms: t,
-                                desde_mono: agora.mono_ms,
+                                desde_mono: instante(agora.mono_ms),
                             });
                         }
                         fechamentos.push(f);
@@ -2067,7 +2143,7 @@ impl Cerebro {
         }
         if sessao.estado != estado_antes {
             sessao.estado_desde = t;
-            sessao.estado_desde_mono = agora.mono_ms;
+            sessao.estado_desde_mono = instante(agora.mono_ms);
             // Os avisos (decisão 0057): mudar de estado resolve o de antes, e
             // entrar em "esperando você" ou em erro abre um. O `idle_prompt`
             // (repete a cada ~60 s) nunca abre nem resolve; um evento
@@ -2093,7 +2169,7 @@ impl Cerebro {
                             .then(|| espera_do_evento(ev))
                             .flatten(),
                         desde_ms: t,
-                        desde_mono: agora.mono_ms,
+                        desde_mono: instante(agora.mono_ms),
                     });
                 }
             }
@@ -2210,7 +2286,7 @@ impl Cerebro {
                             tipo: TipoAviso::Pronto,
                             espera: None,
                             desde_ms: fim_ms,
-                            desde_mono: agora.mono_ms,
+                            desde_mono: instante(agora.mono_ms),
                         });
                     }
                     fechamentos.push(f);
@@ -2233,7 +2309,7 @@ impl Cerebro {
             if sessao.prazo_do_estado().is_some_and(|p| agora.mono_ms >= p) {
                 sessao.estado = EstadoSessao::Parada;
                 sessao.estado_desde = agora.parede_ms;
-                sessao.estado_desde_mono = agora.mono_ms;
+                sessao.estado_desde_mono = instante(agora.mono_ms);
             }
         }
         self.registrar(fechamentos, &mut reacoes, agora);
@@ -2244,7 +2320,7 @@ impl Cerebro {
             } else {
                 VIDA_SESSAO_MS
             };
-            agora.mono_ms.saturating_sub(s.ultimo_mono) < vida
+            agora.mono_ms < depois(s.ultimo_mono, vida)
         });
         for _ in self.sessoes.len()..antes {
             self.ignorar("sessao_expirada");
@@ -2300,7 +2376,7 @@ impl Cerebro {
                     .as_ref()
                     .map(|c| c.ultimo_mono + VIDA_CORRENTE_MS);
                 [
-                    Some(s.ultimo_mono + vida),
+                    Some(depois(s.ultimo_mono, vida)),
                     acomodacao,
                     trocado,
                     aviso,
@@ -2358,6 +2434,112 @@ impl Cerebro {
         }
     }
 
+    // --- a memória das sessões (decisão 0093) ---------------------------------
+
+    /// As sessões reais para a memória das sessões (decisão 0093), só com
+    /// metadados e sem a janela (quem sabe dela é o Motor). As de teste
+    /// nunca vão.
+    pub fn guardar(&self) -> Vec<SessaoGuardada> {
+        self.sessoes
+            .values()
+            .filter(|s| !s.teste)
+            .map(|s| SessaoGuardada {
+                sid: s.sid.clone(),
+                proj: s.proj.clone(),
+                ent: s.ent.clone(),
+                estado: s.estado,
+                estado_desde_ms: s.estado_desde,
+                ultimo_evento_ms: s.ultimo_parede,
+                agendamentos: s.agendamentos,
+                aviso: s.aviso.map(|a| AvisoGuardado {
+                    tipo: a.tipo,
+                    espera: a.espera,
+                    desde_ms: a.desde_ms,
+                    nivel: None,
+                    vista_ms: None,
+                }),
+                janela: None,
+            })
+            .collect()
+    }
+
+    /// Restaura as sessões que a memória guardou (decisão 0093), em `agora`:
+    /// o relógio do laço recomeçou com o processo, e cada prazo é contado de
+    /// novo a partir das horas de parede de antes ([`Agora::no_laco`]). Volta
+    /// só o que ainda vale pelas regras de sempre: a sessão com o último
+    /// evento há menos de [`VIDA_SESSAO_MS`] e de uma origem aceita (as mais
+    /// novas primeiro, até [`MAX_SESSOES`]); o estado, com o prazo dele (o
+    /// pensando, o trabalhando e o compactando até [`ATIVA_SEM_EVENTO_MS`]
+    /// depois do último evento, o erro e o cansado até [`ERRO_NA_TELA_MS`];
+    /// vencido, parada); o pronto e o erro até [`VIDA_AVISO_MS`]; o
+    /// "esperando você" enquanto a sessão vive. Nada de turno, de corrente
+    /// ou de festa: o turno que estava aberto não é de confiança (o Stop dele
+    /// pode ter se perdido com o pet fora), e o próximo evento dele abre um
+    /// turno implícito, como no M3. A sessão volta marcada como restaurada
+    /// até o próximo evento dela. Uma que o cérebro já acompanha fica como
+    /// está.
+    pub fn restaurar(&mut self, guardadas: &[SessaoGuardada], agora: Agora) -> Restauradas {
+        let mut r = Restauradas::default();
+        let mut ordem: Vec<&SessaoGuardada> = guardadas.iter().collect();
+        ordem.sort_by_key(|g| std::cmp::Reverse(g.ultimo_evento_ms));
+        for g in ordem {
+            let chave = (false, g.sid.clone());
+            let idade = agora.parede_ms.saturating_sub(g.ultimo_evento_ms);
+            if idade >= VIDA_SESSAO_MS {
+                r.expiradas += 1;
+                continue;
+            }
+            let origem = g.ent.as_deref().unwrap_or("desconhecida");
+            let reais = self.sessoes.keys().filter(|(teste, _)| !teste).count();
+            if self.sessoes.contains_key(&chave)
+                || !self.config.origens.iter().any(|o| o == origem)
+                || reais >= MAX_SESSOES
+            {
+                r.de_fora += 1;
+                continue;
+            }
+            let mut s = Sessao::nova(g.sid.clone(), false, agora);
+            s.proj.clone_from(&g.proj);
+            s.ent.clone_from(&g.ent);
+            s.agendamentos = g.agendamentos;
+            s.ultimo_parede = g.ultimo_evento_ms;
+            s.ultimo_mono = agora.no_laco(g.ultimo_evento_ms);
+            // O prazo do estado, contado de antes: vencido, a sessão volta
+            // parada desde a hora em que ele venceu.
+            let fim_do_estado = match g.estado {
+                EstadoSessao::Pensando | EstadoSessao::Trabalhando | EstadoSessao::Compactando => {
+                    Some(g.ultimo_evento_ms.saturating_add(ATIVA_SEM_EVENTO_MS))
+                }
+                EstadoSessao::Erro | EstadoSessao::Cansado => {
+                    Some(g.estado_desde_ms.saturating_add(ERRO_NA_TELA_MS))
+                }
+                EstadoSessao::Parada | EstadoSessao::Esperando => None,
+            };
+            (s.estado, s.estado_desde) = match fim_do_estado {
+                Some(fim) if agora.parede_ms >= fim => (EstadoSessao::Parada, fim),
+                _ => (g.estado, g.estado_desde_ms),
+            };
+            s.estado_desde_mono = agora.no_laco(s.estado_desde);
+            s.aviso = g.aviso.and_then(|a| {
+                let vivo = a.tipo == TipoAviso::Esperando
+                    || agora.parede_ms.saturating_sub(a.desde_ms) < VIDA_AVISO_MS;
+                vivo.then(|| Aviso {
+                    tipo: a.tipo,
+                    espera: a.espera.filter(|_| a.tipo == TipoAviso::Esperando),
+                    desde_ms: a.desde_ms,
+                    desde_mono: agora.no_laco(a.desde_ms),
+                })
+            });
+            if s.aviso.is_some() {
+                r.avisos += 1;
+            }
+            s.restaurada = true;
+            self.sessoes.insert(chave.clone(), s);
+            r.chaves.push(chave);
+        }
+        r
+    }
+
     /// Só as sessões do [`Self::resumo`] (o Motor olha a tela a cada passo).
     pub fn resumo_das_sessoes(&self) -> Vec<ResumoSessao> {
         self.sessoes
@@ -2377,6 +2559,7 @@ impl Cerebro {
                 corrente: s.resumo_da_corrente(),
                 agendamentos: s.agendamentos,
                 janela: None,
+                restaurada: s.restaurada,
                 chave: (s.teste, s.sid.clone()),
             })
             .collect()
@@ -4845,5 +5028,342 @@ mod testes {
         );
         assert_eq!(c.resumo().sessoes[0].estado, EstadoSessao::Erro);
         assert_eq!(c.proximo_prazo(), Some(500 + ERRO_NA_TELA_MS));
+    }
+
+    // --- a memória das sessões (decisão 0093) ---------------------------------
+
+    #[test]
+    fn o_instante_do_laco_de_uma_hora_de_parede_e_o_contrario() {
+        let agora = Agora {
+            parede_ms: BASE + 10_000,
+            mono_ms: 4_000,
+        };
+        assert_eq!(agora.no_laco(BASE + 10_000), 4_000);
+        assert_eq!(agora.no_laco(BASE + 1_000), -5_000, "de antes da partida");
+        assert_eq!(agora.no_laco(BASE + 12_000), 6_000);
+        for x in [-5_000, 0, 4_000, 6_000] {
+            assert_eq!(agora.no_laco(agora.na_parede(x)), x);
+        }
+        assert_eq!(depois(-5_000, 2_000), 0, "venceu antes da partida");
+        assert_eq!(depois(-5_000, 7_000), 2_000);
+        assert_eq!(depois(instante(3), 4), 7);
+    }
+
+    /// O relógio do pet que partiu em `volta` (parede), `mono_ms` depois.
+    fn depois_da_volta(volta: u64, mono_ms: u64) -> Agora {
+        Agora {
+            parede_ms: volta + mono_ms,
+            mono_ms,
+        }
+    }
+
+    #[test]
+    fn a_memoria_volta_com_o_relogio_do_laco_do_zero_e_a_parede_adiante() {
+        // O pet A roda 10 min: s1 termina um turno aos 100 s (o pronto) e
+        // manda o último evento aos 160 s; s2 trabalha desde os 500 s; uma
+        // sessão de teste também.
+        let s2 = |e: Evento| Evento {
+            sid: Some("bbbbbbbb-2222".into()),
+            proj: Some("web".into()),
+            ..e
+        };
+        let mut a = novo();
+        rodar(
+            &mut a,
+            vec![
+                chega(50_000, prompt("p1")),
+                chega(60_000, ferramenta("p1", "Edit", Some("aaaaaaaaaaaa"), 40)),
+                chega(100_000, stop("p1")),
+                chega(
+                    160_000,
+                    Evento {
+                        nt: Some("idle_prompt".into()),
+                        ..ev("Notification")
+                    },
+                ),
+                chega(400_000, s2(prompt("q1"))),
+                chega(500_000, s2(ferramenta("q1", "Bash", None, 1_000))),
+                chega(
+                    550_000,
+                    Evento {
+                        teste: true,
+                        sid: Some("cccccccc".into()),
+                        ..prompt("t1")
+                    },
+                ),
+                Ate(600_000),
+            ],
+        );
+        let guardadas = a.guardar();
+        assert_eq!(guardadas.len(), 2, "a de teste nunca vai");
+        // O pet B parte 30 s depois: o relógio do laço do zero, a parede
+        // adiante.
+        let volta = BASE + 630_000;
+        let em = |mono| depois_da_volta(volta, mono);
+        let mut b = novo();
+        let r = b.restaurar(&guardadas, em(0));
+        assert_eq!(
+            (r.chaves.len(), r.avisos, r.expiradas, r.de_fora),
+            (2, 1, 0, 0)
+        );
+        assert!(b.resumo().sessoes.iter().all(|s| s.restaurada));
+        let sessao = |c: &Cerebro, sid8: &str| {
+            c.resumo()
+                .sessoes
+                .into_iter()
+                .find(|s| s.sid8 == sid8)
+                .unwrap()
+        };
+        let s1 = sessao(&b, "aaaaaaaa");
+        assert_eq!(
+            (s1.estado, s1.ultimo_evento_ms, s1.estado_desde_ms),
+            (EstadoSessao::Parada, BASE + 160_000, BASE + 100_000)
+        );
+        assert_eq!(
+            s1.aviso.map(|a| (a.tipo, a.desde_ms, a.desde_mono)),
+            Some((TipoAviso::Pronto, BASE + 100_000, -530_000)),
+            "o pronto de 530 s antes da partida"
+        );
+        let s2r = sessao(&b, "bbbbbbbb");
+        assert_eq!(
+            (s2r.estado, s2r.estado_desde_ms, s2r.turno_aberto),
+            (EstadoSessao::Trabalhando, BASE + 500_000, false),
+            "o turno aberto não volta"
+        );
+        assert!(sem_reacoes_ate(&mut b, 169_999, volta));
+        // Os prazos são os de antes, contados no relógio novo: o trabalhando
+        // volta a parado 5 min depois do último evento (os 500 s de antes,
+        // 170 s depois da partida).
+        assert_eq!(b.proximo_prazo(), Some(170_000));
+        b.tique(em(169_999));
+        assert_eq!(sessao(&b, "bbbbbbbb").estado, EstadoSessao::Trabalhando);
+        b.tique(em(170_000));
+        let s2r = sessao(&b, "bbbbbbbb");
+        assert_eq!(
+            (s2r.estado, s2r.estado_desde_ms),
+            (EstadoSessao::Parada, BASE + 800_000)
+        );
+        // O pronto some 2 h depois de antes, não da partida.
+        let fim_do_pronto = VIDA_AVISO_MS - 530_000;
+        assert_eq!(b.proximo_prazo(), Some(fim_do_pronto));
+        b.tique(em(fim_do_pronto - 1));
+        assert!(sessao(&b, "aaaaaaaa").aviso.is_some());
+        b.tique(em(fim_do_pronto));
+        assert!(sessao(&b, "aaaaaaaa").aviso.is_none());
+        // E as sessões saem 12 h depois do último evento de antes.
+        let fim_de_s1 = VIDA_SESSAO_MS + 160_000 - 630_000;
+        let fim_de_s2 = VIDA_SESSAO_MS + 500_000 - 630_000;
+        assert_eq!(b.proximo_prazo(), Some(fim_de_s1));
+        b.tique(em(fim_de_s1 - 1));
+        assert!(b.tem_sessao(&(false, SID.into())));
+        b.tique(em(fim_de_s1));
+        assert!(!b.tem_sessao(&(false, SID.into())));
+        assert_eq!(b.proximo_prazo(), Some(fim_de_s2));
+        b.tique(em(fim_de_s2));
+        assert!(b.resumo().sessoes.is_empty());
+    }
+
+    /// Nenhuma reação sai dos prazos até `ate` (o relógio do laço da volta).
+    fn sem_reacoes_ate(c: &mut Cerebro, ate: u64, volta: u64) -> bool {
+        let mut tudo = Vec::new();
+        while let Some(p) = c.proximo_prazo().filter(|p| *p <= ate) {
+            tudo.extend(c.tique(depois_da_volta(volta, p)));
+            if c.proximo_prazo() == Some(p) {
+                break;
+            }
+        }
+        tudo.is_empty()
+    }
+
+    #[test]
+    fn o_proximo_evento_da_restaurada_e_como_o_de_qualquer_outra() {
+        let mut a = novo();
+        rodar(
+            &mut a,
+            vec![chega(0, prompt("p1")), chega(5_000, stop("p1")), Ate(6_000)],
+        );
+        let volta = BASE + 60_000;
+        let mut b = novo();
+        b.restaurar(&a.guardar(), depois_da_volta(volta, 0));
+        assert!(b.resumo().sessoes[0].restaurada);
+        // O prompt digitado tira o pronto e a marca; o Stop festeja.
+        let mut p2 = prompt("p2");
+        p2.ts = Some(volta + 1_000);
+        b.receber(&p2, volta + 1_000, depois_da_volta(volta, 1_000));
+        let s = &b.resumo().sessoes[0];
+        assert!(!s.restaurada && s.aviso.is_none());
+        assert_eq!(s.estado, EstadoSessao::Pensando);
+        let mut fim = stop("p2");
+        fim.ts = Some(volta + 2_000);
+        b.receber(&fim, volta + 2_000, depois_da_volta(volta, 2_000));
+        let reacoes = b.tique(depois_da_volta(volta, 2_800));
+        assert_eq!(
+            reacoes.iter().map(|r| r.nome).collect::<Vec<_>>(),
+            vec![ACENO]
+        );
+        // O SessionEnd tira a restaurada, com o tchau de sempre.
+        let mut c = novo();
+        c.restaurar(&a.guardar(), depois_da_volta(volta, 0));
+        let fim_da_sessao = Evento {
+            reason: Some("prompt_input_exit".into()),
+            ..ev("SessionEnd")
+        };
+        let reacoes = c.receber(&fim_da_sessao, volta + 500, depois_da_volta(volta, 500));
+        assert_eq!(
+            reacoes.iter().map(|r| r.nome).collect::<Vec<_>>(),
+            vec![TCHAU]
+        );
+        assert!(c.resumo().sessoes.is_empty());
+    }
+
+    /// Uma sessão guardada parada, com o último evento em `ultimo` (parede).
+    fn guardada(sid: &str, ultimo: u64) -> SessaoGuardada {
+        SessaoGuardada {
+            sid: sid.into(),
+            proj: Some("api".into()),
+            ent: Some("cli".into()),
+            estado: EstadoSessao::Parada,
+            estado_desde_ms: ultimo,
+            ultimo_evento_ms: ultimo,
+            agendamentos: None,
+            aviso: None,
+            janela: None,
+        }
+    }
+
+    #[test]
+    fn a_memoria_so_traz_o_que_ainda_vale_pelas_regras_de_cada_um() {
+        const H: u64 = 60 * 60 * 1000;
+        let volta = BASE + 100 * H;
+        let antes = |ms: u64| volta - ms;
+        let aviso = |tipo: TipoAviso, desde: u64| AvisoGuardado {
+            tipo,
+            espera: (tipo == TipoAviso::Esperando).then_some(TipoEspera::Plano),
+            desde_ms: desde,
+            nivel: None,
+            vista_ms: None,
+        };
+        let mut lista = vec![
+            guardada("velha", antes(13 * H)),
+            guardada("quase-12-h", antes(VIDA_SESSAO_MS - 1)),
+            SessaoGuardada {
+                estado: EstadoSessao::Trabalhando,
+                ..guardada("trabalhando-6-min", antes(6 * 60_000))
+            },
+            SessaoGuardada {
+                estado: EstadoSessao::Pensando,
+                ..guardada("pensando-1-min", antes(60_000))
+            },
+            SessaoGuardada {
+                estado: EstadoSessao::Erro,
+                estado_desde_ms: antes(30_000),
+                aviso: Some(aviso(TipoAviso::Erro, antes(30_000))),
+                ..guardada("erro-30-s", antes(30_000))
+            },
+            SessaoGuardada {
+                estado: EstadoSessao::Cansado,
+                estado_desde_ms: antes(120_000),
+                ..guardada("cansado-2-min", antes(120_000))
+            },
+            SessaoGuardada {
+                aviso: Some(aviso(TipoAviso::Pronto, antes(VIDA_AVISO_MS + 1))),
+                ..guardada("pronto-velho", antes(60_000))
+            },
+            SessaoGuardada {
+                aviso: Some(aviso(TipoAviso::Pronto, antes(H))),
+                ..guardada("pronto-de-1-h", antes(60_000))
+            },
+            SessaoGuardada {
+                estado: EstadoSessao::Esperando,
+                estado_desde_ms: antes(11 * H),
+                aviso: Some(aviso(TipoAviso::Esperando, antes(11 * H))),
+                ..guardada("plano-de-11-h", antes(60_000))
+            },
+            SessaoGuardada {
+                ent: Some("sdk-cli".into()),
+                ..guardada("do-sdk", antes(1_000))
+            },
+            SessaoGuardada {
+                ent: None,
+                ..guardada("sem-origem", antes(1_000))
+            },
+            guardada("repetida", antes(2_000)),
+            guardada("repetida", antes(3_000)),
+            guardada("ja-acompanhada", antes(1_000)),
+        ];
+        let mut c = novo();
+        // Uma sessão que o cérebro já acompanha fica como está.
+        let mut viva = prompt("p1");
+        viva.sid = Some("ja-acompanhada".into());
+        c.receber(&viva, volta, depois_da_volta(volta, 0));
+        let r = c.restaurar(&lista, depois_da_volta(volta, 0));
+        assert_eq!((r.expiradas, r.de_fora), (1, 4));
+        let estado = |sid: &str| {
+            c.resumo()
+                .sessoes
+                .into_iter()
+                .find(|s| s.chave.1 == sid)
+                .map(|s| (s.estado, s.estado_desde_ms, s.aviso.map(|a| a.tipo)))
+        };
+        assert_eq!(estado("velha"), None, "13 h: fora");
+        assert!(estado("quase-12-h").is_some());
+        assert_eq!(
+            estado("trabalhando-6-min"),
+            Some((EstadoSessao::Parada, antes(60_000), None)),
+            "parada desde os 5 min depois do último evento"
+        );
+        assert_eq!(
+            estado("pensando-1-min"),
+            Some((EstadoSessao::Pensando, antes(60_000), None))
+        );
+        assert_eq!(
+            estado("erro-30-s"),
+            Some((EstadoSessao::Erro, antes(30_000), Some(TipoAviso::Erro)))
+        );
+        assert_eq!(
+            estado("cansado-2-min"),
+            Some((EstadoSessao::Parada, antes(60_000), None))
+        );
+        assert_eq!(
+            estado("pronto-velho"),
+            Some((EstadoSessao::Parada, antes(60_000), None)),
+            "a sessão volta; o pronto de mais de 2 h, não"
+        );
+        assert_eq!(estado("pronto-de-1-h").unwrap().2, Some(TipoAviso::Pronto));
+        assert_eq!(
+            estado("plano-de-11-h"),
+            Some((
+                EstadoSessao::Esperando,
+                antes(11 * H),
+                Some(TipoAviso::Esperando)
+            )),
+            "o esperando você não vence sozinho"
+        );
+        assert_eq!(estado("do-sdk"), None);
+        assert_eq!(estado("sem-origem"), None);
+        assert_eq!(
+            estado("ja-acompanhada").map(|e| e.0),
+            Some(EstadoSessao::Pensando),
+            "a viva fica"
+        );
+        assert_eq!(
+            c.resumo()
+                .sessoes
+                .iter()
+                .filter(|s| s.chave.1 == "repetida")
+                .count(),
+            1
+        );
+        // Os prazos de agora: o da quase-12-h é o primeiro (1 ms).
+        assert_eq!(c.proximo_prazo(), Some(1));
+        // O teto: as mais novas primeiro, até MAX_SESSOES.
+        lista = (0..MAX_SESSOES as u64 + 2)
+            .map(|i| guardada(&format!("s{i}"), antes(1_000 + i)))
+            .collect();
+        let mut c = novo();
+        let r = c.restaurar(&lista, depois_da_volta(volta, 0));
+        assert_eq!((r.chaves.len(), r.de_fora), (MAX_SESSOES, 2));
+        assert!(!c.tem_sessao(&(false, format!("s{}", MAX_SESSOES + 1))));
+        assert!(c.tem_sessao(&(false, "s0".into())));
     }
 }

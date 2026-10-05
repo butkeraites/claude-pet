@@ -1207,7 +1207,7 @@ fn pelo_pet_de_verdade() {
     // descartar nada, e nada dos segredos aparece nos eventos de debug, no
     // estado nem no log.
     let banca = Banca::nova();
-    let daemon = comum::Daemon::subir(true);
+    let mut daemon = comum::Daemon::subir(true);
     let mut enviados = 0;
     for caso in casos() {
         let r = rodar(
@@ -1237,6 +1237,33 @@ fn pelo_pet_de_verdade() {
     ] {
         sem_segredo(onde, &texto);
     }
+    // A memória das sessões que o SIGTERM grava em disco também (decisão
+    // 0093): só metadados. Os casos de novo, sem o fim da sessão, para ela
+    // ficar aberta (com o aviso, o estado e a janela) na hora de gravar.
+    let mut de_novo = 0;
+    for caso in casos().into_iter().filter(|c| c.evento != "SessionEnd") {
+        rodar(
+            &banca,
+            daemon.porta,
+            caso.evento,
+            caso.entrada.to_string().as_bytes(),
+            |_| {},
+        )
+        .calada(caso.nome);
+        de_novo += 1;
+    }
+    daemon.esperar_estado("os casos de novo", |e| {
+        e["eventos"]["aceitos"] == enviados + de_novo
+    });
+    assert!(daemon.parar(), "o SIGTERM sai sozinho");
+    let memoria = std::fs::read_to_string(daemon.pasta.join("estado/sessoes.json"))
+        .expect("a memória das sessões gravada na saída");
+    assert!(
+        memoria.contains(SID),
+        "a sessão aberta foi guardada: {memoria}"
+    );
+    sem_segredo("memória das sessões", &memoria);
+    sem_segredo("log do daemon, na saída", &daemon.log());
 }
 
 #[test]

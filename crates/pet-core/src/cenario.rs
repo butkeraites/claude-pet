@@ -11,6 +11,14 @@
 //!   (`ocioso`, `olhando_claude`, `protetor`, `compartilhando`, `ligado`,
 //!   `janela_ativa` com o id da janela ou `null`, `monitor`);
 //! - `{"t": 9000, "clique": "esquerdo"}` (ou `"direito"`);
+//! - `{"t": 90000, "reinicio": {"parado_ms": 20000}}`: o pet para (grava a
+//!   memória das sessões, como no SIGTERM; decisão 0093), fica fora do ar
+//!   por `parado_ms` (um evento nesse tempo se perde, como o hook que não
+//!   acha o pet) e volta num Motor novo, com o relógio do laço do zero e a
+//!   parede adiante, que restaura a memória antes de achar o compositor.
+//!   Opções: `"maquina": true` (a máquina reiniciou: outro boot id),
+//!   `"compositor": true` (outra instância do compositor: as janelas de
+//!   antes não existem mais) e `"arquivo": "corrompido"`;
 //! - `{"t": 60000, "fim": true}`: o relógio anda até aqui e o cenário acaba.
 //!
 //! Linhas vazias e as que começam por `#` são comentários. A primeira linha
@@ -21,10 +29,12 @@
 //!
 //! **O executor** roda o Motor com a [`JanelaFalsa`] pronta num monitor de
 //! 1920x1200 (o eDP-1 do Renan), num relógio falso: parede
-//! [`BASE_PAREDE`] + `t`, monotônico `t`. Entre um passo e outro, vence os
-//! prazos como o laço do daemon (o do cérebro primeiro, depois os da janela),
-//! com o compositor de mentira mostrando cada quadro na hora. Um prazo que
-//! vence e continua armado é um erro (o laço do daemon giraria a 100% de CPU).
+//! [`BASE_PAREDE`] + `t`, monotônico `t` (depois de um reinício, `t` menos o
+//! instante em que o pet voltou; a linha do tempo continua em `t`). Entre um
+//! passo e outro, vence os prazos como o laço do daemon (o do cérebro
+//! primeiro, depois os da janela), com o compositor de mentira mostrando
+//! cada quadro na hora. Um prazo que vence e continua armado é um erro (o
+//! laço do daemon giraria a 100% de CPU).
 
 use std::fmt::Write as _;
 use std::rc::Rc;
@@ -34,6 +44,7 @@ use serde_json::{Map, Value};
 use crate::cerebro::{Agora, ConfigCerebro};
 use crate::config::ConfigEfetiva;
 use crate::evento::{self, Evento};
+use crate::memoria;
 use crate::motor::Motor;
 use crate::motor::intencoes::Intencao;
 use crate::plataforma::falsa::JanelaFalsa;
@@ -48,6 +59,13 @@ const JANELA_DO_PROTETOR: &str = "protetor";
 /// Quantas vezes seguidas um prazo pode vencer no mesmo instante antes de o
 /// executor desistir (um prazo que não anda).
 const MESMO_INSTANTE_MAX: u32 = 64;
+/// O boot id da máquina nos cenários; o de depois de um `"maquina": true`.
+const BOOT: &str = "boot-1";
+const OUTRO_BOOT: &str = "boot-2";
+/// A instância do compositor nos cenários; a de depois de um
+/// `"compositor": true`.
+const COMPOSITOR: &str = "hyprland-1";
+const OUTRO_COMPOSITOR: &str = "hyprland-2";
 
 /// Um cenário lido.
 #[derive(Debug, Clone)]
@@ -64,6 +82,7 @@ pub enum Passo {
     Evento { t: u64, evento: Box<Evento> },
     Desktop { t: u64, evento: Desktop },
     Clique { t: u64, botao: Botao },
+    Reinicio { t: u64, reinicio: Reinicio },
     Fim { t: u64 },
 }
 
@@ -73,9 +92,23 @@ impl Passo {
             Passo::Evento { t, .. }
             | Passo::Desktop { t, .. }
             | Passo::Clique { t, .. }
+            | Passo::Reinicio { t, .. }
             | Passo::Fim { t } => *t,
         }
     }
+}
+
+/// O pet reinicia no meio do cenário (decisão 0093).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Reinicio {
+    /// Quanto tempo o pet fica fora do ar.
+    pub parado_ms: u64,
+    /// A máquina reiniciou (outro boot id).
+    pub maquina: bool,
+    /// Outra instância do compositor (um logout e um login).
+    pub compositor: bool,
+    /// A memória gravada chega corrompida.
+    pub corrompido: bool,
 }
 
 /// Um evento do desktop num cenário, antes de virar o
@@ -98,13 +131,6 @@ pub fn monitor() -> Monitor {
         logico: (1280, 800),
         escala: 1.5,
         ..Monitor::default()
-    }
-}
-
-fn agora(t: u64) -> Agora {
-    Agora {
-        parede_ms: BASE_PAREDE + t,
-        mono_ms: t,
     }
 }
 
@@ -222,12 +248,14 @@ fn tempo(objeto: &Map<String, Value>) -> Result<u64, String> {
 
 fn passo(objeto: &Map<String, Value>, padrao: &Map<String, Value>) -> Result<Passo, String> {
     let t = tempo(objeto)?;
-    let tipos: Vec<&str> = ["evento", "desktop", "clique", "fim"]
+    let tipos: Vec<&str> = ["evento", "desktop", "clique", "reinicio", "fim"]
         .into_iter()
         .filter(|k| objeto.contains_key(*k))
         .collect();
     if tipos.len() != 1 || objeto.len() != 2 {
-        return Err("cada linha tem o t e só um de evento, desktop, clique ou fim".into());
+        return Err(
+            "cada linha tem o t e só um de evento, desktop, clique, reinicio ou fim".into(),
+        );
     }
     match tipos[0] {
         "evento" => {
@@ -297,6 +325,39 @@ fn passo(objeto: &Map<String, Value>, padrao: &Map<String, Value>) -> Result<Pas
             };
             Ok(Passo::Clique { t, botao })
         }
+        "reinicio" => {
+            let r = objeto["reinicio"]
+                .as_object()
+                .ok_or("reinicio: esperava um objeto")?;
+            let mut reinicio = Reinicio {
+                parado_ms: 0,
+                maquina: false,
+                compositor: false,
+                corrompido: false,
+            };
+            let mut parado = None;
+            for (chave, valor) in r {
+                let booleano = || {
+                    valor
+                        .as_bool()
+                        .ok_or_else(|| format!("reinicio.{chave}: esperava true ou false"))
+                };
+                match chave.as_str() {
+                    "parado_ms" => {
+                        parado = Some(valor.as_u64().ok_or("reinicio.parado_ms: inteiro")?);
+                    }
+                    "maquina" => reinicio.maquina = booleano()?,
+                    "compositor" => reinicio.compositor = booleano()?,
+                    "arquivo" => match valor.as_str() {
+                        Some("corrompido") => reinicio.corrompido = true,
+                        _ => return Err("reinicio.arquivo: só \"corrompido\"".into()),
+                    },
+                    outro => return Err(format!("reinicio: não conheço «{outro}»")),
+                }
+            }
+            reinicio.parado_ms = parado.ok_or("reinicio: falta o parado_ms")?;
+            Ok(Passo::Reinicio { t, reinicio })
+        }
         _ => Ok(Passo::Fim { t }),
     }
 }
@@ -307,6 +368,16 @@ pub struct Execucao {
     pub janela: JanelaFalsa,
     /// Agora, em ms desde o começo.
     agora: u64,
+    /// O instante do cenário em que o relógio do laço do Motor de agora
+    /// estava em 0 (muda a cada reinício).
+    origem: u64,
+    /// O pet esteve fora do ar até aqui (o último reinício): um evento antes
+    /// disso se perdeu.
+    fora_ate: u64,
+    /// O boot id da máquina e a instância do compositor de agora.
+    boot: &'static str,
+    compositor: &'static str,
+    config: ConfigCerebro,
     linha_do_tempo: Vec<Intencao>,
 }
 
@@ -315,25 +386,57 @@ impl Execucao {
     /// `_teste`; sem skin, o cérebro decide do mesmo jeito, e só as reações
     /// não animam) e a janela pronta no eDP-1 em `t = 0`.
     pub fn nova(config: ConfigCerebro, skin: Option<Rc<Skin>>) -> Execucao {
-        let mut motor = Motor::novo(config);
-        motor.gravar_todas_as_intencoes();
-        motor.acertar_relogio(agora(0));
-        motor.definir_skin(skin);
-        let mut janela = JanelaFalsa::default();
-        motor.conectou(0);
-        motor.aplicar_visibilidade(&mut janela, 0);
+        let janela = JanelaFalsa::default();
         let mut execucao = Execucao {
-            motor,
+            motor: Motor::novo(config.clone()),
             janela,
             agora: 0,
+            origem: 0,
+            fora_ate: 0,
+            boot: BOOT,
+            compositor: COMPOSITOR,
+            config,
             linha_do_tempo: Vec::new(),
         };
-        execucao.assentar();
+        execucao.partir(skin, None);
         execucao
     }
 
+    /// Um Motor novo agora, com o relógio do laço do zero: restaura a
+    /// `memoria` gravada (se houver), acha o compositor e conecta, como o
+    /// daemon na partida (a memória vem antes do compositor; decisão 0093).
+    fn partir(&mut self, skin: Option<Rc<Skin>>, memoria: Option<&str>) {
+        self.origem = self.agora;
+        let ag = self.agora();
+        let mut motor = Motor::novo(self.config.clone());
+        motor.gravar_todas_as_intencoes();
+        motor.acertar_relogio(ag);
+        motor.definir_skin(skin);
+        if let Some(texto) = memoria {
+            match memoria::ler(texto) {
+                Ok(lida) => {
+                    let _ = motor.restaurar(&lida, Some(self.boot), ag);
+                }
+                Err(recusa) => motor.recusar_memoria(recusa, 0),
+            }
+        }
+        motor.definir_compositor(Some(self.compositor.to_owned()));
+        motor.conectou(0);
+        motor.aplicar_visibilidade(&mut self.janela, 0);
+        self.motor = motor;
+        self.assentar();
+    }
+
     fn agora(&self) -> Agora {
-        agora(self.agora)
+        Agora {
+            parede_ms: BASE_PAREDE + self.agora,
+            mono_ms: self.agora - self.origem,
+        }
+    }
+
+    /// O instante `t` do cenário no relógio do laço do Motor de agora.
+    fn no_laco(&self, t: u64) -> u64 {
+        t.saturating_sub(self.origem)
     }
 
     /// O compositor de mentira: mostra o quadro em voo, deixa pronta a janela
@@ -341,7 +444,7 @@ impl Execucao {
     fn assentar(&mut self) {
         for _ in 0..8 {
             self.janela.mostrou();
-            let t = self.agora;
+            let t = self.no_laco(self.agora);
             match self.janela.fase_atual() {
                 Fase::Saindo => {
                     self.janela.fase = None;
@@ -359,15 +462,24 @@ impl Execucao {
                 _ => break,
             }
         }
+        let origem = self.origem;
         self.linha_do_tempo
-            .extend(self.motor.tirar_intencoes_novas());
+            .extend(self.motor.tirar_intencoes_novas().into_iter().map(|mut i| {
+                i.t_ms += origem;
+                i
+            }));
     }
 
     /// Vence os prazos até `t`, como o laço do daemon.
     pub fn andar_ate(&mut self, t: u64) -> Result<(), String> {
         let mut repeticoes = 0;
         let mut ultimo = None;
-        while let Some(prazo) = self.motor.proximo_prazo().filter(|p| *p <= t) {
+        while let Some(prazo) = self
+            .motor
+            .proximo_prazo()
+            .map(|p| p + self.origem)
+            .filter(|p| *p <= t)
+        {
             let quando = prazo.max(self.agora);
             if ultimo == Some(quando) {
                 repeticoes += 1;
@@ -380,14 +492,15 @@ impl Execucao {
             }
             self.agora = quando;
             let ag = self.agora();
+            let no_laco = ag.mono_ms;
             self.motor.acertar_relogio(ag);
-            if self.motor.prazo_do_cerebro().is_some_and(|p| p <= quando) {
+            if self.motor.prazo_do_cerebro().is_some_and(|p| p <= no_laco) {
                 let reacoes = self.motor.tique(ag);
                 for r in reacoes {
-                    self.motor.reagir(Some(&mut self.janela), r.nome, quando);
+                    self.motor.reagir(Some(&mut self.janela), r.nome, no_laco);
                 }
             }
-            self.motor.vencer(&mut self.janela, quando);
+            self.motor.vencer(&mut self.janela, no_laco);
             self.assentar();
         }
         self.agora = self.agora.max(t);
@@ -396,9 +509,21 @@ impl Execucao {
 
     /// Aplica um passo no instante dele (vencendo os prazos antes).
     pub fn passo(&mut self, passo: &Passo) -> Result<(), String> {
+        if passo.t() < self.fora_ate {
+            // O pet estava fora do ar: o hook não o achou, e o evento se
+            // perdeu. O resto (o desktop, o clique) não cabe aí.
+            return match passo {
+                Passo::Evento { .. } => Ok(()),
+                _ => Err(format!(
+                    "t = {}: o pet está fora do ar até {} (só um evento se perde aí)",
+                    passo.t(),
+                    self.fora_ate
+                )),
+            };
+        }
         self.andar_ate(passo.t())?;
-        let t = self.agora;
         let ag = self.agora();
+        let t = ag.mono_ms;
         match passo {
             Passo::Evento { evento, .. } => {
                 let reacoes = self.motor.evento(evento, ag.parede_ms, ag);
@@ -440,10 +565,47 @@ impl Execucao {
             Passo::Clique { botao, .. } => {
                 self.motor.clicar(&mut self.janela, *botao, t);
             }
+            Passo::Reinicio { reinicio, .. } => self.reiniciar(*reinicio),
             Passo::Fim { .. } => {}
         }
         self.assentar();
         Ok(())
+    }
+
+    /// O pet para (o SIGTERM grava a memória das sessões), fica fora do ar e
+    /// volta num Motor novo, na mesma máquina e no mesmo compositor ou não
+    /// (decisão 0093). A janela velha some com o processo; as janelas do
+    /// compositor ficam, se ele é o mesmo.
+    fn reiniciar(&mut self, r: Reinicio) {
+        let texto = if r.corrompido {
+            r#"{"versao": 1, "gravada_ms": 1, "sessoes": [{"sid": "#.to_owned()
+        } else {
+            self.motor
+                .memoria(self.agora(), Some(self.boot.to_owned()))
+                .texto()
+        };
+        let skin = self.motor.skin().cloned();
+        self.agora += r.parado_ms;
+        self.fora_ate = self.agora;
+        if r.maquina {
+            self.boot = if self.boot == BOOT { OUTRO_BOOT } else { BOOT };
+        }
+        let mut desktop = std::mem::take(&mut self.janela.desktop);
+        desktop.eventos.clear();
+        if r.compositor || r.maquina {
+            self.compositor = if self.compositor == COMPOSITOR {
+                OUTRO_COMPOSITOR
+            } else {
+                COMPOSITOR
+            };
+            desktop.janelas.clear();
+            desktop.ativa = None;
+        }
+        self.janela = JanelaFalsa {
+            desktop,
+            ..JanelaFalsa::default()
+        };
+        self.partir(skin, Some(&texto));
     }
 
     /// A linha do tempo até agora.
