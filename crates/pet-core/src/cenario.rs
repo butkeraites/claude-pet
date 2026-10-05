@@ -463,6 +463,134 @@ pub fn rodar(cenario: &Cenario, skin: Option<Rc<Skin>>) -> Result<Vec<Intencao>,
     Ok(execucao.linha_do_tempo)
 }
 
+/// Os campos do fio v1 que um cenário gravado leva (os outros, como `term`,
+/// `v`, `recebido_ms` e `descartados`, ficam de fora).
+const CAMPOS_GRAVADOS: [&str; 24] = [
+    "e", "ts", "sid", "turno", "agente", "aid", "tool", "nt", "err", "src", "orig", "reason",
+    "intr", "sha", "bg", "bgt", "bgi", "crn", "dur", "arq", "proj", "ent", "dnd", "teste",
+];
+
+/// Os pseudônimos de um cenário gravado: cada id de verdade vira o próximo
+/// da sua família, sempre o mesmo para o mesmo id.
+#[derive(Default)]
+struct Pseudonimos {
+    mapas: std::collections::BTreeMap<&'static str, Vec<String>>,
+}
+
+impl Pseudonimos {
+    fn de(&mut self, familia: &'static str, real: &str) -> usize {
+        let lista = self.mapas.entry(familia).or_default();
+        match lista.iter().position(|r| r == real) {
+            Some(i) => i + 1,
+            None => {
+                lista.push(real.to_owned());
+                lista.len()
+            }
+        }
+    }
+}
+
+/// A letra de um número (1 → a, 26 → z, 27 → aa).
+fn letras(mut n: usize) -> String {
+    let mut s = Vec::new();
+    while n > 0 {
+        n -= 1;
+        s.push(b'a' + (n % 26) as u8);
+        n /= 26;
+    }
+    s.reverse();
+    String::from_utf8(s).unwrap_or_default()
+}
+
+/// Um cenário a partir do JSON do `/v1/debug/eventos` (decisão 0078): os
+/// eventos na ordem em que chegaram, com o tempo relativo ao primeiro
+/// instante (a chegada `t` e o `ts`), e só metadados com pseudônimos: as
+/// sessões viram `s1`, os turnos `p1`, os agentes e as tarefas em segundo
+/// plano `a1` (o mesmo pseudônimo quando o `aid` e o `bgi` são o mesmo id),
+/// as pastas `projeto-a`, os hashes de arquivo `000000000001` e as
+/// ferramentas MCP `mcp__servidor_a__ferramenta_1`; sem o `term`, os
+/// descartados e a hora de verdade. Devolve o texto do `.jsonl`, conferido
+/// pelo mesmo leitor dos cenários.
+pub fn de_eventos(nome: &str, json: &str) -> Result<String, String> {
+    let valor: Value = serde_json::from_str(json)
+        .map_err(|e| format!("não é o JSON do /v1/debug/eventos ({e})"))?;
+    let eventos = valor
+        .get("eventos")
+        .and_then(Value::as_array)
+        .ok_or("sem a lista «eventos» (é a saída do /v1/debug/eventos?)")?;
+    if eventos.is_empty() {
+        return Err("nenhum evento (o pet de debug recebeu algum?)".into());
+    }
+    let numero = |e: &Value, k: &str| e.get(k).and_then(Value::as_u64);
+    // O zero do cenário: o instante mais cedo (a chegada ou o `ts`).
+    let zero = eventos
+        .iter()
+        .flat_map(|e| [numero(e, "recebido_ms"), numero(e, "ts")])
+        .flatten()
+        .min()
+        .ok_or("nenhum evento com a hora de chegada")?;
+    let mut nomes = Pseudonimos::default();
+    let mut texto = String::new();
+    let cabecalho = serde_json::json!({
+        "cenario": nome,
+        "descricao": "gravado do /v1/debug/eventos, com pseudônimos (decisão 0078)",
+    });
+    let _ = writeln!(texto, "{cabecalho}");
+    let mut ultimo_t = 0;
+    for (i, e) in eventos.iter().enumerate() {
+        let objeto = e
+            .as_object()
+            .ok_or_else(|| format!("evento {}: esperava um objeto", i + 1))?;
+        let t = numero(e, "recebido_ms")
+            .ok_or_else(|| format!("evento {}: sem recebido_ms", i + 1))?
+            .saturating_sub(zero)
+            .max(ultimo_t);
+        ultimo_t = t;
+        let mut saida = Map::new();
+        for campo in CAMPOS_GRAVADOS {
+            let Some(v) = objeto.get(campo) else {
+                continue;
+            };
+            let texto_de = |v: &Value| v.as_str().map(str::to_owned);
+            let novo = match campo {
+                "ts" => v.as_u64().map(|ts| Value::from(ts.saturating_sub(zero))),
+                "sid" => texto_de(v).map(|r| Value::from(format!("s{}", nomes.de("sid", &r)))),
+                "turno" => texto_de(v).map(|r| Value::from(format!("p{}", nomes.de("turno", &r)))),
+                "aid" => texto_de(v).map(|r| Value::from(format!("a{}", nomes.de("agente", &r)))),
+                "bgi" => v.as_array().map(|ids| {
+                    Value::from(
+                        ids.iter()
+                            .filter_map(Value::as_str)
+                            .map(|r| format!("a{}", nomes.de("agente", r)))
+                            .collect::<Vec<_>>(),
+                    )
+                }),
+                "proj" => texto_de(v)
+                    .map(|r| Value::from(format!("projeto-{}", letras(nomes.de("proj", &r))))),
+                "arq" => texto_de(v).map(|r| Value::from(format!("{:012x}", nomes.de("arq", &r)))),
+                "tool" => texto_de(v).map(|r| match r.strip_prefix("mcp__") {
+                    Some(resto) => {
+                        let servidor = resto.split("__").next().unwrap_or_default().to_owned();
+                        let s = letras(nomes.de("mcp", &servidor));
+                        let f = nomes.de("mcp_ferramenta", &r);
+                        Value::from(format!("mcp__servidor_{s}__ferramenta_{f}"))
+                    }
+                    None => Value::from(r),
+                }),
+                _ => Some(v.clone()),
+            };
+            if let Some(novo) = novo {
+                saida.insert(campo.to_owned(), novo);
+            }
+        }
+        let _ = writeln!(texto, r#"{{"t":{t},"evento":{}}}"#, Value::Object(saida));
+    }
+    let _ = writeln!(texto, r#"{{"t":{},"fim":true}}"#, ultimo_t + 10_000);
+    // O mesmo leitor dos cenários: um campo que o pet descartaria é erro.
+    ler(nome, &texto)?;
+    Ok(texto)
+}
+
 /// Uma intenção por linha, em JSON (o formato do `.esperado.jsonl`).
 pub fn linhas(intencoes: &[Intencao]) -> String {
     let mut texto = String::new();

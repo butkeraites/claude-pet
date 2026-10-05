@@ -1,0 +1,6 @@
+{"cenario": "real-esc-e-compact", "descricao": "da pesquisa (decisão 0071), pseudonimizado, com o orig que o hook do M5 calcula: o Esc com o Bash rodando (nada chega depois do prompt), o /compact sem o PostCompact (a compactação falhou) e o idle_prompt 66 s depois; nenhuma festa, e o pet volta a parado"}
+{"t":0,"desktop":{"ocioso":false}}
+{"t":12,"evento":{"e":"UserPromptSubmit","ent":"cli","proj":"projeto-a","sid":"s1","ts":0,"turno":"p17","orig":"comum"}}
+{"t":128560,"evento":{"e":"PreCompact","ent":"cli","proj":"projeto-a","sid":"s1","ts":128548,"turno":"p18"}}
+{"t":194750,"evento":{"e":"Notification","ent":"cli","nt":"idle_prompt","proj":"projeto-a","sid":"s1","ts":194748,"turno":"p18"}}
+{"t":204750,"fim":true}

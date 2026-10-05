@@ -1,0 +1,18 @@
+{"cenario": "real-laco", "descricao": "da pesquisa (decisões 0071 e 0072), gravado com o hook do M5 e pseudonimizado: um shell curto em segundo plano e a notificação dele, o /loop de 1 min (o CronCreate e o crn 1 nos Stops), o idle_prompt e um tique com o Renan longe do teclado; a notificação e o tique são turnos de máquina, sem festa nem pronto, e o /exit dá tchau"}
+{"t":0,"desktop":{"ocioso":false}}
+{"t":0,"evento":{"e":"SessionStart","ent":"cli","proj":"projeto-a","sid":"s1","src":"startup","ts":0}}
+{"t":11195,"evento":{"e":"UserPromptSubmit","ent":"cli","orig":"comum","proj":"projeto-a","sid":"s1","ts":11182,"turno":"p1"}}
+{"t":13773,"evento":{"dur":40,"e":"PostToolUse","ent":"cli","proj":"projeto-a","sid":"s1","tool":"Bash","ts":13766,"turno":"p1"}}
+{"t":16364,"evento":{"bg":1,"bgi":["a1"],"bgt":["shell"],"crn":0,"e":"Stop","ent":"cli","proj":"projeto-a","sid":"s1","ts":16357,"turno":"p1"}}
+{"t":18794,"evento":{"e":"UserPromptSubmit","ent":"cli","orig":"notificacao","proj":"projeto-a","sid":"s1","ts":18783,"turno":"p2"}}
+{"t":19625,"evento":{"bg":0,"crn":0,"e":"Stop","ent":"cli","proj":"projeto-a","sid":"s1","ts":19622,"turno":"p2"}}
+{"t":25286,"evento":{"e":"UserPromptSubmit","ent":"cli","orig":"comum","proj":"projeto-a","sid":"s1","ts":25276,"turno":"p3"}}
+{"t":28627,"evento":{"dur":6,"e":"PostToolUse","ent":"cli","proj":"projeto-a","sid":"s1","tool":"ToolSearch","ts":28621,"turno":"p3"}}
+{"t":30854,"evento":{"dur":1,"e":"PostToolUse","ent":"cli","proj":"projeto-a","sid":"s1","tool":"CronCreate","ts":30849,"turno":"p3"}}
+{"t":32210,"evento":{"bg":0,"crn":1,"e":"Stop","ent":"cli","proj":"projeto-a","sid":"s1","ts":32205,"turno":"p3"}}
+{"t":40000,"desktop":{"ocioso":true}}
+{"t":92212,"evento":{"e":"Notification","ent":"cli","nt":"idle_prompt","proj":"projeto-a","sid":"s1","ts":92211,"turno":"p3"}}
+{"t":99020,"evento":{"e":"UserPromptSubmit","ent":"cli","orig":"comum","proj":"projeto-a","sid":"s1","ts":99002,"turno":"p4"}}
+{"t":99685,"evento":{"bg":0,"crn":1,"e":"Stop","ent":"cli","proj":"projeto-a","sid":"s1","ts":99681,"turno":"p4"}}
+{"t":108375,"evento":{"e":"SessionEnd","ent":"cli","proj":"projeto-a","reason":"prompt_input_exit","sid":"s1","ts":108370,"turno":"p5"}}
+{"t":118375,"fim":true}

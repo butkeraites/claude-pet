@@ -434,3 +434,262 @@ fn compartilhando_a_tela_os_baloes_ficam_sem_nome() {
     }
     assert!(baloes(&linha).contains(&(50_800, vec!["Prontinho! web".to_owned()])));
 }
+
+// --- cenários gravados (decisão 0078) ----------------------------------------
+
+#[test]
+fn gravar_troca_os_ids_e_so_leva_metadados() {
+    let sid = "e5659037-01b3-473e-b963-dc15597079f6";
+    let aid = "a6f1b2c3d4e5f6a7b";
+    let entrada = serde_json::json!({ "eventos": [
+        {"e": "SessionStart", "ent": "cli", "proj": "agenda-presidencial", "recebido_ms": 1_791_214_185_974u64,
+         "sid": sid, "src": "startup", "term": {"tmux": "%0"}, "ts": 1_791_214_185_973u64},
+        {"e": "UserPromptSubmit", "ent": "cli", "proj": "agenda-presidencial", "recebido_ms": 1_791_214_194_693u64,
+         "sid": sid, "turno": "df3416fe-86cb", "orig": "comum", "ts": 1_791_214_194_683u64,
+         "prompt": "segredo do Renan", "descartados": ["arq"]},
+        {"e": "SubagentStart", "ent": "cli", "proj": "agenda-presidencial", "recebido_ms": 1_791_214_196_000u64,
+         "sid": sid, "turno": "df3416fe-86cb", "agente": true, "aid": aid, "ts": 1_791_214_195_990u64},
+        {"e": "PostToolUse", "ent": "cli", "proj": "agenda-presidencial", "recebido_ms": 1_791_214_197_000u64,
+         "sid": sid, "turno": "df3416fe-86cb", "tool": "mcp__github-interno__criar_issue", "dur": 40,
+         "ts": 1_791_214_196_990u64},
+        {"e": "PostToolUse", "ent": "cli", "proj": "agenda-presidencial", "recebido_ms": 1_791_214_198_000u64,
+         "sid": sid, "turno": "df3416fe-86cb", "tool": "Edit", "arq": "9f86d081884c", "dur": 20,
+         "ts": 1_791_214_197_990u64},
+        {"e": "Stop", "ent": "cli", "proj": "agenda-presidencial", "recebido_ms": 1_791_214_199_000u64,
+         "sid": sid, "turno": "df3416fe-86cb", "bg": 1, "bgt": ["subagent"], "bgi": [aid], "crn": 0,
+         "ts": 1_791_214_198_990u64}
+    ]});
+    let texto = de_eventos("gravado", &entrada.to_string()).unwrap();
+    for proibido in [
+        sid,
+        aid,
+        "df3416fe",
+        "agenda",
+        "github",
+        "criar_issue",
+        "9f86d081884c",
+        "segredo",
+        "prompt",
+        "term",
+        "tmux",
+        "descartados",
+        "recebido_ms",
+        "1791214",
+    ] {
+        assert!(!texto.contains(proibido), "«{proibido}» vazou:\n{texto}");
+    }
+    let linhas_do_texto: Vec<&str> = texto.lines().collect();
+    assert_eq!(
+        linhas_do_texto[1],
+        r#"{"t":1,"evento":{"e":"SessionStart","ent":"cli","proj":"projeto-a","sid":"s1","src":"startup","ts":0}}"#
+    );
+    assert!(linhas_do_texto[3].contains(r#""aid":"a1""#));
+    assert!(linhas_do_texto[4].contains(r#""tool":"mcp__servidor_a__ferramenta_1""#));
+    assert!(linhas_do_texto[5].contains(r#""arq":"000000000001""#));
+    assert!(
+        linhas_do_texto[6].contains(r#""bgi":["a1"]"#),
+        "o agente e a tarefa dele com o mesmo pseudônimo"
+    );
+    assert_eq!(linhas_do_texto.last(), Some(&r#"{"t":23027,"fim":true}"#));
+    // E roda: o agente em segundo plano abre a corrente.
+    let cenario = ler("gravado", &texto).unwrap();
+    let linha = rodar(&cenario, None).unwrap();
+    assert!(
+        linha
+            .iter()
+            .any(|i| matches!(&i.tipo, Tipo::Turno { corrente: Some(c), .. } if c.aberta))
+    );
+    // O que não é a saída do /v1/debug/eventos é recusado.
+    assert!(de_eventos("x", "[]").is_err());
+    assert!(de_eventos("x", r#"{"eventos": []}"#).is_err());
+    assert!(de_eventos("x", r#"{"eventos": [{"e": "Stop"}]}"#).is_err());
+}
+
+/// As festas (sem as mescladas): instante, sessão, nível e reação.
+fn festas(linha: &[Intencao]) -> Vec<(u64, String, crate::cerebro::Nivel, &'static str)> {
+    linha
+        .iter()
+        .filter_map(|x| match &x.tipo {
+            Tipo::Festa {
+                sid8,
+                nivel,
+                reacao: Some(reacao),
+                ..
+            } => Some((x.t_ms, sid8.clone(), *nivel, *reacao)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Os turnos fechados: o turno, o fim e a origem (só a de máquina).
+fn turnos(
+    linha: &[Intencao],
+) -> Vec<(
+    String,
+    crate::cerebro::Fim,
+    Option<crate::cerebro::OrigemTurno>,
+)> {
+    linha
+        .iter()
+        .filter_map(|x| match &x.tipo {
+            Tipo::Turno {
+                turno8,
+                fim,
+                origem,
+                ..
+            } => Some((turno8.clone().unwrap_or_default(), *fim, *origem)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// O que importa em cada linha da tabela do PLANO (M5), além da linha do
+/// tempo inteira do dourado (decisão 0077).
+#[test]
+fn cada_linha_da_tabela_do_plano() {
+    use crate::cerebro::Nivel::{T0, T1, T2, T3};
+    use crate::cerebro::OrigemTurno;
+    let niveis_das_festas = |nome: &str| -> Vec<(u64, crate::cerebro::Nivel, &'static str)> {
+        festas(&linha_do_tempo(nome))
+            .into_iter()
+            .map(|(t, _, n, r)| (t, n, r))
+            .collect()
+    };
+    // rapido e resposta-longa-sem-ferramenta: o aceno T0, sem balão.
+    for nome in ["rapido", "resposta-longa-sem-ferramenta"] {
+        let linha = linha_do_tempo(nome);
+        assert_eq!(
+            festas(&linha)
+                .iter()
+                .map(|f| (f.2, f.3))
+                .collect::<Vec<_>>(),
+            vec![(T0, "nod")],
+            "{nome}"
+        );
+        assert!(baloes(&linha).is_empty(), "{nome}: o T0 não tem balão");
+    }
+    // pequeno, medio, grande: T1, T2, T3; o segundo T3 em 10 min vira T2.
+    assert_eq!(
+        niveis_das_festas("pequeno"),
+        vec![(15_800, T1, "done_small")]
+    );
+    let medio = linha_do_tempo("medio");
+    assert_eq!(festas(&medio)[0].2, T2);
+    assert!(matches!(
+        so(&medio, "festa")[0].tipo,
+        Tipo::Festa {
+            confete: 12,
+            voo: Some("curto"),
+            ..
+        }
+    ));
+    assert_eq!(
+        niveis_das_festas("grande")
+            .iter()
+            .map(|f| f.1)
+            .collect::<Vec<_>>(),
+        vec![T3, T2, T3]
+    );
+    // idle-prompt-repetido: o idle_prompt nunca vira aviso nem festa.
+    let linha = linha_do_tempo("idle-prompt-repetido");
+    assert!(so(&linha, "escalada").is_empty());
+    assert_eq!(festas(&linha).len(), 1, "só a do turno de verdade");
+    // servidor-em-segundo-plano: festas normais com o servidor rodando; a
+    // notificação do shell é de máquina, sem festa.
+    let linha = linha_do_tempo("servidor-em-segundo-plano");
+    assert_eq!(festas(&linha).len(), 4);
+    assert!(
+        turnos(&linha)
+            .iter()
+            .any(|(_, _, origem)| *origem == Some(OrigemTurno::Notificacao))
+    );
+    // workflow-longo: uma festa só, o T3, no Stop que fecha a corrente.
+    assert_eq!(
+        niveis_das_festas("workflow-longo"),
+        vec![(1_213_800, T3, "done_big")]
+    );
+    // stop-bloqueado: a continuação só festeja se subir.
+    assert_eq!(
+        niveis_das_festas("stop-bloqueado"),
+        vec![
+            (5_800, T0, "nod"),
+            (12_800, T1, "done_small"),
+            (25_800, T1, "done_small")
+        ],
+        "a continuação de p2 no mesmo nível fica só no registro"
+    );
+    // interrompido: sem festa, com e sem o PostToolUseFailure.
+    let linha = linha_do_tempo("interrompido");
+    assert_eq!(
+        festas(&linha)
+            .iter()
+            .map(|f| f.1.as_str())
+            .collect::<Vec<_>>(),
+        vec!["s2"],
+        "só o turno seguinte, q2"
+    );
+    assert!(
+        turnos(&linha)
+            .iter()
+            .any(|(t, fim, _)| t == "p1" && *fim == crate::cerebro::Fim::Interrompido)
+    );
+    // erro-limite: o cansado e o erro, sem festa.
+    let linha = linha_do_tempo("erro-limite");
+    assert!(festas(&linha).is_empty());
+    let reacoes: Vec<&str> = so(&linha, "reacao")
+        .iter()
+        .filter_map(|x| match &x.tipo {
+            Tipo::Reacao { motivo, .. } => Some(*motivo),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(reacoes, vec!["cansado", "erro"]);
+    // real-agente-em-segundo-plano: uma festa só pela corrente.
+    assert_eq!(
+        niveis_das_festas("real-agente-em-segundo-plano"),
+        vec![(12_387, T1, "done_small")]
+    );
+    assert_eq!(
+        niveis_das_festas("real-agente-dentro-da-acomodacao"),
+        vec![(9_104, T1, "done_small")]
+    );
+    // real-servidor-e-shell-curto: o servidor não segura; a notificação do
+    // shell curto é de máquina.
+    let linha = linha_do_tempo("real-servidor-e-shell-curto");
+    assert_eq!(festas(&linha).len(), 3);
+    assert_eq!(
+        turnos(&linha).last().map(|t| t.2),
+        Some(Some(OrigemTurno::Notificacao))
+    );
+    // real-laco: a notificação e o tique (o Renan longe) são de máquina,
+    // sem festa nem pronto; o /exit dá tchau.
+    let linha = linha_do_tempo("real-laco");
+    assert_eq!(
+        festas(&linha).iter().map(|f| f.0).collect::<Vec<_>>(),
+        vec![17_164, 33_010]
+    );
+    assert_eq!(
+        turnos(&linha)
+            .iter()
+            .filter_map(|t| t.2)
+            .collect::<Vec<_>>(),
+        vec![OrigemTurno::Notificacao, OrigemTurno::Tique]
+    );
+    assert!(
+        so(&linha, "reacao")
+            .iter()
+            .any(|x| matches!(&x.tipo, Tipo::Reacao { nome, .. } if nome == "bye"))
+    );
+    // real-pergunta-e-plano: cada diálogo é um aviso só, na L1.
+    let linha = linha_do_tempo("real-pergunta-e-plano");
+    let n: Vec<u8> = niveis(&linha).iter().map(|(_, n)| *n).collect();
+    assert_eq!(n, vec![1, 0, 1, 0]);
+    assert_eq!(chamadas(&linha), 2);
+    // real-esc-e-compact: nada de festa; o pet volta a parado.
+    let linha = linha_do_tempo("real-esc-e-compact");
+    assert!(festas(&linha).is_empty());
+    assert!(matches!(
+        so(&linha, "base").last().map(|x| &x.tipo),
+        Some(Tipo::Base { estado: "idle", .. })
+    ));
+}

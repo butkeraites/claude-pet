@@ -283,3 +283,24 @@ nuvem, Monitor, `StopFailure` (não dá para provocar um limite de uso),
 Stop hook de outro plugin (`stop_hook_active`), `PostCompact` de verdade,
 `ScheduleWakeup`, `poll_event`, `elicitation_dialog` e duas sessões
 terminando juntas.
+
+## Os cenários que saíram daqui (T5.9)
+
+As duas rodadas do `/v1/debug/eventos` do daemon de rascunho passaram pelo
+`pet_core::cenario::de_eventos` (os pseudônimos da decisão 0078; o mesmo que
+o `bin/pet eventos --salvar` usa) e viraram cenários em `cenarios/`, com o
+tempo recomeçando em cada trecho. A primeira rodada foi com o hook instalado,
+sem `orig`: o `orig` dos prompts entrou como o hook do M5 o calcula (o
+transcript diz quais eram notificação). A segunda já veio com o hook do M5.
+As linhas do desktop (o Renan no terminal do Claude, ou longe) são as de um
+dia comum, acrescentadas à mão.
+
+| Cenário | Trecho |
+|---|---|
+| `real-agente-em-segundo-plano` | o agente em segundo plano em três turnos (51–146 s) |
+| `real-servidor-e-shell-curto` | o servidor que fica e o shell curto que acaba (163–247 s) |
+| `real-pergunta-e-plano` | a pergunta (545–576 s) e o plano (865–889 s) |
+| `real-esc-e-compact` | o Esc, o `/compact` sem o `PostCompact` e o `idle_prompt` (616–811 s) |
+| `real-agente-dentro-da-acomodacao` | o agente que o modelo pôs em segundo plano e a notificação na acomodação (901–931 s) |
+| `real-laco` | a segunda rodada: o shell e a notificação, o `/loop` com o `crn`, o `idle_prompt` e um tique com o Renan longe |
+| `pergunta`, `plano-lido-no-terminal` | a pergunta e o plano da primeira rodada, o plano com a leitura esticada |

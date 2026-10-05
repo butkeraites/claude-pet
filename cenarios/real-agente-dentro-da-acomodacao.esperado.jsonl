@@ -1,0 +1,12 @@
+{"t":13,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":2552,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
+{"t":7006,"i":"turno","sid8":"s1","turno8":"p20","fim":"stop","pontuacao":1.25,"corrente":{"aberta":true,"turnos":1}}
+{"t":7006,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":7006,"i":"selos","mais":0,"bandeiras":[],"corrente":true}
+{"t":9104,"i":"turno","sid8":"s1","turno8":"p21","fim":"stop","nivel":"T1","pontuacao":1.25,"reacao":"done_small","origem":"notificacao","corrente":{"aberta":false,"turnos":2}}
+{"t":9104,"i":"festa","sid8":"s1","nivel":"T1","reacao":"done_small"}
+{"t":9104,"i":"balao","linhas":["Prontinho! projeto-a"],"motivo":"festa"}
+{"t":9104,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}
+{"t":9104,"i":"selos","mais":0,"bandeiras":[],"corrente":false}
+{"t":30121,"i":"reacao","nome":"bye","motivo":"tchau","sid8":"s1"}
+{"t":30121,"i":"base","estado":"idle","prioridade":"parado"}

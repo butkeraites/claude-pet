@@ -1,0 +1,29 @@
+{"t":22,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":2227,"i":"reacao","nome":"alert","motivo":"aviso","sid8":"s1"}
+{"t":2227,"i":"balao","linhas":["projeto-a: pergunta pra você"],"motivo":"aviso"}
+{"t":2227,"i":"escalada","sid8":"s1","nivel":1,"espera":"pergunta","motivo":"aviso"}
+{"t":2227,"i":"base","estado":"waiting","prioridade":"esperando","sid8":"s1"}
+{"t":18986,"i":"escalada","sid8":"s1","nivel":0,"motivo":"andou"}
+{"t":18986,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
+{"t":20553,"i":"turno","sid8":"s1","turno8":"p15","fim":"stop","nivel":"T0","pontuacao":0.05,"reacao":"nod"}
+{"t":20553,"i":"festa","sid8":"s1","nivel":"T0","reacao":"nod"}
+{"t":20553,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}
+{"t":26034,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":31173,"i":"turno","sid8":"s1","turno8":"p16","fim":"stop","nivel":"T0","pontuacao":0.0,"reacao":"nod"}
+{"t":31173,"i":"festa","sid8":"s1","nivel":"T0","reacao":"nod"}
+{"t":31173,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}
+{"t":151173,"i":"base","estado":"idle","prioridade":"parado"}
+{"t":151173,"i":"selos","mais":0,"bandeiras":[2],"corrente":false}
+{"t":320153,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":320153,"i":"selos","mais":0,"bandeiras":[],"corrente":false}
+{"t":324696,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
+{"t":326086,"i":"reacao","nome":"alert","motivo":"aviso","sid8":"s1"}
+{"t":326086,"i":"balao","linhas":["Plano pra aprovar! projeto-a"],"motivo":"aviso"}
+{"t":326086,"i":"escalada","sid8":"s1","nivel":1,"espera":"plano","motivo":"aviso"}
+{"t":326086,"i":"base","estado":"waiting","prioridade":"esperando","sid8":"s1"}
+{"t":338728,"i":"escalada","sid8":"s1","nivel":0,"motivo":"andou"}
+{"t":338728,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
+{"t":344535,"i":"turno","sid8":"s1","turno8":"p19","fim":"stop","nivel":"T1","pontuacao":1.45,"reacao":"done_small"}
+{"t":344535,"i":"festa","sid8":"s1","nivel":"T1","reacao":"done_small"}
+{"t":344535,"i":"balao","linhas":["Prontinho! projeto-a"],"motivo":"festa"}
+{"t":344535,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}

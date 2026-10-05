@@ -1,0 +1,12 @@
+{"cenario": "real-agente-dentro-da-acomodacao", "descricao": "da pesquisa (decisão 0071), pseudonimizado, com o orig que o hook do M5 calcula: um agente que o modelo pôs em segundo plano, a notificação dele chegando dentro da acomodação de 0,8 s do Stop, o fim da corrente com uma festa só e o /exit"}
+{"t":0,"desktop":{"ocioso":false}}
+{"t":13,"evento":{"e":"UserPromptSubmit","ent":"cli","proj":"projeto-a","sid":"s1","ts":0,"turno":"p20","orig":"comum"}}
+{"t":2548,"evento":{"agente":true,"aid":"a5","e":"SubagentStart","ent":"cli","proj":"projeto-a","sid":"s1","ts":2535,"turno":"p20"}}
+{"t":2552,"evento":{"dur":5,"e":"PostToolUse","ent":"cli","proj":"projeto-a","sid":"s1","tool":"Agent","ts":2548,"turno":"p20"}}
+{"t":4340,"evento":{"agente":true,"aid":"a5","dur":75,"e":"PostToolUse","ent":"cli","proj":"projeto-a","sid":"s1","tool":"Bash","ts":4337,"turno":"p20"}}
+{"t":4928,"evento":{"agente":true,"aid":"a5","dur":3,"e":"PostToolUse","ent":"cli","proj":"projeto-a","sid":"s1","tool":"Read","ts":4920,"turno":"p20"}}
+{"t":6276,"evento":{"bg":2,"bgi":["a3","a5"],"bgt":["shell","subagent"],"e":"Stop","ent":"cli","proj":"projeto-a","sid":"s1","ts":6270,"turno":"p20"}}
+{"t":7006,"evento":{"e":"UserPromptSubmit","ent":"cli","proj":"projeto-a","sid":"s1","ts":6994,"turno":"p21","orig":"notificacao"}}
+{"t":8304,"evento":{"bg":1,"bgi":["a3"],"bgt":["shell"],"e":"Stop","ent":"cli","proj":"projeto-a","sid":"s1","ts":8300,"turno":"p21"}}
+{"t":30121,"evento":{"e":"SessionEnd","ent":"cli","proj":"projeto-a","reason":"prompt_input_exit","sid":"s1","ts":30117,"turno":"p22"}}
+{"t":40121,"fim":true}
