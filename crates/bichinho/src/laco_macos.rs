@@ -96,7 +96,12 @@ fn laco(nucleo: &mut Nucleo, punho: &mut pet_macos::PunhoMac, recebe: &mpsc::Rec
             nucleo.vencer(Some(punho));
         }
 
-        // Eventos da janela e do desktop (ponteiro, Pronta, Saiu).
+        // O app em foco (o terminal de cada sessão): anota as ativações antes
+        // de drenar os eventos do desktop, para o anel casar com o `ts` do
+        // hook (decisão 0055).
+        punho.desktop.pollar();
+
+        // Eventos da janela e do desktop (ponteiro, Pronta, Saiu, JanelaAtiva).
         nucleo.eventos_da_janela(Some(punho));
 
         // Segue o monitor ativo e atualiza o click-through (plano B).

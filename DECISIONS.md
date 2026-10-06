@@ -4361,3 +4361,39 @@ monitor com a viagem, a reação aos eventos reais, e o foco do terminal
 **Por quê:** é o backend que o spike desenhou. A janela pequena que anda
 mantém os commits baratos (o `CALayer` só troca a imagem da célula), e o
 plano B dá o click-through que o alfa não deu.
+
+## 0103 — macOS: o clique leva ao app do terminal pelo NSWorkspace, sem permissão (parte do T8.7) (2026-10-06)
+
+**Problema:** o Renan quer que o clique no Zeca leve ao terminal da sessão do
+Claude. No macOS o caminho sem permissão é trazer o app do terminal para a
+frente (decisão do Renan e pesquisa 09); a aba exata pede Acessibilidade.
+
+**Escolha (a parte macOS do T8.7, o foco no nível do app):**
+- O `DesktopMac` conta o app em foco pelo `NSWorkspace` (o
+  `frontmostApplication`, lido a cada volta do laço): a cada troca, anota uma
+  `JanelaAtiva` no relógio de parede, e na primeira leitura liga a fonte
+  (`Ligado(true)`) e semeia o anel com a `JanelaInicial`. A "janela" é o
+  **bundle id do app** (`company.thebrowser.dia`, `com.googlecode.iterm2`…),
+  nunca o título nem o nome da janela — o canário dos títulos continua valendo.
+- O anel de ativações e o casamento com o `ts` do hook são os mesmos do M4/M5
+  (decisões 0055 e 0057), sem código novo no Motor: a sessão casa com o app
+  que estava em foco quando o prompt foi digitado.
+- `Desktop::focar(bundle)` acha o `NSRunningApplication` daquele bundle, cede a
+  ativação (`yieldActivationToApplication`, macOS 14+ cooperativo) e o traz
+  para a frente (`activateWithOptions`). O spike provou que funciona (decisão
+  0101). Capacidades: `janela_ativa` e `foca_janela` ligadas; `segue_foco`
+  não (o painel segue o monitor sozinho).
+
+Ao vivo (smoke): o daemon mostrou `protocolos: ["NSWorkspace"]`,
+`foca_janelas: true`, o anel semeado com o app em foco e o relógio de parede,
+e o clique sem sessão caindo na lista. **Pendentes (segunda parte do T8.7):**
+o campo novo do fio v1 com o app da sessão (o `__CFBundleIdentifier` do
+ambiente e a árvore de processos, para tmux e restauração), com decisão e
+canários; e a aba/janela exata por `AXUIElement` com a permissão de
+Acessibilidade (opcional, pedida uma vez). A conferência com dois terminais é
+do M8 na tela (step 6).
+
+**Por quê:** reusa todo o anel e o ciclo do clique do M4/M5; só muda a fonte
+das ativações (o `NSWorkspace` no lugar do socket2) e o `focar` (ativar o app
+no lugar do foreign-toplevel). Dá o clique-leva-ao-terminal no nível do app
+sem pedir nenhuma permissão.
