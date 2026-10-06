@@ -318,6 +318,7 @@ fn nenhum_segredo_com_log_ligado_e_segredos_no_ambiente() {
                     .env("TERM_PROGRAM", "SEGREDO-terminal")
                     .env("TMUX_PANE", "%SEGREDO")
                     .env("KITTY_WINDOW_ID", "SEGREDO-janela")
+                    .env("__CFBundleIdentifier", "SEGREDO com espaço")
                     .env("VARIAVEL_QUE_NINGUEM_CONHECE", "SEGREDO-nova");
             },
         );
@@ -397,6 +398,63 @@ fn ids_de_terminal_validos_so_no_inicio_e_no_prompt() {
     assert_eq!(
         json_do(&pedido, "ids ruins")["term"],
         json!({"wezterm": "42"})
+    );
+}
+
+#[test]
+fn app_do_macos_so_no_inicio_e_no_prompt() {
+    // Decisão 0105: o `__CFBundleIdentifier` (o app que hospeda a sessão no
+    // macOS) vai no `app`, só no SessionStart e no UserPromptSubmit e só se
+    // passa no validador de token do pet. É metadado (um bundle id), nunca o
+    // título da janela.
+    let banca = Banca::nova();
+    let captor = Captor::novo(true);
+    for caso in casos() {
+        let nome = caso.nome;
+        let pedido = rodar_e_pegar(
+            &banca,
+            &captor,
+            nome,
+            caso.evento,
+            caso.entrada.to_string().as_bytes(),
+            |c| {
+                c.env("__CFBundleIdentifier", "com.googlecode.iterm2")
+                    .env("TERM_PROGRAM", "SEGREDO-terminal");
+            },
+        );
+        sem_segredo(&format!("{nome}, com app"), &pedido.bruto);
+        let corpo = json_do(&pedido, nome);
+        if ["SessionStart", "UserPromptSubmit"].contains(&caso.evento) {
+            assert_eq!(corpo["app"], json!("com.googlecode.iterm2"), "{nome}");
+        } else {
+            assert!(corpo.get("app").is_none(), "{nome}: {corpo}");
+        }
+        let lido = pet_core::evento::ler(pedido.corpo.as_bytes())
+            .unwrap_or_else(|e| panic!("{nome}: o pet recusaria: {e}"));
+        assert!(
+            lido.descartados.is_empty(),
+            "{nome}: {:?}",
+            lido.descartados
+        );
+    }
+    // Um app que não passa no validador (tem espaço) não sai.
+    let caso = casos()
+        .into_iter()
+        .find(|c| c.evento == "UserPromptSubmit")
+        .unwrap();
+    let pedido = rodar_e_pegar(
+        &banca,
+        &captor,
+        "app ruim",
+        caso.evento,
+        caso.entrada.to_string().as_bytes(),
+        |c| {
+            c.env("__CFBundleIdentifier", "não é bundle id");
+        },
+    );
+    assert!(
+        json_do(&pedido, "app ruim").get("app").is_none(),
+        "um app ruim não sai"
     );
 }
 
@@ -674,6 +732,10 @@ fn teste_so_com_pet_teste_1() {
     }
 }
 
+// O "não perturbe" vem do Omarchy (Hyprland), só no Linux; no macOS o hook
+// sempre manda `dnd:false` (não há essa fonte). O canário de privacidade dele
+// (nenhuma notificação vaza) vale só onde o campo é lido.
+#[cfg(target_os = "linux")]
 #[test]
 fn nao_perturbe_do_omarchy() {
     let banca = Banca::nova();

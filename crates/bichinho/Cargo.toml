@@ -18,9 +18,13 @@ serde_json.workspace = true
 [target.'cfg(target_os = "linux")'.dependencies]
 pet-wayland.workspace = true
 smithay-client-toolkit.workspace = true
-signal-hook.workspace = true
 # O hook sem core dump (`prctl` pelo invólucro seguro; decisão 0045).
 rustix.workspace = true
+
+# SIGTERM/SIGINT em todo Unix: no Linux pelo pipe do calloop (`laco`), no macOS
+# pelo laço sem janela (`sem_janela`), que grava a memória das sessões na saída.
+[target.'cfg(unix)'.dependencies]
+signal-hook.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 pet-windows.workspace = true

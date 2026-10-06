@@ -750,7 +750,35 @@ fn atender(mut fluxo: TcpStream, ctx: &Contexto) {
     };
     let _ = escrever_resposta(&mut fluxo, status, &corpo);
     let _ = fluxo.flush();
+    fechar_graciosamente(&mut fluxo);
 }
+
+/// Fecha a conexão sem deixar um RST engolir a resposta.
+///
+/// Quando o daemon responde com erro antes de ler o corpo (um `Content-Length`
+/// acima do limite dá 413 sem drenar nada), o fechamento com dados ainda por
+/// ler vira um RST em alguns sistemas (macOS), e o cliente nunca lê a resposta.
+/// Meia-fechamento da escrita e uma drenagem curta e limitada (o `read_timeout`
+/// já posto segura o tempo) resolvem. No Linux o fechamento normal já entrega a
+/// resposta; lá o `atender` não precisa disto.
+#[cfg(not(target_os = "linux"))]
+fn fechar_graciosamente(fluxo: &mut TcpStream) {
+    use std::net::Shutdown;
+    let _ = fluxo.shutdown(Shutdown::Write);
+    // Drena no máximo o que o corpo poderia ter (o limite + folga): o cliente
+    // fecha logo depois de ler a resposta (EOF), ou o `read_timeout` corta.
+    let mut lixo = [0u8; 2048];
+    let mut restante = LIMITE_CORPO + 4096;
+    while restante > 0 {
+        match fluxo.read(&mut lixo) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => restante = restante.saturating_sub(n),
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn fechar_graciosamente(_fluxo: &mut TcpStream) {}
 
 fn achar(palheiro: &[u8], agulha: &[u8]) -> Option<usize> {
     palheiro

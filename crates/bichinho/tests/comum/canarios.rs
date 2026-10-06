@@ -25,10 +25,11 @@ pub const EVENTOS: [&str; 13] = [
     "SessionEnd",
 ];
 /// Todas as chaves que o fio v1 pode ter (o `term` desde a decisão 0054; o
-/// `orig` e o `crn` desde a 0072).
-pub const CHAVES_DO_FIO: [&str; 26] = [
+/// `orig` e o `crn` desde a 0072; o `app` do macOS desde a 0105).
+pub const CHAVES_DO_FIO: [&str; 27] = [
     "v", "e", "ts", "sid", "turno", "agente", "aid", "tool", "nt", "err", "src", "orig", "reason",
     "intr", "sha", "bg", "bgt", "bgi", "crn", "dur", "arq", "proj", "ent", "dnd", "teste", "term",
+    "app",
 ];
 pub const EDICAO: [&str; 4] = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
 pub const SID: &str = "3f0c2a9e-1d2b-4c5d-8e9f-0a1b2c3d4e5f";

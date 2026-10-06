@@ -77,6 +77,10 @@ pub fn rodar(mut argumentos: impl Iterator<Item = String>) -> ExitCode {
     let tmux = std::env::var("TMUX_PANE").ok();
     let kitty = std::env::var("KITTY_WINDOW_ID").ok();
     let wezterm = std::env::var("WEZTERM_PANE").ok();
+    // O app que hospeda a sessão no macOS: o `__CFBundleIdentifier` que o
+    // launchd põe no app gráfico e que a sessão herda (decisão 0105). Fora do
+    // macOS, a variável não existe e o campo some.
+    let app = std::env::var("__CFBundleIdentifier").ok();
     let contexto = Contexto {
         evento: &evento,
         ts,
@@ -88,6 +92,7 @@ pub fn rodar(mut argumentos: impl Iterator<Item = String>) -> ExitCode {
             kitty: kitty.as_deref(),
             wezterm: wezterm.as_deref(),
         },
+        app: app.as_deref(),
     };
     // O JSON do hook passa por este processo em fluxo: só os campos da
     // lista branca ficam na memória, e o hook segue assim que o objeto

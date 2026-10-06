@@ -57,6 +57,9 @@ pub const MAX_ENUM: usize = 40;
 pub const MAX_TAREFAS: usize = 16;
 /// Caracteres do nome do projeto.
 pub const MAX_PROJETO: usize = 64;
+/// Bundle id do app que hospeda a sessão no macOS (`com.googlecode.iterm2`;
+/// o `__CFBundleIdentifier` do ambiente do hook, decisão 0105).
+pub const MAX_APP: usize = 128;
 /// Maior duração de ferramenta aceita.
 pub const MAX_DURACAO_MS: u64 = 24 * 60 * 60 * 1000;
 /// Maior contagem de tarefas em segundo plano aceita.
@@ -131,6 +134,11 @@ pub struct Evento {
     /// Os ids de terminal do ambiente do hook (decisão 0054).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub term: Option<Terminal>,
+    /// O bundle id do app que hospeda a sessão no macOS (o
+    /// `__CFBundleIdentifier` do ambiente do hook; decisão 0105). É a `Alca`
+    /// da janela no macOS — nunca o título.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
 }
 
 /// Os ids de terminal que o hook vê no próprio ambiente (decisão 0054): o
@@ -219,6 +227,7 @@ struct Bruto {
     dnd: Option<Value>,
     teste: Option<Value>,
     term: Option<Value>,
+    app: Option<Value>,
 }
 
 /// Lê e valida um corpo de `POST /v1/evento`.
@@ -268,6 +277,9 @@ pub fn ler(corpo: &[u8]) -> Result<Lido, ErroEvento> {
     let ent = validar("ent", bruto.ent, &mut d, |v| texto(v, eh_origem));
     let dnd = validar("dnd", bruto.dnd, &mut d, Value::as_bool);
     let teste = validar("teste", bruto.teste, &mut d, Value::as_bool);
+    let app = validar("app", bruto.app, &mut d, |v| {
+        texto(v, |s| eh_token(s, MAX_APP))
+    });
     // Um objeto sem nenhum id conhecido (vazio, ou só com as chaves de um
     // hook mais novo) é ausente, sem rastro (decisões 0054 e 0064).
     let term = match bruto.term {
@@ -304,6 +316,7 @@ pub fn ler(corpo: &[u8]) -> Result<Lido, ErroEvento> {
             dnd: dnd.unwrap_or(false),
             teste: teste.unwrap_or(false),
             term,
+            app,
         },
         descartados: d,
     })

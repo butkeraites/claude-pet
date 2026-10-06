@@ -7,6 +7,9 @@
 //! Zeca original, CC0, do gerador em `arte/zeca-livre/`) na skin livre (TS.1).
 
 mod args;
+// `carga` e `globais` são clientes Wayland do host (só Linux); fora do Linux o
+// crate nem puxa o smithay (decisão 0040).
+#[cfg(target_os = "linux")]
 mod carga;
 mod cobertura;
 mod contato;
@@ -14,6 +17,7 @@ mod fantasma;
 mod folha;
 mod fonte;
 mod fonte_mini;
+#[cfg(target_os = "linux")]
 mod globais;
 mod importar;
 mod lint;
@@ -70,6 +74,43 @@ fn raiz() -> PathBuf {
         .unwrap_or_default()
 }
 
+/// `cargo xtask carga`: só no Linux (cliente Wayland do host).
+#[cfg(target_os = "linux")]
+fn cmd_carga(args: &[String]) -> ExitCode {
+    match carga::executar(args) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("carga: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn cmd_carga(_args: &[String]) -> ExitCode {
+    eprintln!("carga: só no Linux (precisa de um compositor Wayland)");
+    ExitCode::FAILURE
+}
+
+/// `cargo xtask globais`: só no Linux (lê o registro do compositor Wayland).
+#[cfg(target_os = "linux")]
+fn cmd_globais(args: &[String]) -> ExitCode {
+    match globais::executar(args) {
+        Ok(true) => ExitCode::SUCCESS,
+        Ok(false) => ExitCode::FAILURE,
+        Err(e) => {
+            eprintln!("globais: {e}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn cmd_globais(_args: &[String]) -> ExitCode {
+    eprintln!("globais: só no Linux (precisa de um compositor Wayland)");
+    ExitCode::from(2)
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
@@ -122,13 +163,7 @@ fn main() -> ExitCode {
                 ExitCode::from(2)
             }
         },
-        Some("carga") => match carga::executar(&args[1..]) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(e) => {
-                eprintln!("carga: {e}");
-                ExitCode::FAILURE
-            }
-        },
+        Some("carga") => cmd_carga(&args[1..]),
         Some("zeca") => match zeca::executar(&args[1..]) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
@@ -174,14 +209,7 @@ fn main() -> ExitCode {
                 ExitCode::from(2)
             }
         },
-        Some("globais") => match globais::executar(&args[1..]) {
-            Ok(true) => ExitCode::SUCCESS,
-            Ok(false) => ExitCode::FAILURE,
-            Err(e) => {
-                eprintln!("globais: {e}");
-                ExitCode::from(2)
-            }
-        },
+        Some("globais") => cmd_globais(&args[1..]),
         Some("fonte") => match fonte::executar(&raiz(), &args[1..]) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {

@@ -19,8 +19,11 @@ gif = { version = "0.14.2", default-features = false, features = ["std", "raii_n
 # Lê o .zip do pack em memória (zeca --pack <zip>).
 flate2 = "1.1.10"
 crc32fast = "1.5.2"
-# Só para `cargo xtask carga` (cliente Wayland do host); o pet-core continua
-# sem Wayland.
+
+# Só para `cargo xtask carga` e `globais` (clientes Wayland do host, só Linux);
+# o pet-core continua sem Wayland. Fora do Linux, os dois comandos avisam que
+# só rodam lá, e o crate compila sem puxar o smithay (que não compila no macOS).
+[target.'cfg(target_os = "linux")'.dependencies]
 smithay-client-toolkit.workspace = true
 rustix.workspace = true
 

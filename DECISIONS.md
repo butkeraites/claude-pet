@@ -4542,3 +4542,386 @@ levar ao terminal sem depender de qual app ele é. O build é feito pelo Renan n
 próprio Mac. Depois vêm M6 → M7 e o resto do M8. Isto corrige a ordem da
 decisão 0038 ("M4 → M7, depois T8.2–T8.8"): ter um Mac de verdade para testar
 tira o maior risco do macOS, que era não poder conferir nada na tela.
+
+## 0100 — macOS: o build, os testes e o `bin/pet verificar` verdes no Mac, sem mexer no Linux (2026-10-05)
+
+**Problema:** o M8 pede o Zeca nativo no Mac (Apple Silicon), antes do M6
+(pedido do Renan em 2026-10-05). No clone do macOS, `cargo build`, `cargo
+test` e `bin/pet verificar` não passavam, por diferenças de sistema, não de
+lógica:
+- o `xtask` puxava o `smithay-client-toolkit` (cliente Wayland do host, dos
+  comandos `carga` e `globais`) sem `cfg`, e ele nem compila no macOS (o
+  `rustix` esconde o `pipe_with` em `apple`): a compilação do workspace
+  inteiro quebrava;
+- a memória das sessões (decisão 0093) ficava desligada sem um boot id, que
+  só vinha do `/proc` do Linux;
+- o laço sem janela (`sem_janela`, Windows e macOS) não tratava SIGTERM: o
+  processo morria sem gravar a memória das sessões na saída;
+- a entrada HTTP respondia 413 a um corpo grande sem drenar o resto, e o
+  fechamento com dados por ler virava um RST que engolia a resposta no
+  macOS;
+- vários testes eram do Linux/Hyprland (socket2, `hyprland.lock`, o "não
+  perturbe" do Omarchy) ou usavam o `sha256sum`, que o macOS não tem, e o
+  `AF_UNIX` do macOS tem o caminho mais curto (`SUN_LEN` 104, não 108);
+- o `bin/pet` roda no bash 3.2 do macOS, que, sem locale UTF-8, lia um byte
+  do `»` logo depois de `$id` como parte do nome da variável (`set -u` →
+  "unbound variable"); e o `verificar` validava o compose, que só vale no
+  Linux.
+
+**Escolha (parte macOS da T8.2, o build e o CI):**
+- **Build.** O `smithay-client-toolkit` e o `rustix` do `xtask` ficam sob
+  `cfg(target_os = "linux")`, e `carga`/`globais` (clientes Wayland do host)
+  avisam que só rodam no Linux fora dele. O `pet-wayland` já era vazio no
+  macOS (decisão 0040); agora o workspace inteiro compila no Mac.
+- **Boot id do macOS.** `memoria::boot_id()` lê o `kern.bootsessionuuid` pelo
+  `sysctl` (só a `std`, sem `unsafe` no daemon): um UUID que muda a cada
+  partida da máquina, como o `/proc/sys/kernel/random/boot_id` do Linux.
+  Assim a memória das sessões funciona no Mac. Windows continua sem boot id
+  (a memória fica desligada) até ter o seu.
+- **Encerrar sem janela.** O `sem_janela` trata SIGTERM/SIGINT numa thread
+  (`signal-hook`, agora em todo Unix): o sinal manda `Comando::Encerrar` pela
+  caixa, o laço sai e grava a memória das sessões, como o `encerrar` do laço
+  do Linux (decisão 0093). E publica o estado inicial antes da primeira
+  espera, para a restauração aparecer no `/v1/estado` na hora, não só no
+  batimento.
+- **Fechamento gracioso da entrada.** Fora do Linux, depois de responder a
+  entrada HTTP meia-fecha a escrita e drena um pouco do corpo por ler, para o
+  413 (e os outros erros) chegarem ao cliente no macOS sem um RST no meio. No
+  Linux o fechamento de antes já entrega a resposta: lá nada muda.
+- **Testes.** Os testes do socket2 e da janela de cada sessão (instância de
+  mentira do Hyprland) e o canário do "não perturbe" do Omarchy ficam só no
+  Linux (`cfg`); o canário do `avisar.sh` usa o `shasum` no macOS (o próximo
+  da ordem do script, que já caía nele). Nada do comportamento do daemon
+  muda: o que saiu são provas de peças que só existem no Linux.
+- **`bin/pet verificar`.** As referências `$id»`/`$pedida»` viraram
+  `${id}»`/`${pedida}»` (o bash 3.2 em locale C parava nelas); o `compose` e
+  o `compose dev` são pulados com aviso fora do Linux (no Mac o bichinho é
+  app nativo, o container é uma VM sem tela). O resto (fmt, clippy, testes,
+  clippy dos alvos Windows e macOS, lint-skin, arte livre, marketplace,
+  plugin, shellcheck) roda igual.
+- **Clippy.** O `rust-toolchain.toml` é `stable` flutuante (decisão 0015); o
+  stable deste Mac (1.96) acusou um `nonminimal_bool` num `!…is_some_and` do
+  M5 (`motor::ver_a_espera`), trocado pela sugestão do próprio clippy
+  (`is_none_or`), que é estável desde a 1.82 (a MSRV é 1.85) e não muda o
+  comportamento. Toca código do M5, que corre em paralelo no Linux: a troca é
+  de uma linha e idêntica no efeito.
+
+**Por quê:** o porte não pode mudar o que o pet faz; estas são todas
+diferenças de sistema (ferramenta ausente, sinal, locale, limite de socket,
+lint de uma versão de clippy mais nova) resolvidas atrás de `cfg`, de uma
+fonte equivalente ou de uma escrita portável, com o Linux byte a byte igual.
+
+## 0101 — Spike do NSPanel no macOS: a tabela «funciona / plano B / não dá» antes do backend (2026-10-06)
+
+**Problema:** antes de escrever o `pet-macos` (T8.5), a pesquisa
+(`docs/pesquisa/09-multiplataforma.md`) deixou incertezas que só uma máquina
+resolve (parte macOS da T8.2): o painel por cima de tudo e de app em tela
+cheia, em todos os Spaces; o clique fora do corpo atravessar pelo alfa ou só
+pelo plano B; o App Nap atrasar os prazos; um painel não ativador conseguir
+trazer outro app para a frente no macOS 15+; e como achar o monitor ativo.
+
+**O spike (descartável):** um binário em Rust com a mesma pilha do backend
+(`objc2` 0.6; `objc2-app-kit`, `objc2-quartz-core`, `objc2-core-graphics`
+0.3) abre um `NSPanel` não ativador com uma skin de teste (corpo opaco
+magenta sobre fundo transparente). Rodado no Mac do Renan (macOS 26.6.2,
+Apple Silicon, 3 telas: o notebook 1512×982 @2× e dois monitores externos
+1200×1920 @1×). O clique-através foi medido sem sintetizar clique, por
+`+[NSWindow windowNumberAtPoint:belowWindowWithWindowNumber:]` (diz qual
+janela pegaria um clique num ponto da tela), calibrado: com
+`ignoresMouseEvents=true` ele devolve a janela de baixo, logo é ciente do
+roteamento, não só da geometria. Prints pelo `screencapture` (com a Gravação
+de Tela que o Renan autorizou) guardados fora do git.
+
+**A tabela:**
+
+| Item | Veredito | Como |
+|---|---|---|
+| Por cima de tudo (janelas normais) | **funciona** | `NSPanel` borderless não ativador, nível alto, `CanJoinAllSpaces\|FullScreenAuxiliary\|Stationary\|IgnoresCycle`. Prints sobre outras janelas e no monitor externo |
+| Sobre app em tela cheia | **funciona** | o mesmo painel aparece na tela cheia (Space à parte); o Renan confirmou na tela |
+| Em todos os Spaces | **funciona** | `CanJoinAllSpaces`; a tela cheia é um Space à parte e o painel entra nela |
+| Clique fora do corpo atravessa pelo alfa | **não** → **plano B** | com o conteúdo num `CALayer`, `ignoresMouseEvents=false` faz a janela pegar o retângulo inteiro, inclusive a margem transparente (`windowNumberAtPoint` devolve o painel em todo ponto). O alfa visual não vira região de clique. Plano B: alternar `ignoresMouseEvents` pela posição do ponteiro |
+| App Nap atrasa os prazos | **não atrapalhou** | deriva ≤ ~17 ms em 80+ s com o app em segundo plano e o painel visível. Mesmo assim, segurar `beginActivity` enquanto houver sessão, por garantia |
+| Painel não ativador ativa outro app (macOS 15+) | **funciona** | `activateWithOptions` no Finder devolveu `true` e o Finder veio para a frente (assíncrono, ~1–2 s); `yieldActivationToApplication` existe e foi chamado sem efeito ruim. O clique-leva-ao-terminal é viável |
+| Monitor ativo: foco do app ou ponteiro | **ambos** → NSScreen.main | `NSScreen.main` acompanhou o app ativo (x = −1200, −2400, 0 conforme a janela em foco mudava de tela); o ponteiro também dá a tela. Usar `NSScreen.main` reavaliado em `NSWorkspaceDidActivateApplicationNotification`, com o ponteiro de reserva |
+| Desenho nítido (CALayer + CGImage) | **funciona** | `CGImage` BGRA pré-multiplicado, `CALayer` com filtro nearest: bloco nítido no print |
+| A pilha objc2 0.6 / 0.3 | **compila e roda** | prova o stack do `pet-macos` (inclui `define_class!` para o content view e `CGEvent`) |
+
+**O que isto manda para o backend (T8.5):**
+- `NSPanel` borderless não ativador, `CanJoinAllSpaces|FullScreenAuxiliary|
+  Stationary|IgnoresCycle`, nível alto, transparente, sem sombra,
+  `becomesKeyOnlyIfNeeded`, `hidesOnDeactivate=false`;
+- `CALayer` com `CGImage` BGRA pré-multiplicado, `contentsScale =
+  backingScaleFactor`, filtro nearest;
+- **click-through pelo plano B:** alternar `ignoresMouseEvents` pela posição
+  do ponteiro — dentro da caixa de toque do pet, `false` (o clique e o
+  arraste chegam); fora, `true` (atravessa). Como com `ignoresMouseEvents=
+  true` a janela não recebe `mouseMoved`, a posição vem de um monitor global
+  do mouse (`NSEvent` global monitor) ou de um timer lento lendo
+  `NSEvent.mouseLocation`;
+- monitor ativo por `NSScreen.main` em `NSWorkspaceDidActivateApplication
+  Notification` + timer lento;
+- `beginActivity` enquanto houver sessão (App Nap por garantia);
+- focar o terminal (T8.7) por `NSRunningApplication.activate` (opcional
+  `yieldActivation` antes); a janela exata por `AXUIElement` com a permissão
+  de Acessibilidade, sem guardar título.
+
+**Nota de método:** o clique sintético de verdade não saiu autônomo — o
+binário do spike, ad-hoc, não tem trust de Acessibilidade (o `CGEvent` é
+descartado), e o `orca computer` devolveu `permission_denied` no clique. A
+prova do click-through veio da consulta `windowNumberAtPoint` (sem evento),
+calibrada, que é suficiente e não depende de permissão.
+
+**Por quê:** é o passo que decide o backend. O achado principal — o alfa não
+atravessa com `CALayer`, então o click-through é o plano B — muda como o
+`Overlay` do macOS trata o ponteiro, e é melhor saber agora.
+
+## 0102 — Backend do macOS: o NSPanel que anda, o laço do AppKit e o click-through pelo plano B (2026-10-06)
+
+**Problema:** o T8.5 pede o `pet-macos` como [`Overlay`] e [`Desktop`] de
+verdade, com o laço do AppKit no lugar do `sem_janela`, a partir do que o
+spike decidiu (decisão 0101).
+
+**Escolha (T8.5, a janela e o laço; o foco do terminal fica para o T8.7):**
+- **A janela** (`pet_macos::Painel`, o `Overlay`): um `NSPanel` não ativador,
+  borderless, nível alto, `CanJoinAllSpaces | FullScreenAuxiliary | Stationary
+  | IgnoresCycle`, transparente e sem sombra. É uma **janela pequena que
+  anda** (`tela_inteira: false`): a cada quadro o `desenhar` acha a caixa da
+  cena no palco, rasteriza um `CGImage` BGRA pré-multiplicado (o mesmo raster
+  do `pet-core`), põe no `CALayer` (filtro nearest, `contentsScale =
+  backingScaleFactor`) e reposiciona a janela no monitor. O confete da tela
+  inteira fica para o palco transitório (o Motor já o barra com
+  `!tela_inteira`).
+- **As coordenadas** (`pixels::Tela`): a conversão entre o palco (device px,
+  origem no topo do monitor) e o AppKit (pontos, origem embaixo), pelos frames
+  do `NSScreen`. O ponteiro volta do `locationInWindow` para o palco.
+- **O click-through é o plano B** (decisão 0101): o painel alterna
+  `ignoresMouseEvents` pela posição do ponteiro — dentro da caixa de toque do
+  pet, pega (o clique e o arraste chegam); fora, atravessa. Como com
+  `ignoresMouseEvents` ligado a janela não recebe `mouseMoved`, a posição vem
+  do `NSEvent.mouseLocation`, lido a cada volta do laço (voltas curtas só com
+  o pet na tela; sem desenhar nada, o orçamento de commits não muda). Com um
+  botão apertado, o toggle congela (o arraste continua).
+- **O ponteiro**: uma `NSView` própria (`define_class!`) loga
+  `mouseDown`/`Dragged`/`Up` e o botão direito, vira [`EventoPonteiro`] no
+  palco, e aceita o primeiro clique sem ser a janela chave (`acceptsFirstMouse`).
+- **O monitor ativo**: o painel segue o `NSScreen.main` (`seguir_monitor` no
+  batimento); quando muda, refaz a tela e anuncia `Pronta` para o Motor
+  refazer o palco no monitor novo. (O seguir fino com poof do M4 e os eventos
+  do `NSWorkspace` ficam para o T8.7.)
+- **O laço** (`crate::laco_macos`): a thread principal roda o run loop do
+  AppKit em fatias e, entre elas, faz o que o `sem_janela` faz (esvazia a
+  caixa, vence os prazos, publica, grava a memória), com o `Punho` de verdade.
+  A entrada HTTP acorda a thread principal pelo `CFRunLoop::wake_up`
+  (`pet_macos::Despertador`). SIGTERM/SIGINT mandam `Encerrar` pela caixa e a
+  memória das sessões vai para o disco na saída. O app é Accessory e segura
+  um `beginActivity` contra o App Nap, por garantia.
+- **Config e estado** ficam em `~/Library/Application Support/bichinho`
+  (decisão 0100).
+- **`unsafe` só no `pet-macos`**, com `// SAFETY:` em cada bloco (quase tudo
+  do AppKit no objc2 0.6 já é seguro; sobra o `msg_send!` e o
+  `CGBitmapContextCreate` com ponteiro cru). O crate tem o `[lints]` próprio
+  (não herda o `unsafe_code = "forbid"` do workspace) e enforça o `// SAFETY`.
+- **Testes sem janela**: o daemon dos testes roda com `PET_SEM_JANELA=1` (o
+  `sem_janela`, sem abrir NSPanel na tela): os testes do cérebro não dependem
+  da janela, como no Linux sem compositor. No Linux a variável é ignorada.
+
+Ao vivo neste Mac (macOS 26.6.2, Apple Silicon): o daemon com `PET_DEBUG=1`
+desenhou o pet `_teste` (xadrez de QA) no canto do monitor ativo, nítido
+(blocos D×D) e **por cima de tudo** (sobre o IDE e o navegador), com 44
+commits de desenho e `tela: ativa`; a foto está fora do git. **Pendentes,
+com a tela e o Renan (T8.7 e a conferência do M8):** o arraste, o
+click-through de verdade atravessando, o clique direito (soneca), o seguir o
+monitor com a viagem, a reação aos eventos reais, e o foco do terminal
+(T8.7).
+
+**Por quê:** é o backend que o spike desenhou. A janela pequena que anda
+mantém os commits baratos (o `CALayer` só troca a imagem da célula), e o
+plano B dá o click-through que o alfa não deu.
+
+## 0103 — macOS: o clique leva ao app do terminal pelo NSWorkspace, sem permissão (parte do T8.7) (2026-10-06)
+
+**Problema:** o Renan quer que o clique no Zeca leve ao terminal da sessão do
+Claude. No macOS o caminho sem permissão é trazer o app do terminal para a
+frente (decisão do Renan e pesquisa 09); a aba exata pede Acessibilidade.
+
+**Escolha (a parte macOS do T8.7, o foco no nível do app):**
+- O `DesktopMac` conta o app em foco pelo `NSWorkspace` (o
+  `frontmostApplication`, lido a cada volta do laço): a cada troca, anota uma
+  `JanelaAtiva` no relógio de parede, e na primeira leitura liga a fonte
+  (`Ligado(true)`) e semeia o anel com a `JanelaInicial`. A "janela" é o
+  **bundle id do app** (`company.thebrowser.dia`, `com.googlecode.iterm2`…),
+  nunca o título nem o nome da janela — o canário dos títulos continua valendo.
+- O anel de ativações e o casamento com o `ts` do hook são os mesmos do M4/M5
+  (decisões 0055 e 0057), sem código novo no Motor: a sessão casa com o app
+  que estava em foco quando o prompt foi digitado.
+- `Desktop::focar(bundle)` acha o `NSRunningApplication` daquele bundle, cede a
+  ativação (`yieldActivationToApplication`, macOS 14+ cooperativo) e o traz
+  para a frente (`activateWithOptions`). O spike provou que funciona (decisão
+  0101). Capacidades: `janela_ativa` e `foca_janela` ligadas; `segue_foco`
+  não (o painel segue o monitor sozinho).
+
+Ao vivo (smoke): o daemon mostrou `protocolos: ["NSWorkspace"]`,
+`foca_janelas: true`, o anel semeado com o app em foco e o relógio de parede,
+e o clique sem sessão caindo na lista. **Pendentes (segunda parte do T8.7):**
+o campo novo do fio v1 com o app da sessão (o `__CFBundleIdentifier` do
+ambiente e a árvore de processos, para tmux e restauração), com decisão e
+canários; e a aba/janela exata por `AXUIElement` com a permissão de
+Acessibilidade (opcional, pedida uma vez). A conferência com dois terminais é
+do M8 na tela (step 6).
+
+**Por quê:** reusa todo o anel e o ciclo do clique do M4/M5; só muda a fonte
+das ativações (o `NSWorkspace` no lugar do socket2) e o `focar` (ativar o app
+no lugar do foreign-toplevel). Dá o clique-leva-ao-terminal no nível do app
+sem pedir nenhuma permissão.
+
+## 0104 — macOS: o Bichinho.app, a instalação e o `bichinho diagnostico` (parte do T9.3) (2026-10-06)
+
+**Problema:** para o dia a dia no Mac, o pet precisa de um app nativo com
+identidade estável (para as permissões não se perderem), de subir no login,
+de ir e voltar do PATH e do plugin, e de um relatório que o Renan possa colar.
+
+**Escolha (a parte macOS do T9.3):**
+- **`bichinho diagnostico`**: um relatório só com metadados — a versão e o
+  commit, o binário que o Claude vê no PATH (de onde o hook chama), se o
+  daemon responde, o backend, as pastas de estado e config, e, no macOS, o
+  LaunchAgent e o estado das permissões (Acessibilidade e Gravação de Tela,
+  por `AXIsProcessTrusted` e `CGPreflightScreenCaptureAccess`, declaradas à
+  mão no `pet-macos`). Nenhum conteúdo, nenhum título.
+- **`scripts/mac-empacotar.sh`**: monta o `Bichinho.app` — o binário de
+  release em `Contents/MacOS/bichinho`, `Info.plist` com `LSUIElement` (sem
+  Dock), bundle id neutro `dev.bichinho.pet`, e **assinatura ad-hoc**
+  (`codesign -s -`), para a Acessibilidade e a Gravação de Tela ficarem presas
+  ao app e sobreviverem às atualizações.
+- **`scripts/mac-instalar.sh`**: monta o `.app` (padrão `~/Applications`),
+  liga o hook no PATH (`~/.local/bin/bichinho` → o binário do `.app`, a mesma
+  assinatura, então o TCC vale para os dois), cria o config em
+  `~/Library/Application Support/bichinho`, e, com os pedidos, instala o
+  **LaunchAgent** (`--launchagent`, `RunAtLoad` + `KeepAlive` com
+  `SuccessfulExit=false`) e o **plugin** (`--plugin`, de uma worktree estável
+  da `main`, nunca da branch, com confirmação, porque vale para todas as
+  sessões do Claude).
+- **`scripts/mac-desinstalar.sh`**: tira o LaunchAgent, o link do PATH e o
+  `.app`; deixa os dados (a aprovação do Zeca) salvo `--tudo`, e o plugin
+  (que se tira pelo `claude plugin uninstall`).
+- O daemon do `.app` é `…/MacOS/bichinho rodar` (o LaunchAgent passa o
+  `rodar`): o `bichinho` sem subcomando continua inerte (a regra de ouro), e
+  o hook no PATH chama `bichinho avisar`.
+
+Ao vivo: o `.app` montado e assinado ad-hoc (`Identifier=dev.bichinho.pet`,
+`Signature=adhoc`, `LSUIElement` true), o binário dele roda, e o
+`bichinho diagnostico` mostra o backend nativo, as pastas, o LaunchAgent e as
+permissões (as duas concedidas neste terminal). **Não rodei a instalação de
+verdade** (PATH, LaunchAgent, plugin são fora do repositório e pedem o
+consentimento do Renan).
+
+**Por quê:** a assinatura ad-hoc com bundle id fixo dá a identidade estável
+que o TCC precisa; o LaunchAgent e o plugin ficam opcionais e avisados porque
+mexem fora do repositório.
+
+## 0105 — O app da sessão no fio v1 (`app`, do `__CFBundleIdentifier`), e o clique casa pela janela que o hook diz (parte do T8.7) (2026-10-06)
+
+**Problema:** no macOS o anel de ativações (`NSWorkspace`, decisão 0103) casa
+a sessão com o app que estava em foco quando o prompt foi digitado — uma
+inferência pelo `ts`, que a troca rápida de app ou o tmux atrapalham. O
+sistema operacional, porém, já diz qual app hospeda a sessão: o
+`__CFBundleIdentifier` que o launchd põe no app gráfico e que a sessão herda.
+
+**Escolha (a segunda parte do T8.7, o campo do fio):**
+- **Campo novo e opcional do fio v1: `app`** — o bundle id do app que hospeda
+  a sessão (`com.googlecode.iterm2`), lido do `__CFBundleIdentifier` do
+  ambiente do hook, validado como token (`eh_token`, até 128), só no
+  `SessionStart` e no `UserPromptSubmit` (os mesmos eventos do `term`, decisão
+  0054). É metadado — nunca o título da janela. Fora do macOS a variável não
+  existe e o campo some, então nada muda no Linux.
+- **O hook** (`bichinho avisar`) lê o `__CFBundleIdentifier` e o manda como
+  `app`, pela mesma lista branca e com o mesmo validador do pet. O
+  `pet_core::aviso::app` espelha o `terminal`.
+- **O Motor** usa o `app` como autoridade: quando um prompt traz `app`, o
+  `Identidades::observar_app` sobrepõe a janela do anel (a `Alca` da sessão
+  vira o bundle id, com certeza `certa`), porque o SO contou direto. No macOS
+  a `Alca` já é o bundle id (o `focar` da decisão 0103 ativa esse app).
+- A cadeia de processos (`getppid`/`proc_pidinfo`) para o tmux e a restauração
+  de sessões, quando o `__CFBundleIdentifier` não basta, fica para depois (o
+  env var cobre o caso comum, e evita `unsafe` no hook).
+- **Canários:** o `app` entra no `CHAVES_DO_FIO` (27); os canários do hook
+  conferem que o `app` sai só nos dois eventos e só válido, que um app ruim
+  (com espaço) é descartado, e que nenhum segredo do ambiente
+  (`__CFBundleIdentifier` com segredo inválido incluso) vaza; o núcleo tem o
+  teste do `observar_app` e do `aviso::app`.
+
+Ao vivo (macOS): um `SessionStart` + `UserPromptSubmit` pelo hook com
+`__CFBundleIdentifier=com.googlecode.iterm2` deu a sessão com
+`janela: {certeza: certa, endereco: com.googlecode.iterm2}` no `/v1/estado`.
+585+ testes verdes, `bin/pet verificar` verde.
+
+**Por quê:** o SO sabe o app da sessão de graça; usá-lo é mais confiável que
+o anel por `ts`, e o campo é aditivo (o Linux não tem a variável). O `focar`
+já ativa o app pelo bundle id (decisão 0103), então o clique leva ao terminal
+certo mesmo com vários apps.
+
+## 0106 — macOS: a janela exata do terminal por AXUIElement, com a Acessibilidade (a última parte do T8.7) (2026-10-06)
+
+**Problema:** o clique traz o app do terminal para a frente (decisão 0103),
+mas com vários apps ou várias janelas o Renan quer a janela certa. O macOS só
+deixa mexer na janela de outro app com a permissão de Acessibilidade.
+
+**Escolha (a última parte do T8.7):**
+- O `pet-macos` usa o `AXUIElement` (framework ApplicationServices, pelo
+  `objc2-application-services`): o `DesktopMac`, quando um app vem para a
+  frente, guarda a **janela em foco dele** (`AXFocusedWindow`), uma referência
+  opaca — **nunca o título**. No clique, depois de ativar o app, levanta essa
+  janela (`AXRaise`). Assim, com a Acessibilidade, o clique vai à janela que
+  estava em foco quando o Renan usou aquele terminal.
+- A permissão é **opcional e pedida uma vez** (`AXIsProcessTrustedWithOptions`
+  com o diálogo do sistema; depois o `DesktopMac` só confere com
+  `AXIsProcessTrusted` a cada volta, porque o Renan pode conceder depois).
+  Sem ela, o clique continua trazendo o app para a frente (o nível de app da
+  decisão 0103), e um aviso diz como conceder. O `bichinho diagnostico`
+  mostra o estado.
+- A guarda da janela é por **app** (a última janela em foco de cada bundle):
+  pega o caso comum (uma janela por app, ou a última usada). Distinguir
+  janelas diferentes do mesmo app por sessão pediria guardar a janela por
+  sessão no anel — fica para depois.
+- O `AXUIElement` e o `CFRetained` ficam só no `pet-macos`, com `unsafe` e
+  `// SAFETY:` em cada bloco (o `kAXTrustedCheckOptionPrompt`, o
+  `copy_attribute_value` com ponteiro de saída, o `from_raw` da regra Copy do
+  CoreFoundation). O `DesktopMac` passa a não ser `Send` (guarda referências
+  de janela), e tudo bem: ele vive só na thread principal do laço.
+
+**Por quê:** é o que o Renan pediu e a pesquisa descreveu (a aba exata por
+`AXUIElement`, sem título, com a Acessibilidade pedida uma vez). A referência
+opaca nunca vira título no log nem no estado, e o nível de app segue valendo
+sem permissão nenhuma.
+
+## 0107 — macOS: o laço bombeia os eventos do AppKit (nextEvent + sendEvent), senão o mouse não chega à view (2026-10-06)
+
+**Problema:** na conferência ao vivo do M8 no Mac, o pet desenhava e reagia,
+mas o **arraste e o clique de verdade no corpo não funcionavam**: a `NSView`
+do painel nunca recebia `mouseDown`. A detecção do click-through estava certa
+(com o cursor no corpo, `ignoresMouseEvents` virava `false`, conferido), e
+mesmo com a janela inteira aceitando clique, nada chegava.
+
+**Causa:** o laço do macOS rodava a fatia com `NSRunLoop.runUntilDate` — isso
+roda o CFRunLoop (desenha, vence timers, acorda pela caixa), mas **não despacha
+os eventos do AppKit para as janelas/views**. Quem faz isso é o
+`NSApplication.run`, com o par `nextEventMatchingMask:` + `sendEvent:`. Sem
+ele, os eventos de mouse entram na fila do app e ficam lá: o pet compõe pela
+GPU (CALayer) sem problema, mas a entrada do usuário nunca é entregue.
+
+**Escolha:** a `rodar_fatia` passou a ser o laço de eventos do AppKit: num
+`autoreleasepool`, `nextEventMatchingMask_untilDate_inMode_dequeue` (máscara
+`Any`, até a data da fatia, modo padrão) e `sendEvent:` em cada evento, até a
+data vencer. O `Despertador` (CFRunLoopWakeUp) continua fazendo o `nextEvent`
+voltar na hora quando chega algo na caixa. O resto do laço (`laco_macos`) não
+muda.
+
+Ao vivo (Mac do Renan): com a correção, a `NSView` recebeu 1142 eventos de
+ponteiro (`Apertou`/`Moveu`/`Soltou`), o pet foi **arrastado** de (994,1679)
+para (1010,702), e as posições por monitor foram salvas no `posicoes.json`
+(as três telas). A detecção do click-through (plano B) continua certa, e o
+aperto segura a janela durante o arraste (o cursor sai do corpo quando o pet
+anda atrás dele). Os logs de depuração do diagnóstico, que imprimiam
+coordenadas do ponteiro, foram tirados (as coordenadas nunca vão para o log).
+
+**Por quê:** um laço próprio no macOS tem de fazer o que o `NSApplication.run`
+faz com a entrada; só rodar o CFRunLoop desenha, mas deixa o mouse na fila.

@@ -3,6 +3,11 @@
 //! hooks pelo `/v1/evento`, com o `ts` de quando o hook rodou. O
 //! `/v1/estado.sessoes[].janela` diz a janela que estava ativa na hora do
 //! prompt, ou a dúvida quando a troca foi perto demais.
+//!
+//! Só no Linux: a instância de mentira do Hyprland (socket2, `hyprland.lock`)
+//! e o leitor do socket2 do daemon vivem no `pet-wayland`, que só compila lá.
+//! No macOS o daemon roda sem essa fonte (laço sem janela).
+#![cfg(target_os = "linux")]
 
 mod comum;
 

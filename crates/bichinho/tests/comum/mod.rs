@@ -75,6 +75,11 @@ impl Daemon {
                 .env("PET_ESTADO", pasta.join("estado"))
                 .env("PET_SKINS", raiz().join("skins"))
                 .env("XDG_RUNTIME_DIR", pasta.join("xdg"))
+                // No macOS, o daemon de teste roda sem janela (não abre um
+                // NSPanel na tela): os testes do cérebro não dependem da
+                // janela, como no Linux sem compositor. No Linux esta variável
+                // é ignorada (o laço do Wayland não a lê).
+                .env("PET_SEM_JANELA", "1")
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::from(log));

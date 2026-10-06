@@ -8,6 +8,10 @@
 //! nunca aparecem no log (com `PET_LOG=debug`), no `/v1/estado` nem no
 //! `/v1/debug/eventos`. O socket de comandos (`.socket.sock`) da instância
 //! nunca recebe conexão.
+//!
+//! Só no Linux: o leitor do socket2 e a instância de mentira do Hyprland vivem
+//! no `pet-wayland`; no macOS o daemon roda sem essa fonte (laço sem janela).
+#![cfg(target_os = "linux")]
 
 mod comum;
 

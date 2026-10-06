@@ -77,6 +77,13 @@ pub enum Comando {
     /// (`/v1/comando` `aprovar_skin` e `revogar_skin`, decisão 0026). O
     /// laço avisa pelo canal quando terminou.
     RecarregarPersonagem(SyncSender<()>),
+    /// Pede ao laço para encerrar (SIGTERM/SIGINT). Só o laço sem janela usa,
+    /// e só em Unix (macOS por enquanto): no Linux o calloop acorda por um pipe
+    /// de sinais (decisão 0040), e o Windows ainda não trata sinais. Acorda o
+    /// `recv` da caixa na hora para a memória das sessões ser gravada antes de
+    /// o processo morrer (decisão 0093).
+    #[cfg_attr(not(unix), allow(dead_code))]
+    Encerrar,
 }
 
 #[cfg(test)]

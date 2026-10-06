@@ -1,17 +1,71 @@
 [package]
 name = "pet-macos"
-description = "Backend do macOS (M8, T8.5): por enquanto só o esboço que compila."
+description = "Backend do macOS (M8, T8.5): NSPanel não ativador + CALayer como Overlay, NSWorkspace como Desktop, e o laço NSApplication."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 publish = false
 
-# Só no macOS: em outro sistema o crate fica vazio (decisão 0040). Sem
-# dependência de SDK por enquanto: o `cargo check --target
-# aarch64-apple-darwin` roda neste notebook, sem linkar.
+# Só no macOS: em outro sistema o crate fica vazio (decisão 0040). A pilha
+# objc2 (0.6; app-kit/quartz-core/core-graphics/foundation 0.3) foi provada no
+# spike (decisão 0101). O `cargo clippy --target aarch64-apple-darwin` não
+# linka, então não pede o SDK da Apple (roda no Linux do CI também).
 [target.'cfg(target_os = "macos")'.dependencies]
 pet-core.workspace = true
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = [
+  "NSString",
+  "NSGeometry",
+  "NSThread",
+  "NSNotification",
+  "NSArray",
+  "NSDictionary",
+  "NSDate",
+  "NSObjCRuntime",
+  "NSValue",
+  "NSProcessInfo",
+  "NSRunLoop",
+] }
+# `NSScreen.localizedName` (nome do monitor, sem título de janela).
+objc2-app-kit = { version = "0.3", features = [
+  "NSApplication",
+  "NSResponder",
+  "NSWindow",
+  "NSPanel",
+  "NSScreen",
+  "NSColor",
+  "NSView",
+  "NSWorkspace",
+  "NSRunningApplication",
+  "NSEvent",
+  "NSGraphics",
+  "NSCursor",
+] }
+objc2-quartz-core = { version = "0.3", features = [
+  "CALayer",
+  "objc2-core-foundation",
+] }
+objc2-core-graphics = { version = "0.3", features = [
+  "CGImage",
+  "CGColorSpace",
+  "CGContext",
+  "CGBitmapContext",
+] }
+objc2-core-foundation = { version = "0.3", features = [
+  "CFBase",
+  "CFRunLoop",
+  "CFString",
+  "CFDictionary",
+  "CFNumber",
+] }
+# A Acessibilidade (AXUIElement): a janela exata do terminal da sessão (T8.7).
+objc2-application-services = { version = "0.3.2", features = ["AXUIElement", "AXError", "AXValue"] }
 
-[lints]
-workspace = true
+# `[lints]` próprio (não herda o `unsafe_code = "forbid"` do workspace): o
+# AppKit pede `unsafe`, que só este crate usa (CLAUDE.md, decisões 0040 e
+# 0101). O clippy continua como no workspace, e cada bloco `unsafe` precisa de
+# um `// SAFETY:` (enforçado pelo lint).
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "warn"

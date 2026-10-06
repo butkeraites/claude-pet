@@ -849,7 +849,7 @@ skin_aprovar() {
     }
   fi
   pasta="$(pasta_da_skin "$id")" || {
-    echo "não achei a skin «$id» em skins-locais/ nem em skins/ (bin/pet skin-instalar <zip>)" >&2
+    echo "não achei a skin «${id}» em skins-locais/ nem em skins/ (bin/pet skin-instalar <zip>)" >&2
     return 1
   }
   sha="$(impressao_da_skin "$pasta")"
@@ -861,16 +861,16 @@ skin_aprovar() {
   folha="$previas/contato-$id.png"
   vista="$(cat "$previas/contato-$id.sha256" 2>/dev/null || true)"
   if [ -z "$vista" ]; then
-    echo "não achei a folha de contato de «$id» ($folha): gere as prévias e olhe antes de aprovar" >&2
+    echo "não achei a folha de contato de «${id}» ($folha): gere as prévias e olhe antes de aprovar" >&2
     echo "  (bin/pet skin-instalar <zip> ou bin/pet skin-livre, ou cargo xtask contato $pasta --copia $previas)" >&2
     return 1
   fi
   if [ "$vista" != "$sha" ]; then
-    echo "a skin «$id» mudou depois da folha de contato (folha: sha ${vista:0:12}; skin: sha ${sha:0:12})." >&2
+    echo "a skin «${id}» mudou depois da folha de contato (folha: sha ${vista:0:12}; skin: sha ${sha:0:12})." >&2
     echo "  Gere as prévias de novo e olhe antes de aprovar: cargo xtask contato $pasta --copia $previas" >&2
     return 1
   fi
-  echo "aprovando «$id» ($pasta, sha ${sha:0:12}), a da folha $folha"
+  echo "aprovando «${id}» ($pasta, sha ${sha:0:12}), a da folha $folha"
   if ! comando_pet "$(jq -cn --arg id "$id" --arg sha "$sha" \
     '{cmd: "aprovar_skin", arg: {id: $id, sha256: $sha}}')"; then
     echo "o pet não respondeu em ${URL} — está de pé? (bin/pet subir)" >&2
@@ -884,7 +884,7 @@ skin_aprovar() {
   jq -r '.personagem | if .id then "personagem: \(.id) (\(.origem))" else "personagem: nenhum — \(.avisos | join("; "))" end' <<<"$RESPOSTA"
   pedida="$(skin_pedida || true)"
   if [ -n "$pedida" ] && [ "$pedida" != "$id" ]; then
-    echo "atenção: o pet está configurado para «$pedida»; para usar «$id», ponha" \
+    echo "atenção: o pet está configurado para «${pedida}»; para usar «${id}», ponha" \
       "skin = \"$id\" na seção [aparencia] de config/bichinho.toml (sem criar outra" \
       "[aparencia]; o pet relê o config a cada aprovação) e rode bin/pet skin-aprovar" \
       "$id de novo" >&2
@@ -910,9 +910,9 @@ skin_revogar() {
     return 1
   fi
   if [ "$(jq -r .revogada <<<"$RESPOSTA")" = true ]; then
-    echo "aprovação de «$id» revogada"
+    echo "aprovação de «${id}» revogada"
   else
-    echo "«$id» não estava aprovada"
+    echo "«${id}» não estava aprovada"
   fi
   jq -r '.personagem | if .id then "personagem: \(.id) (\(.origem))" else "personagem: nenhum (o pet fica escondido)" end' <<<"$RESPOSTA"
 }
@@ -1047,8 +1047,15 @@ verificar() {
   passo "Windows e macOS (cargo clippy --target)" outros_sistemas
   passo "lint-skin" lint_skins
   passo "arte livre reproduzível (zeca.py)" arte_livre_reproduzivel
-  passo "compose" docker compose config -q
-  passo "compose dev" docker compose -f docker-compose.yml -f docker-compose.dev.yml config -q
+  # Docker/compose só valem no Linux: no macOS e no Windows o bichinho é app
+  # nativo (o container é uma VM sem acesso à tela; pesquisa 09). Fora do
+  # Linux, pulados com aviso.
+  if [ "$(uname -s)" = Linux ]; then
+    passo "compose" docker compose config -q
+    passo "compose dev" docker compose -f docker-compose.yml -f docker-compose.dev.yml config -q
+  else
+    printf '▸ compose e compose dev\n  – pulados (só no Linux; aqui o bichinho é app nativo)\n'
+  fi
   if [ -f .claude-plugin/marketplace.json ]; then
     passo "marketplace" claude plugin validate . --strict
   fi
