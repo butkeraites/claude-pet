@@ -4234,3 +4234,67 @@ lógica:
 diferenças de sistema (ferramenta ausente, sinal, locale, limite de socket,
 lint de uma versão de clippy mais nova) resolvidas atrás de `cfg`, de uma
 fonte equivalente ou de uma escrita portável, com o Linux byte a byte igual.
+
+## 0101 — Spike do NSPanel no macOS: a tabela «funciona / plano B / não dá» antes do backend (2026-10-06)
+
+**Problema:** antes de escrever o `pet-macos` (T8.5), a pesquisa
+(`docs/pesquisa/09-multiplataforma.md`) deixou incertezas que só uma máquina
+resolve (parte macOS da T8.2): o painel por cima de tudo e de app em tela
+cheia, em todos os Spaces; o clique fora do corpo atravessar pelo alfa ou só
+pelo plano B; o App Nap atrasar os prazos; um painel não ativador conseguir
+trazer outro app para a frente no macOS 15+; e como achar o monitor ativo.
+
+**O spike (descartável):** um binário em Rust com a mesma pilha do backend
+(`objc2` 0.6; `objc2-app-kit`, `objc2-quartz-core`, `objc2-core-graphics`
+0.3) abre um `NSPanel` não ativador com uma skin de teste (corpo opaco
+magenta sobre fundo transparente). Rodado no Mac do Renan (macOS 26.6.2,
+Apple Silicon, 3 telas: o notebook 1512×982 @2× e dois monitores externos
+1200×1920 @1×). O clique-através foi medido sem sintetizar clique, por
+`+[NSWindow windowNumberAtPoint:belowWindowWithWindowNumber:]` (diz qual
+janela pegaria um clique num ponto da tela), calibrado: com
+`ignoresMouseEvents=true` ele devolve a janela de baixo, logo é ciente do
+roteamento, não só da geometria. Prints pelo `screencapture` (com a Gravação
+de Tela que o Renan autorizou) guardados fora do git.
+
+**A tabela:**
+
+| Item | Veredito | Como |
+|---|---|---|
+| Por cima de tudo (janelas normais) | **funciona** | `NSPanel` borderless não ativador, nível alto, `CanJoinAllSpaces\|FullScreenAuxiliary\|Stationary\|IgnoresCycle`. Prints sobre outras janelas e no monitor externo |
+| Sobre app em tela cheia | **funciona** | o mesmo painel aparece na tela cheia (Space à parte); o Renan confirmou na tela |
+| Em todos os Spaces | **funciona** | `CanJoinAllSpaces`; a tela cheia é um Space à parte e o painel entra nela |
+| Clique fora do corpo atravessa pelo alfa | **não** → **plano B** | com o conteúdo num `CALayer`, `ignoresMouseEvents=false` faz a janela pegar o retângulo inteiro, inclusive a margem transparente (`windowNumberAtPoint` devolve o painel em todo ponto). O alfa visual não vira região de clique. Plano B: alternar `ignoresMouseEvents` pela posição do ponteiro |
+| App Nap atrasa os prazos | **não atrapalhou** | deriva ≤ ~17 ms em 80+ s com o app em segundo plano e o painel visível. Mesmo assim, segurar `beginActivity` enquanto houver sessão, por garantia |
+| Painel não ativador ativa outro app (macOS 15+) | **funciona** | `activateWithOptions` no Finder devolveu `true` e o Finder veio para a frente (assíncrono, ~1–2 s); `yieldActivationToApplication` existe e foi chamado sem efeito ruim. O clique-leva-ao-terminal é viável |
+| Monitor ativo: foco do app ou ponteiro | **ambos** → NSScreen.main | `NSScreen.main` acompanhou o app ativo (x = −1200, −2400, 0 conforme a janela em foco mudava de tela); o ponteiro também dá a tela. Usar `NSScreen.main` reavaliado em `NSWorkspaceDidActivateApplicationNotification`, com o ponteiro de reserva |
+| Desenho nítido (CALayer + CGImage) | **funciona** | `CGImage` BGRA pré-multiplicado, `CALayer` com filtro nearest: bloco nítido no print |
+| A pilha objc2 0.6 / 0.3 | **compila e roda** | prova o stack do `pet-macos` (inclui `define_class!` para o content view e `CGEvent`) |
+
+**O que isto manda para o backend (T8.5):**
+- `NSPanel` borderless não ativador, `CanJoinAllSpaces|FullScreenAuxiliary|
+  Stationary|IgnoresCycle`, nível alto, transparente, sem sombra,
+  `becomesKeyOnlyIfNeeded`, `hidesOnDeactivate=false`;
+- `CALayer` com `CGImage` BGRA pré-multiplicado, `contentsScale =
+  backingScaleFactor`, filtro nearest;
+- **click-through pelo plano B:** alternar `ignoresMouseEvents` pela posição
+  do ponteiro — dentro da caixa de toque do pet, `false` (o clique e o
+  arraste chegam); fora, `true` (atravessa). Como com `ignoresMouseEvents=
+  true` a janela não recebe `mouseMoved`, a posição vem de um monitor global
+  do mouse (`NSEvent` global monitor) ou de um timer lento lendo
+  `NSEvent.mouseLocation`;
+- monitor ativo por `NSScreen.main` em `NSWorkspaceDidActivateApplication
+  Notification` + timer lento;
+- `beginActivity` enquanto houver sessão (App Nap por garantia);
+- focar o terminal (T8.7) por `NSRunningApplication.activate` (opcional
+  `yieldActivation` antes); a janela exata por `AXUIElement` com a permissão
+  de Acessibilidade, sem guardar título.
+
+**Nota de método:** o clique sintético de verdade não saiu autônomo — o
+binário do spike, ad-hoc, não tem trust de Acessibilidade (o `CGEvent` é
+descartado), e o `orca computer` devolveu `permission_denied` no clique. A
+prova do click-through veio da consulta `windowNumberAtPoint` (sem evento),
+calibrada, que é suficiente e não depende de permissão.
+
+**Por quê:** é o passo que decide o backend. O achado principal — o alfa não
+atravessa com `CALayer`, então o click-through é o plano B — muda como o
+`Overlay` do macOS trata o ponteiro, e é melhor saber agora.
