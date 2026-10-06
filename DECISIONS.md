@@ -4298,3 +4298,66 @@ calibrada, que é suficiente e não depende de permissão.
 **Por quê:** é o passo que decide o backend. O achado principal — o alfa não
 atravessa com `CALayer`, então o click-through é o plano B — muda como o
 `Overlay` do macOS trata o ponteiro, e é melhor saber agora.
+
+## 0102 — Backend do macOS: o NSPanel que anda, o laço do AppKit e o click-through pelo plano B (2026-10-06)
+
+**Problema:** o T8.5 pede o `pet-macos` como [`Overlay`] e [`Desktop`] de
+verdade, com o laço do AppKit no lugar do `sem_janela`, a partir do que o
+spike decidiu (decisão 0101).
+
+**Escolha (T8.5, a janela e o laço; o foco do terminal fica para o T8.7):**
+- **A janela** (`pet_macos::Painel`, o `Overlay`): um `NSPanel` não ativador,
+  borderless, nível alto, `CanJoinAllSpaces | FullScreenAuxiliary | Stationary
+  | IgnoresCycle`, transparente e sem sombra. É uma **janela pequena que
+  anda** (`tela_inteira: false`): a cada quadro o `desenhar` acha a caixa da
+  cena no palco, rasteriza um `CGImage` BGRA pré-multiplicado (o mesmo raster
+  do `pet-core`), põe no `CALayer` (filtro nearest, `contentsScale =
+  backingScaleFactor`) e reposiciona a janela no monitor. O confete da tela
+  inteira fica para o palco transitório (o Motor já o barra com
+  `!tela_inteira`).
+- **As coordenadas** (`pixels::Tela`): a conversão entre o palco (device px,
+  origem no topo do monitor) e o AppKit (pontos, origem embaixo), pelos frames
+  do `NSScreen`. O ponteiro volta do `locationInWindow` para o palco.
+- **O click-through é o plano B** (decisão 0101): o painel alterna
+  `ignoresMouseEvents` pela posição do ponteiro — dentro da caixa de toque do
+  pet, pega (o clique e o arraste chegam); fora, atravessa. Como com
+  `ignoresMouseEvents` ligado a janela não recebe `mouseMoved`, a posição vem
+  do `NSEvent.mouseLocation`, lido a cada volta do laço (voltas curtas só com
+  o pet na tela; sem desenhar nada, o orçamento de commits não muda). Com um
+  botão apertado, o toggle congela (o arraste continua).
+- **O ponteiro**: uma `NSView` própria (`define_class!`) loga
+  `mouseDown`/`Dragged`/`Up` e o botão direito, vira [`EventoPonteiro`] no
+  palco, e aceita o primeiro clique sem ser a janela chave (`acceptsFirstMouse`).
+- **O monitor ativo**: o painel segue o `NSScreen.main` (`seguir_monitor` no
+  batimento); quando muda, refaz a tela e anuncia `Pronta` para o Motor
+  refazer o palco no monitor novo. (O seguir fino com poof do M4 e os eventos
+  do `NSWorkspace` ficam para o T8.7.)
+- **O laço** (`crate::laco_macos`): a thread principal roda o run loop do
+  AppKit em fatias e, entre elas, faz o que o `sem_janela` faz (esvazia a
+  caixa, vence os prazos, publica, grava a memória), com o `Punho` de verdade.
+  A entrada HTTP acorda a thread principal pelo `CFRunLoop::wake_up`
+  (`pet_macos::Despertador`). SIGTERM/SIGINT mandam `Encerrar` pela caixa e a
+  memória das sessões vai para o disco na saída. O app é Accessory e segura
+  um `beginActivity` contra o App Nap, por garantia.
+- **Config e estado** ficam em `~/Library/Application Support/bichinho`
+  (decisão 0100).
+- **`unsafe` só no `pet-macos`**, com `// SAFETY:` em cada bloco (quase tudo
+  do AppKit no objc2 0.6 já é seguro; sobra o `msg_send!` e o
+  `CGBitmapContextCreate` com ponteiro cru). O crate tem o `[lints]` próprio
+  (não herda o `unsafe_code = "forbid"` do workspace) e enforça o `// SAFETY`.
+- **Testes sem janela**: o daemon dos testes roda com `PET_SEM_JANELA=1` (o
+  `sem_janela`, sem abrir NSPanel na tela): os testes do cérebro não dependem
+  da janela, como no Linux sem compositor. No Linux a variável é ignorada.
+
+Ao vivo neste Mac (macOS 26.6.2, Apple Silicon): o daemon com `PET_DEBUG=1`
+desenhou o pet `_teste` (xadrez de QA) no canto do monitor ativo, nítido
+(blocos D×D) e **por cima de tudo** (sobre o IDE e o navegador), com 44
+commits de desenho e `tela: ativa`; a foto está fora do git. **Pendentes,
+com a tela e o Renan (T8.7 e a conferência do M8):** o arraste, o
+click-through de verdade atravessando, o clique direito (soneca), o seguir o
+monitor com a viagem, a reação aos eventos reais, e o foco do terminal
+(T8.7).
+
+**Por quê:** é o backend que o spike desenhou. A janela pequena que anda
+mantém os commits baratos (o `CALayer` só troca a imagem da célula), e o
+plano B dá o click-through que o alfa não deu.

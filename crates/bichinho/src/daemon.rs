@@ -72,9 +72,32 @@ fn rodar_no_sistema(
     crate::laco::rodar(ambiente, config, comp, ouvinte)
 }
 
-/// Sem backend de janela ainda (Windows e macOS até o M8): o laço sem
-/// janela, com o cérebro e o `/v1/estado`.
-#[cfg(not(target_os = "linux"))]
+/// macOS (M8, T8.5): o painel nativo (NSPanel + CALayer) pelo laço do AppKit.
+/// Com `PET_SEM_JANELA=1`, o laço sem janela (os testes do daemon não abrem um
+/// NSPanel na tela; o cérebro e o `/v1/estado` funcionam igual).
+#[cfg(target_os = "macos")]
+fn rodar_no_sistema(
+    ambiente: Ambiente,
+    config: ConfigEfetiva,
+    comp: Arc<Compartilhado>,
+    ouvinte: TcpListener,
+) -> ExitCode {
+    if std::env::var("PET_SEM_JANELA").as_deref() == Ok("1") {
+        aviso!("PET_SEM_JANELA=1: laço sem janela (sem NSPanel)");
+        return crate::sem_janela::rodar(
+            ambiente,
+            config,
+            comp,
+            ouvinte,
+            "PET_SEM_JANELA=1: sem janela",
+        );
+    }
+    crate::laco_macos::rodar(ambiente, config, comp, ouvinte)
+}
+
+/// Sem backend de janela ainda (Windows até o M8): o laço sem janela, com o
+/// cérebro e o `/v1/estado`.
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn rodar_no_sistema(
     ambiente: Ambiente,
     config: ConfigEfetiva,
@@ -83,9 +106,7 @@ fn rodar_no_sistema(
 ) -> ExitCode {
     #[cfg(windows)]
     let motivo = pet_windows::SEM_JANELA;
-    #[cfg(target_os = "macos")]
-    let motivo = pet_macos::SEM_JANELA;
-    #[cfg(not(any(windows, target_os = "macos")))]
+    #[cfg(not(windows))]
     let motivo = "este sistema ainda não tem backend de janela";
     crate::sem_janela::rodar(ambiente, config, comp, ouvinte, motivo)
 }

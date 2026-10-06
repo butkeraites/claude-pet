@@ -1,10 +1,11 @@
-//! O laço sem janela (decisão 0040): o daemon nos sistemas que ainda não têm
-//! backend (Windows e macOS, até o M8).
+//! O laço sem janela (decisão 0040): o backend do Windows até o M8, e o modo
+//! sem NSPanel do macOS (`PET_SEM_JANELA=1`, usado pelos testes do daemon;
+//! o backend de verdade do macOS é o `laco_macos`, decisão 0101).
 //!
 //! Só a `std`: a caixa acorda o `recv_timeout`, o prazo mais próximo do
 //! Motor vira o tempo de espera, e o cérebro e o `/v1/estado` funcionam como
-//! no Linux sem compositor (as reações ficam só no estado). No Linux este
-//! laço só roda nos testes, que provam o [`Nucleo`] sem Wayland nem calloop.
+//! no Linux sem compositor (as reações ficam só no estado). No Linux este laço
+//! só roda no teste que prova o [`Nucleo`] sem Wayland nem calloop.
 
 #![cfg_attr(target_os = "linux", allow(dead_code))]
 

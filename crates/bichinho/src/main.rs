@@ -30,6 +30,8 @@ mod estado;
 mod ingress;
 #[cfg(target_os = "linux")]
 mod laco;
+#[cfg(target_os = "macos")]
+mod laco_macos;
 mod memoria;
 mod nucleo;
 mod personagem;

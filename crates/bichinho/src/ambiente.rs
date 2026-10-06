@@ -68,7 +68,7 @@ impl Ambiente {
         let home = var("HOME").unwrap_or_else(|| "/tmp".to_owned());
         let pasta_estado = var("PET_ESTADO")
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(home).join(".local/state/bichinho"));
+            .unwrap_or_else(|| estado_padrao(&home));
         Ok(Ambiente {
             escuta,
             porta_publica,
@@ -105,6 +105,18 @@ impl Ambiente {
     }
 }
 
+/// A pasta de estado padrão (sem `PET_ESTADO`), por sistema: no macOS, como
+/// manda a convenção, `~/Library/Application Support/bichinho` (decisão 0100);
+/// no resto (Linux fora do Docker, Windows até o M8), o XDG
+/// `~/.local/state/bichinho`.
+fn estado_padrao(home: &str) -> PathBuf {
+    if cfg!(target_os = "macos") {
+        PathBuf::from(home).join("Library/Application Support/bichinho")
+    } else {
+        PathBuf::from(home).join(".local/state/bichinho")
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
@@ -120,6 +132,18 @@ mod testes {
             vec![PathBuf::from("skins"), PathBuf::from("skins-locais")]
         );
         assert!(!a.debug);
+    }
+
+    #[test]
+    fn estado_padrao_por_sistema() {
+        let p = estado_padrao("/Users/x");
+        #[cfg(target_os = "macos")]
+        assert_eq!(
+            p,
+            PathBuf::from("/Users/x/Library/Application Support/bichinho")
+        );
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(p, PathBuf::from("/Users/x/.local/state/bichinho"));
     }
 
     #[test]
