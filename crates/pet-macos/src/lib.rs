@@ -27,6 +27,7 @@ extern crate pet_core;
 use pet_core::plataforma::{CapDesktop, CapOverlay};
 
 mod app;
+mod ax;
 mod desktop;
 mod painel;
 mod permissoes;

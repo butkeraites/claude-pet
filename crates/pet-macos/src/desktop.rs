@@ -5,21 +5,35 @@
 //! 0057), os mesmos do M4; aqui a "janela" é o **bundle id do app**, nunca o
 //! título nem o nome da janela.
 //!
-//! A janela exata (a aba certa, por `AXUIElement` com a permissão de
-//! Acessibilidade) fica para a segunda parte do T8.7.
+//! Com a permissão de Acessibilidade (decisão 0106), o clique vai à **janela
+//! exata**: a que estava em foco no app quando ele veio para a frente, por
+//! `AXUIElement` (uma referência opaca; nunca o título).
 
+use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSApplication, NSApplicationActivationOptions, NSWorkspace};
+use objc2_application_services::AXUIElement;
+use objc2_core_foundation::CFRetained;
 
 use pet_core::plataforma::{Alca, CapDesktop, Desktop, ErroFoco, EventoDesktop, InfoDesktop};
+
+use crate::ax;
 
 #[derive(Default)]
 pub struct DesktopMac {
     eventos: Vec<EventoDesktop>,
     ultimo: Option<String>,
     iniciado: bool,
+    /// A janela em foco de cada app na última vez que ele veio para a frente
+    /// (só com a Acessibilidade). A referência é opaca; nunca o título.
+    janelas: HashMap<String, CFRetained<AXUIElement>>,
+    /// Tem a Acessibilidade (reavaliado a cada volta: o Renan pode conceder
+    /// depois).
+    acc: bool,
+    /// Já pediu a Acessibilidade uma vez (o diálogo do sistema).
+    pediu: bool,
 }
 
 impl DesktopMac {
@@ -28,28 +42,60 @@ impl DesktopMac {
     }
 
     /// Lê o app em foco (bundle id) e, se mudou, anota uma ativação no relógio
-    /// de parede (o mesmo do `ts` do hook). A primeira leitura liga a fonte e
-    /// anota a semente do anel. O laço chama a cada volta.
+    /// de parede (o mesmo do `ts` do hook) e guarda a janela em foco dele (com
+    /// a Acessibilidade). A primeira leitura liga a fonte, pede a
+    /// Acessibilidade uma vez e semeia o anel. O laço chama a cada volta.
     pub fn pollar(&mut self) {
-        let agora_frente = frontmost_bundle();
+        // Pede a Acessibilidade uma vez; depois só confere (o Renan concede
+        // nas Ajustes do Sistema, e aí a janela exata passa a valer).
+        if !self.pediu {
+            self.pediu = true;
+            self.acc = ax::pedir_confianca();
+            if !self.acc {
+                aviso!(
+                    "sem a permissão de Acessibilidade: o clique traz o app do terminal para a \
+                     frente, mas não a janela exata. Conceda em Ajustes do Sistema › \
+                     Privacidade e Segurança › Acessibilidade (decisão 0106)."
+                );
+            }
+        } else {
+            self.acc = ax::confiavel();
+        }
+
+        let frente = frontmost();
+        let bundle = frente.as_ref().map(|(b, _)| b.clone());
         if !self.iniciado {
             self.iniciado = true;
             self.eventos.push(EventoDesktop::Ligado(true));
-            if let Some(bundle) = agora_frente.clone() {
+            if let Some((b, pid)) = &frente {
+                self.lembrar_janela(b, *pid);
                 self.eventos.push(EventoDesktop::JanelaInicial {
-                    janela: Alca(bundle),
+                    janela: Alca(b.clone()),
                     parede_ms: parede_ms(),
                 });
             }
-            self.ultimo = agora_frente;
+            self.ultimo = bundle;
             return;
         }
-        if agora_frente != self.ultimo {
+        if bundle != self.ultimo {
+            if let Some((b, pid)) = &frente {
+                self.lembrar_janela(b, *pid);
+            }
             self.eventos.push(EventoDesktop::JanelaAtiva {
-                janela: agora_frente.clone().map(Alca),
+                janela: bundle.clone().map(Alca),
                 parede_ms: parede_ms(),
             });
-            self.ultimo = agora_frente;
+            self.ultimo = bundle;
+        }
+    }
+
+    /// Guarda a janela em foco do app (só com a Acessibilidade).
+    fn lembrar_janela(&mut self, bundle: &str, pid: i32) {
+        if !self.acc {
+            return;
+        }
+        if let Some(janela) = ax::janela_em_foco(pid) {
+            self.janelas.insert(bundle.to_owned(), janela);
         }
     }
 }
@@ -83,12 +129,20 @@ impl Desktop for DesktopMac {
         // alvo e o trazemos para a frente (o spike mostrou que funciona).
         let nosso = NSApplication::sharedApplication(mtm);
         nosso.yieldActivationToApplication(&app);
-        if app.activateWithOptions(NSApplicationActivationOptions::empty()) {
-            info!("focando o app {} (NSRunningApplication.activate)", alvo.0);
-            Ok(())
-        } else {
-            Err(ErroFoco::Recusado("o macOS recusou a ativação".into()))
+        if !app.activateWithOptions(NSApplicationActivationOptions::empty()) {
+            return Err(ErroFoco::Recusado("o macOS recusou a ativação".into()));
         }
+        // Com a Acessibilidade, levanta a janela exata daquele app.
+        let exata = self
+            .janelas
+            .get(&alvo.0)
+            .map(|j| ax::levantar(j))
+            .unwrap_or(false);
+        info!(
+            "focando o app {} (NSRunningApplication.activate; janela exata: {})",
+            alvo.0, exata
+        );
+        Ok(())
     }
 
     fn eventos(&mut self) -> Vec<EventoDesktop> {
@@ -96,23 +150,28 @@ impl Desktop for DesktopMac {
     }
 
     fn janela_ativa(&self) -> Option<Alca> {
-        frontmost_bundle().map(Alca)
+        frontmost().map(|(b, _)| Alca(b))
     }
 
     fn info(&self) -> InfoDesktop {
+        let mut protocolos = vec!["NSWorkspace".to_owned()];
+        if self.acc {
+            protocolos.push("Acessibilidade".to_owned());
+        }
         InfoDesktop {
-            protocolos: vec!["NSWorkspace".to_owned()],
+            protocolos,
             janelas: usize::from(self.ultimo.is_some()),
         }
     }
 }
 
-/// O bundle id do app em foco agora, se tiver (um app gráfico sempre tem).
-fn frontmost_bundle() -> Option<String> {
+/// O app em foco agora: `(bundle id, pid)`, se tiver (um app gráfico sempre
+/// tem um bundle id).
+fn frontmost() -> Option<(String, i32)> {
     let ws = NSWorkspace::sharedWorkspace();
-    ws.frontmostApplication()?
-        .bundleIdentifier()
-        .map(|b| b.to_string())
+    let app = ws.frontmostApplication()?;
+    let bundle = app.bundleIdentifier()?.to_string();
+    Some((bundle, app.processIdentifier()))
 }
 
 fn parede_ms() -> u64 {

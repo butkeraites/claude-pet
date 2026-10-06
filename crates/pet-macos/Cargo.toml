@@ -52,7 +52,14 @@ objc2-core-graphics = { version = "0.3", features = [
   "CGContext",
   "CGBitmapContext",
 ] }
-objc2-core-foundation = { version = "0.3", features = ["CFBase", "CFRunLoop"] }
+objc2-core-foundation = { version = "0.3", features = [
+  "CFBase",
+  "CFRunLoop",
+  "CFString",
+  "CFDictionary",
+  "CFNumber",
+] }
+# A Acessibilidade (AXUIElement): a janela exata do terminal da sessão (T8.7).
 objc2-application-services = { version = "0.3.2", features = ["AXUIElement", "AXError", "AXValue"] }
 
 # `[lints]` próprio (não herda o `unsafe_code = "forbid"` do workspace): o

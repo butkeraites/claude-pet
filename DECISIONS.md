@@ -4482,3 +4482,37 @@ Ao vivo (macOS): um `SessionStart` + `UserPromptSubmit` pelo hook com
 o anel por `ts`, e o campo é aditivo (o Linux não tem a variável). O `focar`
 já ativa o app pelo bundle id (decisão 0103), então o clique leva ao terminal
 certo mesmo com vários apps.
+
+## 0106 — macOS: a janela exata do terminal por AXUIElement, com a Acessibilidade (a última parte do T8.7) (2026-10-06)
+
+**Problema:** o clique traz o app do terminal para a frente (decisão 0103),
+mas com vários apps ou várias janelas o Renan quer a janela certa. O macOS só
+deixa mexer na janela de outro app com a permissão de Acessibilidade.
+
+**Escolha (a última parte do T8.7):**
+- O `pet-macos` usa o `AXUIElement` (framework ApplicationServices, pelo
+  `objc2-application-services`): o `DesktopMac`, quando um app vem para a
+  frente, guarda a **janela em foco dele** (`AXFocusedWindow`), uma referência
+  opaca — **nunca o título**. No clique, depois de ativar o app, levanta essa
+  janela (`AXRaise`). Assim, com a Acessibilidade, o clique vai à janela que
+  estava em foco quando o Renan usou aquele terminal.
+- A permissão é **opcional e pedida uma vez** (`AXIsProcessTrustedWithOptions`
+  com o diálogo do sistema; depois o `DesktopMac` só confere com
+  `AXIsProcessTrusted` a cada volta, porque o Renan pode conceder depois).
+  Sem ela, o clique continua trazendo o app para a frente (o nível de app da
+  decisão 0103), e um aviso diz como conceder. O `bichinho diagnostico`
+  mostra o estado.
+- A guarda da janela é por **app** (a última janela em foco de cada bundle):
+  pega o caso comum (uma janela por app, ou a última usada). Distinguir
+  janelas diferentes do mesmo app por sessão pediria guardar a janela por
+  sessão no anel — fica para depois.
+- O `AXUIElement` e o `CFRetained` ficam só no `pet-macos`, com `unsafe` e
+  `// SAFETY:` em cada bloco (o `kAXTrustedCheckOptionPrompt`, o
+  `copy_attribute_value` com ponteiro de saída, o `from_raw` da regra Copy do
+  CoreFoundation). O `DesktopMac` passa a não ser `Send` (guarda referências
+  de janela), e tudo bem: ele vive só na thread principal do laço.
+
+**Por quê:** é o que o Renan pediu e a pesquisa descreveu (a aba exata por
+`AXUIElement`, sem título, com a Acessibilidade pedida uma vez). A referência
+opaca nunca vira título no log nem no estado, e o nível de app segue valendo
+sem permissão nenhuma.
