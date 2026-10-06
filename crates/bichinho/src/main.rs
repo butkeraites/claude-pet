@@ -35,6 +35,7 @@ mod laco;
 mod laco_macos;
 mod memoria;
 mod nucleo;
+mod observador;
 mod personagem;
 mod privacidade;
 mod sem_janela;

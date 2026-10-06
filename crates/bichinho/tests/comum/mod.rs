@@ -80,6 +80,10 @@ impl Daemon {
                 // janela, como no Linux sem compositor. No Linux esta variável
                 // é ignorada (o laço do Wayland não a lê).
                 .env("PET_SEM_JANELA", "1")
+                // O observador de transcript lê o `~/.claude` do host (fora do
+                // controle do teste); desligado, os testes de integração do
+                // daemon ficam determinísticos (decisão 0108).
+                .env("PET_OBSERVADOR", "0")
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::from(log));

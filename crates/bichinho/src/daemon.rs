@@ -118,6 +118,9 @@ pub fn iniciar_entrada(
     ouvinte: TcpListener,
     caixa: Caixa<Comando>,
 ) -> Result<(), String> {
+    // O observador de transcript usa a mesma caixa do laço (o clone carrega o
+    // Despertador da plataforma); liga antes de a caixa ir para o ingress.
+    crate::observador::iniciar(Arc::clone(comp), caixa.clone());
     let ctx = Arc::new(ingress::Contexto {
         comp: Arc::clone(comp),
         porta_publica: ambiente.porta_publica,
