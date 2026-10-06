@@ -4397,3 +4397,47 @@ do M8 na tela (step 6).
 das ativações (o `NSWorkspace` no lugar do socket2) e o `focar` (ativar o app
 no lugar do foreign-toplevel). Dá o clique-leva-ao-terminal no nível do app
 sem pedir nenhuma permissão.
+
+## 0104 — macOS: o Bichinho.app, a instalação e o `bichinho diagnostico` (parte do T9.3) (2026-10-06)
+
+**Problema:** para o dia a dia no Mac, o pet precisa de um app nativo com
+identidade estável (para as permissões não se perderem), de subir no login,
+de ir e voltar do PATH e do plugin, e de um relatório que o Renan possa colar.
+
+**Escolha (a parte macOS do T9.3):**
+- **`bichinho diagnostico`**: um relatório só com metadados — a versão e o
+  commit, o binário que o Claude vê no PATH (de onde o hook chama), se o
+  daemon responde, o backend, as pastas de estado e config, e, no macOS, o
+  LaunchAgent e o estado das permissões (Acessibilidade e Gravação de Tela,
+  por `AXIsProcessTrusted` e `CGPreflightScreenCaptureAccess`, declaradas à
+  mão no `pet-macos`). Nenhum conteúdo, nenhum título.
+- **`scripts/mac-empacotar.sh`**: monta o `Bichinho.app` — o binário de
+  release em `Contents/MacOS/bichinho`, `Info.plist` com `LSUIElement` (sem
+  Dock), bundle id neutro `dev.bichinho.pet`, e **assinatura ad-hoc**
+  (`codesign -s -`), para a Acessibilidade e a Gravação de Tela ficarem presas
+  ao app e sobreviverem às atualizações.
+- **`scripts/mac-instalar.sh`**: monta o `.app` (padrão `~/Applications`),
+  liga o hook no PATH (`~/.local/bin/bichinho` → o binário do `.app`, a mesma
+  assinatura, então o TCC vale para os dois), cria o config em
+  `~/Library/Application Support/bichinho`, e, com os pedidos, instala o
+  **LaunchAgent** (`--launchagent`, `RunAtLoad` + `KeepAlive` com
+  `SuccessfulExit=false`) e o **plugin** (`--plugin`, de uma worktree estável
+  da `main`, nunca da branch, com confirmação, porque vale para todas as
+  sessões do Claude).
+- **`scripts/mac-desinstalar.sh`**: tira o LaunchAgent, o link do PATH e o
+  `.app`; deixa os dados (a aprovação do Zeca) salvo `--tudo`, e o plugin
+  (que se tira pelo `claude plugin uninstall`).
+- O daemon do `.app` é `…/MacOS/bichinho rodar` (o LaunchAgent passa o
+  `rodar`): o `bichinho` sem subcomando continua inerte (a regra de ouro), e
+  o hook no PATH chama `bichinho avisar`.
+
+Ao vivo: o `.app` montado e assinado ad-hoc (`Identifier=dev.bichinho.pet`,
+`Signature=adhoc`, `LSUIElement` true), o binário dele roda, e o
+`bichinho diagnostico` mostra o backend nativo, as pastas, o LaunchAgent e as
+permissões (as duas concedidas neste terminal). **Não rodei a instalação de
+verdade** (PATH, LaunchAgent, plugin são fora do repositório e pedem o
+consentimento do Renan).
+
+**Por quê:** a assinatura ad-hoc com bundle id fixo dá a identidade estável
+que o TCC precisa; o LaunchAgent e o plugin ficam opcionais e avisados porque
+mexem fora do repositório.

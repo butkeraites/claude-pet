@@ -29,12 +29,14 @@ use pet_core::plataforma::{CapDesktop, CapOverlay};
 mod app;
 mod desktop;
 mod painel;
+mod permissoes;
 mod pixels;
 mod punho;
 
 pub use app::{Despertador, preparar, rodar_fatia};
 pub use desktop::DesktopMac;
 pub use painel::Painel;
+pub use permissoes::permissoes;
 pub use punho::PunhoMac;
 
 /// As capacidades da janela pequena do macOS (decisão 0101).

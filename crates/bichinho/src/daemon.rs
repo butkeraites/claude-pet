@@ -150,7 +150,7 @@ pub fn saude() -> ExitCode {
     }
 }
 
-fn checar_saude(escuta: SocketAddr) -> bool {
+pub(crate) fn checar_saude(escuta: SocketAddr) -> bool {
     let ip = if escuta.ip().is_unspecified() {
         IpAddr::V4(Ipv4Addr::LOCALHOST)
     } else {

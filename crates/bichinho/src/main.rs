@@ -26,6 +26,7 @@ mod aprovacao;
 mod avisar;
 mod comando;
 mod daemon;
+mod diagnostico;
 mod estado;
 mod ingress;
 #[cfg(target_os = "linux")]
@@ -61,6 +62,8 @@ uso: bichinho <rodar | avisar <Evento> | saude | versao | simular | cenario>
                    manda só metadados ao pet do 127.0.0.1, nunca imprime e
                    sempre sai 0
   saude            healthcheck: sai 0 se o daemon responde /saude
+  diagnostico      relatório para colar (binário no PATH, daemon, backend,
+                   pastas; no macOS, plugin, LaunchAgent e permissões)
   versao           imprime a versão e o commit de onde o binário saiu
   simular <cenário.jsonl>
                    roda o cenário num relógio falso, offline, e imprime a
@@ -90,6 +93,7 @@ fn main() -> ExitCode {
         }
         Some("rodar") => daemon::rodar(),
         Some("saude") => daemon::saude(),
+        Some("diagnostico") => diagnostico::rodar(),
         Some("simular") => simular::simular(argumentos),
         Some("cenario") => simular::cenario(argumentos),
         Some("versao" | "--version" | "-V") => {
