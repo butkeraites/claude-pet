@@ -5,9 +5,9 @@
 
 use objc2::MainThreadMarker;
 use objc2::rc::autoreleasepool;
-use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
+use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSEventMask};
 use objc2_core_foundation::CFRunLoop;
-use objc2_foundation::{NSActivityOptions, NSDate, NSProcessInfo, NSRunLoop, NSString};
+use objc2_foundation::{NSActivityOptions, NSDate, NSDefaultRunLoopMode, NSProcessInfo, NSString};
 
 /// Prepara o `NSApplication` como Accessory e segura uma atividade (App Nap).
 /// Obtém o `MainThreadMarker` aqui dentro (o `bichinho` não depende do objc2);
@@ -32,9 +32,30 @@ pub fn preparar() {
 /// do AppKit e a fila principal). O [`Despertador`] faz esta espera terminar
 /// antes quando chega algo na caixa.
 pub fn rodar_fatia(segundos: f64) {
+    let mtm = MainThreadMarker::new().expect("o laço do macOS roda na thread principal");
+    let app = NSApplication::sharedApplication(mtm);
     autoreleasepool(|_| {
         let ate = NSDate::dateWithTimeIntervalSinceNow(segundos.max(0.0));
-        NSRunLoop::currentRunLoop().runUntilDate(&ate);
+        // Bombeia os eventos do AppKit (mouse, teclado) e os despacha para as
+        // janelas/views com `sendEvent:` — o que o `NSApplication.run` faz. Só
+        // rodar o CFRunLoop (`runUntilDate`) desenha, mas não entrega o
+        // `mouseDown` à view; por isso o arraste não chegava. O `Despertador`
+        // (CFRunLoopWakeUp) faz o `nextEvent` voltar na hora.
+        loop {
+            // SAFETY: nextEventMatchingMask/sendEvent padrão do AppKit.
+            let evento = unsafe {
+                app.nextEventMatchingMask_untilDate_inMode_dequeue(
+                    NSEventMask::Any,
+                    Some(&ate),
+                    NSDefaultRunLoopMode,
+                    true,
+                )
+            };
+            match evento {
+                Some(e) => app.sendEvent(&e),
+                None => break,
+            }
+        }
     });
 }
 

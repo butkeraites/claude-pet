@@ -4516,3 +4516,36 @@ deixa mexer na janela de outro app com a permissão de Acessibilidade.
 `AXUIElement`, sem título, com a Acessibilidade pedida uma vez). A referência
 opaca nunca vira título no log nem no estado, e o nível de app segue valendo
 sem permissão nenhuma.
+
+## 0107 — macOS: o laço bombeia os eventos do AppKit (nextEvent + sendEvent), senão o mouse não chega à view (2026-10-06)
+
+**Problema:** na conferência ao vivo do M8 no Mac, o pet desenhava e reagia,
+mas o **arraste e o clique de verdade no corpo não funcionavam**: a `NSView`
+do painel nunca recebia `mouseDown`. A detecção do click-through estava certa
+(com o cursor no corpo, `ignoresMouseEvents` virava `false`, conferido), e
+mesmo com a janela inteira aceitando clique, nada chegava.
+
+**Causa:** o laço do macOS rodava a fatia com `NSRunLoop.runUntilDate` — isso
+roda o CFRunLoop (desenha, vence timers, acorda pela caixa), mas **não despacha
+os eventos do AppKit para as janelas/views**. Quem faz isso é o
+`NSApplication.run`, com o par `nextEventMatchingMask:` + `sendEvent:`. Sem
+ele, os eventos de mouse entram na fila do app e ficam lá: o pet compõe pela
+GPU (CALayer) sem problema, mas a entrada do usuário nunca é entregue.
+
+**Escolha:** a `rodar_fatia` passou a ser o laço de eventos do AppKit: num
+`autoreleasepool`, `nextEventMatchingMask_untilDate_inMode_dequeue` (máscara
+`Any`, até a data da fatia, modo padrão) e `sendEvent:` em cada evento, até a
+data vencer. O `Despertador` (CFRunLoopWakeUp) continua fazendo o `nextEvent`
+voltar na hora quando chega algo na caixa. O resto do laço (`laco_macos`) não
+muda.
+
+Ao vivo (Mac do Renan): com a correção, a `NSView` recebeu 1142 eventos de
+ponteiro (`Apertou`/`Moveu`/`Soltou`), o pet foi **arrastado** de (994,1679)
+para (1010,702), e as posições por monitor foram salvas no `posicoes.json`
+(as três telas). A detecção do click-through (plano B) continua certa, e o
+aperto segura a janela durante o arraste (o cursor sai do corpo quando o pet
+anda atrás dele). Os logs de depuração do diagnóstico, que imprimiam
+coordenadas do ponteiro, foram tirados (as coordenadas nunca vão para o log).
+
+**Por quê:** um laço próprio no macOS tem de fazer o que o `NSApplication.run`
+faz com a entrada; só rodar o CFRunLoop desenha, mas deixa o mouse na fila.

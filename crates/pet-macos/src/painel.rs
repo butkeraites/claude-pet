@@ -176,10 +176,11 @@ impl Painel {
         }
         let apertado = self.ponteiro.borrow().apertado;
         let dentro = if apertado {
+            // Durante um aperto/arraste, a janela continua pegando (o cursor
+            // sai do corpo quando o pet anda atrás dele).
             true
         } else if let Some(toque) = j.toque {
-            let loc = NSEvent::mouseLocation();
-            let (x, y) = j.tela.desktop_para_palco(loc);
+            let (x, y) = j.tela.desktop_para_palco(NSEvent::mouseLocation());
             toque.contem(x, y)
         } else {
             false
