@@ -10,7 +10,7 @@
 //! rabinho virado para cima).
 
 use crate::cena::Elemento;
-use crate::cerebro::{EstadoSessao, ResumoSessao, TipoAviso};
+use crate::cerebro::{EstadoSessao, ResumoSessao, TipoAviso, TipoEspera};
 use crate::fonte;
 use crate::geometria::Ret;
 
@@ -253,6 +253,7 @@ pub fn estado(sessao: &ResumoSessao) -> (&'static str, u64) {
         EstadoSessao::Esperando => "esperando você",
         EstadoSessao::Compactando => "compactando",
         EstadoSessao::Erro => "erro",
+        EstadoSessao::Cansado => "cansado",
     };
     (palavra, sessao.estado_desde_ms)
 }
@@ -264,13 +265,44 @@ pub fn linhas_sem_foco(proj: Option<&str>, tipo: TipoAviso, motivo: &str) -> Vec
     vec![format!("{nome}: {}", tipo.nome()), motivo.to_owned()]
 }
 
-/// "há quanto tempo", curto: 40 s, 3 min, 2 h.
+/// Uma frase com o nome do projeto no fim, se há um ("Deu ruim... api").
+pub fn com_projeto(frase: &str, proj: Option<&str>) -> String {
+    match proj {
+        Some(proj) => format!("{frase} {}", fonte::cortar(proj, MAX_PROJETO)),
+        None => frase.to_owned(),
+    }
+}
+
+/// O balão da chamada de um aviso de espera (decisão 0075), pelo tipo. Sem
+/// `proj` (sem pasta, ou a tela compartilhada), a frase sem o nome.
+pub fn linhas_da_espera(espera: Option<TipoEspera>, proj: Option<&str>) -> Vec<String> {
+    let nome = proj.map(|p| fonte::cortar(p, MAX_PROJETO));
+    match espera {
+        Some(TipoEspera::Pergunta) => vec![match nome {
+            Some(nome) => format!("{nome}: pergunta pra você"),
+            None => "Pergunta pra você".to_owned(),
+        }],
+        Some(TipoEspera::Plano) => vec![com_projeto("Plano pra aprovar!", proj)],
+        Some(TipoEspera::Permissao | TipoEspera::Elicitacao) | None => vec![
+            "Ô, meu camarada!".to_owned(),
+            match nome {
+                Some(nome) => format!("{nome} precisa de você"),
+                None => "precisa de você".to_owned(),
+            },
+        ],
+    }
+}
+
+/// "há quanto tempo", curto: 40 s, 3 min, 2 h, 2 d. Uma sessão sem evento
+/// fica até uma semana na lista (decisão 0096): de um dia em diante, em dias
+/// (decisão 0099).
 pub fn duracao(ms: u64) -> String {
     let s = ms / 1000;
     match s {
         0..60 => format!("{s} s"),
         60..3_600 => format!("{} min", s / 60),
-        _ => format!("{} h", s / 3_600),
+        3_600..86_400 => format!("{} h", s / 3_600),
+        _ => format!("{} d", s / 86_400),
     }
 }
 
@@ -452,6 +484,18 @@ mod testes {
         assert_eq!(duracao(40_000), "40 s");
         assert_eq!(duracao(185_000), "3 min");
         assert_eq!(duracao(7_300_000), "2 h");
+        // Uma sessão sem evento fica até uma semana na lista (decisão 0096):
+        // de um dia em diante, em dias (decisão 0099; antes, até "167 h").
+        const H: u64 = 60 * 60 * 1000;
+        assert_eq!(duracao(24 * H - 1), "23 h");
+        assert_eq!(duracao(24 * H), "1 d");
+        assert_eq!(duracao(2 * 24 * H + 5 * H), "2 d");
+        assert_eq!(duracao(7 * 24 * H - 1), "6 d");
+        assert_eq!(duracao(7 * 24 * H), "7 d");
+        assert_eq!(
+            linha_da_sessao(Some("claude-pet"), "parado", 0, 3 * 24 * H, false),
+            "claude-pet: parado (3 d)"
+        );
         assert_eq!(
             linha_da_sessao(Some("claude-pet"), "pensando", 1_000, 181_000, false),
             "claude-pet: pensando (3 min)"
@@ -474,5 +518,44 @@ mod testes {
             linha_da_sessao(None, "erro", 0, 0, false),
             "sem pasta: erro (0 s)"
         );
+    }
+
+    #[test]
+    fn a_chamada_pelo_tipo_da_espera_cabe_no_balao() {
+        let longo = Some("agenda-presidencial-2026");
+        assert_eq!(
+            linhas_da_espera(Some(TipoEspera::Pergunta), Some("api")),
+            vec!["api: pergunta pra você"]
+        );
+        assert_eq!(
+            linhas_da_espera(Some(TipoEspera::Plano), Some("api")),
+            vec!["Plano pra aprovar! api"]
+        );
+        assert_eq!(
+            linhas_da_espera(Some(TipoEspera::Permissao), Some("api")),
+            vec!["Ô, meu camarada!", "api precisa de você"]
+        );
+        assert_eq!(
+            linhas_da_espera(Some(TipoEspera::Elicitacao), None),
+            vec!["Ô, meu camarada!", "precisa de você"]
+        );
+        assert_eq!(linhas_da_espera(None, None)[1], "precisa de você");
+        for espera in [
+            None,
+            Some(TipoEspera::Permissao),
+            Some(TipoEspera::Elicitacao),
+            Some(TipoEspera::Plano),
+            Some(TipoEspera::Pergunta),
+        ] {
+            for proj in [longo, None] {
+                for linha in linhas_da_espera(espera, proj) {
+                    assert!(
+                        linha.chars().count() <= MAX_CARACTERES,
+                        "{linha}: o balão cortaria"
+                    );
+                    assert!(linha.chars().all(fonte::tem), "{linha}: glifo");
+                }
+            }
+        }
     }
 }

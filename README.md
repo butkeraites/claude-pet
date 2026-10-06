@@ -15,14 +15,21 @@ no terminal:
 Pode ser arrastado com o mouse para qualquer lugar e sempre aparece no
 monitor que está em foco. Sem som.
 
-> **Estado:** em construção. Na `main` (`v0.4.0`): o overlay nítido no
+> **Estado:** em construção. Na `main` (`v0.5.0`): o overlay nítido no
 > Hyprland (M1), o Zeca com aprovação do personagem (M2), hooks → reação
-> (M3), a costura para Windows e macOS com o hook nativo (parte do M8) e
-> arrastar, seguir o monitor ativo e o clique que leva ao terminal (M4). Na
-> branch `skin-zeca-livre`: o Zeca original, arte livre em CC0, como skin
-> (TS.1–TS.4). O destino é um lançamento open source para Linux, macOS e
-> Windows. O repositório de desenvolvimento ainda se chama `claude-pet`.
-> Veja `PLANO.md` para os marcos e `PROGRESS.md` para o andamento.
+> (M3), a costura para Windows e macOS com o hook nativo (parte do M8),
+> arrastar, seguir o monitor ativo e o clique que leva ao terminal (M4), o
+> Zeca original, arte livre em CC0, e o M5: o cérebro completo (as festas
+> pelo trabalho, as correntes de agentes, os avisos com a escalada, a tela
+> com selos, sono e discrição), decidido num registro de intenções com
+> cenários dourados, a tela que desenha isso (o Zeca em cada estado, os selos
+> das outras sessões, o voo da escalada, o confete das festas grandes, a
+> discrição ao compartilhar a tela) e a memória das sessões (o pet que
+> reinicia não esquece as sessões abertas do Claude). O próximo passo é o
+> macOS, na branch `m8-macos`; depois, o M6 (o encanto). O destino é um
+> lançamento open source para Linux, macOS e Windows. O repositório de
+> desenvolvimento ainda se chama `claude-pet`. Veja `PLANO.md` para os marcos
+> e `PROGRESS.md` para o andamento.
 
 ## Requisitos
 
@@ -159,6 +166,10 @@ claude plugin install bichinho@bichinho-local
 claude plugin list                    # bichinho@bichinho-local habilitado
 ```
 
+Uma sessão do Claude aberta antes da instalação não manda nada ao pet até um
+`/reload-plugins` nela, e mesmo depois só aparece com o próximo evento (um
+prompt).
+
 **Depois de cada merge** (e, na primeira vez, a troca do `avisar.sh` pelo
 hook nativo, plugin 0.2.0), com o clone na `main`:
 
@@ -185,6 +196,21 @@ tamanho normal; decisão 0064). O binário novo do hook passa a mandar os ids
 de terminal (`term`, decisão 0054); o antigo continua funcionando com o pet
 novo, sem eles.
 
+No M5 também não muda o plugin, e a troca é a mesma (`bin/pet subir` e
+`bin/pet instalar-host`, no clone). O binário novo do hook passa a mandar a
+forma do prompt (`orig`: `notificacao` quando o Claude Code acorda a sessão
+com o aviso de uma tarefa em segundo plano, `comum` para o resto; o texto
+nunca sai do hook) e quantos agendamentos o Stop lista (`crn`; decisão
+0072). Com o antigo, o pet novo funciona sem eles: a notificação de uma
+tarefa vira continuação quando há uma corrente de agentes aberta (e um
+prompt que você digita com ela aberta também, sem festa própria), a
+notificação de um shell em segundo plano (sem corrente) conta como prompt
+digitado (a festa normal no lugar do pulinho discreto, e a janela da sessão
+casada com a que estiver em foco), e o tique de um `/loop` não é visto
+(festeja como um prompt digitado). A tela do M5 (a base, os selos, o voo, o
+confete, o compartilhamento de tela pelo socket2) só muda o pet: o
+`bin/pet subir` basta para ela.
+
 **Para testar uma mudança**, carregue o plugin e o binário da branch só
 numa sessão (o `~/.local/bin` continua com o da worktree estável):
 
@@ -194,8 +220,9 @@ cd ~/Documents/claude-pet
 PATH="$PWD/target/debug:$PATH" claude --plugin-dir ~/Documents/claude-pet/plugin
 ```
 
-Para conferir sem o Claude: `bin/pet testar rapido` (aceno) e
-`bin/pet testar pequeno` (pulinho) mandam eventos sintéticos pelo mesmo hook
+Para conferir sem o Claude: `bin/pet testar rapido` (aceno),
+`bin/pet testar pequeno` (pulinho), `medio`, `grande`, `pergunta` e
+`dois-prontos` (a tela do M5, logo abaixo) mandam eventos sintéticos pelo mesmo hook
 (o `bichinho avisar` do PATH, ou o de `PET_BICHINHO`, por exemplo
 `PET_BICHINHO="$PWD/target/debug/bichinho"`; sem nenhum, o `avisar.sh`, com
 aviso), dizem de que commit é o binário, e
@@ -203,11 +230,11 @@ aviso), dizem de que commit é o binário, e
 sessões de terminal contam (`sessoes.origens = ["cli"]` em
 `config/exemplo.toml`): `claude -p`, SDK e IDE ficam de fora.
 
-Com o Zeca aprovado, uma resposta sem trabalho (sem editar arquivo, rodar
-comando nem chamar subagente) ganha o aceno; uma resposta com trabalho ganha
-o pulinho; e fechar o Claude, o tchau. No Zeca original são a tirada de
-chapéu, o pulo comemorando e o tchau com a asa; no do pack, levantar e
-sentar, um pio e um pio de tchau. Sem personagem aprovado, as reações ficam só em `bin/pet estado`
+Com o Zeca aprovado, cada resposta ganha a festa do tamanho do trabalho
+(veja "O que o Zeca mostra", abaixo) e fechar o Claude, o tchau. No Zeca
+original o aceno é a tirada de chapéu, o pulinho é o pulo comemorando e o
+tchau é com a asa; no do pack, levantar e sentar, um pio e um pio de tchau.
+Sem personagem aprovado, as reações ficam só em `bin/pet estado`
 (`ultima_reacao` e `turnos`).
 
 ### Arrastar, seguir e clicar
@@ -271,12 +298,85 @@ checklist do HDMI, da tampa fechada e da suspensão).
 a troca de monitor: mexe no Hyprland, então só com o seu consentimento (ele
 pede que você digite «sim» no terminal).
 
+### O que o Zeca mostra (M5)
+
+- **O estado de agora**, da sessão que mais precisa de você (na ordem:
+  esperando você, erro, cansado, pronto, trabalhando, compactando, pensando,
+  parado): trabalhando e pensando ele fica quase parado (uma micro-ação a
+  cada 10–30 s, sorteada); parado, respira e pisca; sem nada por uns
+  minutos, boceja e dorme, e no sono profundo não desenha nada.
+- **A festa** é do tamanho do trabalho: a resposta sem trabalho ganha o
+  aceno; trabalho pequeno, o pulinho e o balão "Prontinho! ‹projeto›";
+  médio, o voo curto com 12 confetes; grande, o voo grande com uma chuva de
+  confete pela tela (no máximo um a cada 10 min; um que não apareceu, com a
+  proteção de tela ou na soneca, não conta). Duas sessões terminando juntas
+  viram uma festa só ("2 prontos: api, web"). Um pedido com agentes em
+  segundo plano (um workflow inclusive) festeja uma vez só, quando o último
+  agente volta, pela soma; um pedido que você digita enquanto eles trabalham
+  festeja sozinho, pelo trabalho dele.
+- **Quando o Claude precisa de você**, ele chama na hora (o pio, um «!»
+  amarelo ao lado e o balão do tipo: pergunta, plano, permissão). Se você
+  não está olhando o terminal daquela sessão (ou está sem mexer há 1 min), a
+  chamada cresce: rajadas aos 30 s, um voo até o alto do monitor com "!!" aos
+  90 s (até 3 vezes, e de volta para o lugar de sempre), e aos 5 min o «!»
+  troca de cor uma vez por segundo, com uma rajada por minuto, até parar de
+  vez aos 35 min: aí a pose de espera sai, o «!» fica parado e ele pode
+  dormir. Quando você volta depois de 1 min longe, um voo mostra o aviso
+  (assim que ele aparece na tela: com a proteção de tela ou a sessão
+  bloqueada, depois que ela some). Com 5 s no terminal da sessão, ele dá o
+  diálogo por visto e não escala mais (um Esc numa pergunta ou um plano
+  recusado não mandam evento nenhum, e a pose de espera sai 2 min depois);
+  o clique que leva ao terminal também a tira. Com mais de uma sessão
+  esperando, a chamada cresce para a mais antiga que você ainda não viu; a
+  que você já viu fica no «!» e no clique. Com o "não perturbe" do
+  Omarchy ou na soneca, só a primeira chamada. O "não perturbe" vem com os
+  eventos do Claude: ligado no meio de uma espera, vale no próximo evento de
+  qualquer sessão; para calar na hora, o clique direito (a soneca).
+- **As outras sessões** viram selos ao lado dele: "+N" (as ocupadas), uma
+  bandeirinha na cor do projeto para cada resposta pronta e "…" quando um
+  agente trabalha em segundo plano.
+- **Compartilhando a tela**, os balões perdem o nome do projeto (depois de 2
+  s de compartilhamento, e até 5 min depois que ele acaba: no Hyprland 0.56 o
+  sinal pisca quando a tela fica parada), e ele fica discreto como no "não
+  perturbe": só a primeira chamada e nenhum voo.
+- **Quando o pet reinicia** (uma atualização, um crash), as sessões abertas
+  do Claude não somem: elas voltam de `/state/sessoes.json` (só metadados:
+  ids opacos, a pasta do projeto, o estado, os avisos e o terminal de cada
+  uma), no estado em que estavam, sem festa nem chamada de novo, com o "não
+  perturbe", a soneca e a discrição da tela compartilhada de antes; uma
+  espera segue a chamada de onde parou. Se o pet ficou parado mais de 1 min
+  (a pergunta pode ter sido respondida nesse meio-tempo), a espera volta
+  quieta (o «!» e o clique, sem chamar de novo), e o terminal de cada sessão
+  só volta com o próximo prompt. Um diálogo novo depois da volta, da mesma
+  sessão ou de outra, chama como sempre. O turno que estava no meio não
+  volta: a sessão fica trabalhando até 5 min depois do último evento, e o
+  próximo evento dela segue normalmente. Depois de reiniciar a máquina, ele
+  começa vazio (todo Claude de antes acabou); depois de sair e entrar de novo
+  na sessão gráfica, as sessões voltam sem o terminal de antes até o próximo
+  prompt.
+- **Todas as sessões abertas** ficam na lista do clique, mesmo paradas há
+  dias: uma sessão só sai quando o Claude dela fecha (também fechando o
+  terminal) ou depois de uma semana sem nada; uma espera sem nenhum sinal da
+  sessão por 12 h sai sozinha.
+
+`bin/pet testar medio`, `grande`, `pergunta` e `dois-prontos` mostram cada
+uma dessas coisas com sessões de teste (que somem em 60 s), e o
+`bin/pet estado` diz o que a tela está desenhando (`desenho`), mesmo com a
+sessão bloqueada.
+
 ## Desenvolvimento
 
 ```sh
 bin/pet verificar               # fmt, clippy, testes, compose, plugin
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+bin/pet simular pergunta        # um cenário no cérebro, num relógio falso: as intenções
 ```
+
+O cérebro decide num registro de intenções, e os cenários de `cenarios/`
+(com o dourado de cada um) são o teste e a documentação do que ele faz: o
+formato, as intenções e como gravar um cenário de verdade com pseudônimos
+(`bin/pet eventos --salvar`, só de um pet de debug) estão em
+`docs/CENARIOS.md`.
 
 Documentação para quem mexe no código: `CLAUDE.md`, `DECISIONS.md` e
 `docs/`.

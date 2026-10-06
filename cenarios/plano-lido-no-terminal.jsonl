@@ -1,0 +1,19 @@
+{"cenario": "plano-lido-no-terminal", "descricao": "da pesquisa (decisão 0071), pseudonimizado e com a leitura esticada: o plano para aprovar (ExitPlanMode) com o Renan lendo no terminal do Claude por 4 min, com pausas de até 50 s sem mexer; a escalada fica na L1 e acaba na aprovação", "padrao": {"sid": "s1", "ent": "cli", "proj": "projeto-a"}}
+{"t": 0, "desktop": {"ocioso": false}}
+{"t": 0, "desktop": {"olhando_claude": true}}
+{"t": 0, "evento": {"e": "UserPromptSubmit", "turno": "p1", "ts": 0, "orig": "comum"}}
+{"t": 5940, "evento": {"e": "PreToolUse", "turno": "p1", "ts": 5933, "tool": "ExitPlanMode"}}
+{"t": 5960, "evento": {"e": "PermissionRequest", "turno": "p1", "ts": 5954, "tool": "ExitPlanMode"}}
+{"t": 11955, "evento": {"e": "Notification", "turno": "p1", "ts": 11951, "nt": "permission_prompt"}}
+# o Renan lê: a cada pausa, o desktop conta o longe 5 s depois da última mexida
+{"t": 45000, "desktop": {"ocioso": true}}
+{"t": 85000, "desktop": {"ocioso": false}}
+{"t": 120000, "desktop": {"ocioso": true}}
+{"t": 160000, "desktop": {"ocioso": false}}
+{"t": 200000, "desktop": {"ocioso": true}}
+{"t": 230000, "desktop": {"ocioso": false}}
+{"t": 245000, "evento": {"e": "PostToolUse", "turno": "p1", "ts": 244990, "tool": "ExitPlanMode", "dur": 1}}
+{"t": 247080, "evento": {"e": "PostToolUse", "turno": "p1", "ts": 247076, "tool": "Write", "dur": 30, "arq": "aaaaaaaaaaa1"}}
+{"t": 248840, "evento": {"e": "PostToolUse", "turno": "p1", "ts": 248836, "tool": "Read", "dur": 9}}
+{"t": 250000, "evento": {"e": "Stop", "turno": "p1", "ts": 249996, "bg": 1, "bgt": ["shell"], "bgi": ["x3"], "crn": 0}}
+{"t": 260000, "fim": true}

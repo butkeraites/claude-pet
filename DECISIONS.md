@@ -2979,3 +2979,1566 @@ aprovar o Zeca original como o padrão da tela do Renan.
   a ele é só trocar `aparencia.skin` no config.
 **Por quê:** os dois atos cabem ao Renan (decisões 0026, 0067 e 0069) e
 foram feitos com o conteúdo final na frente.
+
+## 0071 — Pesquisa do M5: o que o Claude Code 2.1.288 manda de verdade (2026-10-05)
+
+**Problema:** as regras do cérebro do PLANO (correntes, teto de turno de
+máquina, continuação) foram escritas a partir do d.ts do 2.1.288 e contam com
+o `source` do `UserPromptSubmit` (`system`, `loop_wakeup`, …). As decisões
+0021 e 0032 já tinham visto que ele não chega. Faltava ver, ao vivo, o que
+chega quando um agente em segundo plano termina, quando um shell em segundo
+plano continua rodando, num laço, numa pergunta e num Esc.
+**Escolha:** a pesquisa está em `docs/pesquisa/10-cerebro-m5.md` (só
+metadados, ids pseudonimizados), feita num daemon de rascunho nativo da
+branch (porta 27391, sem compositor) com sessões aninhadas do Claude Code no
+tmux mandando só para ele, e com o binário do 2.1.288 lido por `strings`. O
+que muda o desenho do M5:
+- o `source` sai compilado fora (`...!1` no lugar do espalhamento): nenhum
+  prompt traz origem;
+- cada notificação de tarefa e cada tique de um laço é um turno com
+  `prompt_id` novo e um `UserPromptSubmit` comum. A notificação tem forma
+  própria (o texto começa com `<task-notification>`, com o `<task-id>` da
+  tarefa); o tique é o texto agendado, sem embrulho;
+- o `bgi` de um subagente é o `agent_id` dele; as ferramentas do agente
+  chegam depois do Stop com o `prompt_id` de agora; o agente que acorda (o
+  shell dele acabou) manda outro `SubagentStart` com o mesmo `aid`;
+- o Stop traz `session_crons` (os agendamentos que vão acordar a sessão);
+- uma pergunta ou um plano disparam três gatilhos: `PreToolUse` e
+  `PermissionRequest` a 14–21 ms um do outro, e a `Notification`
+  `permission_prompt` 6 s depois;
+- o Esc no meio de uma ferramenta não manda nada (nem `PostToolUseFailure`,
+  nem Stop, nem `idle_prompt` em 100 s);
+- o `PostCompact` pode não vir (compactação que falha);
+- o `duration_ms` do Agent em primeiro plano é a vida do subagente (com o
+  pensar dele), e o do diálogo é 0 (a espera pelo Renan fica de fora).
+**Por quê:** o M5 decide festa e atenção a partir desses eventos; regra
+escrita contra um campo que não vem é regra morta. Ver ao vivo também achou
+um defeito do M4: a janela de cada sessão é casada em todo prompt sem `src`,
+então uma notificação ou um tique casam a sessão com a janela em foco.
+
+## 0072 — A forma do prompt e os agendamentos no fio v1: `orig` e `crn`, calculados no hook (2026-10-05)
+
+**Problema:** sem o `source`, o pet não separa o prompt do Renan de uma
+notificação de tarefa ou de um tique de laço (decisão 0071). A notificação se
+reconhece pelo começo do texto, e o tique só pelo `session_crons` do Stop;
+mas o texto do prompt e o dos agendamentos são conteúdo e nunca saem do hook.
+**Escolha:**
+- **`orig`**, só no `UserPromptSubmit`: `notificacao` quando o `prompt` é um
+  texto que começa (depois de espaços) por `<task-notification>`, `comum` para
+  qualquer outro texto; sem o campo quando o `prompt` falta ou não é texto. O
+  hook nunca guarda o prompt: o leitor em fluxo (decisão 0045) olha os
+  primeiros bytes que passam pela entrada logo depois da chave `prompt` (uma
+  janela de 64 bytes que só é comparada com a etiqueta e jogada fora) e pula
+  o resto sem guardar, como antes; a memória continua sem crescer com o
+  tamanho do prompt.
+- **`crn`**, só no Stop: quantos agendamentos o `session_crons` tem (como o
+  `bg` do `background_tasks`), até 10 000; nenhum campo de dentro deles é lido.
+- **No pet** (`pet_core::evento`): `orig` pelo validador de enum e `crn` pelo
+  de contagem; valor ruim cai sozinho, como os outros. O `avisar.sh` de
+  reserva não manda nenhum dos dois (como o `term`, decisão 0054).
+- **Sem o hook novo** (o instalado até o merge), os dois faltam e o pet não
+  quebra: sem `orig`, um prompt enquanto há agente em voo conta como
+  notificação; sem `crn`, não há tique (decisão 0073).
+- **Canários** (`tests/hook.rs`): o prompt de notificação com segredos, o
+  prompt comum com a etiqueta no meio, os agendamentos com segredos no texto,
+  o prompt de 8 MiB que começa pela etiqueta, e nenhum segredo sai em evento
+  nenhum. Uma versão que manda o começo do prompt reprova.
+- **A troca:** o plugin não muda (o mesmo `hooks.json`, o mesmo `bichinho
+  avisar`); o binário novo chega ao PATH pelo `bin/pet instalar-host` depois
+  do merge, como o `term` (decisão 0054).
+**Por quê:** um enum de dois valores e uma contagem dizem o que o pet precisa
+sem dizer nada do que o Renan escreveu; olhar só o começo, na passagem, mantém
+a regra da decisão 0045 de que o hook não guarda conteúdo e não cresce com
+ele.
+
+## 0073 — Correntes de agentes e turnos de máquina sem `source` (2026-10-05)
+
+**Problema:** o PLANO quer uma festa só para um pedido que roda em segundo
+plano (a corrente), festas normais com um servidor rodando, e um teto T1
+discreto para o que a máquina começa (notificação sem corrente, laço). Os
+eventos reais (decisão 0071) mostram três turnos para um agente em segundo
+plano, o shell do agente segurando o Stop, o agente que acorda e as
+ferramentas dele depois do Stop.
+**Escolha:**
+- **A origem de um prompt**, no cérebro, com a evidência que o Motor tem:
+  1. o `src`, se um Claude Code futuro mandar: `user` é digitado; `system`,
+     notificação; `loop_wakeup`, `schedule_wakeup` e `poll_event`, tique;
+  2. `orig = notificacao`: notificação;
+  3. com agendamento pendente (o último Stop da sessão com `crn > 0`), um
+     prompt comum é tique quando o Motor tem prova de que não foi digitado: o
+     Renan longe do teclado e do mouse (`ocioso`) ou outra janela certa em
+     foco na hora do prompt (a janela da sessão é certa e o anel diz outra);
+  4. sem `orig` (hook antigo) e com corrente aberta: notificação;
+  5. o resto é digitado.
+- **A corrente** (por sessão) abre no Stop, depois da acomodação, com agente
+  em voo (`bgt` com `subagent`, `workflow`, `teammate` ou `cloud_session`);
+  `shell`, `monitor`, `mcp_task` e `outro` nunca seguram, e `dream`,
+  `auto_mode_scan` e `memory_import` são ignorados. Enquanto aberta, todo Stop
+  da sessão é Stop da corrente: com agente em voo, o turno entra nela (os
+  contadores somam; nenhuma festa, nenhum pronto, a sessão com o selo "…");
+  sem agente em voo, ela fecha com uma festa só, pela soma (t0 do primeiro
+  turno). As ferramentas e os `SubagentStart` de um agente conhecido (o `aid`
+  já visto) depois que o turno dele fechou contam na corrente; o agente que
+  acorda não cancela acomodação nem reabre turno. Subagente conta uma vez por
+  `aid`. A corrente expira 12 h depois do último evento dela, e o
+  `SessionEnd` a fecha, sem festa.
+- **Turno de máquina** (notificação, tique ou sistema sem corrente aberta, e
+  a corrente que nasce dele): teto T1, discreto (o pulinho sem balão), sem
+  pronto; o T0 de máquina só fica no registro. Nunca casa a janela da sessão
+  (corrige a decisão 0060 para o 2.1.288) e nunca resolve o pronto de antes.
+  Uma notificação ou um prompt sem marca com corrente aberta é continuação:
+  entra na corrente.
+- **Sem o hook novo**, tudo isso degrada sem quebrar: a corrente funciona (só
+  depende do `bgt`); a notificação vira continuação quando há corrente e
+  digitado quando não há; o tique não é visto.
+**Por quê:** o fim do pedido é quando o último agente volta, e é lá que a
+festa tem de ser grande; um servidor de desenvolvimento não é um agente e
+não pode calar as festas; e o que a máquina começa sozinha não merece o voo
+nem o selo de pronto. A evidência do Motor só entra para o tique e só com
+agendamento pendente, que é onde o texto do prompt não ajuda.
+
+## 0074 — Pontuação e níveis pelo trabalho, com os pesos no config (2026-10-05)
+
+**Problema:** o M3 só separava T0 de T1. O M5 pontua (decisão 0003) e o
+PLANO pede os pesos no config, os componentes de cada turno no
+`/v1/estado.turnos` e o T3 no máximo a cada 10 min. O tempo do Agent em
+primeiro plano é a vida do subagente (decisão 0071), e entraria duas vezes
+(com as ferramentas dele, pelo `aid`) e com o pensar dele.
+**Escolha:**
+- `min_ativos` = a soma do `duration_ms` das ferramentas do turno (ou da
+  corrente), as dos subagentes inclusive, **fora** a do `Agent` e a do `Task`,
+  / 60 000. `pontuação = min(teto, por_minuto·min_ativos +
+  por_ferramenta_de_trabalho·trabalho + por_outra_ferramenta·outras +
+  por_arquivo·arquivos + por_subagente·subagentes)`.
+- T0: nenhuma ferramenta de trabalho, nenhum subagente e nenhum arquivo
+  editado (`nod`); T1 abaixo de `t2` (`done_small`); T2 de `t2` até `t3`
+  (`done_medium`); T3 de `t3` em diante (`done_big`), no máximo um a cada
+  `intervalo_t3_min` (senão T2).
+- **Config** (`[pontuacao]` no `bichinho.toml`, números com faixa; o config
+  ganha o tipo número): `por_minuto = 1.0`, `por_ferramenta_de_trabalho =
+  0.15`, `por_outra_ferramenta = 0.05`, `por_arquivo = 0.5`, `por_subagente
+  = 1.0`, `teto = 20`, `t2 = 4`, `t3 = 12`; e `celebracao.intervalo_t3_min =
+  10`. Documentados no `config/exemplo.toml`.
+- **Modos:** `proporcional`; `sempre_grande` (todo nível acima do T0 vira T3,
+  no máximo um a cada 2 min); `discreta` (teto T1; antes o M3 só acenava, e
+  agora há níveis para separar); `desligada` (nenhuma festa, nenhum tchau; os
+  avisos continuam).
+- **Registro:** cada turno no `/v1/estado.turnos` traz `min_ativos`, a
+  `pontuacao` (total e a parte de cada componente), o nível calculado e o
+  final, os tetos que valeram (`maquina`, `modo`, `intervalo_t3`), a origem do
+  turno e a corrente.
+- Exemplos (viram testes): resposta sem ferramenta de 90 s → T0; 15 Read e
+  2 WebFetch → T0 (nada de trabalho); 1 Edit num arquivo e 1 Bash de 0,9 s →
+  0,82 → T1; 10 Edit em 5 arquivos, 8 Bash e 7 Read com 3 min de ferramenta →
+  8,55 → T2; 40 Edit em 15 arquivos, 30 Bash, 50 Read e 2 subagentes com 12
+  min de ferramenta → 34,5, no teto de 20 → T3.
+**Por quê:** medir pelo que o Claude fez, nunca pelo relógio nem pelo pensar
+(decisão 0003); pesos no config deixam a semana de calibração do M7 mexer sem
+recompilar; e o registro com as partes mostra por que cada festa saiu do
+tamanho que saiu.
+
+## 0075 — Avisos: um diálogo até a sessão andar, a escalada L1–L4 com presença e os tetos (2026-10-05)
+
+**Problema:** o PLANO pede a escalada (L1 → L4) só para quem não está olhando
+o terminal do Claude, com teto, e a dedupe de 5 s com o tipo refinado. Ao
+vivo, um diálogo dispara três gatilhos em 6 s (decisão 0071), e a janela de
+5 s deixaria a notificação abrir outro aviso e recomeçar a escalada.
+**Escolha:**
+- **O tipo da espera:** pergunta (`AskUserQuestion`), plano (`ExitPlanMode`),
+  elicitação (`elicitation_dialog`, `elicitation_url_dialog`) e permissão
+  (o resto: `PermissionRequest` de outra ferramenta, `permission_prompt`,
+  `worker_permission_prompt`, `agent_needs_input`). O `PermissionRequest` da
+  pergunta e do plano é a pergunta e o plano.
+- **Um diálogo:** enquanto a sessão espera e nada andou nela (nenhum evento da
+  thread principal que não seja gatilho), um gatilho novo só refina o tipo
+  (pergunta e plano acima de elicitação, acima de permissão; nunca desce) e
+  nunca recomeça o relógio. O aviso é o mesmo, desde o primeiro gatilho.
+- **A escalada** (só visual; um relógio por aviso; quem toca é o aviso de
+  espera mais velho, os outros viram o "+N"):
+  - L1 em 0 s: a reação `alert`, o balão do tipo ("Ô, meu camarada! ‹proj›
+    precisa de você", "‹proj›: pergunta pra você", "Plano pra aprovar!
+    ‹proj›") e a base de espera;
+  - L2 a partir de 30 s, só se o Renan não está olhando um terminal do Claude
+    (`olhando_claude`) ou está sem mexer há 60 s ou mais: uma rajada (`alert`)
+    a cada 6 s, por 30 s;
+  - L3 a partir de 90 s, na mesma condição, ou na hora em que o Renan volta
+    (`ocioso` de verdadeiro para falso) com o aviso de pé: o voo até o
+    alto-centro do monitor com "!!" (no máximo 2 Hz) e de volta; até 3 voos
+    por aviso, com 60 s entre eles;
+  - L4 a partir de 5 min (o teto): a base de espera, o selo pulsando a 1 Hz e
+    uma rajada a cada 60 s, por no máximo 30 min; depois, o selo parado até
+    o Renan voltar.
+  - Olhando o terminal do Claude e mexendo, fica em L1.
+- **Saída:** qualquer evento da sessão que não seja gatilho, o clique que vê
+  o aviso, o `SessionEnd`.
+- **Tetos:** com o "não perturbe" do Omarchy (o `dnd` do último evento) ou na
+  soneca, nunca acima de L1 (sem rajada e sem voo); escondido ou na proteção
+  de tela, nada toca, e o relógio anda.
+**Por quê:** o mesmo diálogo não pode chamar o Renan duas vezes; o que chama
+atenção é o movimento que começa, e quem está olhando o terminal já viu; e
+nenhuma chamada pode virar laço sem fim (decisão 0010), nem no tempo.
+
+## 0076 — A festa e a tela: mesclagem, prioridade, selos, pronto parado, sono e discrição (2026-10-05)
+
+**Problema:** o PLANO pede uma festa só para fins de sessões diferentes até
+3 s, a festa do Stop com `sha` subindo para T2 e T3, a prioridade na tela, os
+selos das outras sessões, o pronto que vira selo, os prazos de cada estado e
+a discrição com o compartilhamento de tela, sem atrasar a primeira festa.
+**Escolha:**
+- **Mesclagem:** um fim de outra sessão (do mesmo mundo: teste com teste,
+  real com real) até 3 s depois do começo da festa de agora entra nela: o
+  nível é o maior, o balão vira "2 prontos: api, web" (nomes cortados) e a
+  reação só toca de novo se o nível subir. A primeira festa sai na hora da
+  acomodação dela. Um fim discreto (máquina, modo discreto) dentro da festa só
+  fica no registro; fora, toca o pulinho sem balão.
+- **Stop com `sha`:** o turno que reabriu (decisão 0032) só festeja de novo
+  se o nível subir, agora em todos os níveis; dentro dos 3 s ele sobe a festa
+  de agora, depois é uma festa nova no nível novo.
+- **O que a festa pede:** T0 só o aceno; T1 o pulinho e o balão "Prontinho!
+  ‹proj›"; T2 o voo curto e 12 confetes; T3 o voo grande atravessando a tela,
+  40 confetes e a faixa "PRONTO!". Com o "não perturbe", a soneca ou o pet
+  escondido, nada de voo pela tela; escondido ou na proteção de tela, a festa
+  não toca (fica no registro) e nada é repetido na volta.
+- **Prioridade na tela** (a sessão mais alta manda na base): esperando você >
+  erro > cansado > pronto > trabalhando > compactando > pensando > parado >
+  dormindo, com os estados da skin `waiting`, `error`, `sleep` (cansado, com o
+  bocejo ao entrar), `ready`, `working`, `thinking` (compactando e pensando),
+  `idle` e `sleep`.
+- **Prazos por sessão:** trabalhando, pensando e compactando voltam a parado
+  depois de 5 min sem evento da sessão (o turno continua aberto); erro e
+  cansado (o `StopFailure` com `rate_limit`) duram 60 s na tela (o aviso de
+  erro fica, como no M4).
+- **Pronto:** a base `ready` por 2 min depois da festa; depois, só a
+  bandeirinha parada, e o Zeca pode bocejar e dormir com ela. Sai como no M4
+  (clique, prompt digitado, 10 s do terminal em foco com o Renan presente, ou
+  2 h).
+- **Sono:** parado e sem nada pendente, boceja aos 3 min, dorme aos 8 min (3
+  se o Renan está longe) e entra no sono profundo aos 30 min; um evento ou um
+  clique acorda (`wake`).
+- **Selos:** "+N" (as outras sessões com aviso ou trabalhando), uma
+  bandeirinha por sessão com o pronto, na cor do projeto (FNV-1a do nome numa
+  paleta de 8), e "…" com uma corrente aberta.
+- **Compartilhamento de tela:** um evento novo do desktop,
+  `EventoDesktop::Compartilhando(bool)` (no Hyprland, o `screencast` do
+  socket2, na segunda metade do M5). Depois de 2 s compartilhando, nenhum balão
+  leva nome de projeto ("Prontinho!", "2 prontos", "sessão 1: pronto" na lista
+  do clique); um balão com nome na tela sai. Parou de compartilhar, os nomes
+  voltam.
+**Por quê:** uma festa por momento, não por sessão; o maior manda, sem
+apagar o resto, que vira selo; um pronto não pode pular para sempre, e o que
+está na tela compartilhada não pode dizer em que o Renan trabalha. O tempo de
+2 s deixa de fora as capturas de tela, que também abrem um screencast curto.
+
+## 0077 — O registro de intenções do Motor e os cenários dourados (2026-10-05)
+
+**Problema:** o M5 decide o que acontece e quando; quem desenha (balão,
+selos, voos, confete, a base segurada) é a segunda metade do M5. As decisões
+precisam ser testáveis sem tela, e cada linha da tabela do PLANO precisa de
+um cenário que reprove uma regra quebrada.
+**Escolha:**
+- **Intenções** (`pet_core::motor::intencoes`): cada decisão vira uma linha
+  normalizada, com a hora: `turno` (o registro de um turno fechado), `festa` e
+  `festa_mesclada`, `reacao` (o que o animador toca fora da festa), `base`,
+  `balao`, `selos`, `escalada`, `rajada`, `voo`, `pulso`, `discricao` e
+  `clique`. O Motor guarda as últimas 200; o `/v1/estado` mostra as últimas
+  50 (`intencoes`, com a idade) e a fotografia de agora (`tela`: base, selos,
+  escalada, festa e discrição). As reações continuam indo ao animador pelo
+  caminho do M3 (`nod`, `done_small`, `done_medium`, `done_big`, `alert`,
+  `error`, `yawn`, `wake`, `bye`); o resto espera quem desenha.
+- **Cenários** (`cenarios/<nome>.jsonl`): uma linha por passo, com o tempo
+  relativo em ms (`t`): `evento` (o corpo do fio v1, com o `ts` relativo),
+  `desktop` (`ocioso`, `olhando_claude`, `protetor`, `compartilhando`,
+  `ligado`, `janela_ativa`), `clique` e `fim`; linhas com `#` são
+  comentários, e a primeira pode trazer `config` (chaves do `bichinho.toml`).
+  O esperado (`<nome>.esperado.jsonl`) é a linha do tempo das intenções.
+- **O executor** (`pet_core::cenario`) roda o Motor com a
+  `plataforma::falsa::JanelaFalsa` num relógio falso, vencendo os prazos como o
+  laço do daemon; o teste dourado roda todos os cenários e regera com
+  `PET_ATUALIZAR_OURO=1`. Cada linha da tabela do PLANO tem um cenário e uma
+  asserção do que importa nela (além da linha do tempo), e as sequências reais
+  da pesquisa entram pseudonimizadas. Uma regra quebrada de propósito reprova.
+**Por quê:** uma linha do tempo normalizada é o contrato com quem desenha e o
+que os testes comparam; o mesmo executor serve ao teste, ao `simular` e ao
+`/v1/estado`, então o que se testa é o que roda.
+
+## 0078 — `bichinho simular` e `bin/pet eventos --salvar` (2026-10-05)
+
+**Problema:** o PLANO pede `simular <cenário>` (o cérebro com relógio falso,
+offline) e `eventos --salvar <arquivo>` (gravar um cenário de verdade com ids
+pseudonimizados), sem que dados reais do Renan acabem no git.
+**Escolha:**
+- **`bichinho simular <arquivo>`** roda o cenário no executor dos testes
+  (decisão 0077), offline, e imprime a linha do tempo das intenções (uma
+  linha JSON por intenção). O `bin/pet simular <nome|arquivo>` acha o
+  `cenarios/<nome>.jsonl`. Para o binário ter a janela de mentira, o `pet-core`
+  ganha a feature `simulacao` (a `JanelaFalsa` fica em
+  `cfg(any(test, feature = "teste", feature = "simulacao"))`); só o
+  subcomando a usa.
+- **`bichinho cenario`** lê o JSON do `/v1/debug/eventos` na entrada e escreve
+  um cenário: tempos relativos à primeira chegada, ids de sessão, turno,
+  agente e tarefa trocados por `s1`, `p1`, `a1` (o mesmo pseudônimo quando o
+  `aid` e o `bgi` são o mesmo id), pastas por `projeto-a`, hashes de arquivo e
+  nomes de ferramenta MCP por equivalentes fixos, sem os ids de terminal e
+  sem os descartados.
+- **`bin/pet eventos --salvar <arquivo>`** pega o `/v1/debug/eventos` do pet
+  da `PET_PORTA`, passa pelo `bichinho cenario` e grava no arquivo pedido;
+  recusa um pet sem debug (a produção responde 404 nessa rota).
+**Por quê:** o mesmo executor para testar e simular; e o que sai de uma
+sessão de verdade só vai para um arquivo depois de virar pseudônimo, de um pet
+de rascunho, nunca da produção.
+
+## 0079 — A escalada na implementação: a L1 de cada aviso, a volta e os balões na tela (2026-10-05)
+
+**Problema:** ao implementar a escalada (decisão 0075, T5.7), quatro pontos
+ficaram em aberto: um segundo aviso de espera, aberto enquanto o primeiro
+escala, chamaria ou não; a "volta" do Renan (o `ocioso` de verdadeiro para
+falso) dispara a cada pausa de 5 s de quem lê o terminal, porque o desktop
+conta o longe depois de 5 s sem mexer; quem põe na tela os balões que o
+Motor decide (o registro de intenções deixava todos para a segunda metade
+do M5, decisão 0077); e o que fazem a soneca e o pet escondido com a L1.
+**Escolha:**
+- **Cada aviso novo tem a L1 dele:** a reação `alert` e o balão do tipo, na
+  hora. A escalada (L2–L4) é só do aviso de espera mais velho; quando ele
+  sai, o seguinte escala a partir do relógio dele (o nível 1 com o motivo
+  `vez`, e na hora a fase em que já está), sem chamar de novo.
+- **A volta conta só depois de 60 s sem mexer** (a mesma régua do "sem
+  mexer há 60 s ou mais") e só se a janela em foco não é um terminal do
+  Claude (lá ele já vê o diálogo); um aperto no pet também não conta.
+- **Os balões vão para a tela pelo balão do M4**, na mesma chamada que anota
+  a intenção `balao` (o erro, o cansado, a chamada, o tipo refinado); com o
+  pet escondido ou a proteção de tela, nem a linha nem o balão. As reações
+  continuam pelo animador do M3 (a `rajada` toca a `alert` de novo); o resto
+  (a base, os selos, os voos, o pulso, o confete) espera quem desenha.
+- **Na soneca**, a L1 toca o aceno no lugar da chamada (só reações pequenas,
+  decisão 0053) e nada passa da L1; **escondido**, a L1 não toca e nada é
+  repetido na volta: a escalada segue da fase em que o relógio dela está.
+- **Os prazos** da escalada são recalculados na hora em que vencem (o Motor
+  só sabe o "agora" do último lote); a máquina garante que um prazo olhado de
+  novo no instante dele ainda vence, e o teste dela reprova o contrário.
+**Por quê:** um aviso novo é uma notícia mesmo com outro escalando, mas duas
+escaladas ao mesmo tempo seriam barulho; quem só leu o plano por 10 s não
+"voltou" de lugar nenhum; e o balão já existe desde o M4 — deixá-lo para
+depois faria a intenção dizer uma coisa e a tela outra.
+
+## 0080 — A tela na implementação: a fotografia, a acomodação, o T0, o sono e a discrição (2026-10-05)
+
+**Problema:** ao implementar a festa e a tela (decisão 0076, T5.8), o
+`/v1/estado.tela` da decisão 0077 já existia com outro sentido (o estado da
+aprovação: `ativa`, `sem_personagem`), e alguns casos ficaram em aberto: a
+base no 0,8 s da acomodação, o T0 numa festa mesclada, a festa na soneca, o
+que acorda o pet, e a discrição quando a fonte dos eventos do desktop cai.
+**Escolha:**
+- **`/v1/estado.fotografia`** é a fotografia de agora: a base (o estado da
+  skin, a prioridade e a sessão que manda), o sono, os selos, a escalada
+  (sessão, nível, tipo da espera e pulso), a festa dos últimos 3 s e a
+  discrição. O `tela` continua sendo o da aprovação.
+- **Na acomodação do Stop**, a sessão segura a prioridade que tinha: a base
+  não pisca parada antes da festa.
+- **O T0 é uma festa sem balão** (só o aceno). Um fim que entra numa festa
+  (do mesmo mundo; uma festa por mundo) só toca se subir o nível, e o balão
+  "N prontos: …" só sai com a festa no T1 ou acima.
+- **Na soneca**, a festa é o aceno, sem confete, voo nem faixa (o balão
+  fica); **com o "não perturbe"**, nenhum voo (o curto também); **escondido**,
+  a intenção `festa` com `escondida` e nada mais.
+- **O sono:** o relógio começa com o Motor (o pet nasce parado) e recomeça a
+  cada evento de uma sessão que o cérebro acompanha (os dos agentes também:
+  um workflow em segundo plano mantém o pet acordado) e a cada clique; um
+  evento acorda com o despertar, o clique acorda sem ele (a risadinha toca
+  por cima). O pronto não impede o sono; a espera e o erro, sim.
+- **Os selos:** o "+N" conta as outras sessões com aviso de espera ou de erro
+  ou ocupadas (pensando, trabalhando, compactando, esperando, no erro,
+  cansadas); até 8 bandeirinhas, da mais velha para a mais nova, na cor do
+  FNV-1a do nome do projeto (ou do `sid8`, sem pasta).
+- **A discrição** continua ligada se a fonte dos eventos do desktop cai e
+  volta (o fim do compartilhamento pode ter se perdido no meio); o balão da
+  chamada diz "sessão N precisa de você" (a posição na lista do clique).
+**Por quê:** o nome `tela` no `/v1/estado` já é lido pelos scripts e pelo
+`bin/pet`; a base que pisca antes da festa seria um movimento sem
+significado; um T0 é a resposta rápida e não merece balão nem quando chega
+junto; e, na dúvida sobre o compartilhamento, o pet erra para o lado de não
+mostrar o nome do projeto.
+
+## 0081 — O compartilhamento de tela no Hyprland 0.56.2: o `screencast` que pisca com os quadros, as sessões contadas e a discrição que segura (2026-10-05)
+
+**Problema:** a decisão 0076 deixou o compartilhamento de tela para o
+socket2 (`EventoDesktop::Compartilhando`, a discrição 2 s depois e os nomes
+de volta na hora em que ele para). Lido no código-fonte do 0.56.2
+(`docs/pesquisa/11-tela-m5.md`), o `screencast>>ESTADO,TIPO` não diz se há
+uma sessão de compartilhamento, e sim se há quadros sendo copiados: o `1` sai
+num quadro copiado e o `0` meio segundo depois do último. Numa chamada com a
+tela parada o sinal pisca, e o próximo desenho pode ser o do próprio pet (a
+camada cobre o monitor): desligar a discrição no `0` mostraria o nome do
+projeto justo no quadro que volta a ser compartilhado (a festa do Stop, logo
+depois de o spinner do terminal parar). E há mais coisas no evento: várias
+sessões ao mesmo tempo sem dizer qual, o `screencastv2` com o título da
+janela compartilhada, o grim abrindo uma sessão de um quadro só, e o pet que
+liga no meio sem saber das sessões de antes.
+**Escolha:**
+- **O adaptador do Hyprland** (`pet_wayland::hyprland::eventos`) lê só o
+  `screencast>>ESTADO,TIPO`: o primeiro campo, `0` ou `1`; o tipo nem é
+  guardado. O `screencastv2` é outro nome de evento e cai no "não uso", sem
+  ser interpretado (como o `windowtitlev2`).
+- **As sessões contadas na ligação** (a `Entrega` do leitor): um `1` soma, um
+  `0` tira; só a primeira sessão manda `Compartilhando(true)`, e o fim da
+  última, `Compartilhando(false)`. Um fim sem o começo visto (uma sessão de
+  antes desta ligação) também vale como fim; uma ligação nova começa do
+  zero; depois de uma perda na caixa, a tela compartilhada é contada de novo
+  logo depois do `Ligado(false)`/`Ligado(true)` da decisão 0061. O socket2
+  continua sempre drenado, na thread dele.
+- **A discrição no Motor** (`motor::tela`): liga quando o sinal soma
+  `DISCRICAO_APOS_MS` (2 s) num episódio (os piscares de meio segundo de uma
+  tela parada somam; uma captura não chega lá); antes de ligar, sinais até
+  `JUNTA_MS` (60 s) um do outro são o mesmo episódio; ligada, só desliga
+  `SEGURA_MS` (5 min) depois do último sinal. A fonte dos eventos que cai
+  desliga o sinal ali (o `desktop.compartilhando` também), e a discrição
+  segura os 5 min: na dúvida, discreto (decisão 0080), mas nunca para sempre.
+- **Testes:** a tradução (o `screencastv2` e um estado que não é 0 nem 1 não
+  passam), as sessões contadas e a recontagem depois da perda no leitor; no
+  Motor, a captura que não liga (e cinco seguidas que somam 2 s e ligam), a
+  tela parada que pisca sem desligar com o nome de volta 5 min depois e a
+  fonte que cai; o cenário `compartilhando-tela` refeito com a captura, a
+  tela que pisca e os nomes que voltam; o canário do socket2 no daemon de
+  verdade com segredos no `screencastv2` (nada no `/v1/estado`, no log nem no
+  `/v1/debug/eventos`), duas sessões e a discrição ligada pelo laço. Duas
+  mutações reprovaram: a discrição desligando no `0` (5 testes, o dourado
+  entre eles) e o leitor sem contar as sessões (o teste dele e o canário).
+**Por quê:** o que importa é não mostrar o nome do projeto numa tela que está
+sendo vista por outros; o sinal do 0.56.2 diz "quadros saindo agora", e o
+quadro que denuncia é justamente o que o pet desenha depois de uma pausa. Os
+5 min cobrem as pausas de uma tela parada (os ritmos da base nunca passam de
+30 s sem desenhar, fora o sono profundo), e o custo do erro é pequeno: o balão
+diz "Prontinho!" sem o nome por mais alguns minutos depois da chamada.
+
+## 0082 — A base segurada no animador: os ritmos de cada estado e o sorteio com a semente injetada (2026-10-05)
+
+**Problema:** o cérebro anuncia a base (decisão 0076: o estado da skin da
+sessão mais alta na prioridade), mas o animador só sabia o repouso do `idle`:
+o Zeca ficava parado do mesmo jeito trabalhando, esperando ou dormindo, e o
+sono profundo não parava os commits. Cada estado pede um movimento próprio
+dentro do orçamento (decisão 0005): trabalhando e pensando quase parados, até
+4 fps, com micro-ações sorteadas a cada 10–30 s (PLANO, "Movimento"; revisão
+de produto em `docs/pesquisa/08-revisoes.md`), o sono até 2 fps, o sono
+profundo sem commit nenhum, a espera no teto da L4 só na pose (o selo pulsa e
+a rajada vem a cada minuto, decisão 0075). E o núcleo é puro: o sorteio não
+pode ler o relógio nem o sistema.
+**Escolha:**
+- **`animador::Base`** (o estado da skin e o `Ritmo`), que o Motor passa ao
+  pet a cada mudança da base anunciada (no fim de cada `observar_tela`, na
+  escalada e em todo pet novo): `Pet::definir_base`, que só faz algo se a
+  base mudou. A pose é o primeiro quadro da primeira tag do estado; a pose
+  nova entra no próximo quadro, já, ou no fim da reação que estiver tocando;
+  o arraste continua por cima até ser largado.
+- **Os ritmos** (`animador::Ritmo`):
+  - `repouso` (parado, pronto, erro e esperando até a L3): a pose e rajadas
+    das tags do estado com a pausa do M1 (pelo menos 4 s e até 2 commits/s);
+  - `quieto` (trabalhando, pensando, compactando): quadros de pelo menos 250
+    ms e uma rajada a cada 10–30 s, sorteada (8 trechos de cada vez, que se
+    repetem);
+  - `laco` (dormindo e cansado): a primeira tag do estado em laço, com quadros
+    de pelo menos 500 ms;
+  - `parado` (o sono profundo e a espera na L4): só a pose, e o pet não marca
+    prazo nenhum (o `animador::NUNCA` vira `None` no `Pet::sprite`, e o
+    `Motor::desenhar` passa a deixar o prazo vazio quando nada muda sozinho).
+- **Um estado que a skin não tem** cai nas reservas do catálogo
+  (`estados::reserva`, agora aceitando o `idle`), e no fim no próprio `idle`.
+- **O sorteio** (`pet_core::sorteio::Sorteio`, xorshift64*): o Motor guarda
+  um e dá a cada pet novo uma semente tirada dele; o daemon semeia na partida
+  (`Motor::semear`, com a hora e o processo), e quem não semeia (os testes, o
+  `bichinho simular`) usa a fixa. As intenções não dependem dele.
+- **Medido** em 30 min com o animador (sem reações): no Zeca original, o
+  parado 0,95 commit/s, o pronto 1,31, o erro e a espera 2,0 (o teto do
+  repouso: 23 e 12 quadros por rajada), trabalhando 0,77 e pensando 0,55
+  (nenhum quadro abaixo de 250 ms), dormindo 1,92 (520 ms por quadro) e o sono
+  profundo 0; no Zeca do pack, todos abaixo de 2,0 (dormindo 2,0, com o piso
+  de 500 ms nos quadros de 100 ms).
+- O laço do daemon passou a recusar um prazo absurdo (`checked_add`) em vez de
+  estourar o `Instant`: o `u64::MAX` do estado segurado de um quadro só nunca
+  chegava lá, mas a pose parada chegaria.
+**Por quê:** a base é o que o Renan vê de canto de olho por horas; o
+movimento grande fica no começo de cada estado (as reações) e o resto respira
+dentro do orçamento, até parar de vez no sono profundo. Sortear as
+micro-ações tira a cara de relógio do trabalho; a semente injetada mantém o
+núcleo puro e os testes repetíveis.
+
+## 0083 — Os selos ao lado do corpo e o selo do aviso que pulsa uma vez por segundo (2026-10-05)
+
+**Problema:** o Motor anuncia os selos das outras sessões (decisão 0076: o
+"+N", as bandeirinhas dos prontos na cor do projeto, o "…" da corrente) e o
+pulso da L4 (decisão 0075: "pose de espera + selo pulsando a 1 Hz"), mas
+nada disso ia para a tela. Os selos têm de ser nítidos (blocos inteiros, a
+fonte dos balões), parados (o orçamento, decisão 0005), sem cobrir a área de
+toque nem sair do monitor, e legíveis no tema escuro e no claro. A espera do
+Zeca original já tem um «!» desenhado na arte, à direita da cabeça; a do Zeca
+do pack, não (`docs/pesquisa/11-tela-m5.md`). E um pulso de 1 Hz de ciclo
+inteiro (aceso e apagado a cada meio segundo) seria 2 commits/s só ele, mais
+a rajada de cada minuto: acima dos 2/s da espera.
+**Escolha:**
+- **A fileira** (`motor::selos`): ao lado do corpo, na altura da cabeça, à
+  esquerda (o pet mora no canto inferior direito) ou à direita sem espaço;
+  sem caber nos dois lados, o lado maior, e as bandeirinhas mais novas saem;
+  presa na área útil. Do corpo para fora: o selo do aviso, o "+N" (até
+  "+99"), o "…" e as bandeirinhas (até 8, da mais velha para a mais nova). Um
+  pixel do selo vale `dt` (a metade do D, a mesma dos balões e do "zZ"), em
+  blocos inteiros e opacos; nada na área de toque (só o pet recebe o clique,
+  e a área não muda).
+- **Os desenhos:** o "+N" e o "…" na monogram, creme com a sombra de tinta,
+  como o "zZ"; a bandeirinha com o mastro creme, o pano na cor do projeto e a
+  sombra de tinta; o selo do aviso, um «!» de 6 por 14 pixels com a borda de
+  tinta e o recheio amarelo (#FFD23F), fora da cabeça para não cair em cima
+  do «!» da arte e para existir no pack.
+- **A paleta dos projetos** (as 8 cores de `tela::cor`): vermelho #E5394B,
+  laranja #F28C28, amarelo #FFD23F, verde #4CC35A, turquesa #2EC4B6, azul
+  #3A86FF, roxo #9B5DE5 e rosa #FF7AB6 (vivas no tema escuro; a sombra de
+  tinta dá a borda no claro).
+- **O pulso da L4:** o selo do aviso troca de cor (amarelo, vermelho) uma vez
+  por segundo, contado do começo do pulso: um commit por segundo. Com a pose
+  parada da L4 (decisão 0082) e a rajada de cada minuto, a espera no teto
+  fica em ~1,4 commit/s.
+- **Quando:** o selo do aviso aparece com o aviso que o pet chama (a L1) e sai
+  com ele; a fileira some no poof da viagem. O Motor pede o próximo quadro a
+  cada mudança da tela (`redesenhar_ja` no fim de cada `observar_tela` e da
+  escalada); sem mudança, a janela não faz commit.
+**Por quê:** os selos dizem o que as outras sessões estão fazendo sem tirar a
+base de quem manda, e ao lado do corpo eles não brigam com o balão (em cima)
+nem com o "zZ" e o coração (nos cantos de cima). O selo do aviso fora da
+cabeça funciona nas duas skins, e a troca a cada segundo ainda é um
+batimento que o olho pega de canto, dentro do orçamento da espera.
+
+## 0084 — O voo da escalada: até o alto-centro com o "!!", na grade de 34 ms, e de volta para a casa (2026-10-05)
+
+**Problema:** a L3 (decisão 0075) e a volta do Renan (decisão 0079) pedem o
+voo até o alto-centro do monitor com "!!" piscando a no máximo 2 Hz, e de
+volta, até 3 vezes; o Motor anotava a intenção `voo`, e nada voava. O voo
+mexe na célula do pet: tem de andar em múltiplos de D (nitidez), a até 30
+quadros por segundo e curto (orçamento), com a área de toque seguindo o pet,
+sem nunca gravar posição (a do Renan fica), e sem brigar com o arraste, a
+viagem entre monitores, o poof, o pet escondido, a proteção de tela, a soneca
+e o "não perturbe".
+**Escolha:**
+- **`motor::voo::Voo`**, puro: da casa ao alvo em 30 passos de 34 ms (1,02
+  s, suave no começo e no fim), pairando 2,18 s com o "!!" trocando a cada
+  272 ms (8 passos: 1,84 Hz, abaixo dos 2 Hz) e de volta em 30 passos; ~4,2 s
+  ao todo. Toda duração é múltiplo do passo a partir do começo: nenhum quadro
+  do voo sai a menos de 34 ms do anterior. A célula é sempre a casa mais um
+  múltiplo de D em cada eixo.
+- **O alvo:** o meio do corpo no meio da área útil, com o topo do corpo logo
+  abaixo do "!!" (a margem de 16 px lógicos da borda, o "!!" e dois pixels de
+  arte), preso na área e trazido para a grade de D da casa.
+- **No Motor:** a intenção `voo` da escalada começa o voo (um de cada vez), se
+  o pet está na tela, solto, fora de uma viagem (o poof inclusive), fora da
+  soneca e sem o "não perturbe"; senão a intenção fica e o voo não sai. O pet
+  segura o `dangle` (o voo da skin) e, no fim, larga e pousa (`land`). O
+  desenho move a célula (`andar_voo`); a área de toque é a do corpo onde ele
+  está; enquanto voa, os prazos do desenho (as asas, o balão, o pulso) entram
+  no passo seguinte da grade do voo, e a fileira de selos dá lugar ao "!!",
+  em blocos de D, em cima da cabeça. Nada grava posição: a casa volta no fim.
+- **Interrupções:** o fim da escalada (a resposta, o clique que vê o aviso),
+  a soneca e o "não perturbe" mandam de volta já (da célula de agora até a
+  casa, em 30 passos); esconder e viajar acabam o voo na casa; um palco novo
+  (outro monitor, outra escala) acaba o voo na posição salva; o arraste que
+  pega o pet no ar acaba o voo onde ele está, e o arraste segue dali (soltar
+  grava, como todo arraste).
+- **Testes:** o voo puro (múltiplos de D, as fases, o fim na casa, os passos
+  de pelo menos 34 ms e o pisca abaixo de 2 Hz, a volta antes da hora e a
+  grade dela); no Motor, a L3 voando ao alto-centro com o "!!" em blocos de D
+  e a área de toque junto, nenhum quadro a menos de 34 ms, a volta à casa sem
+  nada para gravar e menos de 140 quadros no voo; a resposta no meio
+  mandando de volta e o arraste pegando no ar; arrastando, a intenção fica e o
+  voo não sai; a soneca manda de volta. Duas mutações reprovaram (voar
+  arrastando; os prazos fora da grade do voo).
+**Por quê:** o voo é o movimento grande da escalada, o que o olho pega de
+longe; num monitor que repinta inteiro a cada commit (decisão 0005), ele tem
+de ser uma rajada curta e regular, e nunca pode deixar o pet longe de onde o
+Renan o pôs.
+
+**Atualização (2026-10-05, T5.20): o voo que acaba sem quadros.** Com a
+sessão bloqueada ou a tela apagada, o compositor não pede quadros (decisão
+0018): o voo da L3 começava, o primeiro quadro ficava em voo e a máquina só
+andava no desenho seguinte, que não vinha. O voo velho continuava "no ar" e
+segurava o próximo: a volta do Renan (o voo na hora em que ele volta) não
+saía, e o `/v1/estado.desenho` escondia a fileira de selos. Agora o voo que
+já devia ter acabado termina pelo relógio antes de outro começar (o pouso,
+como no desenho, só toca até 1 s depois do fim, senão o pet pousaria do nada
+quando a tela acendesse), e o `desenho` mostra o voo e a fileira pelo
+relógio, como o próximo quadro vai desenhar. Um teste com o quadro preso em
+voo e a volta 80 s depois reprova sem cada uma das duas correções.
+
+## 0085 — A festa na tela: a fonte de 12 confetes do T2, a chuva de 40 do T3 e o passo de 34 ms (2026-10-05)
+
+**Problema:** a festa (decisão 0076) pede, além da reação e do balão que já
+iam para a tela, 12 confetes no T2 e a chuva de confete no T3 (até 60
+partículas, PLANO "Efeitos e balão"; a intenção diz 40), e a festa mesclada
+que sobe de nível pede os efeitos do nível novo. O confete do M1 só servia ao
+estresse (pedaços que quicam pela tela). O voo atravessando a tela e o
+holofote "PRONTO!" são do M6; a reação do nível (`done_medium`,
+`done_big`) já é um voo dentro da célula nas duas skins. Rajadas têm de
+ficar em até 30 quadros por segundo e curtas (decisão 0005), e a reação
+anima ao mesmo tempo que o confete.
+**Escolha:**
+- **`confete::Festa`:** pedaços que caem na grade de arte do pet (múltiplos
+  de D a partir da célula, como o confete do estresse), nas cores do
+  confete: a **fonte** (o T2: 12 pedaços de 2 pixels de arte saindo da
+  cabeça, para cima, que a gravidade puxa de volta) e a **chuva** (o T3: 40
+  pedaços de 3 pixels caindo do alto da tela inteira, em alturas
+  diferentes). O que sai pelos lados ou por baixo some; o que ainda está
+  acima da borda não aparece; a festa acaba quando o último pedaço sai.
+  Determinístico pela semente (a do sorteio do Motor).
+- **No Motor:** a festa com confete (a nova, ou a mesclada que subiu de
+  nível, no lugar da de antes) começa o efeito; os passos andam um a cada 34
+  ms contados do começo (os que venceram andam todos de uma vez), no fim da
+  cena (para os índices dos outros elementos não mudarem), por no máximo 4,5
+  s. Enquanto ele anda, os prazos do desenho entram no passo seguinte da
+  grade dele (a reação, o balão): nunca dois quadros a menos de 34 ms. O voo
+  da escalada, se houver, manda na grade. Esconder, viajar, um palco novo e o
+  fim da conexão tiram o confete; uma janela que não cobre o monitor (o M8)
+  não mostra confete nenhum.
+- **O que não muda:** a soneca dá o aceno sem confete, o "não perturbe" só
+  tira o voo (decisão 0080), o fim de máquina e o modo discreto continuam
+  pequenos (o pulinho sem balão, sem confete), e escondido nada toca.
+- **Testes:** a fonte (sobe, cai, acaba entre 15 e 80 passos, na grade e na
+  tela) e a chuva (pela tela inteira, mais de 20 pedaços juntos, acaba em
+  até 130 passos); no Motor, com as reações tocando como no laço, o T2 com
+  até 12 pedaços na grade de D e o T3 com a chuva, os dois acabando em até
+  4,5 s e sem quadros a menos de 34 ms; sem confete na soneca e numa janela
+  pequena; a festa mesclada do T2 ao T3 trocando a fonte pela chuva. Uma
+  mutação (os prazos fora da grade do confete) reprovou.
+**Por quê:** o confete é o que diz "foi grande" de canto de olho, e a chuva
+pela tela é a parte do T3 que cabe no M5 sem arte nova; no relógio de 34 ms,
+o pior caso (a reação mais o confete) continua uma rajada de até 30 quadros
+por segundo, que acaba sozinha.
+
+## 0086 — O `/v1/estado.desenho`: o que as intenções viraram na janela (2026-10-05)
+
+**Problema:** o `/v1/estado` tinha as intenções (decisão 0077) e a
+fotografia do que o cérebro decidiu (decisão 0080), mas não o que a janela
+está desenhando: com a sessão do Renan quase sempre bloqueada, a
+conferência ao vivo da segunda metade do M5 (a base no animador, os selos, o
+voo, o confete) não teria como ser feita sem olhar a tela. E o que vai para
+o `/v1/estado` só pode ser metadado.
+**Escolha:** `Painel::desenho` (o `/v1/estado.desenho`), montado do estado
+do Motor na hora do painel: a `base` e o `ritmo` do animador, a fileira de
+`selos` (o `aviso` `normal` ou `aceso`, se `pulso`, o `mais`, a `corrente` e
+quantas `bandeiras`; vazia no voo e na viagem), o `voo` (a `fase` e o
+`motivo`) e o `confete` (quantos pedaços na tela). Vazio sem o pet desenhado
+(sem conexão, escondido). Só enums e contagens: nem o nome do projeto, que o
+balão e a fotografia já mostram, entra aqui. A seção da tela no
+`docs/CENARIOS.md` diz o que cada intenção desenha. Testes no Motor (a
+espera, o voo, a L4 com o pulso aceso, a festa com confete, o JSON sem o
+nome, nada sem janela) e no núcleo do daemon (o `desenho` no
+`/v1/estado`).
+**Por quê:** a intenção diz o que o cérebro quer, a fotografia diz o que ele
+decidiu agora, e o desenho diz o que a janela está fazendo com isso: com a
+tela fora do alcance, é a terceira linha que fecha a conta (e o
+`commits_total`, que só anda com a tela acesa).
+
+## 0087 — As demonstrações do `bin/pet testar` para a tela do M5 (2026-10-05)
+
+**Problema:** o `bin/pet testar` só tinha o `rapido` (o aceno) e o `pequeno`
+(o pulinho). A segunda metade do M5 precisa de demonstrações ao vivo do que
+a tela faz (o voo curto com o confete, a chuva do T3, a chamada da pergunta,
+a festa de duas sessões), conferidas pelo `/v1/estado` com a sessão
+bloqueada, sem nunca mexer nas sessões reais do Renan nem nas aprovações.
+**Escolha:**
+- **Cenários novos**, todos com `PET_TESTE=1` pelo hook de verdade (o mundo
+  de teste, que some em 60 s e nunca se mistura com o real; o T3 do mundo de
+  teste não segura o do real): `medio` (uma edição e 4 min de Bash: 4,8
+  pontos, `done_medium` e a festa com 12 confetes), `grande` (12 min de Bash:
+  12,8 pontos, `done_big` e a chuva de 40; um segundo `grande` em 10 min vira
+  T2, e o `testar` diz isso e espera o `done_medium`), `pergunta` (o
+  `AskUserQuestion`: o aviso de espera do tipo pergunta, a chamada `alert` e a
+  L1; depois a resposta e o Stop, que acabam a escalada e dão o aceno) e
+  `dois-prontos` (duas sessões, `demo-api` e `demo-web`, terminando uma logo
+  depois da outra: uma festa só, a mesclada, e o balão "2 prontos: demo-api,
+  demo-web").
+- **O que mostra:** o turno (a reação, o nível, a pontuação, os tetos e os
+  contadores), as intenções da sessão de teste (a festa, a escalada, a
+  chamada) e o `/v1/estado.desenho`, só metadados; o veredito no fim. Cada
+  demonstração espera a festa de antes passar (até 4 s, pela
+  `fotografia.festa`): um fim até 3 s depois de outra festa entraria nela.
+- **O desenho pelo relógio:** o `desenho.confete` conta os pedaços na hora do
+  painel (os passos andam numa cópia), e o voo que acabou com a tela apagada
+  não pousa do nada quando ela acende: o `/v1/estado` diz o que a janela vai
+  mostrar mesmo sem quadros.
+- **Testes** (`tests/testar.rs`, com o daemon de verdade e o hook nativo):
+  `medio`, `grande` e o segundo `grande` virando T2; `pergunta` e
+  `dois-prontos`, só com sessões de teste e sem o texto do prompt no
+  `/v1/estado`.
+**Por quê:** com a tela do Renan quase sempre bloqueada, a demonstração que
+vale é a que se confere sozinha pelo `/v1/estado`; e um teste no mundo de
+teste pode rodar na produção a qualquer hora sem tocar no que é dele.
+
+## 0088 — A prova do orçamento e da nitidez da tela do M5 em relógio falso (2026-10-05)
+
+**Problema:** a segunda metade do M5 pôs a base, os selos, o pulso, o voo e o
+confete na tela; o orçamento de commits (decisão 0005: parado e esperando em
+média até 2/s, 0 no sono profundo, rajadas até 30 por segundo e curtas) e a
+nitidez (D inteiro, pixels inteiros, movimento em múltiplos de D) precisam de
+prova em teste, com o personagem de produção, e não só nas contas de cada
+decisão. Com a sessão do Renan bloqueada, a medição na tela fica pendente.
+**Escolha:** testes do Motor em relógio falso, com o compositor mostrando
+cada quadro na hora (o pior caso) e as reações tocando como no laço do daemon
+(`quadros_como_o_laco`), contando os commits (os quadros novos e os só de
+estado), com o Zeca original de produção (`zeca-livre-escuro`, D = 4 no
+`pequeno` do eDP-1) e com a skin de teste:
+- **trabalhando por 20 min** (um Bash a cada 30 s): 0,68 commit/s no Zeca
+  original (0,18 na de teste), nenhum quadro a menos de 250 ms (até 4 fps);
+  o teste exige até 1/s;
+- **a espera na L4 por 10 min** (a pose parada, o pulso a uma troca por
+  segundo, a rajada a cada minuto): 1,38 commit/s (1,03); antes dela, a
+  chamada, as rajadas da L2 e os três voos da L3 sem quadro a menos de 34
+  ms; depois dos 30 min da L4, o selo parado sem commit nenhum em 10 min;
+- **parado por 30 min** (o repouso, o bocejo, o laço do sono e o quadro do
+  sono profundo): 1,66 commit/s (1,67); depois, **nenhum commit** em 60 min
+  de sono profundo;
+- **a rajada do T3** (o `done_big` e a chuva): 118 commits em 5 s (99),
+  nenhum a menos de 34 ms, o confete fora da tela antes dos 5 s, e o minuto
+  seguinte (o pronto no repouso) até 2/s;
+- **a nitidez**, com o Zeca original no D = 4: em cada quadro da festa T3 com
+  os selos, da espera com o «!», do voo com o "!!" e do pulso, o sprite no D
+  do palco e na grade de D da casa, cada bloco em múltiplos da metade do D
+  (os selos, o balão) ou do D (o "!!", o confete), os glifos na metade do D,
+  tudo opaco e dentro do monitor.
+Uma mutação (o pulso com um ciclo inteiro por segundo, duas trocas) reprovou
+o orçamento da L4 e o teste do pulso, como a decisão 0083 previa.
+**Por quê:** o orçamento é a condição de a camada do tamanho do monitor
+continuar valendo (decisão 0005); com o pior caso em teste, uma mudança que o
+estoure reprova o `bin/pet verificar` antes de chegar à tela do Renan. A
+medição na tela (CPU e GPU do Hyprland, `scripts/medir-custo.sh`) continua a
+ser feita com a tela acesa e desbloqueada.
+
+## 0089 — Revisão das correntes: os agentes que nascem depois do Stop, o pedido digitado com a corrente aberta e a continuação depois do fim dela (2026-10-05)
+
+**Problema:** a revisão adversarial do cérebro do M5 (lente das correntes e
+dos cenários) achou três buracos, reproduzidos no `bichinho simular`:
+- **O agente que nasce depois do Stop virava a thread principal.** Os
+  agentes de um workflow nascem quando o workflow quer, e o `bgi` do Stop é o
+  id do workflow, não o deles. Um `SubagentStart` de um `aid` nunca visto
+  dentro da acomodação cancelava o Stop (a corrente nem abria, e o workflow
+  acabava num T0 de máquina); depois dela, reabria o turno comemorado, que
+  engolia o trabalho do agente e fechava `substituido` no prompt seguinte (13
+  min de ferramenta viraram um T1 de 1,05).
+- **Todo Stop com a corrente aberta era dela** (decisão 0073): um pedido que
+  o Renan digita enquanto um agente em segundo plano trabalha acabava sem
+  festa e sem pronto, somado na festa do agente ou perdido se a corrente
+  expirasse. Era um retrocesso do M4 e o contrário da festa proporcional ao
+  trabalho de cada pedido.
+- **A continuação de um Stop hook depois do fim da corrente** pontuava só o
+  turno, com o teto de máquina, e trocava o registro da corrente pelo dele.
+**Escolha:**
+- **O agente novo em segundo plano:** um `SubagentStart` de um `aid` nunca
+  visto não é a thread principal (1) na acomodação de um Stop que listou
+  agentes em voo: conta como subagente desse turno, que vai para a corrente,
+  e não cancela a acomodação; (2) com a corrente aberta e nenhum turno aberto
+  daquele prompt: conta na corrente e o `aid` passa a ser dela, então o que
+  ele faz conta nela até com um prompt digitado aberto. Com o turno daquele
+  prompt aberto, é dele (o Agent em primeiro plano), como no M3; depois de um
+  Stop sem agente em voo, continua sendo a thread principal (a continuação
+  de um Stop hook).
+- **A ferramenta de um agente** que é da corrente (em voo no último Stop ou
+  nascido para ela) conta na corrente; a de um agente que sobreviveu ao turno
+  dele, com a corrente aberta, também; sem corrente, fica ignorada como antes.
+- **O pedido digitado com a corrente aberta:** um turno digitado cujo Stop
+  só lista agentes que já são da corrente (não começou nada novo em segundo
+  plano) festeja sozinho, pelo trabalho dele, com o pronto; a corrente segue
+  (o "…") e fecha no Stop sem agente em voo. Um pedido digitado que começa
+  trabalho novo em segundo plano entra na corrente, como o que a abriu; um
+  Stop digitado sem nada em voo fecha a corrente com a soma, como antes. Os
+  turnos de máquina (notificação, tique) continuam entrando nela. Com o hook
+  antigo (sem `orig`), um prompt com a corrente aberta continua sendo
+  notificação (a degradação da decisão 0073).
+- **A continuação depois do fim da corrente:** o turno em que a corrente
+  fechou guarda a corrente; se ele reabre (o `sha`), o Stop seguinte o põe de
+  volta nela e pontua a soma de novo, com o t0, a origem e o resumo dela, e
+  só festeja se o nível subir.
+- **Testes:** no cérebro, os agentes de um workflow nascendo na acomodação e
+  depois do turno comemorado, o pedido digitado (sozinho, com o pronto; o que
+  lança agente novo entra; o agente do workflow que nasce no meio dele e
+  sobrevive) e a continuação depois do fim da corrente; os dourados
+  `workflow-agentes-depois-do-stop` e `digitado-durante-a-corrente`, e o
+  `workflow-longo` com o terceiro agente nascendo 12 s depois do Stop e a
+  última notificação com `orig: notificacao` (o 2.1.288 nunca manda o
+  `src`). Quatro mutações reprovaram (o agente novo como thread principal, o
+  pedido digitado dentro da corrente, a continuação sem a corrente, a
+  ferramenta do agente que sobreviveu ao turno ignorada).
+- **Limite:** um agente de workflow que nasce com um pedido digitado aberto
+  conta nesse pedido (o ponto do subagente e o que ele faz enquanto o pedido
+  está aberto): nada separa o nascimento dele do de um Agent em primeiro
+  plano. O que ele faz depois que o pedido fecha é da corrente.
+**Por quê:** o fim de um pedido em segundo plano é quando o último agente
+volta, e um workflow é o pedido mais longo que existe: perder o trabalho
+dele ou fechá-lo num T0 é o contrário da festa proporcional ao trabalho
+(decisão 0003). E um pedido que o Renan digita é dele, com o fim dele: não
+pode sumir dentro da corrente de outro pedido.
+
+## 0090 — Revisão da espera e da escalada: a pose pelo aviso, o diálogo visto no terminal da sessão, a volta com a conta dela e o voo que ninguém viu (2026-10-05)
+
+**Problema:** as revisões adversariais do M5 (lentes do cérebro e da tela)
+acharam, e uma sessão aninhada do 2.1.288 conferiu (pesquisa em
+`docs/pesquisa/10-cerebro-m5.md`, seção da revisão):
+- **O diálogo dispensado nunca saía.** O Esc numa pergunta e um plano
+  recusado sem comentário não mandam evento nenhum (nem `PostToolUse`, nem
+  `PostToolUseFailure`, nem Stop, nem `idle_prompt` em 80–94 s). A sessão
+  ficava "esperando" até o próximo prompt, ou 12 h: a escalada inteira (L2 a
+  L4) por um diálogo que não existia mais e o sono bloqueado. O clique que
+  levava ao terminal tirava o aviso, mas não a pose: a prioridade vinha do
+  estado da sessão, e a espera em repouso ficava a 2 commits/s por até 12 h.
+- **Olhar qualquer terminal do Claude calava a escalada de outra sessão:**
+  com o Renan trabalhando no terminal de A, a pergunta de B nunca passava da
+  L1 (a decisão 0079 dizia "lá ele já vê o diálogo", e no terminal de A não
+  vê).
+- **A volta quase nunca aparecia** com a proteção de tela aos 150 s e o
+  bloqueio aos 900 s (a configuração do Renan): os voos da L3 saíam com ele
+  longe e gastavam a conta da volta; o primeiro toque chegava com a proteção
+  de tela ainda aberta, e o voo não saía nem tentava de novo; bloqueado, o
+  voo saía embaixo da tela de senha e acabava pelo relógio antes do
+  desbloqueio.
+- **A janela que fechava no meio do voo** (o HDMI desplugado com o pet nele)
+  deixava o pet segurando o voo da skin em laço, a uns 12 commits/s: o voo
+  que acabava sem palco não largava.
+**Escolha:**
+- **A pose pelo aviso:** a prioridade "esperando você" vem do aviso de
+  espera, e só enquanto ele segura a base: até o teto da escalada (o fim da
+  L4, 35 min depois do aviso) ou, com o diálogo visto no terminal da sessão,
+  até `ESPERA_VISTA_NA_BASE_MS` (2 min) depois. Depois, o selo "!" fica
+  parado, o pet volta ao repouso e pode dormir com ele; o aviso continua para
+  o clique e a lista. O clique que vê o aviso solta a pose na hora. Uma sessão
+  "esperando" sem aviso (vista, ou um gatilho atrasado) conta como parada.
+- **O diálogo visto no terminal da sessão:** com a janela certa da sessão em
+  foco e o Renan presente por `ESPERA_VISTA_MS` (5 s), contados do mais tarde
+  entre o aviso, a janela ficar ativa e ele voltar a mexer, o diálogo conta
+  como visto (a intenção `escalada` com o motivo `vista`, e `vista` na
+  `fotografia.escalada`): daí em diante nada passa da L1 (nem rajada, nem
+  voo, nem pulso, nem o voo da volta), e um voo no ar volta para a casa. O
+  Esc e o "não" são feitos no terminal da sessão: o diálogo dispensado conta
+  como visto e não escala com o Renan indo embora. Sem a janela certa da
+  sessão, nada conta como visto, e o teto solta a pose.
+- **Olhar a espera** é ter em foco o terminal da sessão que espera, quando a
+  janela dela é certa; sem ela, um terminal do Claude qualquer, como antes.
+  Vale para a escalada e para a volta (corrige a decisão 0079).
+- **A volta:** os voos da volta têm a conta deles (`VOLTAS_MAX`, até 3 por
+  aviso), fora dos 3 da L3, e o próximo da L3 espera os 60 s dele depois de
+  um. A volta com o pet fora da tela (a proteção de tela ainda aberta) espera
+  até `VOLTA_VALE_MS` (2 min) o pet poder aparecer e voa então, com a L3 dela
+  no motivo `voltou`. A volta acorda o pet (o teto pode ter soltado a pose e
+  deixado ele dormindo com o selo). No desenho, que não muda as intenções: o
+  voo da volta que não pôde começar (sem palco: a camada ainda voltando da
+  proteção de tela) ou que acabou sem a janela mostrar quadro nenhum (a
+  sessão bloqueada: o compositor segura o primeiro) sai de novo quando a
+  janela mostrar quadros (o palco pronto, ou o quadro preso mostrado no
+  desbloqueio), por até `VOLTA_POR_MOSTRAR_MS` (2 min).
+- **A janela que fecha no meio do voo:** o `Sumiu` acaba o voo e o confete,
+  como o esconder; o voo que acaba sem palco larga o voo da skin.
+- **Testes:** na escalada, os voos da volta com a conta deles e a volta que
+  espera o pet aparecer (e sai no prazo, ou com o "não perturbe"); no Motor,
+  o clique que vê a espera solta a pose e o pet dorme, a volta que ninguém
+  viu com a sessão bloqueada sai no desbloqueio (uma intenção só), a janela
+  que fecha no meio do voo larga o voo, e o orçamento depois do teto (o
+  repouso e o sono profundo sem commit, com o selo); os dourados novos
+  `pergunta-noutro-terminal`, `pergunta-dispensada` e
+  `pergunta-com-protetor-de-tela`, e o `pergunta-ausente` (o voo da volta e
+  o pet dormindo depois do teto) e o `pergunta-com-volta` (o terceiro voo da
+  L3) refeitos. Sete mutações reprovaram (olhar qualquer terminal, sem a
+  espera vista, a pose pelo estado, a volta gastando os voos da L3, a volta
+  escondida perdida, sem mostrar a volta de novo, o voo sem palco sem
+  largar).
+**Por quê:** chamar por um diálogo que já não existe é o pior erro da
+escalada: ensina o Renan a ignorar o pet. O diálogo dispensado não manda
+nada, mas é dispensado no terminal da sessão, e isso o desktop vê; quem viu o
+diálogo e foi embora sabe dele, e o selo parado basta. A volta é o momento em
+que a chamada mais vale, e só vale se aparecer na tela.
+
+## 0091 — Revisão da tela: o orçamento da espera, o "+N" na acomodação, o erro escondido e o sono, a tela compartilhada como o "não perturbe" e a medição ao vivo com o pet acordado (2026-10-05)
+
+**Problema:** as revisões adversariais do M5 (lentes da tela e das regras)
+acharam:
+- **A espera passava do orçamento.** A base de espera ficava no repouso, no
+  teto de 2 commits/s (as tags de espera do Zeca original são densas,
+  decisão 0082), e a escalada tocava por cima: medido em relógio falso com o
+  Zeca original (D = 4), 2,85 commits/s nos 5 primeiros minutos de um aviso
+  com o Renan longe e 2,0 com ele lendo no terminal. A prova da decisão 0088
+  só tinha medido a L4.
+- **O "+N" piscava na acomodação do Stop:** ele contava as sessões pelo
+  estado cru, e a sessão que parava saía dele 0,8 s antes de a bandeirinha
+  aparecer (a base já segurava a prioridade de antes, decisão 0080).
+- **O susto do erro e o bocejo do cansado tocavam escondidos** (na proteção
+  de tela, com o pet escondido), com a intenção anotada, contra a decisão
+  0079.
+- **O erro segurava o sono por 2 h:** ele fica 60 s na tela, mas o aviso dele
+  (2 h) bloqueava o sono, com o pet acordado no repouso sem nada que dissesse
+  por quê.
+- **A tela compartilhada só tirava os nomes:** a decisão 0010 diz que o "não
+  perturbe" e o compartilhamento de tela "deixam tudo discreto", e o PLANO
+  estreitou isso sem decisão; as rajadas, os voos ao alto-centro e o voo da
+  festa apareciam para quem assistia.
+- **O `scripts/medir-custo.sh` media o sono como "parado":** ele sobe uma
+  pilha de dev nova e pede para ninguém mexer; aos 3 min o pet do M5 boceja e
+  dorme (decisão 0076), e as fases "parado" depois disso mediam o laço do
+  sono (no limite dos 2,0 da faixa). E não havia fase do M5.
+**Escolha:**
+- **O ritmo atento** (`animador::Ritmo::Atento`): o repouso com até
+  `COMMITS_POR_S_ATENTO` (1) commit/s, para a espera na L1 e o erro, que têm a
+  chamada, as rajadas e o balão por cima. Da L2 em diante, a espera fica só
+  na pose: quem anda são as rajadas, os voos e o pulso do selo. Medido em
+  relógio falso com o Zeca original: a espera chamando a 1,42 commit/s nos 5
+  primeiros minutos e 1,39 em 15; lida no terminal da sessão, 0,95 em 10
+  min; o erro, 1,02 nos 60 s dele (a skin de teste, menos). O teste novo do
+  orçamento reprova as duas metades (a pose parada só na L4; a L1 no repouso
+  de sempre).
+- **O "+N"** conta a sessão pela prioridade que ela segura: na acomodação, a
+  de antes, e ele muda só quando a bandeirinha aparece. Uma espera sem aviso
+  (vista) não conta.
+- **Escondido**, a entrada no erro e no cansado não toca nem anota, e fica
+  vista: nada se repete na volta.
+- **O erro não segura o sono:** depois dos 60 s dele na tela, como o pronto
+  (corrige a decisão 0080); o aviso continua para o clique e o "+N".
+- **A tela compartilhada é discreta como o "não perturbe"** (decisão 0010):
+  além dos balões sem nome, nada passa da L1, nada voa (nem a escalada nem a
+  festa), e um voo no ar volta para a casa quando a discrição liga; o
+  confete fica, como no "não perturbe" (decisão 0080).
+- **A medição ao vivo** (`scripts/medir-custo.sh`): antes de cada fase
+  "parado", uma sessão de teste (`PET_TESTE=1`) manda um `SessionStart` pelo
+  hook de dentro da imagem, com o pet escondido (o despertar não toca), e a
+  fase só vale com `fotografia.sono` acordado e `desenho.base` `idle` no
+  começo e no fim (uma sessão real do Renan trabalhando no meio para a
+  medida). Duas fases novas: `trabalhando` (uma sessão de teste, até 1
+  commit/s) e `dormindo` (o laço do sono depois de o pet dormir sozinho, de
+  0,3 a 2 por segundo). O sono profundo (aos 30 min) fica com o teste em
+  relógio falso. Não rodado aqui: a sessão estava bloqueada.
+**Por quê:** a camada do tamanho do monitor só vale com o orçamento (decisão
+0005), e o que pega o olho na espera é o movimento que começa (a chamada, a
+rajada, o voo), não a base que respira por baixo dele. O "+N" que pisca é
+movimento sem significado; o que toca escondido ou dorme acordado engana; e
+quem compartilha a tela numa chamada não quer o pet voando pela tela dos
+outros.
+
+## 0092 — O que ficou da revisão do M5: o "✳" fora, a presença no casamento da janela, o T3 que não tocou, os limites conhecidos e as docs reconciliadas (2026-10-05)
+
+**Problema:** as revisões adversariais do M5 deixaram pontos menores:
+- a regra do PLANO "o turno fecha quando o título do terminal focado vira ✳
+  com uma só sessão trabalhando" não foi feita, e nenhuma decisão a tirou;
+- um prompt que chega com o Renan longe do teclado e do mouse (`ocioso`)
+  nunca casa a janela da sessão, o que muda a regra das decisões 0055 e 0060,
+  e só o PROGRESS do T5.4 e um comentário diziam isso (a decisão 0073 usa o
+  longe só como prova do tique, com `crn > 0`);
+- o intervalo de 10 min do T3 era gasto mesmo quando o T3 não aparecia (o pet
+  escondido, a proteção de tela, a soneca que o troca pelo aceno);
+- limites sem registro: o tique de um `/loop` com o Renan no teclado e a
+  janela da própria sessão em foco, as mensagens de teammate e de canal, e o
+  "não perturbe" que só chega com os eventos;
+- as docs desencontradas (o PLANO com o pulso "a 1 Hz", a faixa do T3 em
+  "2,5–4 s" e a lista do M6 com o que o M5 já fez; o CLAUDE.md com o rumo e as
+  pendências velhos e sem como voltar a produção para a `main`; o README com
+  a regra do M3 e sem a notificação do shell no hook antigo), o comentário
+  partido do `bin/pet`, o log "reação yawn da sessão " sem sessão, e
+  pronomes para o Renan em textos novos;
+- as sobras das sessões aninhadas das pesquisas em `~/.claude` e em
+  `/tmp/claude-1000`.
+**Escolha:**
+- **O "✳" fica de fora:** no 2.1.288 o título do terminal fica ✳ o tempo todo
+  (pensando, num Bash de 20 s, com um diálogo na tela e depois do Esc;
+  conferido no tmux, decisão 0090), então ele diz "terminal do Claude", não
+  "parado". O turno que o Esc deixa aberto fecha no prompt seguinte, no
+  `idle_prompt` ou no `SessionEnd`, e o estado volta a parado pelo prazo de 5
+  min (decisão 0076); a espera que ele deixa tem as regras da decisão 0090.
+  O PLANO ganha a nota.
+- **A presença no casamento da janela** (atualiza a decisão 0073): um prompt
+  que chega com o Renan longe do teclado e do mouse nunca casa a janela da
+  sessão: sem entrada nenhuma, a janela ativa não é a de onde o prompt saiu
+  (o Remote Control, um prompt colado por outro programa, o tique sem `crn`). O
+  próximo prompt digitado casa como antes; até lá, o clique cai no balão.
+- **O T3 que não tocou** (escondido, na proteção de tela, ou o aceno da
+  soneca) devolve o intervalo: o próximo T3 conta do T3 de antes. A sessão
+  bloqueada não entra (o Motor não a vê).
+- **Os limites conhecidos**, escritos:
+  - o tique de um `/loop` com o Renan no teclado e a janela da própria sessão
+    em foco (outro painel do tmux, outra aba do mesmo terminal) conta como
+    digitado (o pronto e a janela casada de novo): o aviso de ocioso do
+    Wayland é do teclado inteiro e não diz para qual janela vão as teclas, e
+    uma segunda notificação de 1–2 s não separaria o painel do lado;
+  - as mensagens de teammate (`<teammate-message>`) e de canal (`<channel
+    source=…>`) existem no binário do 2.1.288, e não foi visto ao vivo se
+    passam pelo `UserPromptSubmit`; se passarem, contam como digitadas
+    (`orig` comum). O conserto é um valor novo e fechado do `orig` no hook
+    (com canários e decisão própria), para quando o Renan usar times de
+    agentes ou canais;
+  - o "não perturbe" vem no `dnd` de cada evento do Claude (o pet nunca lê a
+    pasta do Omarchy, que guarda o histórico da área de transferência):
+    ligado no meio de uma espera, vale no próximo evento de qualquer sessão;
+    o clique direito (a soneca) cala na hora;
+  - a permissão de um Bash demorado segura a espera até o `PostToolUse` (só
+    a pergunta e o plano têm `PreToolUse`); com a decisão 0090, 5 s no
+    terminal da sessão param a escalada.
+- **As docs reconciliadas:** as notas de correção do PLANO (o "✳", o pulso, o
+  T3 de até 4,5 s, a lista do M6); o CLAUDE.md (o estado com a revisão, o
+  rumo, as pendências com a conferência na tela do M5, o PR e as sobras, a
+  volta da produção para a `main` e as pegadinhas novas); o README (a festa
+  pelo trabalho no lugar da regra do M3, o hook antigo com a notificação do
+  shell e o prompt digitado com a corrente aberta, o que mudou na espera); o
+  `docs/CENARIOS.md`; o comentário do `bin/pet`; o log "reação yawn do pet";
+  e as descrições dos cenários sem pronome para o Renan. As decisões 0079,
+  0084 (a atualização) e 0087 ainda dizem "ele" para o Renan em alguns
+  lugares: o DECISIONS só cresce (a única reescrita permitida foi a da 0035),
+  então ficam; o texto novo evita.
+- **As sobras:** as da sessão aninhada desta revisão (a pasta do projeto em
+  `~/.claude/projects`, a de `/tmp/claude-1000` e o plano em
+  `~/.claude/plans`) foram apagadas; as das pesquisas do T5.1 e do T5.2 e as
+  linhas no `~/.claude/history.jsonl` (um arquivo que as sessões do Renan
+  escrevem o tempo todo) ficam listadas no CLAUDE.md, para apagar só com o OK
+  do Renan.
+**Por quê:** uma regra do plano que nenhum código segue é uma promessa que
+ninguém cumpre; melhor dizer por quê e o que a substitui. Os limites são o que
+a semana de calibração do M7 vai encontrar: escritos, não são defeitos a
+descobrir de novo.
+
+## 0093 — A memória das sessões: o pet que reinicia não esquece as sessões abertas do Claude (2026-10-05)
+
+**Problema:** o cérebro guarda as sessões só na memória do processo. Cada
+reinício do pet (toda atualização refaz a produção, um crash, um `docker
+restart`) esquecia todas as sessões abertas, e uma sessão parada não manda
+nada (o `idle_prompt` sai uma vez por turno, ~60 s depois do Stop): o clique
+no Zeca dizia "nenhuma sessão do Claude aberta" com o Renan cheio de sessões
+abertas, até cada uma ser usada de novo (relatado pelo Renan em 2026-10-05).
+O Zeca tem de acompanhar todas as sessões abertas (decisão do Renan). E os
+prazos do cérebro contam num relógio monotônico que recomeça do zero com o
+processo: guardar os instantes dele não serviria.
+**Escolha:**
+- **O arquivo** `/state/sessoes.json` (`pet_core::memoria`, versão 1, no
+  máximo 64 sessões, `MAX_SESSOES`, em até 256 KiB): só as sessões reais,
+  nunca as de teste, e só metadados: o `sid` inteiro (opaco, para casar os
+  próximos eventos; no `/v1/estado` continua só o `sid8`), o nome da pasta do
+  projeto, a origem, o estado e desde quando, a hora do último evento, os
+  agendamentos do último Stop (o `crn`, que separa o tique do prompt
+  digitado), o aviso pendente (o tipo, a espera, desde quando e, no aviso que
+  o pet chamava, o nível da escalada e a hora em que o Renan viu o diálogo),
+  a janela do terminal (o endereço, a instância do compositor a que ele
+  pertence, a certeza e a hora do casamento) e os ids de terminal. Nada de
+  prompt, título de janela ou caminho; os tempos são de parede. O boot id da
+  máquina vai junto.
+- **A gravação** é só do laço principal, nunca da entrada HTTP nem do hook:
+  no batimento de 5 s, se a memória mudou desde a última gravação (no máximo
+  a cada 4 s), e no SIGTERM, antes do adeus ao compositor (o
+  `stop_grace_period` é de 5 s). De uma vez: um arquivo temporário na mesma
+  pasta, só do dono (0600), e o `rename`. Um `kill -9` perde no máximo os
+  últimos segundos.
+- **A leitura** é na partida, antes de achar o compositor (no boot o pet sobe
+  antes dele; nada espera por ele). A conferência é a do fio v1, campo a
+  campo: uma sessão com um campo ruim fica de fora; o arquivo que não é este
+  JSON, de outra versão ou grande demais é ignorado inteiro, com um aviso que
+  não cita o conteúdo, e o pet começa vazio. A primeira gravação troca o
+  arquivo ruim, e um que falta é só a primeira partida.
+- **Os relógios:** a hora de parede gravada vira o instante do relógio novo
+  (`Agora::no_laco`), negativo quando é de antes da partida. O cérebro passa a
+  guardar o último evento, a entrada no estado e o aviso como `Instante` (ms
+  com sinal), e a escalada o começo do aviso; todo prazo sai deles
+  (`cerebro::depois`), e um prazo de antes da partida já venceu. Assim os
+  prazos restaurados são os de antes, contados no relógio novo, e nada muda
+  para o pet que não reiniciou (os testes e os dourados de antes passaram sem
+  mexer). Um teste restaura com o relógio do laço em 0 e a parede 30 s
+  adiante e confere cada prazo ao milissegundo.
+- **O que volta** (`Cerebro::restaurar`) é o que ainda vale pelas regras de
+  sempre, contadas das horas de antes: a sessão com o último evento há menos
+  de 12 h (`VIDA_SESSAO_MS`) e de uma origem que o config aceita, as mais
+  novas primeiro; o estado com o prazo dele; o pronto e o erro até 2 h; o
+  "esperando você" enquanto a sessão vive. A sessão guarda a hora do último
+  evento de antes (a vida de 12 h e o `SessionEnd` a tiram como antes) e vai
+  marcada `restaurada` no `/v1/estado.sessoes` até o próximo evento dela.
+- **O turno aberto não volta, e a sessão volta no estado dela só pelo prazo
+  dele.** O Stop pode ter se perdido com o pet fora (o hook é assíncrono, não
+  acha o pet e não tenta de novo). Nada de turno, corrente ou festa: a sessão
+  que trabalhava (pensando, trabalhando, compactando) volta assim até 5 min
+  depois do último evento dela, o prazo de sempre de um turno cujo Stop não
+  vem (o do Esc, decisões 0076 e 0092), ou até o `idle_prompt`, que a deixa
+  parada sem festa. O próximo evento do turno abre um turno implícito, como no
+  M3, e o Stop festeja o que veio depois da volta, com o pronto. Voltar
+  parada de cara mostraria "parado" com o Claude trabalhando até o próximo
+  evento; o prazo curto erra menos, e para o mesmo lado de um Stop perdido
+  sem reinício nenhum.
+- **A volta é quieta:** nenhuma reação, festa, olá, balão ou chamada de novo.
+  O erro e o cansado entram como já vistos (sem o susto) e ficam o resto dos
+  60 s deles; os avisos de espera contam como já chamados (sem a L1 de
+  novo). A escalada do aviso de espera mais velho **segue do tempo que
+  passou** (`Escalada::retomada`): o nível de antes; as rajadas e os voos
+  cuja hora já passou contam como gastos; o próximo de cada um sai um
+  intervalo inteiro depois da volta; a fase de agora sobe o nível nas horas
+  dela (a L4 com o pulso aos 5 min do aviso, o teto aos 35, contados do aviso
+  de antes); o diálogo que o Renan já tinha visto continua visto. Recomeçar
+  da base quieta repetiria a L2 e a L3 de um aviso que já passou por elas, e
+  ensinaria o Renan a ignorar o pet (decisão 0090). A intenção `restauracao`
+  diz quantas sessões e avisos voltaram e quantas ficaram de fora (ou por que
+  nada voltou), e a `escalada` com o motivo `restaurada` diz de onde a
+  escalada segue.
+- **A máquina que reiniciou:** depois de um boot todo Claude de antes morreu,
+  e as sessões seriam fantasmas por 12 h. O daemon lê o boot id do Linux
+  (`/proc/sys/kernel/random/boot_id`, o do host também dentro do container),
+  atrás da costura de plataforma; o núcleo só compara. Outro boot id, ou um
+  que falta na gravação ou agora: nada volta (uma sessão fantasma é pior que
+  esquecer). Sem o boot id (Windows e macOS até o M8), nada é guardado.
+- **Outro compositor** (um logout e um login sem reiniciar a máquina; as
+  sessões do tmux sobrevivem): a janela de cada sessão leva a instância do
+  compositor em que foi vista (no Hyprland, a assinatura que a descoberta
+  acha). Quando a descoberta acha uma instância, as janelas vistas noutra
+  saem (a certeza vira "fechou", e o clique diz que a janela dela fechou): a
+  sessão fica, e o próximo prompt digitado casa a janela nova. Vale também
+  com o pet de pé (antes, o endereço velho ficava, e noutra instância poderia
+  ser outra janela), e o anel e a janela ativa da instância de antes saem
+  junto. Na partida, a janela restaurada espera a instância ser achada.
+- **Testes:** no cérebro, a volta com o relógio do laço do zero e a parede
+  adiante (o trabalhando, o pronto e as duas vidas de 12 h ao milissegundo),
+  o próximo evento da restaurada, o que vale e o que não vale de cada regra e
+  o teto; no formato, a ida e a volta, os campos ruins e os arquivos
+  recusados; na escalada, a retomada (a L4 sem rajada na volta, o teto
+  contado do aviso de antes, a L3 e a L2 com o que já passou); no Motor, só
+  metadados, a volta quieta com o diálogo visto, outra partida da máquina e
+  outro compositor (ao vivo e na memória); os dourados
+  `reinicio-sessao-parada` (com uma sessão de teste), `reinicio-no-meio-do-turno`
+  (com o Stop perdido), `reinicio-com-pergunta`, `reinicio-com-pronto-e-erro`,
+  `reinicio-depois-de-13-h`, `reinicio-da-maquina`,
+  `reinicio-com-outro-compositor` e `reinicio-com-arquivo-corrompido` (o
+  executor ganha o passo `reinicio`: o Motor novo com o relógio do laço do
+  zero, a parede adiante e os eventos com o pet fora perdidos); no daemon, a
+  gravação de uma vez e só do dono, o ritmo, os arquivos ruins trocados e o
+  boot id; com o binário de verdade, o SIGTERM que grava e a partida seguinte
+  que devolve; o canário do hook não chega ao arquivo. Dez mutações
+  reprovaram (sem semear os avisos chamados, sem semear os estados vistos, o
+  último evento e o aviso sem ir ao relógio novo, a sessão de teste na
+  memória, sem conferir o boot id, a janela de outro compositor que fica, a
+  escalada que recomeça da L1, o trabalhando sem o prazo dele, a sessão de 13
+  h que volta). Ao vivo, num daemon de rascunho da branch (a 27391) com uma
+  sessão aninhada do 2.1.288: um turno curto, a sessão parada, o SIGTERM, e a
+  partida seguinte com a sessão na lista, restaurada, sem evento nenhum; com o
+  boot id trocado no arquivo, a lista vazia.
+- **Limites:** o T3 de 10 min não é lembrado (o intervalo recomeça na volta);
+  a corrente de agentes aberta não volta (o "…" some, e o fim dela festeja
+  só o turno que a fecha); o turno que estava aberto festeja só o trabalho
+  depois da volta, e um turno de máquina aberto na parada volta como um turno
+  implícito digitado; um evento que chega com o pet fora se perde; os voos da
+  volta do Renan recomeçam a conta. Uma sessão aberta antes de o plugin ser
+  instalado não manda nada até o `/reload-plugins` (a sessão principal do
+  Renan só chegou ao pet hoje, depois dele), e depois dele só aparece no
+  próximo evento: a memória não ajuda aí.
+**Por quê:** o trabalho do Zeca é ficar de olho nas sessões do Claude do
+Renan, e a produção reinicia a cada atualização: esquecer as sessões a cada
+reinício fazia a lista do clique mentir. Guardar só os metadados que a
+lista, os selos e o clique pedem, e refazer cada prazo pela hora de parede,
+mantém as regras de sempre; voltar quieto deixa o reinício como coisa do pet,
+não do Claude (nada de festa nem de chamada por algo que já passou). Depois
+de um boot, esquecer é o certo; depois de um logout, a sessão continua viva
+no tmux, mas o endereço de uma janela de outro compositor nunca é de
+confiança: focar a janela errada é pior que o balão.
+
+## 0094 — Revisão da memória das sessões: o `idle_prompt` tira a espera que sobrou e as horas do futuro ficam de fora (2026-10-05)
+
+**Problema:** relendo a decisão 0093 antes de levar a memória para a
+produção, dois buracos. Uma pergunta que o Renan responde com o pet fora,
+num turno que também acaba com o pet fora (a resposta e o Stop se perdem),
+voltava com a memória e seguia escalando: o `idle_prompt`, o único evento que
+a sessão ainda manda depois disso, nunca mexia em aviso nenhum (decisão
+0057), e o pet chamaria por um diálogo que não existe mais até o próximo
+prompt, o pior erro da escalada (decisão 0090). E um arquivo com horas muito
+adiante (o relógio que voltou entre as partidas, o arquivo mexido)
+restaurava sessões com prazos fora do relógio do laço.
+**Escolha:**
+- **O `idle_prompt` tira a espera que sobrou** (corrige a decisão 0057, que o
+  deixava sem mexer em aviso nenhum): ele nunca sai com um diálogo na tela
+  (lido no binário do 2.1.288, no T5.7), então um aviso de espera de antes
+  dele é de um diálogo que acabou sem o evento chegar. A espera sai no
+  primeiro `idle_prompt` da sessão; um atrasado, de antes do aviso, não mexe
+  nela; o pronto e o erro continuam com ele (ele se repete, e quem os tira é
+  o Renan). Sem reinício nenhum, o caso não acontece: nenhum dourado mudou.
+  O dourado novo `reinicio-com-pergunta-respondida-fora` mostra a espera que
+  volta quieta, segue escalando (a L2 ainda sai: o pet não tem como saber) e
+  sai no `idle_prompt`, sem festa.
+- **As horas do futuro:** uma sessão com alguma hora (o último evento, o
+  estado, o aviso, o diálogo visto, o casamento da janela) mais de 6 h
+  adiante da partida (`JANELA_TS_MS`, a mesma janela do `ts` dos hooks)
+  fica de fora.
+- **Testes:** o dos avisos no cérebro (o `idle_prompt` tira a espera que
+  sobrou, não a de um atrasado, nem o pronto), o da memória com as horas do
+  futuro e o dourado com a asserção dele. Três mutações reprovaram (a espera
+  que fica, o atrasado que a tira, o pronto que sai junto).
+- **Limites:** a espera respondida com o pet fora segue escalando até o
+  `idle_prompt`, uns 60 s depois do fim do turno. Uma janela que fechou com o
+  pet fora continua na sessão até o próximo prompt casar outra ou o clique
+  dizer que ela sumiu (no mesmo compositor, o endereço de uma janela fechada
+  poderia, em tese, ser o de uma nova; a parada de uma atualização dura
+  segundos).
+**Por quê:** a memória não pode trazer de volta uma chamada por algo que já
+passou, e o `idle_prompt` é a prova, mandada pela própria sessão, de que não
+há diálogo na tela: o primeiro evento depois de um turno perdido. E nada lido
+do disco pode pôr um prazo fora do relógio do laço.
+
+## 0095 — Segunda revisão da memória das sessões: o sossego volta, a memória velha volta quieta e o tempo é o acordado (2026-10-05)
+
+**Problema:** três revisões adversariais da memória (decisões 0093 e 0094),
+conferidas antes de mexer:
+- **O sossego se perdia.** O "não perturbe", a soneca e a discrição da tela
+  compartilhada seguram a escalada na L1 (decisões 0075, 0081 e 0091), mas
+  moravam só na memória do processo. Depois de um reinício, a espera que
+  voltava subia aos voos da L3 e às rajadas da L4 com o pulso por cima dos
+  três: reproduzido no `bichinho simular` (o "não perturbe" em todo evento, a
+  soneca aos 12 s, a tela compartilhada até 16 s; o pet parando aos 60 s).
+- **A memória de qualquer idade valia.** O `gravada_ms` nunca era lido. Uma
+  memória velha (a produção de volta à `main` e de novo à branch, um `bin/pet
+  parar` e um `subir` horas depois, gravações falhando por muito tempo)
+  trazia a espera de um diálogo que acabou na parada, e o `idle_prompt` que a
+  tiraria (decisão 0094) também se perde quando a parada passa de uns 60 s:
+  10 min fora deram 25 min de L4 por uma pergunta já respondida (reproduzido).
+  O endereço de uma janela que fechou na parada pode ser o de outra (decisão
+  0093: focar a janela errada é pior que o balão).
+- **A volta contava a parede; o pet de pé conta o tempo acordado.** O relógio
+  do laço (o `Instant` do Linux) não anda com a máquina suspensa, e as vidas
+  do pet que não reinicia (a da sessão, a de 2 h do pronto) contam só o tempo
+  acordado. A volta contava pela parede: depois de uma noite suspensa, a
+  primeira atualização tirava as sessões que o pet de pé ainda listava, o
+  sintoma relatado pelo Renan (nesta máquina, 14,3 h suspensas desde o boot).
+- **Menores:** o pronto de um Stop nos 0,8 s da acomodação se perdia numa
+  parada ali; a hora em que o Renan viu o diálogo era refeita pela conta
+  parede menos relógio do laço a cada gravação (oscila 1 ms e pula com uma
+  suspensão), e o arquivo era regravado sem mudança; a gravação que falhava
+  deixava o temporário; a leitura que falhava não ficava nas intenções; e
+  nenhum teste do daemon pegava a descoberta sem o compositor (`laco.rs`) nem
+  a gravação da saída (o batimento podia gravar antes dela).
+
+**Escolha:**
+- **O sossego volta** (`memoria::Sossego`, no arquivo só quando há): o "não
+  perturbe" do último evento (vale até o próximo evento, como no pet de pé),
+  o fim da soneca e a discrição (com o último sinal, ou o sinal ainda aceso
+  na gravação), postos antes de a escalada seguir; a soneca e a discrição só
+  se ainda valem, contadas de antes. A intenção `restauracao` diz o que
+  voltou (`sossego`), e a discrição desliga 5 min depois do último sinal de
+  antes, com a intenção de sempre.
+- **A memória velha** é a gravada há mais de 60 s pela parede
+  (`MEMORIA_VELHA_MS`, o tempo do `idle_prompt`), ou adiante disso (o relógio
+  voltou). As sessões voltam todas (o Renan quer ver as abertas), mas as
+  esperas voltam dadas como vistas na hora da gravação: nada passa da L1, e a
+  pose de espera sai 2 min depois dela, como a de um diálogo visto (numa
+  parada longa, já saiu); o selo "!" e o clique ficam, também para a espera
+  que ganha a vez depois. As janelas voltam sem o endereço (os ids de terminal
+  ficam; o próximo prompt digitado casa de novo). A intenção `restauracao`
+  leva `velha`, e o log diz. Para a parada medir até quando o pet sabia: a
+  saída grava sempre (o log diz "gravada(s) na saída"), e o batimento regrava
+  a memória que não mudou a cada 30 s (`REFRESCO_MEMORIA_MS`, só com algo a
+  lembrar), então a parada de um crash fica abaixo dos 60 s. Isto corrige o
+  limite escrito na decisão 0094: a espera respondida com o pet fora só segue
+  escalando até o `idle_prompt` numa parada curta; numa longa, volta quieta.
+- **O tempo acordado:** cada instante vai também no relógio do laço de quem
+  gravou (`ultimo_evento_laco_ms`, `estado_desde_laco_ms`, `desde_laco_ms` e
+  `vista_laco_ms` do aviso, com o `laco_ms` da gravação), e a volta conta o
+  tempo acordado até a gravação mais a parada pela parede (`memoria::Volta`).
+  Um prazo restaurado é o do pet que não reiniciou, até ao milissegundo (o
+  pronto conta do fim da acomodação, como no pet de pé). As horas de parede
+  ficam para o `/v1/estado` e o balão; um arquivo sem o relógio do laço (o da
+  decisão 0093) conta pela parede. Um instante do laço depois da gravação
+  deixa a sessão de fora, como as horas do futuro (decisão 0094). Tudo segue
+  na versão 1 do arquivo: os campos novos são opcionais.
+- **O pronto da acomodação** vai na memória: o mesmo fechamento que o tique
+  faria no fim dela, numa cópia da sessão (nada muda no cérebro).
+- **A hora em que o Renan viu o diálogo** vai como foi anotada, na parede e
+  no relógio do laço: a memória que não mudou grava igual.
+- **A gravação que falha** tira o temporário e deixa o arquivo de antes; o
+  aviso sai uma vez, e o batimento seguinte tenta de novo. A leitura que
+  falha fica nas intenções (`erro_de_leitura`).
+- **Testes:** no formato, o sossego e o relógio do laço de ida e volta, os
+  ruins valendo como nenhum, e a `Volta` (o tempo acordado mais a parada, a
+  parede sem o relógio do laço, a memória velha dos dois lados); no cérebro,
+  a máquina suspensa por mais que a vida da sessão (o pet de pé e a volta
+  igual; pela parede, a sessão teria morrido), o instante depois da gravação
+  e o pronto da acomodação (o de um turno de máquina, não); no Motor, o
+  sossego (cada um segura a escalada, e sem ele ela sobe), a memória velha
+  (as duas esperas vistas, as janelas sem endereço, e uma espera nova de
+  agora escalando) e a memória que grava igual com a parede andando
+  diferente; os dourados `reinicio-com-nao-perturbe`, `reinicio-na-soneca`,
+  `reinicio-compartilhando`, `reinicio-depois-de-uma-pausa` e
+  `reinicio-na-acomodacao` (o `reinicio-depois-de-13-h` ganha o `velha`, e
+  nenhum outro dourado mudou); no daemon, o refresco e a saída, a gravação
+  que falha, a leitura que falha e, no binário de verdade com o Hyprland de
+  mentira, a janela de outra instância que sai na descoberta e a gravação da
+  saída pelo log. 18 mutações reprovaram (cada parte do sossego, a memória
+  nunca velha, a espera velha que escala na volta ou na vez, a janela velha
+  que fica, a volta pela parede, o pronto da acomodação, a vista pela conta
+  da parede, o instante depois da gravação, a saída que só grava com
+  mudança, o refresco, o temporário que fica, a leitura sem intenção, a
+  descoberta sem o compositor e a saída sem gravar).
+- **Limites:** numa memória velha, a espera volta vista mesmo que o Renan
+  não tenha respondido (o pet não tem como saber): fica o selo e o clique; o
+  "não perturbe" que volta vale até o próximo evento, como no pet de pé; uma
+  suspensão da máquina com o pet fora conta como parada; o intervalo do T3
+  continua sem memória (decisão 0093).
+
+**Por quê:** a volta não pode fazer o que o pet de pé não faria: escalar por
+cima do "não perturbe", da soneca ou da tela compartilhada, chamar por um
+diálogo que pode ter acabado numa parada longa, focar um endereço que pode
+ser de outra janela, nem esquecer as sessões que uma suspensão não esqueceria.
+Medir a idade da memória pela saída e pelo refresco deixa a parada curta de
+uma atualização igual a antes, e quieta só o que a parada longa pode ter
+mudado.
+
+## 0096 — Todas as sessões abertas: a sessão real não sai mais em 12 h sem evento (2026-10-05)
+
+**Problema:** a decisão do Renan é que o Zeca acompanhe todas as sessões
+abertas do Claude. A memória (decisões 0093 e 0095) cobre o reinício do pet,
+mas a regra de 2026-10-03 (decisão 0020) tirava uma sessão real depois de 12
+h sem evento, com o pet de pé ou na volta: uma sessão parada de uma noite (a
+máquina do Renan fica acordada: no ar há 14 dias, com 14,3 h suspensas) sumia
+da lista, e o clique voltava a dizer "nenhuma sessão do Claude aberta" com a
+sessão aberta. A regra existia para enterrar a sessão de um processo que
+morreu sem o `SessionEnd`. Hoje o boot id (decisão 0093) já tira as de uma
+máquina que reiniciou, e o terminal que fecha manda o `SessionEnd`: numa
+sessão aninhada do 2.1.288 no tmux, matar o tmux (o SIGHUP de um terminal
+que fecha) mandou o `SessionEnd` com o motivo `other`, e o pet tirou a sessão
+com o tchau (conferido em 2026-10-05, num daemon de rascunho). E sem a vida
+de 12 h, uma espera não sairia nunca: um Esc numa pergunta não manda nada
+(decisão 0090).
+**Escolha:**
+- **A vida de uma sessão real sem evento nenhum passa a uma semana**
+  (`VIDA_SESSAO_MS`), no tempo acordado como antes; o `SessionEnd` e a máquina
+  que reinicia continuam tirando na hora. A sessão de um processo que morreu
+  sem o `SessionEnd` (um `kill -9`, um crash) fica na lista do clique até lá,
+  parada e no fim (a lista vai da mais recente à mais velha, e o balão mostra
+  5 linhas e o "+ N"); vencidos os avisos dela (em até 12 h), ela não segura
+  a base nem entra no "+N".
+- **A espera sai sozinha depois de 12 h sem evento nenhum da sessão**
+  (`VIDA_ESPERA_MS`): o aviso "esperando você" e o estado; a sessão fica,
+  parada. A escalada acaba com o motivo novo `expirou`. Na volta da memória,
+  igual: a espera de uma sessão sem evento há mais de 12 h volta parada, sem o
+  aviso.
+- **Testes:** no cérebro, a espera que sai em 12 h com a sessão ficando até
+  uma semana, e a volta (a sessão de 13 h volta, a espera de 13 h volta
+  parada, a de uma semana fica de fora); o dourado novo `espera-de-uma-noite`
+  (a escalada até o teto, o sono com o selo, a espera que expira e a sessão
+  na lista do clique) e o `reinicio-depois-de-13-h` refeito (as duas sessões
+  voltam e ficam na lista); sete mutações reprovaram (a vida de 12 h, a
+  espera que nunca sai, o estado que fica esperando, a espera sem prazo, a
+  volta com a espera velha ou ainda esperando, o `expirou` que vira `andou`).
+- **Limites:** a sessão de um processo que morreu sem o `SessionEnd` fica
+  na lista até uma semana sem evento; a espera sem evento por 12 h sai mesmo
+  com o diálogo ainda na tela (o pet não tem como saber; antes, a sessão
+  inteira saía junto).
+**Por quê:** o clique que diz "nenhuma sessão aberta" com uma sessão aberta
+é o erro que o Renan relatou, e uma noite parada o repetia sem reinício
+nenhum. O fantasma que ficou (o processo morto sem o `SessionEnd`) é raro,
+quieto e vai para o fim da lista; esquecer uma sessão aberta é o contrário do
+trabalho do Zeca. A espera continua com prazo: chamar por um diálogo de 12 h
+sem evento nenhum seria pior que deixá-la no clique.
+
+## 0097 — Revisão final da memória: o diálogo novo numa espera que voltou chama (2026-10-05)
+
+**Problema:** a revisão final do M5 achou, e o `bichinho simular` reproduziu,
+um diálogo novo engolido pela espera que a memória das sessões trouxe. A
+sessão restaurada volta "esperando" sem turno aberto (decisão 0093), e a
+resposta do diálogo de antes pode ter se perdido com o pet fora. Se o primeiro
+evento dela depois da volta é o gatilho de outro diálogo (o `PermissionRequest`
+de um Bash, uma pergunta, o plano, a notificação de um formulário), o estado
+não muda: o cérebro tratava como o mesmo diálogo (decisão 0075), só refinava o
+tipo e deixava a espera de antes com a hora dela. O Motor reconhece cada espera
+pela sessão e por essa hora: nem a chamada, nem a L1 de novo; numa memória
+velha a espera de antes volta vista (decisão 0095), então nada escalava, a pose
+saía e o pet dormia com o Claude parado num diálogo que o Renan nunca viu.
+Reproduzido: uma pergunta aos 10 s, o pet 2 min fora com a resposta perdida, a
+permissão de um Bash aos 150 s: nada aos 150 s e o bocejo aos 330 s (sem o
+reinício: a chamada, o balão e a L1 aos 150 s, a L2 aos 180 s, a L3 aos 240
+s). Numa parada curta, com o diálogo de antes já visto no terminal, o mesmo.
+**Escolha:**
+- **A espera que a memória trouxe guarda a hora em que a sessão entrou nela**,
+  até o estado da sessão mudar. Os gatilhos de um diálogo chegam em até uns 6 s
+  dele (o `PreToolUse` e o `PermissionRequest` juntos, a notificação
+  `permission_prompt` 6 s depois; T5.1). Um gatilho mais de 10 s depois dela
+  (`GATILHOS_DO_DIALOGO_MS`) é outro diálogo: a sessão entra na espera de novo,
+  como no pet de pé (o estado desde ele, o aviso novo com o tipo dele), e o
+  Motor chama (a chamada, o balão, a escalada desde a L1). A espera de antes
+  sai, e a marca de vista dela junto. Um gatilho dentro dos 10 s é do mesmo
+  diálogo e só refina, como sempre.
+- Vale também para a espera vista pelo clique antes da partida (o estado
+  "esperando" sem o aviso): o diálogo novo chama.
+- A marca sai na primeira mudança de estado da sessão (a resposta, o prompt, o
+  Stop, o `idle_prompt`); os eventos de um subagente no meio não a tiram. Com o
+  pet de pé, nada muda.
+**Testes:** no cérebro, a permissão depois da volta (a espera nova, desde ela),
+o subagente no meio, o formulário que só manda a notificação, a notificação do
+mesmo diálogo 6 s depois dele (só refina), a sessão que andou (daí em diante,
+as regras de sempre) e a espera sem o aviso; o dourado novo
+`reinicio-com-outro-dialogo` (a chamada, o balão e a L1 aos 150 s, a L2 aos 180
+s, a L3 aos 240 s), e nenhum outro dourado mudou. Cinco mutações reprovaram
+(sem o outro diálogo, a janela zero, a marca que não sai na mudança de estado,
+a volta sem a marca, a notificação que não é gatilho).
+**Limites:** um gatilho do mesmo diálogo que chegasse mais de 10 s depois dele,
+logo depois da volta, chamaria de novo (uma vez: a marca sai ali). Com o pet de
+pé, um diálogo novo sem nenhum evento da sessão desde o de antes continua sendo
+o mesmo (decisão 0075; não visto no 2.1.288).
+**Por quê:** a volta não pode calar o que o pet de pé chamaria (decisão 0095),
+e o Claude parado num diálogo que o Renan nunca viu, com o pet dormindo, é o
+erro contrário ao da decisão 0090. O tempo entre os gatilhos de um diálogo é
+medido (T5.1), e a marca só vale para a espera que a memória trouxe, a única em
+que a resposta pode ter se perdido.
+
+## 0098 — Revisão final da escalada: a espera vista não segura a vez da que o Renan não viu (2026-10-05)
+
+**Problema:** a revisão final do M5 achou, e o `bichinho simular` reproduziu,
+três defeitos de uma raiz só: "vista" (o diálogo 5 s no terminal da sessão,
+decisão 0090; a espera que volta de uma memória velha, decisão 0095) morava
+só na escalada da espera da vez.
+- **A espera vista segurava a vez.** Só a espera mais velha escala (decisão
+  0079), e a vista não passa da L1: a mais velha vista ficava com a vez, e a
+  pergunta nova de outra sessão ganhava só a L1, sem rajada, voo, o pulso da
+  L4 nem o voo da volta do Renan. Durava até a vista sair, com um evento da
+  sessão dela (o Esc numa pergunta não manda nenhum, decisão 0090) ou nas 12 h
+  da decisão 0096. Acontecia com o pet de pé (a pergunta vista e dispensada
+  com o Esc) e, muito mais, depois de toda parada de mais de 60 s, em que as
+  esperas voltam vistas. Reproduzido: a api pergunta, o pet fica 10 min fora,
+  e a web pergunta com o Renan longe: só a chamada da L1 (sem o reinício: a
+  L2, a L3 e o voo da volta).
+- **A vista das outras se perdia.** Só a da vez ia para o arquivo da memória:
+  numa memória velha com duas esperas, um reinício curto depois trazia a
+  segunda sem a vista, e quando a vez chegava a ela, ela escalava na hora até
+  a L3 e a L4 pela idade (a decisão 0095 diz que elas nunca passam da L1,
+  "também quando a vez delas chega depois").
+- **A pose das outras vistas não saía.** A pose de espera sai 2 min depois da
+  vista (decisão 0090) só na da vez: uma segunda espera vista segurava a pose
+  até o teto, 35 min depois de aberta, e o pet não dormia.
+**Escolha:**
+- **Cada espera guarda a vista dela** (`motor::Vista`: o aviso, a hora no
+  relógio do laço e na parede), uma por sessão, até a espera sair: a vista no
+  terminal da sessão, a da memória velha (na gravação) e a que vem no arquivo.
+- **A vez é da espera mais velha que o Renan ainda não viu** (corrige a
+  decisão 0079). Com todas vistas, a que já tinha a vez (nada de ir e
+  voltar), ou a mais velha: o selo "!" e o clique ficam, e nada passa da L1.
+  A espera nova de outra sessão pega a vez de uma vista (a escalada da vista
+  acaba com o motivo `outro_aviso`, e a nova chama e escala desde a L1);
+  vista a da vez, a vez passa na hora à seguinte que ele não viu, no relógio
+  dela (como quando a mais velha sai); respondida a nova, a vez volta à vista
+  (`vez`), que continua sem escalar.
+- **A memória leva a vista de cada espera** (o `vista_ms` e o
+  `vista_laco_ms` de todas, não só da vez), e a volta devolve cada uma; o
+  formato do arquivo não muda.
+- **A pose de cada espera** sai 2 min depois da vista dela, seja ou não a da
+  vez.
+**Testes:** no Motor, a vista que passa a vez na hora (a seguinte já na L2),
+a vez que fica com a que a tinha quando as duas são vistas, a que volta à
+vista sem escalar, e a memória que leva as duas vistas e solta a pose das
+duas; três dourados novos: `reinicio-velho-com-outra-sessao` (a memória velha
+e a pergunta de outra sessão: a L2, a L3 e o voo da volta),
+`pergunta-vista-e-outra-sessao` (o mesmo com o pet de pé: a pergunta vista e
+o Esc) e `reinicio-duas-vezes-com-duas-esperas` (duas esperas vistas de uma
+memória velha: a pose das duas sai 2 min depois da gravação, e no reinício
+seguinte as duas seguem vistas; nada escala na vez da segunda). Nenhum outro
+dourado mudou. Seis mutações reprovaram (a vista que segura a vez, a vez que
+vai e volta, a vista que não passa a vez na hora, a memória só com a vista da
+vez, a volta que esquece a vista do arquivo, a pose que só olha a da vez).
+**Limites:** "vista" continua sendo só a do terminal da sessão da vez (outro
+terminal de sessão em foco não conta até a vez chegar a ela, como antes). Um
+arquivo gravado antes desta decisão traz só a vista da que tinha a vez: numa
+parada curta, as outras voltam sem a vista, como antes.
+**Por quê:** a espera que o Renan viu já cumpriu o trabalho da escalada;
+segurar a vez para ela calava o pet justamente no diálogo que ele não viu, o
+erro contrário ao da decisão 0090, e a parada longa (decisão 0095) só pode
+quietar o que ela pode ter mudado, não o que chega depois dela. Com a vista
+em cada espera, as regras das decisões 0090 e 0095 valem para todas, sem
+depender de qual tem a vez.
+
+## 0099 — A última rodada antes do merge do M5: o refresco da memória pela parede, os dias na lista, o `idle_prompt` de uma vez por turno e a soneca que volta (2026-10-05)
+
+**Problema:** a última leitura do M5 antes do merge achou:
+- **O refresco da memória contava só o relógio do laço.** A idade da memória
+  (`Volta::velha`, 60 s) e a parada contam pela parede, e o refresco de 30 s
+  (decisão 0095) contava pelo relógio do laço, que não anda com a máquina
+  suspensa. Depois de uma noite suspensa com a memória parada, o arquivo
+  ficava com a gravação de antes da suspensão até 30 s acordados depois da
+  volta: um crash ali traria a memória como de horas atrás (as esperas
+  vistas, as janelas sem o endereço e a noite contada como parada, gastando
+  prazos que o pet de pé, no tempo acordado, não gasta). A asserção de
+  compilação que somava o refresco e o batimento contra a memória velha
+  misturava os dois relógios e só valia com a máquina acordada.
+- **A lista do clique dizia até "167 h":** desde a decisão 0096 uma sessão
+  sem evento fica uma semana, e a `balao::duracao` parava nas horas.
+- **O `idle_prompt` "se repete a cada ~60 s"** na pegadinha do CLAUDE.md, na
+  lista do PLANO, no comentário de um teste do cérebro e na descrição do
+  cenário `idle-prompt-repetido`. Isso veio de relatos de antes do M5
+  (`docs/pesquisa/07-desenho-sintese.md`); no 2.1.288 ele sai uma vez por
+  turno, uns 60 s depois do Stop, e nunca com um diálogo na tela
+  (`docs/pesquisa/10-cerebro-m5.md`, T5.1 e T5.7). A decisão 0094 apoiou
+  nisso o pronto e o erro que ficam com ele ("ele se repete").
+- **A soneca volta com a memória das sessões** (decisão 0095), mas a decisão
+  0053 diz que ela não persiste num restart, e o PLANO deixa a persistência
+  para os comandos `soneca` e `acordar` do M7.
+- **Comentários com as regras de antes das decisões 0094 e 0096:** o
+  "esperando você" que "nunca" sai sozinho (`prazo_do_aviso`,
+  `ver_pelo_foco`), as 12 h de vida da sessão (`reconfigurar`, um teste da
+  memória no cérebro, `Memoria::conferir_boot`) e as listas do que fica de
+  fora na volta (`Restauradas::de_fora`, `Restauracao::de_fora`, a intenção
+  e o `docs/CENARIOS.md`) sem as horas do futuro (decisão 0094) ou o instante
+  do laço depois da gravação (decisão 0095).
+- **Nenhum teste dizia** que as 12 h da espera (decisão 0096) contam do
+  último evento da sessão, e não do começo do aviso.
+
+**Escolha:**
+- **O refresco olha os dois relógios:** a decisão de gravar é uma função
+  pura (`nucleo::gravar_memoria_agora`) da última gravação no relógio do
+  laço e na parede, de agora, do que mudou, de haver algo a lembrar e da
+  saída. A memória que não mudou é regravada quando o relógio do laço **ou a
+  parede** andou 30 s (`REFRESCO_MEMORIA_MS`) desde a última gravação, a
+  parede para qualquer lado (o relógio que volta também regrava); o mínimo
+  de 4 s entre gravações continua no relógio do laço, e a saída grava sempre.
+  Na volta de uma suspensão, o primeiro batimento (em até 5 s acordados)
+  regrava. O batimento passa a ser um só (`nucleo::BATIMENTO_MS`, que o laço
+  do Linux e o sem janela usam), e as asserções de compilação dizem o que
+  vale: o mínimo entre gravações é menor que o batimento, e o refresco mais
+  o batimento ficam abaixo da memória velha, os dois pela parede com a
+  máquina acordada.
+- **Os dias na lista:** de 24 h em diante, a duração sai em dias ("2 d"),
+  arredondada para baixo como as outras unidades.
+- **O `idle_prompt` de uma vez por turno** nas docs e nos comentários. Isto
+  corrige a premissa da decisão 0094: o pronto e o erro continuam com ele,
+  não porque ele se repete, mas porque ele não diz que o Renan viu nada
+  (quem os tira é o clique, o terminal da sessão em foco, o próximo prompt
+  ou as 2 h). O cenário `idle-prompt-repetido` fica, como a prova de que um
+  repetido não faz nada (um Claude Code que repetisse, ou o mesmo evento duas
+  vezes).
+- **A soneca** do clique direito volta num reinício do pet, com a memória
+  das sessões (não depois de um boot da máquina): corrige a decisão 0053. O
+  PLANO diz isso, e do M7 ficam os comandos `soneca` e `acordar` do `bin/pet`.
+- **Os comentários** com as regras das decisões 0094 a 0096.
+- **O estado do repositório escrito para a `main` depois do merge** (como no
+  TS.5), no CLAUDE.md e no README: o M5 na lista da `main` (PR #7, `v0.5.0`,
+  decisões 0071–0099), a produção na `main` com o estado do Renan, o hook
+  com o `orig` e o `crn` pelo `bin/pet instalar-host` (o plugin continua
+  0.2.0), as conferências na tela pendentes e o próximo passo: o macOS na
+  branch `m8-macos`, escrita no Mac do Renan (decisões de 0100 em diante, de
+  lá), e depois o M6. Sai a pendência de reescrever o estado antes do merge.
+
+**Testes:** no núcleo, a decisão de gravar (8 h e 5 s depois na parede e 5 s
+no relógio do laço, com a memória igual: grava; sem nada a lembrar, não;
+acordada, só aos 30 s; a parede que volta; o que mudou nunca a menos de 4 s;
+a saída; a primeira gravação) e, pelo `Nucleo`, a memória parada regravada no
+primeiro batimento depois de uma suspensão: os dois reprovaram com a regra de
+antes, só pelo relógio do laço. No balão, os dias ("23 h", "1 d", "6 d", "7
+d" e a linha da lista). No cérebro, a espera que sai 12 h depois do último
+evento da sessão: um evento do subagente 3 h depois da permissão empurra o
+prazo e não muda a hora do aviso, no pet de pé e na volta da memória (13 h
+depois do aviso e 10 h depois do último evento, a espera volta e sai 2 h
+depois da partida). O código já contava do último evento: o teste passou de
+primeira, e três mutações o reprovaram (o prazo do pet de pé contado do
+aviso, a volta contada do aviso, o evento do agente que não conta). Nenhum
+dourado mudou.
+
+**Limites:** um crash nos primeiros segundos depois de uma suspensão, antes
+do primeiro batimento, ainda traz a memória velha, e uma suspensão com o pet
+fora continua contando como parada (decisão 0095). A lista em dias perde as
+horas (uma sessão de 1 d e 23 h mostra "1 d").
+
+**Por quê:** a idade da memória é pela parede, e o refresco que a mantém
+fresca tem de olhar o mesmo relógio: senão uma suspensão, que o pet de pé
+atravessa sem perder nada, vira uma parada longa no primeiro crash. "167 h"
+não se lê de relance. E as docs têm de dizer o que o Claude Code manda de
+verdade e o que o pet faz hoje: um `idle_prompt` que "se repete" ensinaria a
+tratá-lo como lembrete, e uma soneca que "não persiste" esconderia que ela
+volta.
+
+**Adendo (2026-10-05, a ordem dos marcos):** o Renan pediu que a parte macOS
+do M8 venha logo depois do merge do M5, antes do M6. A T8.2 roda no Mac, junto
+com a T8.5 e o macOS da T8.7, na branch `m8-macos`, que outra sessão do Claude
+Code escreve no Mac do Renan. As decisões dessa branch vão de 0100 em diante.
+O Mac é Apple Silicon. O Renan usa vários terminais, então o clique tem de
+levar ao terminal sem depender de qual app ele é. O build é feito pelo Renan no
+próprio Mac. Depois vêm M6 → M7 e o resto do M8. Isto corrige a ordem da
+decisão 0038 ("M4 → M7, depois T8.2–T8.8"): ter um Mac de verdade para testar
+tira o maior risco do macOS, que era não poder conferir nada na tela.

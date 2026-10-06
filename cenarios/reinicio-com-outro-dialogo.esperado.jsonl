@@ -1,0 +1,26 @@
+{"t":1000,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":10000,"i":"reacao","nome":"alert","motivo":"aviso","sid8":"s1"}
+{"t":10000,"i":"balao","linhas":["api: pergunta pra você"],"motivo":"aviso"}
+{"t":10000,"i":"escalada","sid8":"s1","nivel":1,"espera":"pergunta","motivo":"aviso"}
+{"t":10000,"i":"base","estado":"waiting","prioridade":"esperando","sid8":"s1"}
+{"t":140000,"i":"escalada","sid8":"s1","nivel":1,"espera":"pergunta","motivo":"restaurada"}
+{"t":140000,"i":"restauracao","sessoes":1,"avisos":1,"velha":true}
+{"t":150000,"i":"reacao","nome":"alert","motivo":"aviso","sid8":"s1"}
+{"t":150000,"i":"balao","linhas":["Ô, meu camarada!","api precisa de você"],"motivo":"aviso"}
+{"t":150000,"i":"escalada","sid8":"s1","nivel":0,"motivo":"andou"}
+{"t":150000,"i":"escalada","sid8":"s1","nivel":1,"espera":"permissao","motivo":"aviso"}
+{"t":150000,"i":"base","estado":"waiting","prioridade":"esperando","sid8":"s1"}
+{"t":180000,"i":"escalada","sid8":"s1","nivel":2,"motivo":"tempo"}
+{"t":180000,"i":"rajada","sid8":"s1","nivel":2}
+{"t":186000,"i":"rajada","sid8":"s1","nivel":2}
+{"t":192000,"i":"rajada","sid8":"s1","nivel":2}
+{"t":198000,"i":"rajada","sid8":"s1","nivel":2}
+{"t":204000,"i":"rajada","sid8":"s1","nivel":2}
+{"t":240000,"i":"escalada","sid8":"s1","nivel":3,"motivo":"tempo"}
+{"t":240000,"i":"voo","destino":"alto_centro","motivo":"escalada","sid8":"s1"}
+{"t":260000,"i":"escalada","sid8":"s1","nivel":0,"motivo":"andou"}
+{"t":260000,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
+{"t":265800,"i":"turno","sid8":"s1","turno8":"p1","fim":"stop","nivel":"T1","pontuacao":0.18,"reacao":"done_small"}
+{"t":265800,"i":"festa","sid8":"s1","nivel":"T1","reacao":"done_small"}
+{"t":265800,"i":"balao","linhas":["Prontinho! api"],"motivo":"festa"}
+{"t":265800,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}

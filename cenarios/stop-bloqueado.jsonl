@@ -1,0 +1,12 @@
+{"cenario": "stop-bloqueado", "descricao": "um Stop hook de outro plugin segura o Claude: a continuação chega com o mesmo prompt_id depois da festa e só festeja de novo se o nível subir", "padrao": {"sid": "s1", "ent": "cli", "proj": "api"}}
+{"t": 0, "evento": {"e": "UserPromptSubmit", "turno": "p1", "orig": "comum"}}
+{"t": 5000, "evento": {"e": "Stop", "turno": "p1", "bg": 0, "crn": 0}}
+{"t": 8000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Edit", "dur": 40, "arq": "aaaaaaaaaaa1"}}
+{"t": 9000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Bash", "dur": 1200}}
+{"t": 12000, "evento": {"e": "Stop", "turno": "p1", "sha": true, "bg": 0, "crn": 0}}
+{"t": 20000, "evento": {"e": "UserPromptSubmit", "turno": "p2", "orig": "comum"}}
+{"t": 22000, "evento": {"e": "PostToolUse", "turno": "p2", "tool": "Edit", "dur": 40, "arq": "aaaaaaaaaaa2"}}
+{"t": 25000, "evento": {"e": "Stop", "turno": "p2", "bg": 0, "crn": 0}}
+{"t": 28000, "evento": {"e": "PostToolUse", "turno": "p2", "tool": "Read", "dur": 5}}
+{"t": 30000, "evento": {"e": "Stop", "turno": "p2", "sha": true, "bg": 0, "crn": 0}}
+{"t": 35000, "fim": true}

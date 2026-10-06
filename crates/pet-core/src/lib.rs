@@ -13,6 +13,10 @@ pub mod animador;
 pub mod aprovacao;
 pub mod aviso;
 pub mod cena;
+/// Os cenários dourados e o `bichinho simular` (decisões 0077 e 0078): o
+/// executor usa a janela de mentira.
+#[cfg(any(test, feature = "teste", feature = "simulacao"))]
+pub mod cenario;
 pub mod cerebro;
 pub mod confete;
 pub mod config;
@@ -20,10 +24,12 @@ pub mod estados;
 pub mod evento;
 pub mod fonte;
 pub mod geometria;
+pub mod memoria;
 pub mod motor;
 pub mod plataforma;
 pub mod raster;
 pub mod skin;
+pub mod sorteio;
 
 /// Versão do workspace, igual para o daemon, o core e o xtask.
 pub const VERSAO: &str = env!("CARGO_PKG_VERSION");

@@ -8,7 +8,8 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
-pet-core.workspace = true
+# O executor dos cenários, para o `bichinho simular` (decisão 0078).
+pet-core = { workspace = true, features = ["simulacao"] }
 serde.workspace = true
 serde_json.workspace = true
 

@@ -24,6 +24,8 @@
 //! | `agente` | `agent_id` presente (o hook veio de dentro de um subagente) | bool |
 //! | `tool` | `tool_name` | token de até 128 |
 //! | `nt`, `err`, `src`, `reason` | `notification_type`, `error` do StopFailure, `source`, `reason` | `[a-z_]{1,40}` |
+//! | `orig` | a forma do `prompt`, calculada no hook sem o texto sair dele (decisão 0072): `notificacao` ou `comum` | `[a-z_]{1,40}` |
+//! | `crn` | tamanho de `session_crons` no Stop (decisão 0072) | inteiro até 10 000 |
 //! | `intr`, `sha` | `is_interrupt`, `stop_hook_active` | bool |
 //! | `bg` | tamanho de `background_tasks` | inteiro até 10 000 |
 //! | `bgt`, `bgi` | tipos (lista fechada no `avisar.sh`, senão `outro`) e ids de `background_tasks` | listas alinhadas de até 16 |
@@ -61,6 +63,12 @@ pub const MAX_DURACAO_MS: u64 = 24 * 60 * 60 * 1000;
 pub const MAX_CONTAGEM: u64 = 10_000;
 /// Maior inteiro exato num número JSON.
 const MAX_INTEIRO_JSON: u64 = (1 << 53) - 1;
+/// O `orig` de um prompt que é a notificação de uma tarefa em segundo plano
+/// (começa por `<task-notification>`; decisão 0072).
+pub const ORIG_NOTIFICACAO: &str = "notificacao";
+/// O `orig` de qualquer outro prompt (digitado, ou o tique de um laço, que
+/// não tem forma própria).
+pub const ORIG_COMUM: &str = "comum";
 
 /// Um evento validado. Só tem o que passou nas regras.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -88,6 +96,10 @@ pub struct Evento {
     pub err: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub src: Option<String>,
+    /// A forma do prompt (decisão 0072): [`ORIG_NOTIFICACAO`] ou
+    /// [`ORIG_COMUM`]; sem ela, o hook é o de antes do M5.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub orig: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     #[serde(skip_serializing_if = "eh_falso")]
@@ -100,6 +112,10 @@ pub struct Evento {
     pub bgt: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub bgi: Vec<String>,
+    /// Quantos agendamentos a sessão tem (decisão 0072); sem o campo, o hook
+    /// é o de antes do M5.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crn: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dur: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -188,12 +204,14 @@ struct Bruto {
     nt: Option<Value>,
     err: Option<Value>,
     src: Option<Value>,
+    orig: Option<Value>,
     reason: Option<Value>,
     intr: Option<Value>,
     sha: Option<Value>,
     bg: Option<Value>,
     bgt: Option<Value>,
     bgi: Option<Value>,
+    crn: Option<Value>,
     dur: Option<Value>,
     arq: Option<Value>,
     proj: Option<Value>,
@@ -236,12 +254,14 @@ pub fn ler(corpo: &[u8]) -> Result<Lido, ErroEvento> {
     let nt = validar("nt", bruto.nt, &mut d, |v| texto(v, eh_enum));
     let err = validar("err", bruto.err, &mut d, |v| texto(v, eh_enum));
     let src = validar("src", bruto.src, &mut d, |v| texto(v, eh_enum));
+    let orig = validar("orig", bruto.orig, &mut d, |v| texto(v, eh_enum));
     let reason = validar("reason", bruto.reason, &mut d, |v| texto(v, eh_enum));
     let intr = validar("intr", bruto.intr, &mut d, Value::as_bool);
     let sha = validar("sha", bruto.sha, &mut d, Value::as_bool);
     let bg = validar("bg", bruto.bg, &mut d, |v| inteiro(v, 0, MAX_CONTAGEM));
     let bgt = validar("bgt", bruto.bgt, &mut d, |v| lista(v, eh_enum));
     let bgi = validar("bgi", bruto.bgi, &mut d, |v| lista(v, eh_id));
+    let crn = validar("crn", bruto.crn, &mut d, |v| inteiro(v, 0, MAX_CONTAGEM));
     let dur = validar("dur", bruto.dur, &mut d, |v| inteiro(v, 0, MAX_DURACAO_MS));
     let arq = validar("arq", bruto.arq, &mut d, |v| texto(v, eh_hash_de_arquivo));
     let proj = validar("proj", bruto.proj, &mut d, |v| texto(v, eh_projeto));
@@ -269,12 +289,14 @@ pub fn ler(corpo: &[u8]) -> Result<Lido, ErroEvento> {
             nt,
             err,
             src,
+            orig,
             reason,
             intr: intr.unwrap_or(false),
             sha: sha.unwrap_or(false),
             bg,
             bgt: bgt.unwrap_or_default(),
             bgi: bgi.unwrap_or_default(),
+            crn,
             dur,
             arq,
             proj,
@@ -426,8 +448,9 @@ mod testes {
         let lido = ok(
             r#"{"v":1,"e":"Stop","ts":1790020208123,"sid":"0b9e7c1d-aaaa-4bbb-8ccc-123456789abc",
             "turno":"p-1","agente":true,"aid":"a1","tool":"Edit","nt":"permission_prompt",
-            "err":"rate_limit","src":"user","reason":"logout","intr":true,"sha":true,"bg":2,
-            "bgt":["subagent","shell"],"bgi":["t1","t2"],"dur":1830,"arq":"3fa2b19c04de",
+            "err":"rate_limit","src":"user","orig":"notificacao","reason":"logout","intr":true,
+            "sha":true,"bg":2,"bgt":["subagent","shell"],"bgi":["t1","t2"],"crn":3,"dur":1830,
+            "arq":"3fa2b19c04de",
             "proj":"agenda-presidencial","ent":"cli","dnd":false,"teste":true,
             "term":{"tmux":"%3","kitty":"12","wezterm":"0"}}"#,
         );
@@ -443,7 +466,8 @@ mod testes {
         assert!(e.agente && e.intr && e.sha && e.teste && !e.dnd);
         assert_eq!(e.bgt, vec!["subagent", "shell"]);
         assert_eq!(e.bgi, vec!["t1", "t2"]);
-        assert_eq!((e.bg, e.dur), (Some(2), Some(1830)));
+        assert_eq!((e.bg, e.dur, e.crn), (Some(2), Some(1830), Some(3)));
+        assert_eq!(e.orig.as_deref(), Some(ORIG_NOTIFICACAO));
         assert_eq!(e.arq.as_deref(), Some("3fa2b19c04de"));
         assert_eq!(e.proj.as_deref(), Some("agenda-presidencial"));
         assert_eq!(e.ent.as_deref(), Some("cli"));
@@ -540,7 +564,8 @@ mod testes {
         let lido = ok(
             r#"{"v":1,"e":"PostToolUse","sid":"ok-1","tool":"Bash; SEGREDO",
             "nt":"SEGREDO-3","proj":"/home/SEGREDO-4/x","dur":"SEGREDO-5","arq":"3FA2B19C04DE",
-            "bgt":["shell","SEGREDO-6"],"ent":"CLI","agente":"sim","ts":-5}"#,
+            "bgt":["shell","SEGREDO-6"],"ent":"CLI","agente":"sim","ts":-5,
+            "orig":"<task-notification> SEGREDO-7","crn":-1}"#,
         );
         assert_eq!(lido.evento.sid.as_deref(), Some("ok-1"));
         let mut nomes = lido.descartados.clone();
@@ -548,7 +573,7 @@ mod testes {
         assert_eq!(
             nomes,
             vec![
-                "agente", "arq", "bgt", "dur", "ent", "nt", "proj", "tool", "ts"
+                "agente", "arq", "bgt", "crn", "dur", "ent", "nt", "orig", "proj", "tool", "ts"
             ]
         );
         let texto = format!(

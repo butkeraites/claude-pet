@@ -1,0 +1,9 @@
+{"cenario": "interrompido", "descricao": "Esc no meio: com o PostToolUseFailure interrompido (s1) e como o 2.1.288 faz, sem evento nenhum depois do prompt (s2); nenhuma festa", "padrao": {"ent": "cli"}}
+{"t": 0, "evento": {"e": "UserPromptSubmit", "sid": "s1", "proj": "api", "turno": "p1", "orig": "comum"}}
+{"t": 3000, "evento": {"e": "PostToolUse", "sid": "s1", "proj": "api", "turno": "p1", "tool": "Edit", "dur": 30, "arq": "aaaaaaaaaaa1"}}
+{"t": 6000, "evento": {"e": "PostToolUseFailure", "sid": "s1", "proj": "api", "turno": "p1", "tool": "Bash", "intr": true, "dur": 2800}}
+{"t": 10000, "evento": {"e": "UserPromptSubmit", "sid": "s2", "proj": "web", "turno": "q1", "orig": "comum"}}
+# s2: o Esc com o Bash rodando não manda nada; o próximo prompt fecha q1 sem festa
+{"t": 140000, "evento": {"e": "UserPromptSubmit", "sid": "s2", "proj": "web", "turno": "q2", "orig": "comum"}}
+{"t": 150000, "evento": {"e": "Stop", "sid": "s2", "proj": "web", "turno": "q2", "bg": 0, "crn": 0}}
+{"t": 160000, "fim": true}

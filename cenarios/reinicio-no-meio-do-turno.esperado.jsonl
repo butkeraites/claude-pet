@@ -1,0 +1,11 @@
+{"t":2000,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":6000,"i":"selos","mais":1,"bandeiras":[],"corrente":false}
+{"t":30000,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
+{"t":75000,"i":"restauracao","sessoes":2}
+{"t":75000,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s2"}
+{"t":75000,"i":"selos","mais":1,"bandeiras":[],"corrente":false}
+{"t":100800,"i":"turno","sid8":"s1","turno8":"p1","fim":"stop","nivel":"T1","pontuacao":0.48,"reacao":"done_small"}
+{"t":100800,"i":"festa","sid8":"s1","nivel":"T1","reacao":"done_small"}
+{"t":100800,"i":"balao","linhas":["Prontinho! api"],"motivo":"festa"}
+{"t":100800,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}
+{"t":130000,"i":"selos","mais":0,"bandeiras":[],"corrente":false}

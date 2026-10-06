@@ -1,0 +1,4 @@
+{"t":2000,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":32800,"i":"turno","sid8":"s1","turno8":"p1","fim":"stop","nivel":"T0","pontuacao":0.0,"reacao":"nod"}
+{"t":32800,"i":"festa","sid8":"s1","nivel":"T0","reacao":"nod"}
+{"t":32800,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}

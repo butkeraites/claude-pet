@@ -17,7 +17,10 @@
 //! - o endereço de uma janela que abriu (`openwindow`), com um booleano dizendo
 //!   se é a proteção de tela do Omarchy, e o de uma que fechou
 //!   (`closewindow`);
-//! - que um monitor entrou ou saiu.
+//! - que um monitor entrou ou saiu;
+//! - que a tela está ou não sendo compartilhada (`screencast>>ESTADO,TIPO`):
+//!   só o estado, contado por sessão na ligação (decisão 0081). O
+//!   `screencastv2`, que traz o título da janela compartilhada, nem é lido.
 //!
 //! O resto (títulos, classes, áreas de trabalho, `windowtitle`, …) nem é
 //! interpretado. Nada da linha vai para o log: só ligou, caiu e quanto falta
@@ -64,6 +67,10 @@ pub enum Linha {
     },
     Fechou(Alca),
     Monitores,
+    /// Uma sessão de compartilhamento de tela começou (`true`) ou parou
+    /// (`false`) de copiar quadros (no 0.56.2, o `0` sai meio segundo depois
+    /// do último quadro copiado; decisão 0081).
+    Compartilhando(bool),
 }
 
 /// Endereço de janela do Hyprland nos eventos: hexadecimal sem `0x`.
@@ -138,6 +145,17 @@ pub fn traduzir(linha: &[u8]) -> Option<Linha> {
             endereco(dados).map(Linha::Fechou)
         }
         b"monitoraddedv2" | b"monitorremovedv2" => Some(Linha::Monitores),
+        b"screencast" => {
+            // ESTADO,TIPO: só o estado (0 ou 1). O tipo (`monitor`,
+            // `window`, `region`) nem é guardado, e o `screencastv2`, que traz
+            // o nome do alvo (o título da janela compartilhada), é outro
+            // evento: cai no `_` sem ser interpretado.
+            match dados.split(|&b| b == b',').next()? {
+                b"1" => Some(Linha::Compartilhando(true)),
+                b"0" => Some(Linha::Compartilhando(false)),
+                _ => None,
+            }
+        }
         _ => None,
     }
 }
@@ -190,6 +208,10 @@ impl Repetidos {
                 Some(EventoDesktop::JanelaFechou(janela))
             }
             Linha::Monitores => Some(EventoDesktop::Monitores),
+            // Quem conta as sessões é a [`Entrega`]; aqui só passa.
+            Linha::Compartilhando(compartilhando) => {
+                Some(EventoDesktop::Compartilhando(compartilhando))
+            }
         }
     }
 }
@@ -314,28 +336,56 @@ fn mandar(caixa: &Caixa<EventoDesktop>, comum: &Comum, evento: EventoDesktop) ->
     foi
 }
 
-/// A entrega de uma ligação: lembra as repetições e se algo se perdeu.
+/// A entrega de uma ligação: lembra as repetições, as sessões de
+/// compartilhamento de tela e se algo se perdeu.
 #[derive(Debug, Default)]
 struct Entrega {
     repetidos: Repetidos,
+    /// As sessões que estão compartilhando a tela, contadas nesta ligação
+    /// (decisão 0081): o Hyprland manda um `1` e um `0` por sessão, sem
+    /// dizer qual.
+    sessoes: u32,
     /// Um evento não coube na caixa (o laço atrasado) desde a última
     /// entrega.
     perdeu: bool,
 }
 
 impl Entrega {
+    /// O compartilhamento de tela: só a primeira sessão e o fim da última
+    /// viram evento. Um fim sem o começo visto (uma sessão de antes desta
+    /// ligação) também vale como fim: o Motor segura a discrição do mesmo
+    /// jeito, e um fim que não chegasse a deixaria ligada para sempre.
+    fn compartilhamento(&mut self, compartilhando: bool) -> Option<EventoDesktop> {
+        if compartilhando {
+            self.sessoes = self.sessoes.saturating_add(1);
+            (self.sessoes == 1).then_some(EventoDesktop::Compartilhando(true))
+        } else if self.sessoes > 1 {
+            self.sessoes -= 1;
+            None
+        } else {
+            self.sessoes = 0;
+            Some(EventoDesktop::Compartilhando(false))
+        }
+    }
+
     /// Manda o evento de uma linha. Depois de uma perda, o laço vê a fonte
     /// cair e voltar antes do próximo evento (decisão 0061): o anel ganha um
     /// buraco no lugar da troca que se perdeu, e a memória das repetições
     /// recomeça, para a próxima ativação passar mesmo que seja a mesma janela
-    /// de antes.
+    /// de antes. A tela compartilhada é contada de novo logo depois (a fonte
+    /// que cai desliga o sinal no Motor).
     fn linha(&mut self, caixa: &Caixa<EventoDesktop>, comum: &Comum, linha: Linha, parede_ms: u64) {
-        let Some(evento) = self.repetidos.filtrar(linha, parede_ms) else {
+        let evento = match linha {
+            Linha::Compartilhando(compartilhando) => self.compartilhamento(compartilhando),
+            outra => self.repetidos.filtrar(outra, parede_ms),
+        };
+        let Some(evento) = evento else {
             return;
         };
         if self.perdeu {
             if !(mandar(caixa, comum, EventoDesktop::Ligado(false))
-                && mandar(caixa, comum, EventoDesktop::Ligado(true)))
+                && mandar(caixa, comum, EventoDesktop::Ligado(true))
+                && (self.sessoes == 0 || mandar(caixa, comum, EventoDesktop::Compartilhando(true))))
             {
                 self.repetidos = Repetidos::default();
                 return;
@@ -538,11 +588,25 @@ mod testes {
             t("monitorremovedv2>>1,HDMI-A-1,Dell"),
             Some(Linha::Monitores)
         );
+        // O compartilhamento de tela: só o estado; o tipo nem é olhado.
+        assert_eq!(
+            t("screencast>>1,monitor"),
+            Some(Linha::Compartilhando(true))
+        );
+        assert_eq!(
+            t("screencast>>0,window"),
+            Some(Linha::Compartilhando(false))
+        );
+        assert_eq!(t("screencast>>1"), Some(Linha::Compartilhando(true)));
         for ignorada in [
             "windowtitlev2>>abc,SEGREDO",
             "workspacev2>>2,SEGREDO",
             "configreloaded>>",
-            "screencast>>1,0",
+            // O v2 traz o título da janela compartilhada: nunca é lido.
+            "screencastv2>>1,window,SEGREDO-titulo",
+            "screencast>>2,monitor",
+            "screencast>>,monitor",
+            "screencast>>",
             "sem separador",
             "",
         ] {
@@ -562,6 +626,8 @@ mod testes {
             "openwindow>>abc124,SEGREDO-area,SEGREDO-classe,SEGREDO-titulo",
             "windowtitlev2>>abc124,SEGREDO-novo",
             "focusedmonv2>>eDP-1,SEGREDO",
+            "screencast>>1,SEGREDO-tipo",
+            "screencastv2>>1,window,SEGREDO-compartilhada",
         ];
         let mut repetidos = Repetidos::default();
         for linha in linhas {
@@ -600,6 +666,94 @@ mod testes {
         // mesmo endereço, um dia) passa.
         assert!(r.filtrar(Linha::Fechou(Alca("a1".into())), 50).is_some());
         assert!(r.filtrar(a(), 60).is_some());
+    }
+
+    fn comum() -> Comum {
+        Comum {
+            parar: AtomicBool::new(false),
+            fluxo: Mutex::new(None),
+            sono: (Mutex::new(()), Condvar::new()),
+            perdidos: AtomicU64::new(0),
+        }
+    }
+
+    #[test]
+    fn o_compartilhamento_conta_as_sessoes_da_ligacao() {
+        let (caixa, recebe) = Caixa::nova(16, Arc::new(SemDespertador));
+        let comum = comum();
+        let mut entrega = Entrega::default();
+        let mut linha = |texto: &str| {
+            let traduzida = traduzir(texto.as_bytes()).expect("uma linha do pet");
+            entrega.linha(&caixa, &comum, traduzida, 1);
+        };
+        // Duas sessões (um gravador no monitor, uma chamada numa janela): só
+        // a primeira começa e só o fim da última acaba.
+        for texto in [
+            "screencast>>1,monitor",
+            "screencast>>1,window",
+            "screencast>>0,window",
+            "screencast>>0,monitor",
+        ] {
+            linha(texto);
+        }
+        assert_eq!(
+            recebe.try_iter().collect::<Vec<_>>(),
+            vec![
+                EventoDesktop::Compartilhando(true),
+                EventoDesktop::Compartilhando(false)
+            ]
+        );
+        // Um fim sem o começo visto (uma sessão de antes desta ligação) vale
+        // como fim; a tela parada que pisca (0 e 1) passa os dois.
+        for texto in [
+            "screencast>>0,monitor",
+            "screencast>>1,monitor",
+            "screencast>>0,monitor",
+        ] {
+            linha(texto);
+        }
+        assert_eq!(
+            recebe.try_iter().collect::<Vec<_>>(),
+            vec![
+                EventoDesktop::Compartilhando(false),
+                EventoDesktop::Compartilhando(true),
+                EventoDesktop::Compartilhando(false)
+            ]
+        );
+    }
+
+    #[test]
+    fn depois_de_uma_perda_a_tela_compartilhada_e_contada_de_novo() {
+        // O laço atrasado (4 vagas): o a4 se perde. Na próxima linha, a fonte
+        // "cai e volta" (o Motor desliga o sinal), e a tela compartilhada é
+        // contada de novo antes do evento.
+        let (caixa, recebe) = Caixa::nova(4, Arc::new(SemDespertador));
+        let comum = comum();
+        let mut entrega = Entrega::default();
+        for texto in [
+            "screencast>>1,monitor",
+            "activewindowv2>>a1",
+            "activewindowv2>>a2",
+            "activewindowv2>>a3",
+            "activewindowv2>>a4",
+        ] {
+            entrega.linha(&caixa, &comum, traduzir(texto.as_bytes()).unwrap(), 1);
+        }
+        assert_eq!(comum.perdidos.load(Ordering::Relaxed), 1);
+        assert_eq!(recebe.try_iter().count(), 4);
+        entrega.linha(&caixa, &comum, traduzir(b"activewindowv2>>a5").unwrap(), 2);
+        assert_eq!(
+            recebe.try_iter().collect::<Vec<_>>(),
+            vec![
+                EventoDesktop::Ligado(false),
+                EventoDesktop::Ligado(true),
+                EventoDesktop::Compartilhando(true),
+                EventoDesktop::JanelaAtiva {
+                    janela: Some(Alca("a5".into())),
+                    parede_ms: 2
+                }
+            ]
+        );
     }
 
     /// Um socket2 de mentira: cada conexão recebe as linhas do canal.

@@ -1,0 +1,21 @@
+{"cenario": "reinicio-com-outro-compositor", "descricao": "o Renan sai da sessão gráfica e entra de novo sem reiniciar a máquina (o Claude no tmux sobrevive), e o pet reinicia no meio: a sessão volta com o pronto, mas a janela dela era da outra instância do compositor e sai; o clique diz que a janela dela fechou; o próximo prompt digitado casa a janela nova, e o clique seguinte leva até ela", "padrao": {"sid": "s1", "ent": "cli", "proj": "api"}}
+{"t": 0, "desktop": {"ligado": true}}
+{"t": 0, "desktop": {"ocioso": false}}
+{"t": 0, "desktop": {"janela_ativa": "a0a0a0"}}
+{"t": 2000, "evento": {"e": "UserPromptSubmit", "turno": "p1", "orig": "comum"}}
+{"t": 10000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Edit", "arq": "000000000001", "dur": 40}}
+{"t": 12000, "evento": {"e": "Stop", "turno": "p1", "bg": 0, "crn": 0}}
+{"t": 13000, "desktop": {"janela_ativa": "b0b0b0"}}
+{"t": 20000, "reinicio": {"parado_ms": 30000, "compositor": true}}
+{"t": 50000, "desktop": {"ligado": true}}
+{"t": 50000, "desktop": {"ocioso": false}}
+{"t": 50000, "desktop": {"janela_ativa": "d0d0d0"}}
+{"t": 60000, "clique": "esquerdo"}
+{"t": 70000, "desktop": {"janela_ativa": "e0e0e0"}}
+{"t": 75000, "evento": {"e": "UserPromptSubmit", "turno": "p2", "orig": "comum"}}
+{"t": 80000, "evento": {"e": "PostToolUse", "turno": "p2", "tool": "Bash", "dur": 1000}}
+{"t": 85000, "evento": {"e": "Stop", "turno": "p2", "bg": 0, "crn": 0}}
+{"t": 86000, "desktop": {"janela_ativa": "d0d0d0"}}
+{"t": 90000, "clique": "esquerdo"}
+{"t": 90500, "desktop": {"janela_ativa": "e0e0e0"}}
+{"t": 100000, "fim": true}

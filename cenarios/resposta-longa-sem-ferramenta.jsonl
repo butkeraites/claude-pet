@@ -1,0 +1,21 @@
+{"cenario": "resposta-longa-sem-ferramenta", "descricao": "90 s pensando, 15 leituras e 2 buscas na web, nada editado: T0 (o relógio nunca pontua)", "padrao": {"sid": "s1", "ent": "cli", "proj": "api"}}
+{"t": 0, "evento": {"e": "UserPromptSubmit", "turno": "p1", "orig": "comum"}}
+{"t": 10000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Read", "dur": 5}}
+{"t": 11000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Read", "dur": 5}}
+{"t": 12000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Read", "dur": 5}}
+{"t": 13000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Read", "dur": 5}}
+{"t": 14000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Read", "dur": 5}}
+{"t": 15000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Read", "dur": 5}}
+{"t": 16000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Read", "dur": 5}}
+{"t": 17000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Read", "dur": 5}}
+{"t": 18000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Read", "dur": 5}}
+{"t": 19000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Read", "dur": 5}}
+{"t": 20000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Read", "dur": 5}}
+{"t": 21000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Read", "dur": 5}}
+{"t": 22000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Read", "dur": 5}}
+{"t": 23000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Read", "dur": 5}}
+{"t": 24000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Read", "dur": 5}}
+{"t": 40000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "WebFetch", "dur": 2000}}
+{"t": 60000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "WebFetch", "dur": 2000}}
+{"t": 90000, "evento": {"e": "Stop", "turno": "p1", "bg": 0, "crn": 0}}
+{"t": 95000, "fim": true}

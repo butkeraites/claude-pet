@@ -24,7 +24,7 @@ use crate::{daemon, vigia};
 
 /// Espera máxima entre duas voltas: o batimento que o vigia e o `/saude`
 /// leem.
-const BATIMENTO: Duration = Duration::from_secs(5);
+const BATIMENTO: Duration = Duration::from_millis(crate::nucleo::BATIMENTO_MS);
 
 /// O daemon sem janela, até a caixa fechar (o processo é morto antes disso).
 pub fn rodar(
@@ -87,6 +87,9 @@ pub fn laco(nucleo: &mut Nucleo, recebe: &mpsc::Receiver<Comando>) {
             nucleo.vencer(None);
         }
         nucleo.publicar(None);
+        // A memória das sessões, se mudou (no máximo a cada 4 s; decisão
+        // 0093).
+        nucleo.guardar_memoria(false);
     }
 }
 

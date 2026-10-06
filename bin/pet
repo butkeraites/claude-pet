@@ -43,11 +43,24 @@ uso: bin/pet <comando>
                   (sem ela, o da main) e de árvore limpa: o hook vale para todas
                   as sessões do Claude Code. --da-branch pula a conferência
                   (só para uma pasta fora do PATH, nos testes)
+  simular <nome|arquivo>
+                  roda um cenário (cenarios/<nome>.jsonl, ou o arquivo) no
+                  cérebro e no Motor num relógio falso, offline, e imprime a
+                  linha do tempo das intenções (o bichinho da branch: PET_BICHINHO
+                  ou o cargo)
+  eventos [--salvar <arquivo>]
+                  os eventos que um pet de debug recebeu (/v1/debug/eventos;
+                  só metadados); --salvar grava um cenário com pseudônimos
+                  (s1, p1, a1, projeto-a) no arquivo. Recusa um pet sem debug
+                  (a produção nunca guarda eventos)
   testar CENÁRIO  manda eventos sintéticos pelo hook de verdade (o `bichinho
                   avisar` do PATH, ou PET_BICHINHO; sem ele, o avisar.sh de
                   reserva), com PET_TESTE=1 (isolados das sessões reais e
-                  esquecidos em 60 s), e mostra a reação: rapido → nod,
-                  pequeno → done_small
+                  esquecidos em 60 s), e mostra a reação e o que a tela fez:
+                  rapido → nod, pequeno → done_small, medio → done_medium
+                  (T2, confete), grande → done_big (T3, chuva; o segundo em
+                  10 min vira T2), pergunta → a chamada e o aceno,
+                  dois-prontos → uma festa só
   tocar REAÇÃO    toca uma reação (nod, done_small, wave, alert, …) e diz a
                   tag que a skin tocou e se ela apareceu na tela
   clique [esquerdo|direito]
@@ -176,6 +189,93 @@ fonte_do_clone() {
   printf '%s' "$commit"
 }
 
+# O bichinho da branch, para os subcomandos que o do PATH (o da worktree
+# estável) pode não ter: PET_BICHINHO, ou o cargo.
+bichinho_da_branch() {
+  if [ -n "${PET_BICHINHO:-}" ]; then
+    "$PET_BICHINHO" "$@"
+  else
+    cargo run -q -p bichinho -- "$@"
+  fi
+}
+
+# Um caminho dado na linha de comando, relativo à pasta de onde o bin/pet foi
+# chamado.
+caminho_do_usuario() {
+  case "$1" in
+    /*) printf '%s' "$1" ;;
+    *) printf '%s' "$ORIGEM/$1" ;;
+  esac
+}
+
+# bin/pet simular <nome|arquivo>: o cenário pelo nome (cenarios/<nome>.jsonl)
+# ou pelo arquivo, no relógio falso (decisão 0078).
+simular() {
+  local alvo="${1:-}" arquivo
+  if [ -z "$alvo" ] || [ "$#" -gt 1 ]; then
+    echo "uso: bin/pet simular <nome|arquivo.jsonl>" >&2
+    return 2
+  fi
+  if [ -f "$(caminho_do_usuario "$alvo")" ]; then
+    arquivo="$(caminho_do_usuario "$alvo")"
+  elif [ -f "cenarios/${alvo}.jsonl" ]; then
+    arquivo="$RAIZ/cenarios/${alvo}.jsonl"
+  else
+    echo "não achei o cenário «${alvo}» (nem o arquivo, nem cenarios/${alvo}.jsonl)" >&2
+    return 1
+  fi
+  bichinho_da_branch simular "$arquivo"
+}
+
+# bin/pet eventos [--salvar <arquivo>]: o /v1/debug/eventos do pet da
+# PET_PORTA; com --salvar, o cenário com pseudônimos (decisão 0078). Só de um
+# pet de debug: a produção não guarda eventos, e a recusa vem antes de pedir.
+eventos() {
+  local destino=""
+  case "${1:-}" in
+    "") ;;
+    --salvar)
+      destino="${2:-}"
+      if [ -z "$destino" ] || [ "$#" -gt 2 ]; then
+        echo "uso: bin/pet eventos [--salvar <arquivo.jsonl>]" >&2
+        return 2
+      fi
+      ;;
+    *)
+      echo "uso: bin/pet eventos [--salvar <arquivo.jsonl>]" >&2
+      return 2
+      ;;
+  esac
+  local estado
+  if ! estado="$(api /v1/estado)"; then
+    echo "o pet não respondeu em ${URL} — está de pé?" >&2
+    return 1
+  fi
+  if [ "$(jq -r '.debug' <<<"$estado")" != true ]; then
+    echo "o pet em ${URL} não está em debug: só um pet de debug (PET_DEBUG=1, a pilha de dev ou um de rascunho na PET_PORTA) guarda os eventos; a produção nunca guarda" >&2
+    return 1
+  fi
+  local json
+  if ! json="$(api /v1/debug/eventos)"; then
+    echo "o pet em ${URL} não deu os eventos (/v1/debug/eventos)" >&2
+    return 1
+  fi
+  if [ -z "$destino" ]; then
+    jq . <<<"$json"
+    return
+  fi
+  local arquivo nome temporario
+  arquivo="$(caminho_do_usuario "$destino")"
+  nome="$(basename "$arquivo" .jsonl)"
+  temporario="$(mktemp "${arquivo}.XXXXXX")"
+  if ! bichinho_da_branch cenario "$nome" <<<"$json" >"$temporario"; then
+    rm -f "$temporario"
+    return 1
+  fi
+  mv "$temporario" "$arquivo"
+  echo "✓ $(grep -c '"evento"' "$arquivo") eventos em ${destino}, com pseudônimos (s1, p1, a1, projeto-a); confira antes de pôr no git"
+}
+
 # O hook que o plugin chama (decisão 0041): o `bichinho` do PATH, como o
 # Claude Code acha no exec form, ou PET_BICHINHO; vazio se não houver.
 binario_do_hook() {
@@ -191,14 +291,69 @@ binario_do_hook() {
 # terminal) e PET_TESTE=1 (o pet isola o evento das sessões reais e o esquece
 # em 60 s). O hook é o `bichinho avisar` (o do PATH ou PET_BICHINHO); sem ele,
 # o avisar.sh de reserva, com aviso. Depois espera a acomodação do Stop e
-# mostra a reação.
+# mostra a reação, o nível e o que a tela fez (o /v1/estado: o turno, as
+# intenções e o desenho; decisão 0087).
+HOOK_NATIVO=""
+hook_de_teste() {
+  # hook_de_teste <sid> <turno> <pasta> <Evento> <json a mais>
+  jq -nc --arg e "$4" --arg sid "$1" --arg turno "$2" --arg cwd "$3" --argjson extra "$5" \
+    '{session_id: $sid, prompt_id: $turno, cwd: $cwd,
+      transcript_path: "/dev/null", hook_event_name: $e} + $extra' |
+    if [ -n "$HOOK_NATIVO" ]; then
+      PET_TESTE=1 PET_PORTA="$PORTA" CLAUDE_CODE_ENTRYPOINT=cli "$HOOK_NATIVO" avisar "$4"
+    else
+      PET_TESTE=1 PET_PORTA="$PORTA" CLAUDE_CODE_ENTRYPOINT=cli \
+        sh "$RAIZ/plugin/scripts/avisar.sh" "$4"
+    fi
+}
+
+id_de_teste() {
+  od -An -N8 -tx1 /dev/urandom | tr -d ' \n'
+}
+
+# Um turno de teste inteiro, com `bash_ms` de Bash e uma edição (0: nenhuma
+# ferramenta): o prompt, as ferramentas e o Stop.
+turno_de_teste() {
+  local sid=$1 turno=$2 cwd=$3 bash_ms=$4
+  hook_de_teste "$sid" "$turno" "$cwd" SessionStart '{"source": "startup"}'
+  hook_de_teste "$sid" "$turno" "$cwd" UserPromptSubmit '{"prompt": "teste do bin/pet", "source": "user"}'
+  if [ "$bash_ms" -gt 0 ]; then
+    hook_de_teste "$sid" "$turno" "$cwd" PostToolUse "{\"tool_name\": \"Edit\", \"duration_ms\": 40,
+      \"tool_input\": {\"file_path\": \"$cwd/oi.txt\"}, \"tool_response\": {}}"
+    hook_de_teste "$sid" "$turno" "$cwd" PostToolUse "{\"tool_name\": \"Bash\", \"duration_ms\": $bash_ms,
+      \"tool_input\": {\"command\": \"true\"}, \"tool_response\": {}}"
+  fi
+  hook_de_teste "$sid" "$turno" "$cwd" Stop '{"stop_hook_active": false, "background_tasks": []}'
+}
+
+# Espera (até 5 s) o filtro do jq dar alguma coisa no /v1/estado, com
+# `sid8` como argumento; deixa o resultado em ACHADO. A ultima_reacao não
+# serve: é de quem reagiu por último, e uma sessão real pode reagir no meio
+# (decisão 0034).
+ACHADO=""
+esperar_no_estado() {
+  local sid8=$1 filtro=$2 estado
+  ACHADO=""
+  for _ in $(seq 1 50); do
+    estado="$(api /v1/estado || true)"
+    ACHADO="$(jq -c --arg sid8 "$sid8" "$filtro" <<<"$estado" 2>/dev/null || true)"
+    [ -n "$ACHADO" ] && return 0
+    sleep 0.1
+  done
+  return 1
+}
+
+# O turno de teste da sessão (com a reação) no /v1/estado.turnos.
+# shellcheck disable=SC2016 # programa do jq: $sid8 é dele
+FILTRO_TURNO='[.turnos[] | select(.teste == true and .sid8 == $sid8
+  and .reacao != null)][0] // empty'
+
 testar() {
-  local cenario="${1:-}" esperado
+  local cenario="${1:-}"
   case "$cenario" in
-    rapido) esperado=nod ;;
-    pequeno) esperado=done_small ;;
+    rapido | pequeno | medio | grande | pergunta | dois-prontos) ;;
     *)
-      echo "uso: bin/pet testar <rapido|pequeno>" >&2
+      echo "uso: bin/pet testar <rapido|pequeno|medio|grande|pergunta|dois-prontos>" >&2
       return 2
       ;;
   esac
@@ -206,61 +361,158 @@ testar() {
     echo "o pet não respondeu em ${URL} — está de pé? (bin/pet subir)" >&2
     return 1
   fi
-  local sid id_turno nativo
-  sid="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')-pet-testar"
-  id_turno="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
-  nativo="$(binario_do_hook)"
-  if [ -n "$nativo" ]; then
-    echo "pelo hook nativo: $nativo avisar ($("$nativo" versao 2>/dev/null || echo 'sem versão'))"
+  # Um fim até 3 s depois de outra festa entra nela (decisão 0076): cada
+  # demonstração espera a festa de antes passar, para mostrar a sua.
+  for _ in $(seq 1 40); do
+    [ "$(api /v1/estado | jq -r '.fotografia.festa // empty | .nivel' 2>/dev/null || true)" = "" ] && break
+    sleep 0.1
+  done
+  HOOK_NATIVO="$(binario_do_hook)"
+  if [ -n "$HOOK_NATIVO" ]; then
+    echo "pelo hook nativo: $HOOK_NATIVO avisar ($("$HOOK_NATIVO" versao 2>/dev/null || echo 'sem versão'))"
   else
     echo "aviso: o bichinho não está no PATH (bin/pet instalar-host); indo pelo avisar.sh de reserva" >&2
   fi
-  hook() {
-    jq -nc --arg e "$1" --arg sid "$sid" --arg turno "$id_turno" --argjson extra "$2" \
-      '{session_id: $sid, prompt_id: $turno, cwd: "/tmp/pet-testar",
-        transcript_path: "/dev/null", hook_event_name: $e} + $extra' |
-      if [ -n "$nativo" ]; then
-        PET_TESTE=1 PET_PORTA="$PORTA" CLAUDE_CODE_ENTRYPOINT=cli "$nativo" avisar "$1"
-      else
-        PET_TESTE=1 PET_PORTA="$PORTA" CLAUDE_CODE_ENTRYPOINT=cli \
-          sh "$RAIZ/plugin/scripts/avisar.sh" "$1"
-      fi
-  }
-  hook SessionStart '{"source": "startup"}'
-  hook UserPromptSubmit '{"prompt": "teste do bin/pet", "source": "user"}'
-  if [ "$cenario" = pequeno ]; then
-    hook PostToolUse '{"tool_name": "Edit", "duration_ms": 40,
-      "tool_input": {"file_path": "/tmp/pet-testar/oi.txt"}, "tool_response": {}}'
-    hook PostToolUse '{"tool_name": "Bash", "duration_ms": 900,
-      "tool_input": {"command": "true"}, "tool_response": {}}'
-  fi
-  hook Stop '{"stop_hook_active": false, "background_tasks": []}'
+  case "$cenario" in
+    pergunta) testar_pergunta ;;
+    dois-prontos) testar_dois_prontos ;;
+    *) testar_turno "$cenario" ;;
+  esac
+}
 
-  # O turno desta sessão de teste (sid8) no /v1/estado.turnos, com a reação
-  # dele. A ultima_reacao não serve: é de quem reagiu por último, e uma
-  # sessão real pode reagir no meio (decisão 0034). A acomodação do Stop é
-  # de 0,8 s.
-  local filtro estado turno=""
-  # shellcheck disable=SC2016 # programa do jq: $sid8 é dele
-  filtro='[.turnos[] | select(.teste == true and .sid8 == $sid8
-    and .reacao != null)][0] // empty'
-  for _ in $(seq 1 50); do
-    estado="$(api /v1/estado || true)"
-    turno="$(jq -c --arg sid8 "${sid:0:8}" "$filtro" <<<"$estado" 2>/dev/null || true)"
-    [ -n "$turno" ] && break
-    sleep 0.1
-  done
-  if [ -z "$turno" ]; then
+# rapido → nod (T0), pequeno → done_small (T1), medio → done_medium (T2,
+# 4 min de Bash), grande → done_big (T3, 12 min de Bash; um segundo T3 de
+# teste em 10 min vira T2, como o de verdade).
+testar_turno() {
+  local cenario=$1 esperado bash_ms sid
+  case "$cenario" in
+    rapido) esperado=nod bash_ms=0 ;;
+    pequeno) esperado=done_small bash_ms=900 ;;
+    medio) esperado=done_medium bash_ms=240000 ;;
+    *) esperado=done_big bash_ms=720000 ;;
+  esac
+  sid="$(id_de_teste)-pet-testar"
+  turno_de_teste "$sid" "$(id_de_teste)" /tmp/pet-testar "$bash_ms"
+  if ! esperar_no_estado "${sid:0:8}" "$FILTRO_TURNO"; then
     echo "✗ ${cenario}: nenhuma reação em 5 s (bin/pet logs; os eventos chegaram?)" >&2
     return 1
   fi
-  jq -c '{reacao, nivel, trabalho, outras, arquivos, subagentes, dur_ms, sid8}' <<<"$turno"
-  local nome
+  local turno nome
+  turno="$ACHADO"
+  jq -c '{reacao, nivel, pontuacao: .pontuacao.total, teto, trabalho, outras, arquivos, subagentes, dur_ms, sid8}' <<<"$turno"
   nome="$(jq -r .reacao <<<"$turno")"
+  # O T3 de teste no máximo a cada 10 min (decisão 0074): o segundo vira T2.
+  if [ "$cenario" = grande ] && jq -e '.teto | index("intervalo_t3")' <<<"$turno" >/dev/null 2>&1; then
+    esperado=done_medium
+    echo "(outro T3 de teste há menos de 10 min: este virou T2)"
+  fi
+  mostrar_tela "${sid:0:8}"
+  # O confete anda por uns segundos (a chuva do T3 começa acima da tela):
+  # o máximo de pedaços que o desenho mostrou em até 6 s. O /v1/estado sai a
+  # cada lote do laço; com a tela apagada ou a sessão bloqueada não há
+  # quadros, e ele sai no batimento de 5 s: a chuva pode passar entre dois.
+  if [ "$nome" = done_medium ] || [ "$nome" = done_big ]; then
+    if [ -z "$(api /v1/estado | jq -r '.desenho.base // empty' 2>/dev/null || true)" ]; then
+      echo "confete na tela: nenhum (o pet não está na tela)"
+    else
+      local maximo=0 agora
+      for _ in $(seq 1 60); do
+        agora="$(api /v1/estado | jq -r '.desenho.confete // 0' 2>/dev/null || echo 0)"
+        [ "$agora" -gt "$maximo" ] && maximo=$agora
+        # Já caiu e acabou: o resto da espera não acha mais nada.
+        [ "$maximo" -gt 0 ] && [ "$agora" -eq 0 ] && break
+        sleep 0.1
+      done
+      echo "confete na tela (o máximo em até 6 s): ${maximo} pedaços"
+    fi
+  fi
   if [ "$nome" = "$esperado" ]; then
     echo "✓ ${cenario} → ${nome}"
   else
     echo "✗ ${cenario}: esperava ${esperado}, veio ${nome}" >&2
+    return 1
+  fi
+}
+
+# O que a tela fez com a sessão (intenções com o sid8 dela) e o desenho de
+# agora, só metadados.
+mostrar_tela() {
+  local estado
+  estado="$(api /v1/estado || true)"
+  # shellcheck disable=SC2016 # programa do jq: $sid8 é dele
+  jq -c --arg sid8 "$1" '[.intencoes[] | select(.sid8 == $sid8 and
+      (.i == "festa" or .i == "festa_mesclada" or .i == "escalada" or .i == "reacao"))
+      | del(.ha_ms)] | reverse | .[]' <<<"$estado" 2>/dev/null || true
+  jq -c '{desenho}' <<<"$estado" 2>/dev/null || true
+}
+
+# pergunta: o AskUserQuestion chama na hora (a chamada, o «!» e o balão; a
+# L1 da escalada), a resposta acaba a escalada, e o fim é o aceno (nenhuma
+# ferramenta de trabalho).
+testar_pergunta() {
+  local sid turno
+  sid="$(id_de_teste)-pet-testar"
+  turno="$(id_de_teste)"
+  hook_de_teste "$sid" "$turno" /tmp/pet-testar SessionStart '{"source": "startup"}'
+  hook_de_teste "$sid" "$turno" /tmp/pet-testar UserPromptSubmit '{"prompt": "teste do bin/pet", "source": "user"}'
+  hook_de_teste "$sid" "$turno" /tmp/pet-testar PreToolUse '{"tool_name": "AskUserQuestion", "tool_input": {}}'
+  # shellcheck disable=SC2016 # programa do jq: $sid8 é dele
+  if ! esperar_no_estado "${sid:0:8}" '[.sessoes[] | select(.teste == true and .sid8 == $sid8
+      and .aviso.tipo == "esperando")][0] // empty'; then
+    echo "✗ pergunta: o aviso não abriu em 5 s (bin/pet logs)" >&2
+    return 1
+  fi
+  echo "aviso: $(jq -c '{tipo: .aviso.tipo, espera: .aviso.espera, estado}' <<<"$ACHADO")"
+  local estado chamou
+  estado="$(api /v1/estado || true)"
+  # shellcheck disable=SC2016 # programa do jq: $sid8 é dele
+  chamou="$(jq -r --arg sid8 "${sid:0:8}" '[.intencoes[] | select(.i == "reacao" and .sid8 == $sid8
+      and .motivo == "aviso")][0].nome // empty' <<<"$estado")"
+  mostrar_tela "${sid:0:8}"
+  # A resposta: a ferramenta volta, a escalada acaba, e o turno termina.
+  hook_de_teste "$sid" "$turno" /tmp/pet-testar PostToolUse '{"tool_name": "AskUserQuestion", "duration_ms": 0, "tool_input": {}, "tool_response": {}}'
+  hook_de_teste "$sid" "$turno" /tmp/pet-testar Stop '{"stop_hook_active": false, "background_tasks": []}'
+  if ! esperar_no_estado "${sid:0:8}" "$FILTRO_TURNO"; then
+    echo "✗ pergunta: nenhuma reação no fim em 5 s" >&2
+    return 1
+  fi
+  local nome
+  nome="$(jq -r .reacao <<<"$ACHADO")"
+  if [ "$chamou" = alert ] && [ "$nome" = nod ]; then
+    echo "✓ pergunta → alert (L1, «${sid:0:8}») → ${nome}"
+  else
+    echo "✗ pergunta: esperava a chamada (alert) e o aceno (nod), vieram «${chamou:-nada}» e «${nome}»" >&2
+    return 1
+  fi
+}
+
+# dois-prontos: duas sessões de teste terminando juntas viram uma festa só,
+# com o balão «2 prontos: demo-api, demo-web» (decisão 0076).
+testar_dois_prontos() {
+  local a b
+  a="$(id_de_teste)-pet-testar"
+  b="$(id_de_teste)-pet-testar"
+  # Um logo depois do outro: o segundo fim chega bem dentro dos 3 s da festa
+  # do primeiro.
+  turno_de_teste "$a" "$(id_de_teste)" /tmp/demo-api 900
+  turno_de_teste "$b" "$(id_de_teste)" /tmp/demo-web 900
+  if ! esperar_no_estado "${a:0:8}" "$FILTRO_TURNO" || ! esperar_no_estado "${b:0:8}" "$FILTRO_TURNO"; then
+    echo "✗ dois-prontos: as duas festas não chegaram em 5 s" >&2
+    return 1
+  fi
+  local estado mescladas
+  estado="$(api /v1/estado || true)"
+  # shellcheck disable=SC2016 # programa do jq: $a e $b são dele
+  mescladas="$(jq -c --arg a "${a:0:8}" --arg b "${b:0:8}" '[.intencoes[] |
+      select(.i == "festa_mesclada" and (.sid8 == $a or .sid8 == $b))] | length' <<<"$estado")"
+  jq -c '[.intencoes[] | select(.i == "balao" and .motivo == "festa") | .linhas[]] | .[0]' <<<"$estado"
+  mostrar_tela "${a:0:8}"
+  mostrar_tela "${b:0:8}" | grep -v '"desenho"' || true
+  if [ "$mescladas" = 1 ] && jq -e '[.intencoes[] | select(.i == "balao" and .motivo == "festa")
+      | .linhas[] | select(startswith("2 prontos"))] | length > 0' <<<"$estado" >/dev/null; then
+    echo "✓ dois-prontos → uma festa só («2 prontos»)"
+  else
+    echo "✗ dois-prontos: esperava uma festa mesclada com «2 prontos», vieram ${mescladas:-0}" >&2
     return 1
   fi
 }
@@ -834,6 +1086,8 @@ case "$comando" in
     fi
     ;;
   testar) testar "$@" ;;
+  simular) simular "$@" ;;
+  eventos) eventos "$@" ;;
   tocar)
     if [ -z "${1:-}" ]; then
       echo "uso: bin/pet tocar <reação>" >&2

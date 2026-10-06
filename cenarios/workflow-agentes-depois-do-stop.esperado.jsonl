@@ -1,0 +1,11 @@
+{"t":2000,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":4000,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
+{"t":6800,"i":"turno","sid8":"s1","turno8":"p1","fim":"stop","pontuacao":1.05,"corrente":{"aberta":true,"turnos":1}}
+{"t":6800,"i":"base","estado":"idle","prioridade":"parado"}
+{"t":6800,"i":"selos","mais":0,"bandeiras":[],"corrente":true}
+{"t":871000,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":872800,"i":"turno","sid8":"s1","turno8":"p2","fim":"stop","nivel":"T3","pontuacao":20.0,"reacao":"done_big","origem":"notificacao","corrente":{"aberta":false,"turnos":2}}
+{"t":872800,"i":"festa","sid8":"s1","nivel":"T3","reacao":"done_big","confete":40,"voo":"atravessar","faixa":true}
+{"t":872800,"i":"balao","linhas":["Prontinho! api"],"motivo":"festa"}
+{"t":872800,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}
+{"t":872800,"i":"selos","mais":0,"bandeiras":[],"corrente":false}

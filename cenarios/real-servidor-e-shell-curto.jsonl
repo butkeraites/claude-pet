@@ -1,0 +1,15 @@
+{"cenario": "real-servidor-e-shell-curto", "descricao": "da pesquisa (decisão 0071), pseudonimizado, com o orig que o hook do M5 calcula: um servidor que fica rodando em segundo plano (todo Stop com bg 1), um turno normal com ele, um shell curto em segundo plano e a notificação de quando ele acaba, e o idle_prompt; festas normais com o servidor rodando, e a notificação é turno de máquina, sem festa"}
+{"t":0,"desktop":{"ocioso":false}}
+{"t":0,"desktop":{"olhando_claude":true}}
+{"t":12,"evento":{"e":"UserPromptSubmit","ent":"cli","proj":"projeto-a","sid":"s1","ts":0,"turno":"p6","orig":"comum"}}
+{"t":1550,"evento":{"dur":14,"e":"PostToolUse","ent":"cli","proj":"projeto-a","sid":"s1","tool":"Bash","ts":1544,"turno":"p6"}}
+{"t":2561,"evento":{"bg":1,"bgi":["a3"],"bgt":["shell"],"e":"Stop","ent":"cli","proj":"projeto-a","sid":"s1","ts":2554,"turno":"p6"}}
+{"t":7554,"evento":{"e":"UserPromptSubmit","ent":"cli","proj":"projeto-a","sid":"s1","ts":7543,"turno":"p7","orig":"comum"}}
+{"t":8213,"evento":{"bg":1,"bgi":["a3"],"bgt":["shell"],"e":"Stop","ent":"cli","proj":"projeto-a","sid":"s1","ts":8207,"turno":"p7"}}
+{"t":14133,"evento":{"e":"UserPromptSubmit","ent":"cli","proj":"projeto-a","sid":"s1","ts":14122,"turno":"p8","orig":"comum"}}
+{"t":16026,"evento":{"dur":17,"e":"PostToolUse","ent":"cli","proj":"projeto-a","sid":"s1","tool":"Bash","ts":16020,"turno":"p8"}}
+{"t":16782,"evento":{"bg":2,"bgi":["a3","a4"],"bgt":["shell","shell"],"e":"Stop","ent":"cli","proj":"projeto-a","sid":"s1","ts":16775,"turno":"p8"}}
+{"t":22046,"evento":{"e":"UserPromptSubmit","ent":"cli","proj":"projeto-a","sid":"s1","ts":22035,"turno":"p9","orig":"notificacao"}}
+{"t":22994,"evento":{"bg":1,"bgi":["a3"],"bgt":["shell"],"e":"Stop","ent":"cli","proj":"projeto-a","sid":"s1","ts":22989,"turno":"p9"}}
+{"t":82997,"evento":{"e":"Notification","ent":"cli","nt":"idle_prompt","proj":"projeto-a","sid":"s1","ts":82995,"turno":"p9"}}
+{"t":92997,"fim":true}

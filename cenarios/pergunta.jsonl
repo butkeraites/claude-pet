@@ -1,0 +1,10 @@
+{"cenario": "pergunta", "descricao": "da pesquisa (decisão 0071), pseudonimizado: uma pergunta (AskUserQuestion) com os três gatilhos do 2.1.288 (PreToolUse, PermissionRequest 14 ms depois e a notificação 6 s depois), o Renan no terminal do Claude; um aviso só, na L1, até a resposta", "padrao": {"sid": "s1", "ent": "cli", "proj": "projeto-a"}}
+{"t": 0, "desktop": {"ocioso": false}}
+{"t": 0, "desktop": {"olhando_claude": true}}
+{"t": 0, "evento": {"e": "UserPromptSubmit", "turno": "p1", "ts": 0, "orig": "comum"}}
+{"t": 2210, "evento": {"e": "PreToolUse", "turno": "p1", "ts": 2205, "tool": "AskUserQuestion"}}
+{"t": 2225, "evento": {"e": "PermissionRequest", "turno": "p1", "ts": 2219, "tool": "AskUserQuestion"}}
+{"t": 8220, "evento": {"e": "Notification", "turno": "p1", "ts": 8217, "nt": "permission_prompt"}}
+{"t": 18970, "evento": {"e": "PostToolUse", "turno": "p1", "ts": 18964, "tool": "AskUserQuestion", "dur": 0}}
+{"t": 19735, "evento": {"e": "Stop", "turno": "p1", "ts": 19731, "bg": 1, "bgt": ["shell"], "bgi": ["x3"], "crn": 0}}
+{"t": 30000, "fim": true}

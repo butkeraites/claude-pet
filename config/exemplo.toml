@@ -25,8 +25,38 @@ skin = "zeca"
 tamanho = "normal"
 
 [celebracao]
-# proporcional | sempre_grande | discreta | desligada
+# Como o Zeca comemora o fim de um turno do Claude (decisão 0074):
+#   proporcional   pelo trabalho do turno (a pontuação abaixo): T0 o aceno, T1
+#                  o pulinho, T2 o voo curto com confete, T3 o voo grande
+#   sempre_grande  todo turno com trabalho vira T3 (no máximo um a cada 2 min)
+#   discreta       nunca passa do pulinho (T1)
+#   desligada      nenhuma festa e nenhum tchau (os avisos continuam)
 modo = "proporcional"
+# O T3 no máximo a cada tantos minutos (0: sem limite); dentro do intervalo,
+# o T3 vira o T2.
+intervalo_t3_min = 10
+
+[pontuacao]
+# A festa é pelo trabalho, nunca pelo relógio (decisão 0003): com o Opus em
+# esforço máximo uma resposta simples leva de 20 a 90 s. Cada turno soma
+#   por_minuto × minutos de ferramenta (a soma do duration_ms das
+#                ferramentas, as dos subagentes inclusive, fora o Agent/Task)
+#   + por_ferramenta_de_trabalho × Edit, Write, MultiEdit, NotebookEdit, Bash
+#   + por_outra_ferramenta × as outras
+#   + por_arquivo × arquivos diferentes editados
+#   + por_subagente × subagentes
+# até o teto. Sem ferramenta de trabalho, subagente nem arquivo editado é T0;
+# abaixo de t2 é T1, de t2 a t3 é T2, de t3 em diante é T3. Cada turno mostra
+# as partes em `bin/pet estado` (turnos[].pontuacao), para calibrar. Use ponto
+# nos decimais. Ou PET_PONTUACAO_POR_ARQUIVO=1 no ambiente (como as outras).
+por_minuto = 1.0
+por_ferramenta_de_trabalho = 0.15
+por_outra_ferramenta = 0.05
+por_arquivo = 0.5
+por_subagente = 1.0
+teto = 20
+t2 = 4
+t3 = 12
 
 [sessoes]
 # De onde vêm as sessões do Claude Code que o pet acompanha

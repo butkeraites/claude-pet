@@ -1,0 +1,11 @@
+{"t":0,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":5940,"i":"reacao","nome":"alert","motivo":"aviso","sid8":"s1"}
+{"t":5940,"i":"balao","linhas":["Plano pra aprovar! projeto-a"],"motivo":"aviso"}
+{"t":5940,"i":"escalada","sid8":"s1","nivel":1,"espera":"plano","motivo":"aviso"}
+{"t":5940,"i":"base","estado":"waiting","prioridade":"esperando","sid8":"s1"}
+{"t":245000,"i":"escalada","sid8":"s1","nivel":0,"motivo":"andou"}
+{"t":245000,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
+{"t":250800,"i":"turno","sid8":"s1","turno8":"p1","fim":"stop","nivel":"T1","pontuacao":0.75,"reacao":"done_small"}
+{"t":250800,"i":"festa","sid8":"s1","nivel":"T1","reacao":"done_small"}
+{"t":250800,"i":"balao","linhas":["Prontinho! projeto-a"],"motivo":"festa"}
+{"t":250800,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}

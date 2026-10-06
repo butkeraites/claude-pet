@@ -11,7 +11,20 @@
 #   B. carga+escondido × carga+parado, intercalados: o mesmo, com uma repintura
 #      de tela cheia no ritmo do monitor (`cargo xtask carga`: camada OVERLAY
 #      transparente, invisível) — o custo estrutural da camada sempre mapeada;
-#   C. estresse (PET_FASE_ESTRESSE_S): 40 confetes a 30 fps.
+#   C. estresse (PET_FASE_ESTRESSE_S): 40 confetes a 30 fps;
+#   D. trabalhando (o M5): a base quase parada de uma sessão de teste
+#      trabalhando, até 4 quadros por segundo (decisão 0082);
+#   E. dormindo (o M5): o laço do sono, até 2 quadros por segundo, depois de
+#      o pet dormir sozinho (~4 min sem mexer). O sono profundo (nenhum
+#      commit) só aos 30 min: fica com o teste em relógio falso (decisão
+#      0088).
+#
+# O pet do M5 boceja aos 3 min parado e dorme (decisão 0076): antes de cada
+# fase "parado", uma sessão de teste (PET_TESTE=1, o mundo de teste, que some
+# em 60 s) manda um SessionStart pelo hook de dentro da imagem, o que acorda o
+# pet sem reação nenhuma, e a fase só vale com o pet acordado e na base `idle`
+# no começo e no fim (`fotografia.sono`, `desenho.base`; decisão 0091). Uma
+# sessão real do Renan trabalhando no meio muda a base, e a medida para.
 #
 # Por fase: CPU do Hyprland = Δ(utime+stime) de /proc/<pid>/stat ÷ CLK_TCK ÷ Δt;
 # GPU ocupada = 1 − Δrc6_residency_ms ÷ Δt (PET_RC6 muda o arquivo);
@@ -137,7 +150,7 @@ if [ "$PERSONAGEM" = 1 ]; then
 fi
 esperar_campo 20 .visivel true || parar "o pet não apareceu"
 echo "  pet: $(campo .skin.id), D=$(campo .d)"
-echo "  (não mexa no mouse nem no teclado durante a medição: ~$(((RODADAS * 4 * (FASE + 4) + FASE_ESTRESSE + 30) / 60)) min)"
+echo "  (não mexa no mouse nem no teclado durante a medição: ~$(((RODADAS * 4 * (FASE + 4) + FASE_ESTRESSE + 2 * FASE + 300) / 60)) min)"
 
 cpu_h() { awk '{print $14 + $15}' "/proc/$PID_H/stat"; }
 
@@ -164,6 +177,31 @@ esconder() {
   post /v1/debug/esconder "" || parar "POST esconder falhou"
   esperar_campo 5 .visivel false || parar "o pet não escondeu"
   sleep 2 # fade de saída do Hyprland
+}
+
+# Um evento de uma sessão de teste pelo hook de dentro da imagem (o mundo de
+# teste: some em 60 s, nunca se mistura com as sessões do Renan).
+SID_TESTE="medir-custo-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
+hook_teste() { # <Evento> <json a mais>
+  jq -nc --arg e "$1" --arg sid "$SID_TESTE" --argjson extra "$2" \
+    '{session_id: $sid, prompt_id: "medir-custo-p", cwd: "/tmp/medir-custo",
+      transcript_path: "/dev/null", hook_event_name: $e} + $extra' |
+    "${DEV[@]}" exec -T -e PET_TESTE=1 -e CLAUDE_CODE_ENTRYPOINT=cli bichinho \
+      bichinho avisar "$1" >/dev/null 2>&1
+}
+# Acorda o pet e recomeça o relógio do sono (decisão 0076). Com o pet
+# escondido o despertar não toca: chame antes de mostrar.
+acordar() {
+  hook_teste SessionStart '{"source": "startup"}' || parar "o hook de teste falhou"
+  esperar_campo 3 .fotografia.sono acordado || parar "o pet não acordou"
+}
+# A fase "parado" só vale com o pet acordado e na base `idle`.
+conferir_parado() { # <nome>
+  local sono base
+  sono="$(campo .fotografia.sono)"
+  base="$(campo .desenho.base)"
+  [ "$sono" = acordado ] && [ "$base" = idle ] ||
+    parar "«$1»: o pet não estava acordado e parado (sono $sono, base $base): medida inválida"
 }
 mostrar() {
   post /v1/debug/mostrar "" || parar "POST mostrar falhou"
@@ -195,8 +233,11 @@ echo "▸ A. escondido × parado, ${RODADAS} rodadas de ${FASE} s"
 for r in $(seq 1 "$RODADAS"); do
   esconder
   medir "escondido-$r" "$FASE" 0 0.05
+  acordar
   mostrar
+  conferir_parado "parado-$r"
   medir "parado-$r" "$FASE" 0.1 2.0
+  conferir_parado "parado-$r"
 done
 
 echo "▸ B. com repintura de tela cheia (carga invisível), ${RODADAS} rodadas de ${FASE} s"
@@ -205,9 +246,12 @@ for r in $(seq 1 "$RODADAS"); do
   carga_iniciar $((FASE + 4))
   medir "carga-escondido-$r" "$FASE" 0 0.05
   carga_fim
+  acordar
   mostrar
   carga_iniciar $((FASE + 4))
+  conferir_parado "carga-parado-$r"
   medir "carga-parado-$r" "$FASE" 0.1 2.0
+  conferir_parado "carga-parado-$r"
   carga_fim
 done
 
@@ -217,6 +261,20 @@ esperar_campo 3 .estresse true || parar "o estresse não começou"
 sleep 1
 medir estresse "$FASE_ESTRESSE" 20 31
 esperar_campo 10 .estresse false || parar "o estresse não acabou"
+
+echo "▸ D. trabalhando (${FASE} s, uma sessão de teste: a base quase parada, até 4 quadros por segundo)"
+hook_teste UserPromptSubmit '{"prompt": "medir-custo", "source": "user"}' || parar "o hook de teste falhou"
+hook_teste PostToolUse '{"tool_name": "Read", "duration_ms": 10, "tool_input": {}, "tool_response": {}}'
+esperar_campo 3 .desenho.base working || parar "a base não virou working"
+sleep 2
+medir trabalhando "$FASE" 0 1.0
+[ "$(campo .desenho.base)" = working ] || parar "«trabalhando»: a base saiu de working"
+
+echo "▸ E. dormindo (${FASE} s, o laço do sono, até 2 quadros por segundo): esperando o pet dormir sozinho (~4 min, sem mexer)"
+esperar_campo 600 .desenho.base sleep || parar "o pet não dormiu em 10 min"
+sleep 2
+medir dormindo "$FASE" 0.3 2.0
+[ "$(campo .fotografia.sono)" = dormindo ] || parar "«dormindo»: o sono mudou no meio da medida"
 
 # media <prefixo> <tabela>: média e faixa das rodadas
 resumo() {
@@ -240,6 +298,8 @@ for f in escondido parado carga-escondido carga-parado; do
   printf '| %s | %s | %s | %s |\n' "$f" "$(resumo "$f" CPU)" "$(resumo "$f" GPU)" "$(resumo "$f" CPS)"
 done
 printf '| estresse | %s | %s | %s |\n' "${CPU[estresse]}" "${GPU[estresse]}" "${CPS[estresse]}"
+printf '| trabalhando | %s | %s | %s |\n' "${CPU[trabalhando]}" "${GPU[trabalhando]}" "${CPS[trabalhando]}"
+printf '| dormindo | %s | %s | %s |\n' "${CPU[dormindo]}" "${GPU[dormindo]}" "${CPS[dormindo]}"
 echo "(média das ${RODADAS} rodadas, entre parênteses a menor e a maior; RSS do Hyprland: ${RSS[escondido-1]} → ${RSS[parado-1]} MiB)"
 
 D_PARADO="$(awk -v p="$(media parado CPU)" -v e="$(media escondido CPU)" 'BEGIN{printf "%.2f", p-e}')"

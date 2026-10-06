@@ -1,0 +1,29 @@
+{"cenario": "medio", "descricao": "10 Edit em 5 arquivos, 8 Bash e 7 Read com 3 min de ferramenta: 8,55 pontos, o voo curto (T2)", "padrao": {"sid": "s1", "ent": "cli", "proj": "api"}}
+{"t": 0, "evento": {"e": "UserPromptSubmit", "turno": "p1", "orig": "comum"}}
+{"t": 5000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Edit", "dur": 0, "arq": "a00000000000"}}
+{"t": 9000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Edit", "dur": 0, "arq": "a00000000001"}}
+{"t": 13000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Edit", "dur": 0, "arq": "a00000000002"}}
+{"t": 17000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Edit", "dur": 0, "arq": "a00000000003"}}
+{"t": 21000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Edit", "dur": 0, "arq": "a00000000004"}}
+{"t": 25000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Edit", "dur": 0, "arq": "a00000000000"}}
+{"t": 29000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Edit", "dur": 0, "arq": "a00000000001"}}
+{"t": 33000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Edit", "dur": 0, "arq": "a00000000002"}}
+{"t": 37000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Edit", "dur": 0, "arq": "a00000000003"}}
+{"t": 41000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Edit", "dur": 0, "arq": "a00000000004"}}
+{"t": 45000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Bash", "dur": 22500}}
+{"t": 69000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Bash", "dur": 22500}}
+{"t": 93000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Bash", "dur": 22500}}
+{"t": 117000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Bash", "dur": 22500}}
+{"t": 141000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Bash", "dur": 22500}}
+{"t": 165000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Bash", "dur": 22500}}
+{"t": 189000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Bash", "dur": 22500}}
+{"t": 213000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Bash", "dur": 22500}}
+{"t": 237000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Read", "dur": 0}}
+{"t": 239000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Read", "dur": 0}}
+{"t": 241000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Read", "dur": 0}}
+{"t": 243000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Read", "dur": 0}}
+{"t": 245000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Read", "dur": 0}}
+{"t": 247000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Read", "dur": 0}}
+{"t": 249000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Read", "dur": 0}}
+{"t": 256000, "evento": {"e": "Stop", "turno": "p1", "bg": 0, "crn": 0}}
+{"t": 266000, "fim": true}

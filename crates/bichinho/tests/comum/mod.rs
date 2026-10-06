@@ -137,6 +137,24 @@ impl Daemon {
         self.filho.id()
     }
 
+    /// Para o daemon com um SIGTERM (como o `docker stop`) e espera ele sair
+    /// (até 5 s, o `stop_grace_period` do compose). `true` se saiu sozinho,
+    /// com sucesso.
+    pub fn parar(&mut self) -> bool {
+        let mandou = Command::new("kill")
+            .args(["-TERM", &self.pid().to_string()])
+            .status()
+            .is_ok_and(|s| s.success());
+        let limite = Instant::now() + Duration::from_secs(5);
+        while mandou && Instant::now() < limite {
+            if let Ok(Some(status)) = self.filho.try_wait() {
+                return status.success();
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        false
+    }
+
     /// CPU que o daemon gastou até agora (usuário e sistema), em tiques do
     /// relógio do kernel (`/proc/<pid>/stat`, campos 14 e 15). O `stat` se
     /// lê mesmo com o processo sem core dump (dono root, modo 0444).

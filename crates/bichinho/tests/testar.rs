@@ -39,13 +39,66 @@ fn rapido_acena_e_pequeno_pula() {
     let (ok, saida, erro) = testar(&d, "pequeno");
     assert!(ok, "pequeno falhou: {saida}{erro}");
     assert!(saida.contains("✓ pequeno → done_small"), "{saida}");
-    assert!(saida.contains(r#""nivel":"T1","trabalho":2"#), "{saida}");
+    assert!(saida.contains(r#""nivel":"T1""#), "{saida}");
+    assert!(saida.contains(r#""trabalho":2"#), "{saida}");
     let estado = d.get_json("/v1/estado");
     let sessoes = estado["sessoes"].as_array().unwrap();
     assert_eq!(sessoes.len(), 2, "uma sessão por execução: {estado:#}");
     assert!(sessoes.iter().all(|s| s["teste"] == true), "{estado:#}");
     assert!(sessoes.iter().all(|s| s["proj"] == "pet-testar"));
     assert_eq!(estado["ultima_reacao"]["teste"], true);
+}
+
+#[test]
+fn medio_voa_com_confete_e_grande_chove_e_o_segundo_vira_t2() {
+    let d = Daemon::subir(false);
+    let (ok, saida, erro) = testar(&d, "medio");
+    assert!(ok, "medio falhou: {saida}{erro}");
+    assert!(saida.contains("✓ medio → done_medium"), "{saida}");
+    assert!(saida.contains(r#""nivel":"T2""#), "{saida}");
+    assert!(
+        saida.contains(r#""i":"festa""#) && saida.contains(r#""confete":12"#),
+        "a festa com o confete: {saida}"
+    );
+    let (ok, saida, erro) = testar(&d, "grande");
+    assert!(ok, "grande falhou: {saida}{erro}");
+    assert!(saida.contains("✓ grande → done_big"), "{saida}");
+    assert!(saida.contains(r#""confete":40"#), "{saida}");
+    // Sem compositor o pet não está na tela: o testar não espera a chuva.
+    assert!(
+        saida.contains("confete na tela: nenhum (o pet não está na tela)"),
+        "{saida}"
+    );
+    // O segundo T3 de teste em 10 min vira T2, e o testar explica.
+    let (ok, saida, erro) = testar(&d, "grande");
+    assert!(ok, "o segundo grande falhou: {saida}{erro}");
+    assert!(saida.contains("este virou T2"), "{saida}");
+    assert!(saida.contains("✓ grande → done_medium"), "{saida}");
+    let estado = d.get_json("/v1/estado");
+    let sessoes = estado["sessoes"].as_array().unwrap();
+    assert!(sessoes.iter().all(|s| s["teste"] == true), "{estado:#}");
+}
+
+#[test]
+fn pergunta_chama_e_dois_prontos_viram_uma_festa_so() {
+    let d = Daemon::subir(false);
+    let (ok, saida, erro) = testar(&d, "pergunta");
+    assert!(ok, "pergunta falhou: {saida}{erro}");
+    assert!(saida.contains("✓ pergunta → alert"), "{saida}");
+    assert!(saida.contains(r#""espera":"pergunta""#), "{saida}");
+    assert!(saida.contains("→ nod"), "{saida}");
+    let (ok, saida, erro) = testar(&d, "dois-prontos");
+    assert!(ok, "dois-prontos falhou: {saida}{erro}");
+    assert!(saida.contains("✓ dois-prontos → uma festa só"), "{saida}");
+    assert!(saida.contains("2 prontos: demo-api, demo-web"), "{saida}");
+    // Só sessões de teste, sem nada de conteúdo.
+    let estado = d.get_json("/v1/estado");
+    let sessoes = estado["sessoes"].as_array().unwrap();
+    assert!(sessoes.iter().all(|s| s["teste"] == true), "{estado:#}");
+    assert!(
+        !estado.to_string().contains("teste do bin/pet"),
+        "o prompt vazou"
+    );
 }
 
 #[test]
@@ -154,6 +207,7 @@ fn cenario_desconhecido_e_pet_desligado() {
     let (ok, _, erro) = testar(&d, "gigante");
     assert!(!ok);
     assert!(erro.contains("uso: bin/pet testar"), "{erro}");
+    assert!(erro.contains("dois-prontos"), "{erro}");
     let porta = d.porta;
     drop(d);
     let saida = Command::new(comum::raiz().join("bin/pet"))

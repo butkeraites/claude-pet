@@ -1,0 +1,7 @@
+{"cenario": "espera-de-uma-noite", "descricao": "uma pergunta que ninguém responde com o Renan longe, e a sessão não manda mais nada (um Esc também não manda evento): a escalada até o teto, e o pet dorme com o selo; 12 h depois do último evento da sessão, a espera sai (o estado e o aviso) e a sessão fica aberta na lista do clique, até uma semana sem evento (decisão 0096)", "padrao": {"sid": "s1", "ent": "cli", "proj": "api"}}
+{"t": 0, "desktop": {"ligado": true}}
+{"t": 0, "desktop": {"ocioso": true}}
+{"t": 0, "evento": {"e": "UserPromptSubmit", "turno": "p1", "orig": "comum"}}
+{"t": 10000, "evento": {"e": "PermissionRequest", "turno": "p1", "tool": "AskUserQuestion"}}
+{"t": 46800000, "clique": "esquerdo"}
+{"t": 46810000, "fim": true}

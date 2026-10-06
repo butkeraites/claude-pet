@@ -173,6 +173,10 @@ pub enum EventoDesktop {
     /// voltou a mexer (`false`; também o estado de partida de uma conexão
     /// que sabe contar). Sem isto, não se sabe (decisão 0062).
     Ocioso(bool),
+    /// A tela começou (`true`) ou parou (`false`) de ser compartilhada (no
+    /// Hyprland, o `screencast` do socket2). Depois de 2 s compartilhando,
+    /// os balões perdem os nomes dos projetos (decisão 0076).
+    Compartilhando(bool),
 }
 
 /// O que a ligação com o desktop mostra no `/v1/estado`.
@@ -496,9 +500,10 @@ impl<T> Caixa<T> {
     }
 }
 
-/// Uma janela de mentira para os testes: a do Motor aqui, e a do núcleo do
-/// daemon com a feature `teste` (só nos testes; o binário nunca a tem).
-#[cfg(any(test, feature = "teste"))]
+/// Uma janela de mentira para os testes: a do Motor aqui, a do núcleo do
+/// daemon com a feature `teste` (só nos testes) e a do `bichinho simular`
+/// com a feature `simulacao` (só o subcomando offline a usa; decisão 0078).
+#[cfg(any(test, feature = "teste", feature = "simulacao"))]
 pub mod falsa {
     use super::*;
     use crate::geometria::para_logico_por_fora;

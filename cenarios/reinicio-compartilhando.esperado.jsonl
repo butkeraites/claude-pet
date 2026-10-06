@@ -1,0 +1,19 @@
+{"t":1000,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":10000,"i":"reacao","nome":"alert","motivo":"aviso","sid8":"s1"}
+{"t":10000,"i":"balao","linhas":["agenda-secreta: pergunta pra você"],"motivo":"aviso"}
+{"t":10000,"i":"escalada","sid8":"s1","nivel":1,"espera":"pergunta","motivo":"aviso"}
+{"t":10000,"i":"base","estado":"waiting","prioridade":"esperando","sid8":"s1"}
+{"t":14000,"i":"discricao","ligada":true,"tirou_balao":true}
+{"t":81000,"i":"escalada","sid8":"s1","nivel":1,"espera":"pergunta","motivo":"restaurada"}
+{"t":81000,"i":"restauracao","sessoes":1,"avisos":1,"sossego":["discricao"]}
+{"t":81000,"i":"base","estado":"waiting","prioridade":"esperando","sid8":"s1"}
+{"t":100000,"i":"selos","mais":1,"bandeiras":[],"corrente":false}
+{"t":110800,"i":"turno","sid8":"s2","turno8":"q1","fim":"stop","nivel":"T1","pontuacao":0.65,"reacao":"done_small"}
+{"t":110800,"i":"festa","sid8":"s2","nivel":"T1","reacao":"done_small"}
+{"t":110800,"i":"balao","linhas":["Prontinho!"],"motivo":"festa"}
+{"t":110800,"i":"selos","mais":0,"bandeiras":[1],"corrente":false}
+{"t":316000,"i":"discricao","ligada":false}
+{"t":316000,"i":"pulso","ligado":true,"sid8":"s1"}
+{"t":316000,"i":"escalada","sid8":"s1","nivel":4,"motivo":"tempo"}
+{"t":316000,"i":"rajada","sid8":"s1","nivel":4}
+{"t":376000,"i":"rajada","sid8":"s1","nivel":4}

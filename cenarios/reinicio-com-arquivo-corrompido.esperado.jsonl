@@ -1,0 +1,12 @@
+{"t":2000,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":10800,"i":"turno","sid8":"s1","turno8":"p1","fim":"stop","nivel":"T0","pontuacao":0.0,"reacao":"nod"}
+{"t":10800,"i":"festa","sid8":"s1","nivel":"T0","reacao":"nod"}
+{"t":10800,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}
+{"t":25000,"i":"restauracao","sessoes":0,"motivo":"arquivo_ruim"}
+{"t":30000,"i":"reacao","nome":"giggle","motivo":"clique"}
+{"t":30000,"i":"balao","linhas":["nenhuma sessão do Claude aberta"],"motivo":"lista"}
+{"t":30000,"i":"clique","resultado":"lista"}
+{"t":40000,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":50000,"i":"reacao","nome":"giggle","motivo":"clique"}
+{"t":50000,"i":"balao","linhas":["api: pensando (10 s)"],"motivo":"lista"}
+{"t":50000,"i":"clique","resultado":"lista"}

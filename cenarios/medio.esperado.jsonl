@@ -1,0 +1,6 @@
+{"t":0,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":5000,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
+{"t":256800,"i":"turno","sid8":"s1","turno8":"p1","fim":"stop","nivel":"T2","pontuacao":8.55,"reacao":"done_medium"}
+{"t":256800,"i":"festa","sid8":"s1","nivel":"T2","reacao":"done_medium","confete":12,"voo":"curto"}
+{"t":256800,"i":"balao","linhas":["Prontinho! api"],"motivo":"festa"}
+{"t":256800,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}

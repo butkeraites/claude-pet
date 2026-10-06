@@ -10,6 +10,9 @@
 //!   sempre sai 0.
 //! - `saude`: healthcheck do Docker; sai 0 se o daemon está vivo.
 //! - `versao`: imprime a versão e o commit de onde o binário saiu.
+//! - `simular <cenário.jsonl>` e `cenario [nome]`: o cérebro num relógio falso,
+//!   offline, e o cenário com pseudônimos de um `/v1/debug/eventos`
+//!   ([`simular`], decisão 0078).
 //!
 //! O que é igual em todo sistema mora aqui e no `pet-core` (o Motor); o laço
 //! de cada sistema fica atrás de `cfg` (decisão 0040): no Linux, o calloop
@@ -27,10 +30,12 @@ mod estado;
 mod ingress;
 #[cfg(target_os = "linux")]
 mod laco;
+mod memoria;
 mod nucleo;
 mod personagem;
 mod privacidade;
 mod sem_janela;
+mod simular;
 mod vigia;
 
 use std::io::IsTerminal;
@@ -47,7 +52,7 @@ pub const FONTE: &str = match option_env!("BICHINHO_FONTE") {
 };
 
 const AJUDA: &str = "\
-uso: bichinho <rodar | avisar <Evento> | saude | versao>
+uso: bichinho <rodar | avisar <Evento> | saude | versao | simular | cenario>
 
   rodar            o daemon
   avisar <Evento>  o hook do plugin: lê o JSON do hook na entrada padrão,
@@ -55,6 +60,11 @@ uso: bichinho <rodar | avisar <Evento> | saude | versao>
                    sempre sai 0
   saude            healthcheck: sai 0 se o daemon responde /saude
   versao           imprime a versão e o commit de onde o binário saiu
+  simular <cenário.jsonl>
+                   roda o cenário num relógio falso, offline, e imprime a
+                   linha do tempo das intenções (uma por linha)
+  cenario [nome]   o JSON do /v1/debug/eventos na entrada vira um cenário
+                   com pseudônimos (só metadados) na saída
 
 Sem comando, nada roda (no terminal, esta ajuda).
 ";
@@ -78,6 +88,8 @@ fn main() -> ExitCode {
         }
         Some("rodar") => daemon::rodar(),
         Some("saude") => daemon::saude(),
+        Some("simular") => simular::simular(argumentos),
+        Some("cenario") => simular::cenario(argumentos),
         Some("versao" | "--version" | "-V") => {
             println!("bichinho {} (fonte {FONTE})", pet_core::VERSAO);
             ExitCode::SUCCESS

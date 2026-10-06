@@ -26,6 +26,8 @@ pub struct EstadoDesktop {
     /// O Renan está longe do teclado e do mouse (`None`: não se sabe; a
     /// conexão não conta, ou caiu). Decisão 0062.
     pub ocioso: Option<bool>,
+    /// A tela está sendo compartilhada (decisão 0076).
+    pub compartilhando: bool,
 }
 
 impl EstadoDesktop {
@@ -43,8 +45,11 @@ impl EstadoDesktop {
                     self.protetor.clear();
                 } else {
                     // O que vier depois de voltar é o que vale; o que se
-                    // sabia pode ter mudado no meio.
+                    // sabia pode ter mudado no meio. O sinal do
+                    // compartilhamento também desliga: quem segura a
+                    // discrição, na dúvida, é a tela (decisão 0081).
                     self.olhando_claude = false;
+                    self.compartilhando = false;
                     self.anel.buraco(parede_ms);
                 }
             }
@@ -78,6 +83,7 @@ impl EstadoDesktop {
             }
             EventoDesktop::Monitores => {}
             EventoDesktop::Ocioso(ocioso) => self.ocioso = Some(*ocioso),
+            EventoDesktop::Compartilhando(compartilhando) => self.compartilhando = *compartilhando,
         }
         *self != antes
     }
@@ -100,6 +106,7 @@ impl EstadoDesktop {
             anel: self.anel.painel(),
             protetor_de_tela: !self.protetor.is_empty(),
             ocioso: self.ocioso,
+            compartilhando: self.compartilhando,
         }
     }
 
@@ -131,6 +138,8 @@ pub struct PainelDesktop {
     pub protetor_de_tela: bool,
     /// O Renan longe do teclado e do mouse (`null`: não se sabe).
     pub ocioso: Option<bool>,
+    /// A tela está sendo compartilhada.
+    pub compartilhando: bool,
 }
 
 impl Default for PainelDesktop {
@@ -227,5 +236,26 @@ mod testes {
         assert!(d.protetor_ativo());
         d.aplicar(&EventoDesktop::Ligado(true), 20);
         assert!(!d.protetor_ativo());
+    }
+
+    #[test]
+    fn o_sinal_do_compartilhamento_desliga_com_a_fonte() {
+        let mut d = EstadoDesktop::default();
+        assert!(d.aplicar(&EventoDesktop::Compartilhando(true), 0));
+        assert!(!d.aplicar(&EventoDesktop::Compartilhando(true), 1));
+        assert!(
+            d.painel(CapDesktop::default(), InfoDesktop::default())
+                .compartilhando
+        );
+        // A fonte caiu: o sinal desliga ali (o fim pode ter se perdido no
+        // meio, e quem segura a discrição é a tela, decisão 0081).
+        d.aplicar(&EventoDesktop::Ligado(false), 10);
+        assert!(!d.compartilhando);
+        d.aplicar(&EventoDesktop::Ligado(true), 20);
+        assert!(!d.compartilhando);
+        assert!(d.aplicar(&EventoDesktop::Compartilhando(true), 30));
+        assert!(d.aplicar(&EventoDesktop::Compartilhando(false), 40));
+        let p = d.painel(CapDesktop::default(), InfoDesktop::default());
+        assert!(!p.compartilhando);
     }
 }

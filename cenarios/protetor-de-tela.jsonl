@@ -1,0 +1,13 @@
+{"cenario": "protetor-de-tela", "descricao": "o turno acaba com a proteção de tela do Omarchy aberta: a festa não toca (fica no registro), e nem o susto do erro nem o bocejo do cansado de outras duas sessões; nada se repete quando ela fecha, e o pronto fica (a base pronta até 2 min depois da festa e, depois, a bandeirinha)", "padrao": {"sid": "s1", "ent": "cli", "proj": "api"}}
+{"t": 0, "evento": {"e": "UserPromptSubmit", "turno": "p1", "orig": "comum"}}
+{"t": 3000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "Edit", "dur": 30, "arq": "aaaaaaaaaaa1"}}
+{"t": 5000, "desktop": {"ocioso": true}}
+{"t": 6000, "desktop": {"protetor": true}}
+{"t": 20000, "evento": {"e": "Stop", "turno": "p1", "bg": 0, "crn": 0}}
+{"t": 21000, "evento": {"e": "UserPromptSubmit", "sid": "s2", "proj": "web", "turno": "q1", "orig": "comum"}}
+{"t": 22000, "evento": {"e": "StopFailure", "sid": "s2", "proj": "web", "turno": "q1", "err": "rate_limit"}}
+{"t": 23000, "evento": {"e": "UserPromptSubmit", "sid": "s3", "proj": "lab", "turno": "r1", "orig": "comum"}}
+{"t": 24000, "evento": {"e": "StopFailure", "sid": "s3", "proj": "lab", "turno": "r1", "err": "server_error"}}
+{"t": 30000, "desktop": {"protetor": false}}
+{"t": 30100, "desktop": {"ocioso": false}}
+{"t": 150000, "fim": true}

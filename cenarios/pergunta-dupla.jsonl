@@ -1,0 +1,12 @@
+{"cenario": "pergunta-dupla", "descricao": "os gatilhos da mesma pergunta chegando fora de ordem (hooks async): o PermissionRequest antes do PreToolUse, 30 ms um do outro, e a notificação 6 s depois; uma chamada e um balão só", "padrao": {"sid": "s1", "ent": "cli", "proj": "api"}}
+{"t": 0, "desktop": {"ocioso": false}}
+{"t": 0, "desktop": {"olhando_claude": true}}
+{"t": 0, "evento": {"e": "UserPromptSubmit", "turno": "p1", "ts": 0, "orig": "comum"}}
+{"t": 4000, "evento": {"e": "PostToolUse", "turno": "p1", "ts": 3990, "tool": "Read", "dur": 12}}
+{"t": 6000, "evento": {"e": "PermissionRequest", "turno": "p1", "ts": 5995, "tool": "AskUserQuestion"}}
+{"t": 6030, "evento": {"e": "PreToolUse", "turno": "p1", "ts": 5980, "tool": "AskUserQuestion"}}
+{"t": 12000, "evento": {"e": "Notification", "turno": "p1", "ts": 11995, "nt": "permission_prompt"}}
+{"t": 25000, "evento": {"e": "PostToolUse", "turno": "p1", "ts": 24990, "tool": "AskUserQuestion", "dur": 0}}
+{"t": 31000, "evento": {"e": "PostToolUse", "turno": "p1", "ts": 30990, "tool": "Edit", "dur": 25, "arq": "aaaaaaaaaaa1"}}
+{"t": 33000, "evento": {"e": "Stop", "turno": "p1", "ts": 32995, "bg": 0, "crn": 0}}
+{"t": 45000, "fim": true}

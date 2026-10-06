@@ -1,0 +1,7 @@
+{"t":1000,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":5000,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
+{"t":11500,"i":"restauracao","sessoes":1,"avisos":1}
+{"t":11500,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}
+{"t":20000,"i":"reacao","nome":"giggle","motivo":"clique"}
+{"t":20000,"i":"clique","resultado":"focou","sid8":"s1"}
+{"t":20500,"i":"base","estado":"idle","prioridade":"parado"}

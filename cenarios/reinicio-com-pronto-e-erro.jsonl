@@ -1,0 +1,23 @@
+{"cenario": "reinicio-com-pronto-e-erro", "descricao": "um pronto com o Renan noutra janela e o erro de outra sessão: o pet reinicia; o pronto volta segurando a base até 2 min depois da festa (sem festa de novo) e o erro volta na tela até os 60 s dele, sem o susto (nem quando uma sessão nova chega com ele na tela); no mesmo compositor, o clique leva ao terminal do erro e depois ao do pronto", "padrao": {"ent": "cli"}}
+{"t": 0, "desktop": {"ligado": true}}
+{"t": 0, "desktop": {"ocioso": false}}
+{"t": 0, "desktop": {"janela_ativa": "a0a0a0"}}
+{"t": 2000, "evento": {"e": "UserPromptSubmit", "sid": "s1", "proj": "api", "turno": "p1", "orig": "comum"}}
+{"t": 3000, "desktop": {"janela_ativa": "b0b0b0"}}
+{"t": 5000, "evento": {"e": "UserPromptSubmit", "sid": "s2", "proj": "web", "turno": "q1", "orig": "comum"}}
+{"t": 6000, "desktop": {"janela_ativa": "c0c0c0"}}
+{"t": 20000, "evento": {"e": "PostToolUse", "sid": "s1", "proj": "api", "turno": "p1", "tool": "Edit", "arq": "000000000001", "dur": 40}}
+{"t": 30000, "evento": {"e": "Stop", "sid": "s1", "proj": "api", "turno": "p1", "bg": 0, "crn": 0}}
+{"t": 40000, "evento": {"e": "StopFailure", "sid": "s2", "proj": "web", "turno": "q1", "err": "server_error"}}
+{"t": 60000, "reinicio": {"parado_ms": 10000}}
+{"t": 70000, "desktop": {"ligado": true}}
+{"t": 70000, "desktop": {"ocioso": false}}
+{"t": 70000, "desktop": {"janela_ativa": "c0c0c0"}}
+# Uma sessão nova com o erro ainda na tela: o cérebro muda, e a entrada no
+# erro de antes da partida não toca de novo.
+{"t": 80000, "evento": {"e": "SessionStart", "sid": "s3", "proj": "docs", "src": "startup"}}
+{"t": 120000, "clique": "esquerdo"}
+{"t": 120500, "desktop": {"janela_ativa": "b0b0b0"}}
+{"t": 130000, "clique": "esquerdo"}
+{"t": 130500, "desktop": {"janela_ativa": "a0a0a0"}}
+{"t": 200000, "fim": true}

@@ -1,0 +1,17 @@
+{"t":12,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":1550,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
+{"t":3361,"i":"turno","sid8":"s1","turno8":"p6","fim":"stop","nivel":"T1","pontuacao":0.15,"reacao":"done_small"}
+{"t":3361,"i":"festa","sid8":"s1","nivel":"T1","reacao":"done_small"}
+{"t":3361,"i":"balao","linhas":["Prontinho! projeto-a"],"motivo":"festa"}
+{"t":3361,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}
+{"t":7554,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":9013,"i":"turno","sid8":"s1","turno8":"p7","fim":"stop","nivel":"T0","pontuacao":0.0,"reacao":"nod"}
+{"t":9013,"i":"festa","sid8":"s1","nivel":"T0","reacao":"nod"}
+{"t":9013,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}
+{"t":14133,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":16026,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
+{"t":17582,"i":"turno","sid8":"s1","turno8":"p8","fim":"stop","nivel":"T1","pontuacao":0.15,"reacao":"done_small"}
+{"t":17582,"i":"festa","sid8":"s1","nivel":"T1","reacao":"done_small"}
+{"t":17582,"i":"balao","linhas":["Prontinho! projeto-a"],"motivo":"festa"}
+{"t":17582,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}
+{"t":23794,"i":"turno","sid8":"s1","turno8":"p9","fim":"stop","nivel":"T0","pontuacao":0.0,"teto":["maquina"],"origem":"notificacao"}

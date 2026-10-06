@@ -1,0 +1,24 @@
+{"cenario": "compartilhando-tela", "descricao": "uma captura de tela (o sinal por 400 ms) não muda nada; numa chamada, a discrição liga quando o sinal soma 2 s e tira o balão com nome; a tela parada que pisca (0 e 1, no Hyprland 0.56.2) não a desliga; a chamada, a lista do clique e a festa saem sem nome de projeto, também nos 5 min depois do último sinal; depois, os nomes voltam (decisão 0081)", "padrao": {"ent": "cli"}}
+{"t": 0, "evento": {"e": "UserPromptSubmit", "sid": "s1", "proj": "agenda-secreta", "turno": "p1", "orig": "comum"}}
+# Uma captura de tela: o grim acende o sinal por menos de meio segundo.
+{"t": 2000, "desktop": {"compartilhando": true}}
+{"t": 2400, "desktop": {"compartilhando": false}}
+{"t": 6000, "evento": {"e": "PostToolUse", "sid": "s1", "proj": "agenda-secreta", "turno": "p1", "tool": "Edit", "dur": 30, "arq": "aaaaaaaaaaa1"}}
+# A chamada começa: o sinal fica aceso.
+{"t": 10000, "desktop": {"compartilhando": true}}
+{"t": 10500, "evento": {"e": "Stop", "sid": "s1", "proj": "agenda-secreta", "turno": "p1", "bg": 0, "crn": 0}}
+{"t": 20000, "evento": {"e": "UserPromptSubmit", "sid": "s2", "proj": "web", "turno": "q1", "orig": "comum"}}
+# A tela parada: o Hyprland manda 0 meio segundo depois do último quadro e 1 no próximo desenho.
+{"t": 22000, "desktop": {"compartilhando": false}}
+{"t": 23000, "desktop": {"compartilhando": true}}
+{"t": 25000, "evento": {"e": "PermissionRequest", "sid": "s2", "proj": "web", "turno": "q1", "tool": "Bash"}}
+{"t": 30000, "clique": "esquerdo"}
+# A chamada acaba.
+{"t": 40000, "desktop": {"compartilhando": false}}
+{"t": 45000, "evento": {"e": "PostToolUse", "sid": "s2", "proj": "web", "turno": "q1", "tool": "Bash", "dur": 900}}
+{"t": 50000, "evento": {"e": "Stop", "sid": "s2", "proj": "web", "turno": "q1", "bg": 0, "crn": 0}}
+# Cinco minutos depois do último sinal (aos 340 s), os nomes voltam.
+{"t": 345000, "evento": {"e": "UserPromptSubmit", "sid": "s1", "proj": "agenda-secreta", "turno": "p2", "orig": "comum"}}
+{"t": 346000, "evento": {"e": "PostToolUse", "sid": "s1", "proj": "agenda-secreta", "turno": "p2", "tool": "Edit", "dur": 30, "arq": "aaaaaaaaaaa1"}}
+{"t": 347000, "evento": {"e": "Stop", "sid": "s1", "proj": "agenda-secreta", "turno": "p2", "bg": 0, "crn": 0}}
+{"t": 360000, "fim": true}

@@ -1,0 +1,9 @@
+{"t":0,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":3000,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
+{"t":6000,"i":"turno","sid8":"s1","turno8":"p1","fim":"interrompido"}
+{"t":6000,"i":"base","estado":"idle","prioridade":"parado"}
+{"t":10000,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s2"}
+{"t":140800,"i":"turno","sid8":"s2","turno8":"q1","fim":"substituido"}
+{"t":150800,"i":"turno","sid8":"s2","turno8":"q2","fim":"stop","nivel":"T0","pontuacao":0.0,"reacao":"nod"}
+{"t":150800,"i":"festa","sid8":"s2","nivel":"T0","reacao":"nod"}
+{"t":150800,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s2"}

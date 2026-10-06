@@ -1,0 +1,24 @@
+{"cenario": "reinicio-depois-de-uma-pausa", "descricao": "uma pergunta pendente quando o pet para; ele fica 10 min fora (o Renan responde e o Claude termina o turno: a resposta, o Stop e o idle_prompt se perdem); a memória é velha (gravada há mais de 60 s): a espera volta dada como vista na gravação (o selo e o clique, nada acima da L1, sem a pose) e a janela volta sem o endereço (pode ser de outra agora): o clique diz que não viu a janela; o próximo prompt digitado tira a espera e casa a janela de novo, e o clique no pronto dele leva até ela (decisão 0095)", "padrao": {"sid": "s1", "ent": "cli", "proj": "api"}}
+{"t": 0, "desktop": {"ligado": true}}
+{"t": 0, "desktop": {"ocioso": false}}
+{"t": 0, "desktop": {"janela_ativa": "a0a0a0"}}
+{"t": 1000, "evento": {"e": "UserPromptSubmit", "turno": "p1", "orig": "comum"}}
+{"t": 3000, "desktop": {"janela_ativa": "c0c0c0"}}
+{"t": 10000, "evento": {"e": "PreToolUse", "turno": "p1", "tool": "AskUserQuestion"}}
+{"t": 10015, "evento": {"e": "PermissionRequest", "turno": "p1", "tool": "AskUserQuestion"}}
+{"t": 20000, "reinicio": {"parado_ms": 600000}}
+# Com o pet fora, a resposta, o Stop e o idle_prompt se perdem.
+{"t": 25000, "evento": {"e": "PostToolUse", "turno": "p1", "tool": "AskUserQuestion", "dur": 0}}
+{"t": 30000, "evento": {"e": "Stop", "turno": "p1", "bg": 0, "crn": 0}}
+{"t": 90000, "evento": {"e": "Notification", "turno": "p1", "nt": "idle_prompt"}}
+{"t": 620000, "desktop": {"ligado": true}}
+{"t": 620000, "desktop": {"ocioso": false}}
+{"t": 620000, "desktop": {"janela_ativa": "c0c0c0"}}
+{"t": 630000, "clique": "esquerdo"}
+{"t": 1800000, "desktop": {"janela_ativa": "a0a0a0"}}
+{"t": 1802000, "evento": {"e": "UserPromptSubmit", "turno": "p2", "orig": "comum"}}
+{"t": 1805000, "evento": {"e": "Stop", "turno": "p2", "bg": 0, "crn": 0}}
+{"t": 1810000, "desktop": {"janela_ativa": "c0c0c0"}}
+{"t": 1815000, "clique": "esquerdo"}
+{"t": 1815500, "desktop": {"janela_ativa": "a0a0a0"}}
+{"t": 1830000, "fim": true}

@@ -1,0 +1,10 @@
+{"cenario": "idle-prompt-repetido", "descricao": "o idle_prompt sai uma vez por turno, uns 60 s depois do Stop, e nunca com um diálogo na tela (o 2.1.288; docs/pesquisa/10-cerebro-m5.md); aqui cada sessão manda dois, 60 s um do outro, e um idle_prompt nunca vira aviso nem festa: depois de uma festa (s1) nenhum dos dois faz nada; com o turno aberto sem Stop (s2), o primeiro fecha o turno sem festa e o segundo não faz nada (decisão 0099)", "padrao": {"ent": "cli"}}
+{"t": 0, "evento": {"e": "UserPromptSubmit", "sid": "s1", "proj": "api", "turno": "p1", "orig": "comum"}}
+{"t": 4000, "evento": {"e": "PostToolUse", "sid": "s1", "proj": "api", "turno": "p1", "tool": "Write", "dur": 20, "arq": "aaaaaaaaaaa1"}}
+{"t": 6000, "evento": {"e": "Stop", "sid": "s1", "proj": "api", "turno": "p1", "bg": 0, "crn": 0}}
+{"t": 66000, "evento": {"e": "Notification", "sid": "s1", "proj": "api", "turno": "p1", "nt": "idle_prompt"}}
+{"t": 126000, "evento": {"e": "Notification", "sid": "s1", "proj": "api", "turno": "p1", "nt": "idle_prompt"}}
+{"t": 130000, "evento": {"e": "UserPromptSubmit", "sid": "s2", "proj": "web", "turno": "q1", "orig": "comum"}}
+{"t": 190000, "evento": {"e": "Notification", "sid": "s2", "proj": "web", "turno": "q1", "nt": "idle_prompt"}}
+{"t": 250000, "evento": {"e": "Notification", "sid": "s2", "proj": "web", "turno": "q1", "nt": "idle_prompt"}}
+{"t": 260000, "fim": true}
