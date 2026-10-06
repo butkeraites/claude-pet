@@ -4532,3 +4532,13 @@ não se lê de relance. E as docs têm de dizer o que o Claude Code manda de
 verdade e o que o pet faz hoje: um `idle_prompt` que "se repete" ensinaria a
 tratá-lo como lembrete, e uma soneca que "não persiste" esconderia que ela
 volta.
+
+**Adendo (2026-10-05, a ordem dos marcos):** o Renan pediu que a parte macOS
+do M8 venha logo depois do merge do M5, antes do M6. A T8.2 roda no Mac, junto
+com a T8.5 e o macOS da T8.7, na branch `m8-macos`, que outra sessão do Claude
+Code escreve no Mac do Renan. As decisões dessa branch vão de 0100 em diante.
+O Mac é Apple Silicon. O Renan usa vários terminais, então o clique tem de
+levar ao terminal sem depender de qual app ele é. O build é feito pelo Renan no
+próprio Mac. Depois vêm M6 → M7 e o resto do M8. Isto corrige a ordem da
+decisão 0038 ("M4 → M7, depois T8.2–T8.8"): ter um Mac de verdade para testar
+tira o maior risco do macOS, que era não poder conferir nada na tela.

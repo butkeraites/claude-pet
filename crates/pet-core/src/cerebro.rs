@@ -3524,7 +3524,8 @@ mod testes {
         let roteiro = vec![
             chega(0, prompt("p1")),
             chega(1_000, edit_teste("p1")),
-            // Esc no meio da resposta: nenhum Stop. Um minuto depois:
+            // O Stop se perdeu (o pet estava fora); uns 60 s depois, o
+            // idle_prompt fecha o turno:
             chega(61_000, ocioso.clone()),
             Ate(70_000),
         ];
@@ -3533,7 +3534,7 @@ mod testes {
         assert_eq!(r.turnos[0].fim, Fim::Ocioso);
         assert_eq!(r.sessoes[0].estado, EstadoSessao::Parada);
         assert!(!r.sessoes[0].turno_aberto);
-        // Repetido a cada minuto não faz nada.
+        // Um segundo (repetido, ou o mesmo evento duas vezes) não faz nada.
         assert_eq!(rodar(&mut c, vec![chega(121_000, ocioso)]), vec![]);
         assert_eq!(c.resumo().turnos.len(), 1);
     }
@@ -4895,7 +4896,8 @@ mod testes {
             ]
         };
         assert!(rodar(&mut c, abrir()).is_empty());
-        // A sessão continua viva (o Renan usa o terminal, o idle_prompt), e
+        // A sessão continua viva (os dois idle_prompt são sintéticos, só para
+        // mantê-la viva), e
         // o agente nunca volta: a corrente expira 12 h depois do último
         // evento dela (o fechamento do Stop, na acomodação).
         let ocioso = Evento {
@@ -5227,7 +5229,8 @@ mod testes {
         assert_eq!(c.resumo().sessoes[0].estado, EstadoSessao::Compactando);
         rodar(&mut c, vec![Ate(1_000 + ATIVA_SEM_EVENTO_MS)]);
         assert_eq!(c.resumo().sessoes[0].estado, EstadoSessao::Parada);
-        // Esperando você não volta sozinho.
+        // Esperando você não volta sozinho no prazo de 5 min (sai em 12 h sem
+        // evento, decisão 0096).
         let mut c = novo();
         rodar(
             &mut c,

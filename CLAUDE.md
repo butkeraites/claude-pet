@@ -94,7 +94,7 @@ aprovação. A pilha de dev (`PET_DEBUG=1`) mostra a skin xadrez `_teste`, ou o
 personagem aprovado com `PET_DEBUG_PERSONAGEM=1`. Formato, arte e aprovação
 em `docs/SKINS.md`.
 
-**Rumo (2026-10-03, decisões 0035–0042):** lançamento open source para
+**Rumo (2026-10-03, decisões 0035–0042; a ordem, decisão 0099):** lançamento open source para
 Linux, macOS e Windows, com o app **bichinho** (o personagem continua Zeca);
 o PLANO tem o M8 (multiplataforma) e o M9 (publicação). A pesquisa está em
 `docs/pesquisa/09-multiplataforma.md`. O próximo passo é o macOS, na branch
@@ -367,7 +367,8 @@ Fora dele, use `~/.cargo/bin/cargo`.
   PATH, os dois faltam e o pet degrada sem quebrar.
 - No 2.1.288 o Esc numa pergunta e o plano recusado sem comentário **não
   mandam evento nenhum** (nem Stop, nem `idle_prompt`): a sessão fica
-  "esperando" até o próximo prompt. Por isso a pose de espera vem do aviso e
+  "esperando" até o próximo prompt, ou 12 h sem evento nenhum dela (decisão
+  0096). Por isso a pose de espera vem do aviso e
   tem prazo, e 5 s no terminal da sessão dão o diálogo por visto (decisão
   0090). O título do terminal fica ✳ o tempo todo (no tmux, conferido): ele
   diz "terminal do Claude", não "parado".
