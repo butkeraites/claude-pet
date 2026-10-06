@@ -4925,3 +4925,55 @@ coordenadas do ponteiro, foram tirados (as coordenadas nunca vão para o log).
 
 **Por quê:** um laço próprio no macOS tem de fazer o que o `NSApplication.run`
 faz com a entrada; só rodar o CFRunLoop desenha, mas deixa o mouse na fila.
+
+## 0108 — Observador de transcript: o Zeca vê as sessões do Claude abertas antes do plugin, lendo o `~/.claude` (2026-10-06)
+
+**Problema:** o hook (plugin) só avisa o Zeca das sessões que carregaram o
+plugin — as novas, ou as antigas depois de um `/reload-plugins`. As sessões já
+abertas quando o plugin é instalado ficam invisíveis: o Renan instalou o Zeca e
+as sessões abertas apareceram como zero. Isso fura a meta de "instalou e já
+funciona", porque sobra um passo manual (o reload em cada aba) que o usuário não
+devia ter de pensar.
+
+**Decisão:** uma segunda fonte de eventos, de dentro do daemon — o *observador
+de transcript*. Uma thread lê os transcripts do Claude Code
+(`~/.claude/projects/*/*.jsonl`), deriva os eventos que o hook mandaria
+(`SessionStart`, `UserPromptSubmit`, `Stop`) e os alimenta pelo mesmo caminho do
+hook (a `Caixa` do laço). Multiplataforma (`~/.claude` existe em todo sistema). O
+hook continua a fonte rica (a janela do terminal para o clique, menos latência,
+mais metadados); o observador preenche o que ele não cobre.
+
+- **Divisão (as regras de ouro):** a classificação é pura, no
+  `pet_core::transcript` (uma linha parseada → `Evento`, testável, sem IO,
+  mapeando o `turnOrigin` para a forma do turno — humano é comum, `scheduled`/
+  `task_notification` é de máquina, decisão 0072); a descoberta e o seguimento
+  dos arquivos são do daemon (`bichinho::observador`, uma thread como a do
+  socket2, subida no `daemon::iniciar_entrada` com um clone da `Caixa`).
+- **Privacidade:** o observador lê a linha só para o metadado do fio
+  (`sessionId`, `promptId`, a última pasta do `cwd`, o `entrypoint`, a forma do
+  turno) e descarta o resto na hora — nunca loga, guarda nem manda o texto do
+  prompt ou da resposta; olha o `type` da linha e, no máximo, o `type` do
+  primeiro bloco do conteúdo (prompt × `tool_result`), nunca o texto. É uma
+  superfície nova (o daemon passa a ler os transcripts), então fica atrás de um
+  liga/desliga (`PET_OBSERVADOR`, ligado por padrão); um toggle no config é o
+  próximo passo.
+- **Dedup:** o observador alimenta com o **sid completo** (o nome do arquivo), e
+  o cérebro funde por sid e deduplica por `(sid, turno)` — a mesma máquina que já
+  trata o Stop repetido (decisão 0032). No arranque (a lista publicada vazia) ele
+  adota todas as sessões ativas; as que o hook cobre recebem os dois, e a
+  idempotência do cérebro evita a reação dobrada (conferido ao vivo: os
+  contadores não inflam, a janela do hook se mantém, cada sessão aparece uma
+  vez). O `sid8` publicado serve só para não re-semear o `SessionStart` de uma
+  sessão que o hook já estabeleceu. Só adota sessões `cli` (como o cérebro já
+  filtra). Os testes de integração do daemon rodam com `PET_OBSERVADOR=0` (o
+  observador lê o host, fora do controle do teste).
+- **Limites deste corte:** a janela do terminal não vem do transcript (só do
+  hook), então o clique não leva ao terminal de uma sessão só-observador até um
+  evento do hook; o `ts` é o de agora, não o da linha; a espera (uma pergunta
+  aberta) ainda não é derivada (precisa do `PreToolUse`). Follow-ups.
+
+**Por quê:** os transcripts têm todos os metadados que o hook manda (conferido
+campo a campo), então o daemon pode ver e reagir às sessões já abertas sem
+depender do `/reload-plugins` — o passo manual que ainda sobrava na instalação.
+No limite, o observador deixa o Zeca funcionar sem o plugin, com o hook como
+enriquecimento.
