@@ -244,6 +244,36 @@ fn mandar(caixa: &Caixa<Comando>, mut evento: Evento) {
     let _ = caixa.tentar(Comando::Evento(Box::new(recebido)));
 }
 
+/// Os jsonl mexidos na [`JANELA_ATIVA`] (sessões abertas), em `raiz/*/*.jsonl`.
+fn jsonl_ativos(raiz: &Path) -> Vec<PathBuf> {
+    let agora = SystemTime::now();
+    let mut ativos = Vec::new();
+    let Ok(projetos) = fs::read_dir(raiz) else {
+        return ativos;
+    };
+    for projeto in projetos.flatten() {
+        let Ok(arquivos) = fs::read_dir(projeto.path()) else {
+            continue;
+        };
+        for arquivo in arquivos.flatten() {
+            let caminho = arquivo.path();
+            if caminho.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let recente = arquivo
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|m| agora.duration_since(m).ok())
+                .is_some_and(|idade| idade <= JANELA_ATIVA);
+            if recente {
+                ativos.push(caminho);
+            }
+        }
+    }
+    ativos
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
@@ -365,34 +395,4 @@ mod testes {
         assert_eq!(jsonl_ativos(&raiz).len(), 1);
         fs::remove_dir_all(raiz).ok();
     }
-}
-
-/// Os jsonl mexidos na [`JANELA_ATIVA`] (sessões abertas), em `raiz/*/*.jsonl`.
-fn jsonl_ativos(raiz: &Path) -> Vec<PathBuf> {
-    let agora = SystemTime::now();
-    let mut ativos = Vec::new();
-    let Ok(projetos) = fs::read_dir(raiz) else {
-        return ativos;
-    };
-    for projeto in projetos.flatten() {
-        let Ok(arquivos) = fs::read_dir(projeto.path()) else {
-            continue;
-        };
-        for arquivo in arquivos.flatten() {
-            let caminho = arquivo.path();
-            if caminho.extension().and_then(|e| e.to_str()) != Some("jsonl") {
-                continue;
-            }
-            let recente = arquivo
-                .metadata()
-                .and_then(|m| m.modified())
-                .ok()
-                .and_then(|m| agora.duration_since(m).ok())
-                .is_some_and(|idade| idade <= JANELA_ATIVA);
-            if recente {
-                ativos.push(caminho);
-            }
-        }
-    }
-    ativos
 }
