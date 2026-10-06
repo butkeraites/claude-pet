@@ -53,6 +53,7 @@ objc2-core-graphics = { version = "0.3", features = [
   "CGBitmapContext",
 ] }
 objc2-core-foundation = { version = "0.3", features = ["CFBase", "CFRunLoop"] }
+objc2-application-services = { version = "0.3.2", features = ["AXUIElement", "AXError", "AXValue"] }
 
 # `[lints]` próprio (não herda o `unsafe_code = "forbid"` do workspace): o
 # AppKit pede `unsafe`, que só este crate usa (CLAUDE.md, decisões 0040 e

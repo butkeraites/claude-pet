@@ -339,6 +339,33 @@ impl Identidades {
         }
     }
 
+    /// A janela que o próprio hook disse (o `app` do macOS, decisão 0105): o
+    /// sistema operacional contou qual app hospeda a sessão, então vale mais
+    /// que o anel (que é uma inferência pelo `ts`). Chamado depois do
+    /// `observar`, sobrepõe a janela do anel. Fora do macOS o `app` não vem e
+    /// nada muda.
+    pub fn observar_app(&mut self, chave: Chave, app: Alca, ts: u64, origem: Origem) {
+        let compositor = self.compositor.clone();
+        let atual = self.mapa.entry(chave).or_insert(Identidade {
+            janela: None,
+            certeza: Certeza::SemAnel,
+            terminal: None,
+            em_ms: ts,
+            compositor: None,
+        });
+        if ts < atual.em_ms {
+            return;
+        }
+        atual.em_ms = ts;
+        // Como o `Achado::Janela`: o começo da sessão não troca uma janela já
+        // certa; um prompt sempre atualiza.
+        if origem == Origem::Prompt || atual.certeza != Certeza::Certa {
+            atual.janela = Some(app);
+            atual.certeza = Certeza::Certa;
+            atual.compositor = compositor;
+        }
+    }
+
     /// A janela fechou: as sessões nela ficam sem janela.
     pub fn fechou(&mut self, janela: &Alca) {
         for identidade in self.mapa.values_mut() {
@@ -506,6 +533,23 @@ mod testes {
         terceiro.ativou(Some(a("foot1")), T0);
         terceiro.buraco(T0 + 1_000);
         assert!(terceiro.ativou(Some(a("foot1")), T0 + 2_000));
+    }
+
+    #[test]
+    fn o_app_do_hook_sobrepoe_o_anel() {
+        // Decisão 0105: o `app` que o hook manda (o macOS) é autoridade e
+        // sobrepõe o anel. Com o anel em dúvida, o app dá a janela certa.
+        let mut ids = Identidades::default();
+        let s1 = (false, "s1".to_owned());
+        ids.observar(s1.clone(), Achado::Duvida, None, T0, Origem::Prompt);
+        ids.observar_app(s1.clone(), a("com.googlecode.iterm2"), T0, Origem::Prompt);
+        let i = ids.de(&s1).unwrap();
+        assert_eq!(i.janela, Some(a("com.googlecode.iterm2")));
+        assert_eq!(i.certeza, Certeza::Certa);
+        // Um prompt novo com outro app troca (o Renan mudou de terminal).
+        ids.observar(s1.clone(), Achado::Nenhuma, None, T0 + 10, Origem::Prompt);
+        ids.observar_app(s1.clone(), a("com.apple.Terminal"), T0 + 10, Origem::Prompt);
+        assert_eq!(ids.de(&s1).unwrap().janela, Some(a("com.apple.Terminal")));
     }
 
     #[test]

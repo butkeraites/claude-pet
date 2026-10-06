@@ -4441,3 +4441,44 @@ consentimento do Renan).
 **Por quê:** a assinatura ad-hoc com bundle id fixo dá a identidade estável
 que o TCC precisa; o LaunchAgent e o plugin ficam opcionais e avisados porque
 mexem fora do repositório.
+
+## 0105 — O app da sessão no fio v1 (`app`, do `__CFBundleIdentifier`), e o clique casa pela janela que o hook diz (parte do T8.7) (2026-10-06)
+
+**Problema:** no macOS o anel de ativações (`NSWorkspace`, decisão 0103) casa
+a sessão com o app que estava em foco quando o prompt foi digitado — uma
+inferência pelo `ts`, que a troca rápida de app ou o tmux atrapalham. O
+sistema operacional, porém, já diz qual app hospeda a sessão: o
+`__CFBundleIdentifier` que o launchd põe no app gráfico e que a sessão herda.
+
+**Escolha (a segunda parte do T8.7, o campo do fio):**
+- **Campo novo e opcional do fio v1: `app`** — o bundle id do app que hospeda
+  a sessão (`com.googlecode.iterm2`), lido do `__CFBundleIdentifier` do
+  ambiente do hook, validado como token (`eh_token`, até 128), só no
+  `SessionStart` e no `UserPromptSubmit` (os mesmos eventos do `term`, decisão
+  0054). É metadado — nunca o título da janela. Fora do macOS a variável não
+  existe e o campo some, então nada muda no Linux.
+- **O hook** (`bichinho avisar`) lê o `__CFBundleIdentifier` e o manda como
+  `app`, pela mesma lista branca e com o mesmo validador do pet. O
+  `pet_core::aviso::app` espelha o `terminal`.
+- **O Motor** usa o `app` como autoridade: quando um prompt traz `app`, o
+  `Identidades::observar_app` sobrepõe a janela do anel (a `Alca` da sessão
+  vira o bundle id, com certeza `certa`), porque o SO contou direto. No macOS
+  a `Alca` já é o bundle id (o `focar` da decisão 0103 ativa esse app).
+- A cadeia de processos (`getppid`/`proc_pidinfo`) para o tmux e a restauração
+  de sessões, quando o `__CFBundleIdentifier` não basta, fica para depois (o
+  env var cobre o caso comum, e evita `unsafe` no hook).
+- **Canários:** o `app` entra no `CHAVES_DO_FIO` (27); os canários do hook
+  conferem que o `app` sai só nos dois eventos e só válido, que um app ruim
+  (com espaço) é descartado, e que nenhum segredo do ambiente
+  (`__CFBundleIdentifier` com segredo inválido incluso) vaza; o núcleo tem o
+  teste do `observar_app` e do `aviso::app`.
+
+Ao vivo (macOS): um `SessionStart` + `UserPromptSubmit` pelo hook com
+`__CFBundleIdentifier=com.googlecode.iterm2` deu a sessão com
+`janela: {certeza: certa, endereco: com.googlecode.iterm2}` no `/v1/estado`.
+585+ testes verdes, `bin/pet verificar` verde.
+
+**Por quê:** o SO sabe o app da sessão de graça; usá-lo é mais confiável que
+o anel por `ts`, e o campo é aditivo (o Linux não tem a variável). O `focar`
+já ativa o app pelo bundle id (decisão 0103), então o clique leva ao terminal
+certo mesmo com vários apps.

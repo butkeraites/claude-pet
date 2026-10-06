@@ -1358,7 +1358,12 @@ impl Motor {
                 let ts = cerebro::hora_do_evento(ev.ts, recebido_ms);
                 let achado = self.desktop.anel.em(ts);
                 self.identidades
-                    .observar(chave, achado, ev.term.clone(), ts, origem);
+                    .observar(chave.clone(), achado, ev.term.clone(), ts, origem);
+                // O hook disse o app (macOS): sobrepõe o anel (decisão 0105).
+                if let Some(app) = &ev.app {
+                    self.identidades
+                        .observar_app(chave, Alca(app.clone()), ts, origem);
+                }
             }
         }
         self.esquecer_janelas_sem_sessao();

@@ -46,9 +46,9 @@ use sha2::{Digest, Sha256};
 
 use crate::aprovacao::hex;
 use crate::evento::{
-    MAX_CONTAGEM, MAX_DURACAO_MS, MAX_FERRAMENTA, MAX_TAREFAS, ORIG_COMUM, ORIG_NOTIFICACAO,
-    Terminal, eh_enum, eh_hash_de_arquivo, eh_id, eh_nome_de_evento, eh_numero_de_terminal,
-    eh_origem, eh_painel_tmux, eh_projeto, eh_token,
+    MAX_APP, MAX_CONTAGEM, MAX_DURACAO_MS, MAX_FERRAMENTA, MAX_TAREFAS, ORIG_COMUM,
+    ORIG_NOTIFICACAO, Terminal, eh_enum, eh_hash_de_arquivo, eh_id, eh_nome_de_evento,
+    eh_numero_de_terminal, eh_origem, eh_painel_tmux, eh_projeto, eh_token,
 };
 
 /// O começo do prompt com que o Claude Code acorda a sessão quando uma tarefa
@@ -92,6 +92,9 @@ pub struct Contexto<'a> {
     pub dnd: bool,
     pub teste: bool,
     pub terminal: IdsDoAmbiente<'a>,
+    /// O `__CFBundleIdentifier` do ambiente do hook (o app que hospeda a
+    /// sessão no macOS; decisão 0105). Ausente fora do macOS.
+    pub app: Option<&'a str>,
 }
 
 /// Os ids de terminal como o ambiente do hook os tem (`TMUX_PANE`,
@@ -125,6 +128,16 @@ pub fn terminal(evento: &str, ids: &IdsDoAmbiente) -> Option<Terminal> {
             .map(str::to_owned),
     };
     (!t.vazio()).then_some(t)
+}
+
+/// O app que hospeda a sessão (o `__CFBundleIdentifier` do macOS), só nos
+/// eventos que casam a janela (os mesmos do terminal) e se passa pelo
+/// validador de token do pet (decisão 0105). É a `Alca` da janela no macOS.
+pub fn app(evento: &str, id: Option<&str>) -> Option<String> {
+    if !EVENTOS_COM_TERMINAL.contains(&evento) {
+        return None;
+    }
+    id.filter(|v| eh_token(v, MAX_APP)).map(str::to_owned)
 }
 
 /// O corpo do fio v1, na ordem do `avisar.sh`.
@@ -181,6 +194,8 @@ pub struct Fio {
     pub teste: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub term: Option<Terminal>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
 }
 
 /// O mínimo, quando a entrada não é um objeto JSON: `{"v":1,"e":"<Evento>"}`
@@ -879,6 +894,7 @@ pub fn montar(lido: &Lido, ctx: &Contexto, arq: Option<&str>) -> Fio {
         dnd: ctx.dnd,
         teste: ctx.teste.then_some(true),
         term: terminal(e, &ctx.terminal),
+        app: app(e, ctx.app),
     }
 }
 
@@ -919,7 +935,36 @@ mod testes {
             dnd: false,
             teste: false,
             terminal: IdsDoAmbiente::default(),
+            app: None,
         }
+    }
+
+    #[test]
+    fn app_do_macos_so_no_inicio_e_no_prompt_e_so_valido() {
+        let com = |e: &str, app: Option<&'static str>| {
+            let c = Contexto { app, ..ctx(e) };
+            let texto = corpo(br#"{"session_id":"s1"}"#, &c);
+            serde_json::from_str::<Value>(&texto).unwrap()
+        };
+        for e in EVENTOS_COM_TERMINAL {
+            assert_eq!(
+                com(e, Some("com.googlecode.iterm2"))["app"],
+                json!("com.googlecode.iterm2"),
+                "{e}"
+            );
+        }
+        // Fora dos eventos de casar janela, não sai.
+        assert!(
+            com("Stop", Some("com.googlecode.iterm2"))
+                .get("app")
+                .is_none()
+        );
+        // Um app que não é token não sai.
+        assert!(
+            com("UserPromptSubmit", Some("não vale"))
+                .get("app")
+                .is_none()
+        );
     }
 
     #[test]
