@@ -3,14 +3,14 @@
 {"t":1801000,"i":"base","estado":"sleep","prioridade":"dormindo","profundo":true}
 {"t":7201000,"i":"reacao","nome":"wake","motivo":"acordou"}
 {"t":7201000,"i":"base","estado":"idle","prioridade":"parado"}
-{"t":46810000,"i":"restauracao","sessoes":1,"de_fora":1}
+{"t":46810000,"i":"restauracao","sessoes":2,"velha":true}
 {"t":46820000,"i":"reacao","nome":"giggle","motivo":"clique"}
-{"t":46820000,"i":"balao","linhas":["api: parado (11 h)"],"motivo":"lista"}
+{"t":46820000,"i":"balao","linhas":["api: parado (11 h)","velha: parado (13 h)"],"motivo":"lista"}
 {"t":46820000,"i":"clique","resultado":"lista"}
 {"t":47000000,"i":"reacao","nome":"yawn","motivo":"sono"}
 {"t":47300000,"i":"base","estado":"sleep","prioridade":"dormindo"}
 {"t":48620000,"i":"base","estado":"sleep","prioridade":"dormindo","profundo":true}
 {"t":50410000,"i":"reacao","nome":"giggle","motivo":"clique"}
-{"t":50410000,"i":"balao","linhas":["nenhuma sessão do Claude aberta"],"motivo":"lista"}
+{"t":50410000,"i":"balao","linhas":["api: parado (12 h)","velha: parado (14 h)"],"motivo":"lista"}
 {"t":50410000,"i":"clique","resultado":"lista"}
 {"t":50410000,"i":"base","estado":"idle","prioridade":"parado"}

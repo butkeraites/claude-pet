@@ -339,6 +339,8 @@ Essa pasta do Omarchy **nunca** é montada no container, porque guarda o histór
 - Contam só sessões com `ent = cli`. Execuções `claude -p`, SDK e IDE são ignoradas por padrão (config `sessoes.origens`).
 - **SessionEnd sempre** limpa os avisos e o turno daquela sessão; só o "tchau" depende do motivo.
 - *Acréscimo (2026-10-05, decisão 0093):* o pet que reinicia não esquece as sessões abertas. A memória das sessões (`/state/sessoes.json`, só metadados das sessões reais, com o boot id da máquina) é gravada pelo laço principal quando muda (no batimento de 5 s) e no SIGTERM, e lida na partida, antes do compositor. Volta o que ainda vale pelas regras de sempre, contadas das horas de parede de antes (o relógio do laço recomeça do zero): a sessão de até 12 h, o estado com o prazo dele, o pronto e o erro de até 2 h, a espera; nada de turno, corrente ou festa, e a volta é quieta (a escalada segue do tempo que passou). Outra partida da máquina (outro boot id): nada volta; outro compositor: as sessões ficam, sem as janelas de antes.
+- *Acréscimo (2026-10-05, decisão 0095):* a volta faz o que o pet de pé faria. O sossego (o "não perturbe" do último evento, a soneca, a discrição da tela compartilhada) volta junto e segura a escalada na L1; os prazos contam o tempo acordado (o relógio do laço de quem gravou, mais a parada), como o pet que não reinicia numa máquina que suspende; a memória gravada há mais de 60 s é velha: as sessões voltam, mas as esperas voltam vistas (nada acima da L1) e as janelas sem o endereço. A saída grava sempre, e o batimento regrava a memória parada a cada 30 s.
+- *Acréscimo (2026-10-05, decisão 0096):* o Zeca acompanha todas as sessões abertas: uma sessão real sem evento nenhum sai só depois de uma semana (eram 12 h), além do `SessionEnd` (que chega também quando o terminal fecha) e da máquina que reinicia; a espera de uma sessão sem evento por 12 h sai sozinha, e a sessão fica.
 
 **Turnos:**
 - A chave é o `prompt_id`.
@@ -395,6 +397,7 @@ As outras sessões aparecem como selos: um contador "+N", uma bandeirinha com a 
 **Escalada de "precisa de você"** (só visual):
 - Há um espaço de aviso por sessão.
 - Um segundo gatilho em até 5 s só refina o tipo, e pergunta/plano tem prioridade sobre permissão. Evita aviso duplicado para o mesmo diálogo.
+- *Acréscimo (2026-10-05, revisão final, decisão 0097):* numa espera que a memória das sessões trouxe (a resposta pode ter se perdido com o pet fora), um gatilho mais de 10 s depois dela é de outro diálogo: a espera abre de novo e chama, como no pet de pé.
 
 | Nível | Quando | O que o Zeca faz |
 |---|---|---|
@@ -407,9 +410,13 @@ As outras sessões aparecem como selos: um contador "+N", uma bandeirinha com a 
 
 **Saída da escalada:** qualquer evento da própria sessão ou um clique no aviso exibido.
 
+*Correção (2026-10-05, decisão 0096):* a espera de uma sessão sem evento nenhum por 12 h sai sozinha (`expirou`), e a sessão fica.
+
 *Correção (2026-10-05, decisão 0094):* o `idle_prompt` também tira o aviso de espera que sobrou (ele nunca sai com um diálogo na tela: a espera é de um diálogo que acabou sem o evento chegar, como o respondido com o pet fora); o pronto e o erro continuam com ele.
 
 *Correção (2026-10-05, revisão, decisão 0090):* "olhando o terminal do Claude" é olhar o terminal da sessão que espera, quando a janela dela é certa (o de outra sessão não vale); 5 s nele com o Renan presente contam como o diálogo visto, e daí nada passa da L1 (o Esc numa pergunta e o plano recusado não mandam evento nenhum no 2.1.288, e são feitos ali). A pose de espera vem do aviso e dura até o teto da escalada, ou 2 min depois de o diálogo ser visto; o clique que vê o aviso a solta, e o pet pode dormir com o selo "!". Os voos da volta têm a conta deles (até 3), fora dos 3 da L3, e esperam o pet aparecer na tela (a proteção de tela que fecha depois do primeiro toque, a sessão bloqueada).
+
+*Correção (2026-10-05, revisão final, decisão 0098):* a escalada é da espera mais velha que o Renan ainda não viu, não só da mais velha: uma espera vista (no terminal dela, ou de volta de uma memória velha) não segura a vez de uma nova de outra sessão, e vista a da vez, a seguinte escala na hora. Cada espera guarda a vista dela (na memória também), e a pose de cada uma sai 2 min depois da dela.
 
 **Presença:**
 - `olhando_claude` = o título da janela focada começa com ✳, ◐ ou ◑ (vem do `activewindow` do socket2).
@@ -546,7 +553,7 @@ claude-pet/
   - a skin de teste nunca vira personagem.
 - Pegadinhas:
   - estouro de 64 eventos no socket2;
-  - `idle_prompt` repete a cada ~60 s;
+  - `idle_prompt` sai uma vez por turno, uns 60 s depois do Stop, nunca com um diálogo na tela (no 2.1.288; decisão 0099);
   - Stop não vem depois de Esc;
   - `hyprctl output create` não aceita nome;
   - nunca usar `compose.override.yml`;
@@ -576,6 +583,8 @@ claude-pet/
 | `plugin-atualizar` | atualiza a worktree estável do plugin |
 | `subir`, `parar`, `logs`, `reconstruir`, `dev` | atalhos do compose |
 | `verificar` | portão antes de commit |
+
+*Correção (2026-10-05, decisão 0099):* a soneca do clique direito já sobrevive a um reinício do pet, com a memória das sessões (decisão 0095; como as sessões, não a um boot da máquina). Do M7 ficam os comandos `soneca [30m]` e `acordar` do `bin/pet`.
 
 **`verificar` roda:**
 - `cargo fmt --check`;
@@ -617,6 +626,8 @@ M0–M3 estão na `main` (tags `v0.1.0`–`v0.3.0`). Daqui em diante:
    - **TS.4** a revisão: o anel do escuro sem juntar peças soltas (a poeira no rabo, o chapéu voando no topete, as notas no bico; o gerador e a montagem reprovam se juntar), o `sleep` só com o laço do sono (dentro dos 2 fps do dormindo) e a dedicação CC0 em nome do Renan, que confirma antes do merge (decisões 0068 e 0069); folhas de contato novas para a aprovação dele.
 
 A beta pública mínima é T8.0–T8.5 mais T9.0–T9.4.
+
+*Correção (2026-10-05, decisão 0099):* depois do M5 vem a parte macOS do M8 (a T8.2 no Mac, a T8.5 e o macOS da T8.7), na branch `m8-macos`, escrita no Mac do Renan (Apple Silicon; decisões de 0100 em diante); depois, M6 → M7 e o resto do M8. Pedido do Renan, que tem um Mac para testar de verdade.
 
 ### M0 — Fundação
 
@@ -734,7 +745,7 @@ Atualizado em 2026-10-03 (decisões 0038 e 0039). O M4 nasce em cima da costura 
 - **T4.8–T4.10** **clicar no Zeca leva à janela do terminal da sessão do Claude que terminou ou que precisa de você** (decisão 0039):
   - **T4.8** **identidade de janela por sessão:** o leitor do socket2 guarda um anel com as últimas ativações (`activewindowv2`: endereço da janela e a hora em que o evento chegou, nunca o título). O `ts` do `UserPromptSubmit` (e do `SessionStart`) de cada sessão escolhe no anel a janela que estava ativa quando o Renan mandou o prompt: é o terminal daquela sessão (o `SessionStart` só preenche uma janela que ainda não é certa, o de compactação e o prompt de sistema nunca casam, e um hook atrasado não desfaz um casamento mais novo; decisão 0060). O hook pode mandar também, num campo novo e opcional do fio v1 (validado no `pet_core::evento` e com decisão própria), os ids de terminal que ele vê no próprio ambiente (`TMUX_PANE`, `KITTY_WINDOW_ID`, `WEZTERM_PANE`; só ids, nunca títulos). Eles só separam sessões dentro de um mesmo terminal (painéis do tmux, abas): no Docker o daemon roda em outro espaço de PIDs, e nem o socket2 nem o foreign-toplevel trazem PID, então uma cadeia de PIDs não leva a uma janela sem o `hyprctl clients`, que é o socket de comandos (decisão 0043). Quando o anel tem dúvida (dois terminais trocados em menos de 1 s), o clique cai no balão com a lista;
   - **T4.9** **focar sem o socket de comandos:** `zwlr_foreign_toplevel_manager_v1` + `hyprland_toplevel_mapping_manager_v1` (que liga cada handle de toplevel ao endereço de janela do Hyprland, o mesmo do `activewindowv2`) e `zwlr_foreign_toplevel_handle_v1.activate(seat)`. O daemon continua sem abrir o `.socket.sock` e sem chamar `hyprctl` (decisão 0006). Conferir na 0.56.2 que os dois protocolos aparecem no registro; se faltar algum, o clique cai no balão;
-  - **T4.10** **pendências em ciclo:** com vários avisos (precisa de você, erro, pronto), o primeiro clique vai ao mais urgente, pela prioridade do cérebro (esperando você > erro > pronto), e cada clique seguinte vai ao próximo. O clique que foca a janela de uma sessão marca o aviso dela como visto; o foco sem clique segue as regras de sempre (o pronto some depois de ~10 s com o terminal da sessão em foco e o Renan no teclado ou no mouse, pelo `ext_idle_notifier_v1`; bloqueado ou longe, fica; decisão 0062; o "esperando você" só sai com um evento da própria sessão ou um clique); um clique mais de 15 s depois do anterior recomeça do mais urgente;
+  - **T4.10** **pendências em ciclo:** com vários avisos (precisa de você, erro, pronto), o primeiro clique vai ao mais urgente, pela prioridade do cérebro (esperando você > erro > pronto), e cada clique seguinte vai ao próximo. O clique que foca a janela de uma sessão marca o aviso dela como visto; o foco sem clique segue as regras de sempre (o pronto some depois de ~10 s com o terminal da sessão em foco e o Renan no teclado ou no mouse, pelo `ext_idle_notifier_v1`; bloqueado ou longe, fica; decisão 0062; o "esperando você" só sai com um evento da própria sessão ou um clique (e, desde a decisão 0096, 12 h sem evento)); um clique mais de 15 s depois do anterior recomeça do mais urgente;
   - **T4.10** **clique sem pendência** (o balão mínimo e a fonte na **T4.6**): um balão com a lista das sessões abertas (nome da pasta do projeto, estado — pensando, trabalhando, esperando você, pronto, parado — e há quanto tempo), que some sozinho. Pede o **balão mínimo e a fonte de pixel** (monogram, CC0), puxados do M6; o M6 só acrescenta pop, datilografia e as frases;
   - **T4.10** **sem como focar** (a janela fechou, a sessão não tem identidade, o compositor não oferece os protocolos): o balão diz isso e mostra a lista;
 - **tamanho:** `aparencia.tamanho` (`pequeno`, `normal`, `grande`) chega antes, no TP.2; no M4 o arraste, as posições salvas e o balão usam o D que o tamanho escolhido dá em cada monitor.
@@ -796,8 +807,12 @@ Atualizado em 2026-10-05 com a pesquisa do M5 (`docs/pesquisa/10-cerebro-m5.md`,
 - **T5.24** o que ficou da revisão: o T3 que não tocou não gasta o intervalo, o log da reação do próprio pet, o comentário partido do `bin/pet`, a regra do "✳" fora, a presença no casamento da janela, os limites conhecidos (o tique na mesma janela, as mensagens de teammate e de canal, o "não perturbe" que só chega com os eventos) e as docs (PLANO, CLAUDE.md, README) reconciliadas (decisão 0092).
 
 **A memória das sessões** (relatado pelo Renan em 2026-10-05: cada reinício do pet esquecia as sessões abertas, e o clique dizia "nenhuma sessão do Claude aberta"; decisão 0093):
-- **T5.25** a memória das sessões: `pet_core::memoria` (o formato com versão, só metadados das sessões reais, até 64 sessões e 256 KiB, conferido campo a campo), os instantes do laço com sinal no cérebro e na escalada (`cerebro::Instante`, `Agora::no_laco`, `cerebro::depois`), o `Cerebro::restaurar` pelas regras de sempre, o `Motor::restaurar` quieto (a `Escalada::retomada`, a intenção `restauracao`, a marca `restaurada` no `/v1/estado.sessoes`), a instância do compositor nas janelas (`Motor::definir_compositor`), no daemon a gravação de uma vez pelo laço (no batimento, quando muda, e no SIGTERM) e o boot id do Linux; o passo `reinicio` nos cenários (e no `docs/CENARIOS.md`) e os dourados de reinício, o teste do daemon de verdade e o canário; na revisão, o `idle_prompt` que tira a espera que sobrou e as horas do futuro fora da memória (decisão 0094);
+- **T5.25** a memória das sessões: `pet_core::memoria` (o formato com versão, só metadados das sessões reais, até 64 sessões e 256 KiB, conferido campo a campo), os instantes do laço com sinal no cérebro e na escalada (`cerebro::Instante`, `Agora::no_laco`, `cerebro::depois`), o `Cerebro::restaurar` pelas regras de sempre, o `Motor::restaurar` quieto (a `Escalada::retomada`, a intenção `restauracao`, a marca `restaurada` no `/v1/estado.sessoes`), a instância do compositor nas janelas (`Motor::definir_compositor`), no daemon a gravação de uma vez pelo laço (no batimento, quando muda, e no SIGTERM) e o boot id do Linux; o passo `reinicio` nos cenários (e no `docs/CENARIOS.md`) e os dourados de reinício, o teste do daemon de verdade e o canário; na revisão, o `idle_prompt` que tira a espera que sobrou e as horas do futuro fora da memória (decisão 0094); na segunda revisão, o sossego que volta, a memória velha (gravada há mais de 60 s) que volta quieta e sem os endereços das janelas, o tempo acordado (`*_laco_ms` e `memoria::Volta`), o pronto da acomodação, a gravação que falha e os testes do daemon com o Hyprland de mentira (decisão 0095); e todas as sessões abertas: a vida de uma semana sem evento e a espera que sai em 12 h (decisão 0096);
 - **T5.26** as docs e a conferência: o CLAUDE.md (o estado, as pegadinhas da memória e do `/reload-plugins`), o README, a conferência ao vivo num daemon de rascunho com uma sessão aninhada, e a produção refeita da branch e reiniciada com as sessões reais do Renan na lista antes e depois.
+
+**Revisão final** (a revisão final do M5 antes do merge; decisões 0097 em diante):
+- **T5.27** o diálogo novo numa espera que a memória trouxe chama, como no pet de pé (decisão 0097); a espera vista não segura a vez da que o Renan não viu, e cada espera guarda a vista dela, também na memória (decisão 0098); as docs (o CLAUDE.md, o README, a tabela de verificação reconciliada com os dourados das decisões 0095 a 0098) e a produção refeita da branch com o estado do Renan intacto.
+- **T5.28** a última rodada antes do merge (decisão 0099): o refresco da memória das sessões também pela parede (a memória parada regravada no primeiro batimento depois de uma suspensão), os dias na lista do clique ("2 d"), o teste da espera que sai 12 h depois do último evento da sessão (não do aviso), as docs e os comentários com o `idle_prompt` de uma vez por turno, a soneca que volta com a memória e as regras das decisões 0094 e 0096, e o estado do repositório escrito para a `main` depois do merge.
 
 **Verificação:** `bin/pet verificar` verde a cada commit e `cargo test -p pet-core` com os cenários. Tabelas, exemplos de pontuação (decisão 0074) e cenários:
 
@@ -813,7 +828,7 @@ Atualizado em 2026-10-05 com a pesquisa do M5 (`docs/pesquisa/10-cerebro-m5.md`,
 | `pergunta-noutro-terminal` | o Renan no terminal de outra sessão: a escalada segue; 5 s no terminal dela e nada mais escala (decisão 0090) |
 | `pergunta-dispensada` | o Esc no terminal: visto, sem escalada com o Renan longe; a pose sai e o pet dorme (decisão 0090) |
 | `pergunta-com-protetor-de-tela` | a volta com a proteção de tela ainda aberta voa quando o pet aparece (decisão 0090) |
-| `idle-prompt-repetido` | — |
+| `idle-prompt-repetido` | um `idle_prompt` repetido não faz nada (o 2.1.288 manda um por turno, decisão 0099): depois de uma festa, nada; com o turno aberto sem Stop, o primeiro fecha sem festa |
 | `servidor-em-segundo-plano` | festas normais com um dev server rodando |
 | `workflow-longo` | T3 no Stop final da corrente (a notificação que a fecha) |
 | `workflow-agentes-depois-do-stop` | os agentes que o workflow lança depois do Stop são da corrente: T3 no fim (decisão 0089) |
@@ -829,9 +844,16 @@ Atualizado em 2026-10-05 com a pesquisa do M5 (`docs/pesquisa/10-cerebro-m5.md`,
 | `reinicio-com-pergunta` | a escalada segue do tempo que passou, sem chamar de novo; os voos e a L4 nas horas deles |
 | `reinicio-com-pergunta-respondida-fora` | a resposta e o Stop se perdem com o pet fora: a espera volta e sai no `idle_prompt`, sem festa (decisão 0094) |
 | `reinicio-com-pronto-e-erro` | o pronto e o erro voltam sem festa nem susto; o clique leva aos terminais de antes |
-| `reinicio-depois-de-13-h` | a sessão de 13 h não volta; a de 11 h sai na hora dela |
+| `reinicio-depois-de-13-h` | as duas sessões (13 h e 11 h sem evento) voltam, com a memória velha, e ficam na lista do clique (decisão 0096; antes, a de 13 h não voltava e a de 11 h saía nas 12 h dela) |
 | `reinicio-da-maquina`, `reinicio-com-arquivo-corrompido` | nada volta |
 | `reinicio-com-outro-compositor` | a sessão volta sem a janela de antes; o próximo prompt casa a nova |
+| `reinicio-com-nao-perturbe`, `reinicio-na-soneca`, `reinicio-compartilhando` | o "não perturbe", a soneca e a discrição da tela compartilhada voltam com a memória e seguram a espera na L1 até acabar; depois, a L4 na hora dela (decisão 0095) |
+| `reinicio-depois-de-uma-pausa` | 10 min fora (a memória velha): a espera volta vista, sem a pose, e a janela sem o endereço (o clique diz que não a viu); o prompt seguinte casa de novo (decisão 0095) |
+| `reinicio-na-acomodacao` | a parada nos 0,8 s da acomodação do Stop traz o pronto, sem festa (decisão 0095) |
+| `espera-de-uma-noite` | ninguém responde: a escalada até o teto, o sono com o selo, e 12 h depois do último evento a espera sai (`expirou`) e a sessão fica na lista (decisão 0096) |
+| `reinicio-com-outro-dialogo` | a resposta se perde com o pet fora; o diálogo seguinte, o primeiro evento depois da volta, chama na hora e escala (decisão 0097) |
+| `reinicio-velho-com-outra-sessao`, `pergunta-vista-e-outra-sessao` | uma espera vista (de volta de uma memória velha, ou vista no terminal e dispensada com o Esc) e a pergunta nova de outra sessão com o Renan longe: a nova escala (a L2, a L3 e o voo da volta); respondida, a vez volta à vista, sem escalar (decisão 0098) |
+| `reinicio-duas-vezes-com-duas-esperas` | duas esperas vistas de uma memória velha: a pose das duas sai 2 min depois da gravação, e no reinício seguinte as duas seguem vistas (nada escala na vez da segunda; decisão 0098) |
 
 **Verificação da segunda metade:** o desenho não muda as intenções (os dourados e o teste que roda todos os cenários sem personagem); o orçamento em relógio falso, com o compositor mostrando cada quadro na hora (o pior caso): trabalhando por 20 min, na espera da L4 por 10 min e parado por 30 min, em média até 2 commits/s, o sono profundo sem commit nenhum, e as rajadas (o voo, o confete) curtas e sem dois quadros a menos de 34 ms; cada desenho novo em blocos inteiros (D, ou a metade dele nos selos) e dentro do monitor; o canário do socket2 com segredos no `screencastv2`; ao vivo, `bin/pet testar medio|grande|pergunta|dois-prontos` com a reação e o nível no `/v1/estado`; com a tela acesa e desbloqueada, `bin/pet foto`, a nitidez e o `scripts/medir-custo.sh`.
 

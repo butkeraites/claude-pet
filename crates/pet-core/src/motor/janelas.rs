@@ -433,7 +433,10 @@ impl Identidades {
     /// A janela de uma sessão que a memória restaurou. Uma janela de outra
     /// instância do compositor (já conhecida) sai na hora; com o compositor
     /// ainda por achar (a partida da máquina), ela espera a instância dele.
-    pub fn restaurar(&mut self, chave: Chave, guardada: &JanelaGuardada) {
+    /// Numa memória velha (`velha`, decisão 0095) o endereço não volta (a
+    /// janela pode ter fechado na parada, e o endereço ser de outra): os ids
+    /// de terminal ficam, e o próximo prompt digitado casa a janela de novo.
+    pub fn restaurar(&mut self, chave: Chave, guardada: &JanelaGuardada, velha: bool) {
         let mut identidade = Identidade {
             janela: guardada.endereco.clone().map(Alca),
             certeza: guardada.certeza,
@@ -441,6 +444,10 @@ impl Identidades {
             em_ms: guardada.em_ms,
             compositor: guardada.compositor.clone(),
         };
+        if velha && identidade.janela.is_some() {
+            identidade.janela = None;
+            identidade.certeza = Certeza::SemAnel;
+        }
         if let Some(agora) = &self.compositor
             && identidade.janela.is_some()
             && identidade.compositor.as_ref() != Some(agora)

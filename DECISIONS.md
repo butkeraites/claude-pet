@@ -4167,6 +4167,382 @@ passou, e o `idle_prompt` é a prova, mandada pela própria sessão, de que não
 há diálogo na tela: o primeiro evento depois de um turno perdido. E nada lido
 do disco pode pôr um prazo fora do relógio do laço.
 
+## 0095 — Segunda revisão da memória das sessões: o sossego volta, a memória velha volta quieta e o tempo é o acordado (2026-10-05)
+
+**Problema:** três revisões adversariais da memória (decisões 0093 e 0094),
+conferidas antes de mexer:
+- **O sossego se perdia.** O "não perturbe", a soneca e a discrição da tela
+  compartilhada seguram a escalada na L1 (decisões 0075, 0081 e 0091), mas
+  moravam só na memória do processo. Depois de um reinício, a espera que
+  voltava subia aos voos da L3 e às rajadas da L4 com o pulso por cima dos
+  três: reproduzido no `bichinho simular` (o "não perturbe" em todo evento, a
+  soneca aos 12 s, a tela compartilhada até 16 s; o pet parando aos 60 s).
+- **A memória de qualquer idade valia.** O `gravada_ms` nunca era lido. Uma
+  memória velha (a produção de volta à `main` e de novo à branch, um `bin/pet
+  parar` e um `subir` horas depois, gravações falhando por muito tempo)
+  trazia a espera de um diálogo que acabou na parada, e o `idle_prompt` que a
+  tiraria (decisão 0094) também se perde quando a parada passa de uns 60 s:
+  10 min fora deram 25 min de L4 por uma pergunta já respondida (reproduzido).
+  O endereço de uma janela que fechou na parada pode ser o de outra (decisão
+  0093: focar a janela errada é pior que o balão).
+- **A volta contava a parede; o pet de pé conta o tempo acordado.** O relógio
+  do laço (o `Instant` do Linux) não anda com a máquina suspensa, e as vidas
+  do pet que não reinicia (a da sessão, a de 2 h do pronto) contam só o tempo
+  acordado. A volta contava pela parede: depois de uma noite suspensa, a
+  primeira atualização tirava as sessões que o pet de pé ainda listava, o
+  sintoma relatado pelo Renan (nesta máquina, 14,3 h suspensas desde o boot).
+- **Menores:** o pronto de um Stop nos 0,8 s da acomodação se perdia numa
+  parada ali; a hora em que o Renan viu o diálogo era refeita pela conta
+  parede menos relógio do laço a cada gravação (oscila 1 ms e pula com uma
+  suspensão), e o arquivo era regravado sem mudança; a gravação que falhava
+  deixava o temporário; a leitura que falhava não ficava nas intenções; e
+  nenhum teste do daemon pegava a descoberta sem o compositor (`laco.rs`) nem
+  a gravação da saída (o batimento podia gravar antes dela).
+
+**Escolha:**
+- **O sossego volta** (`memoria::Sossego`, no arquivo só quando há): o "não
+  perturbe" do último evento (vale até o próximo evento, como no pet de pé),
+  o fim da soneca e a discrição (com o último sinal, ou o sinal ainda aceso
+  na gravação), postos antes de a escalada seguir; a soneca e a discrição só
+  se ainda valem, contadas de antes. A intenção `restauracao` diz o que
+  voltou (`sossego`), e a discrição desliga 5 min depois do último sinal de
+  antes, com a intenção de sempre.
+- **A memória velha** é a gravada há mais de 60 s pela parede
+  (`MEMORIA_VELHA_MS`, o tempo do `idle_prompt`), ou adiante disso (o relógio
+  voltou). As sessões voltam todas (o Renan quer ver as abertas), mas as
+  esperas voltam dadas como vistas na hora da gravação: nada passa da L1, e a
+  pose de espera sai 2 min depois dela, como a de um diálogo visto (numa
+  parada longa, já saiu); o selo "!" e o clique ficam, também para a espera
+  que ganha a vez depois. As janelas voltam sem o endereço (os ids de terminal
+  ficam; o próximo prompt digitado casa de novo). A intenção `restauracao`
+  leva `velha`, e o log diz. Para a parada medir até quando o pet sabia: a
+  saída grava sempre (o log diz "gravada(s) na saída"), e o batimento regrava
+  a memória que não mudou a cada 30 s (`REFRESCO_MEMORIA_MS`, só com algo a
+  lembrar), então a parada de um crash fica abaixo dos 60 s. Isto corrige o
+  limite escrito na decisão 0094: a espera respondida com o pet fora só segue
+  escalando até o `idle_prompt` numa parada curta; numa longa, volta quieta.
+- **O tempo acordado:** cada instante vai também no relógio do laço de quem
+  gravou (`ultimo_evento_laco_ms`, `estado_desde_laco_ms`, `desde_laco_ms` e
+  `vista_laco_ms` do aviso, com o `laco_ms` da gravação), e a volta conta o
+  tempo acordado até a gravação mais a parada pela parede (`memoria::Volta`).
+  Um prazo restaurado é o do pet que não reiniciou, até ao milissegundo (o
+  pronto conta do fim da acomodação, como no pet de pé). As horas de parede
+  ficam para o `/v1/estado` e o balão; um arquivo sem o relógio do laço (o da
+  decisão 0093) conta pela parede. Um instante do laço depois da gravação
+  deixa a sessão de fora, como as horas do futuro (decisão 0094). Tudo segue
+  na versão 1 do arquivo: os campos novos são opcionais.
+- **O pronto da acomodação** vai na memória: o mesmo fechamento que o tique
+  faria no fim dela, numa cópia da sessão (nada muda no cérebro).
+- **A hora em que o Renan viu o diálogo** vai como foi anotada, na parede e
+  no relógio do laço: a memória que não mudou grava igual.
+- **A gravação que falha** tira o temporário e deixa o arquivo de antes; o
+  aviso sai uma vez, e o batimento seguinte tenta de novo. A leitura que
+  falha fica nas intenções (`erro_de_leitura`).
+- **Testes:** no formato, o sossego e o relógio do laço de ida e volta, os
+  ruins valendo como nenhum, e a `Volta` (o tempo acordado mais a parada, a
+  parede sem o relógio do laço, a memória velha dos dois lados); no cérebro,
+  a máquina suspensa por mais que a vida da sessão (o pet de pé e a volta
+  igual; pela parede, a sessão teria morrido), o instante depois da gravação
+  e o pronto da acomodação (o de um turno de máquina, não); no Motor, o
+  sossego (cada um segura a escalada, e sem ele ela sobe), a memória velha
+  (as duas esperas vistas, as janelas sem endereço, e uma espera nova de
+  agora escalando) e a memória que grava igual com a parede andando
+  diferente; os dourados `reinicio-com-nao-perturbe`, `reinicio-na-soneca`,
+  `reinicio-compartilhando`, `reinicio-depois-de-uma-pausa` e
+  `reinicio-na-acomodacao` (o `reinicio-depois-de-13-h` ganha o `velha`, e
+  nenhum outro dourado mudou); no daemon, o refresco e a saída, a gravação
+  que falha, a leitura que falha e, no binário de verdade com o Hyprland de
+  mentira, a janela de outra instância que sai na descoberta e a gravação da
+  saída pelo log. 18 mutações reprovaram (cada parte do sossego, a memória
+  nunca velha, a espera velha que escala na volta ou na vez, a janela velha
+  que fica, a volta pela parede, o pronto da acomodação, a vista pela conta
+  da parede, o instante depois da gravação, a saída que só grava com
+  mudança, o refresco, o temporário que fica, a leitura sem intenção, a
+  descoberta sem o compositor e a saída sem gravar).
+- **Limites:** numa memória velha, a espera volta vista mesmo que o Renan
+  não tenha respondido (o pet não tem como saber): fica o selo e o clique; o
+  "não perturbe" que volta vale até o próximo evento, como no pet de pé; uma
+  suspensão da máquina com o pet fora conta como parada; o intervalo do T3
+  continua sem memória (decisão 0093).
+
+**Por quê:** a volta não pode fazer o que o pet de pé não faria: escalar por
+cima do "não perturbe", da soneca ou da tela compartilhada, chamar por um
+diálogo que pode ter acabado numa parada longa, focar um endereço que pode
+ser de outra janela, nem esquecer as sessões que uma suspensão não esqueceria.
+Medir a idade da memória pela saída e pelo refresco deixa a parada curta de
+uma atualização igual a antes, e quieta só o que a parada longa pode ter
+mudado.
+
+## 0096 — Todas as sessões abertas: a sessão real não sai mais em 12 h sem evento (2026-10-05)
+
+**Problema:** a decisão do Renan é que o Zeca acompanhe todas as sessões
+abertas do Claude. A memória (decisões 0093 e 0095) cobre o reinício do pet,
+mas a regra de 2026-10-03 (decisão 0020) tirava uma sessão real depois de 12
+h sem evento, com o pet de pé ou na volta: uma sessão parada de uma noite (a
+máquina do Renan fica acordada: no ar há 14 dias, com 14,3 h suspensas) sumia
+da lista, e o clique voltava a dizer "nenhuma sessão do Claude aberta" com a
+sessão aberta. A regra existia para enterrar a sessão de um processo que
+morreu sem o `SessionEnd`. Hoje o boot id (decisão 0093) já tira as de uma
+máquina que reiniciou, e o terminal que fecha manda o `SessionEnd`: numa
+sessão aninhada do 2.1.288 no tmux, matar o tmux (o SIGHUP de um terminal
+que fecha) mandou o `SessionEnd` com o motivo `other`, e o pet tirou a sessão
+com o tchau (conferido em 2026-10-05, num daemon de rascunho). E sem a vida
+de 12 h, uma espera não sairia nunca: um Esc numa pergunta não manda nada
+(decisão 0090).
+**Escolha:**
+- **A vida de uma sessão real sem evento nenhum passa a uma semana**
+  (`VIDA_SESSAO_MS`), no tempo acordado como antes; o `SessionEnd` e a máquina
+  que reinicia continuam tirando na hora. A sessão de um processo que morreu
+  sem o `SessionEnd` (um `kill -9`, um crash) fica na lista do clique até lá,
+  parada e no fim (a lista vai da mais recente à mais velha, e o balão mostra
+  5 linhas e o "+ N"); vencidos os avisos dela (em até 12 h), ela não segura
+  a base nem entra no "+N".
+- **A espera sai sozinha depois de 12 h sem evento nenhum da sessão**
+  (`VIDA_ESPERA_MS`): o aviso "esperando você" e o estado; a sessão fica,
+  parada. A escalada acaba com o motivo novo `expirou`. Na volta da memória,
+  igual: a espera de uma sessão sem evento há mais de 12 h volta parada, sem o
+  aviso.
+- **Testes:** no cérebro, a espera que sai em 12 h com a sessão ficando até
+  uma semana, e a volta (a sessão de 13 h volta, a espera de 13 h volta
+  parada, a de uma semana fica de fora); o dourado novo `espera-de-uma-noite`
+  (a escalada até o teto, o sono com o selo, a espera que expira e a sessão
+  na lista do clique) e o `reinicio-depois-de-13-h` refeito (as duas sessões
+  voltam e ficam na lista); sete mutações reprovaram (a vida de 12 h, a
+  espera que nunca sai, o estado que fica esperando, a espera sem prazo, a
+  volta com a espera velha ou ainda esperando, o `expirou` que vira `andou`).
+- **Limites:** a sessão de um processo que morreu sem o `SessionEnd` fica
+  na lista até uma semana sem evento; a espera sem evento por 12 h sai mesmo
+  com o diálogo ainda na tela (o pet não tem como saber; antes, a sessão
+  inteira saía junto).
+**Por quê:** o clique que diz "nenhuma sessão aberta" com uma sessão aberta
+é o erro que o Renan relatou, e uma noite parada o repetia sem reinício
+nenhum. O fantasma que ficou (o processo morto sem o `SessionEnd`) é raro,
+quieto e vai para o fim da lista; esquecer uma sessão aberta é o contrário do
+trabalho do Zeca. A espera continua com prazo: chamar por um diálogo de 12 h
+sem evento nenhum seria pior que deixá-la no clique.
+
+## 0097 — Revisão final da memória: o diálogo novo numa espera que voltou chama (2026-10-05)
+
+**Problema:** a revisão final do M5 achou, e o `bichinho simular` reproduziu,
+um diálogo novo engolido pela espera que a memória das sessões trouxe. A
+sessão restaurada volta "esperando" sem turno aberto (decisão 0093), e a
+resposta do diálogo de antes pode ter se perdido com o pet fora. Se o primeiro
+evento dela depois da volta é o gatilho de outro diálogo (o `PermissionRequest`
+de um Bash, uma pergunta, o plano, a notificação de um formulário), o estado
+não muda: o cérebro tratava como o mesmo diálogo (decisão 0075), só refinava o
+tipo e deixava a espera de antes com a hora dela. O Motor reconhece cada espera
+pela sessão e por essa hora: nem a chamada, nem a L1 de novo; numa memória
+velha a espera de antes volta vista (decisão 0095), então nada escalava, a pose
+saía e o pet dormia com o Claude parado num diálogo que o Renan nunca viu.
+Reproduzido: uma pergunta aos 10 s, o pet 2 min fora com a resposta perdida, a
+permissão de um Bash aos 150 s: nada aos 150 s e o bocejo aos 330 s (sem o
+reinício: a chamada, o balão e a L1 aos 150 s, a L2 aos 180 s, a L3 aos 240
+s). Numa parada curta, com o diálogo de antes já visto no terminal, o mesmo.
+**Escolha:**
+- **A espera que a memória trouxe guarda a hora em que a sessão entrou nela**,
+  até o estado da sessão mudar. Os gatilhos de um diálogo chegam em até uns 6 s
+  dele (o `PreToolUse` e o `PermissionRequest` juntos, a notificação
+  `permission_prompt` 6 s depois; T5.1). Um gatilho mais de 10 s depois dela
+  (`GATILHOS_DO_DIALOGO_MS`) é outro diálogo: a sessão entra na espera de novo,
+  como no pet de pé (o estado desde ele, o aviso novo com o tipo dele), e o
+  Motor chama (a chamada, o balão, a escalada desde a L1). A espera de antes
+  sai, e a marca de vista dela junto. Um gatilho dentro dos 10 s é do mesmo
+  diálogo e só refina, como sempre.
+- Vale também para a espera vista pelo clique antes da partida (o estado
+  "esperando" sem o aviso): o diálogo novo chama.
+- A marca sai na primeira mudança de estado da sessão (a resposta, o prompt, o
+  Stop, o `idle_prompt`); os eventos de um subagente no meio não a tiram. Com o
+  pet de pé, nada muda.
+**Testes:** no cérebro, a permissão depois da volta (a espera nova, desde ela),
+o subagente no meio, o formulário que só manda a notificação, a notificação do
+mesmo diálogo 6 s depois dele (só refina), a sessão que andou (daí em diante,
+as regras de sempre) e a espera sem o aviso; o dourado novo
+`reinicio-com-outro-dialogo` (a chamada, o balão e a L1 aos 150 s, a L2 aos 180
+s, a L3 aos 240 s), e nenhum outro dourado mudou. Cinco mutações reprovaram
+(sem o outro diálogo, a janela zero, a marca que não sai na mudança de estado,
+a volta sem a marca, a notificação que não é gatilho).
+**Limites:** um gatilho do mesmo diálogo que chegasse mais de 10 s depois dele,
+logo depois da volta, chamaria de novo (uma vez: a marca sai ali). Com o pet de
+pé, um diálogo novo sem nenhum evento da sessão desde o de antes continua sendo
+o mesmo (decisão 0075; não visto no 2.1.288).
+**Por quê:** a volta não pode calar o que o pet de pé chamaria (decisão 0095),
+e o Claude parado num diálogo que o Renan nunca viu, com o pet dormindo, é o
+erro contrário ao da decisão 0090. O tempo entre os gatilhos de um diálogo é
+medido (T5.1), e a marca só vale para a espera que a memória trouxe, a única em
+que a resposta pode ter se perdido.
+
+## 0098 — Revisão final da escalada: a espera vista não segura a vez da que o Renan não viu (2026-10-05)
+
+**Problema:** a revisão final do M5 achou, e o `bichinho simular` reproduziu,
+três defeitos de uma raiz só: "vista" (o diálogo 5 s no terminal da sessão,
+decisão 0090; a espera que volta de uma memória velha, decisão 0095) morava
+só na escalada da espera da vez.
+- **A espera vista segurava a vez.** Só a espera mais velha escala (decisão
+  0079), e a vista não passa da L1: a mais velha vista ficava com a vez, e a
+  pergunta nova de outra sessão ganhava só a L1, sem rajada, voo, o pulso da
+  L4 nem o voo da volta do Renan. Durava até a vista sair, com um evento da
+  sessão dela (o Esc numa pergunta não manda nenhum, decisão 0090) ou nas 12 h
+  da decisão 0096. Acontecia com o pet de pé (a pergunta vista e dispensada
+  com o Esc) e, muito mais, depois de toda parada de mais de 60 s, em que as
+  esperas voltam vistas. Reproduzido: a api pergunta, o pet fica 10 min fora,
+  e a web pergunta com o Renan longe: só a chamada da L1 (sem o reinício: a
+  L2, a L3 e o voo da volta).
+- **A vista das outras se perdia.** Só a da vez ia para o arquivo da memória:
+  numa memória velha com duas esperas, um reinício curto depois trazia a
+  segunda sem a vista, e quando a vez chegava a ela, ela escalava na hora até
+  a L3 e a L4 pela idade (a decisão 0095 diz que elas nunca passam da L1,
+  "também quando a vez delas chega depois").
+- **A pose das outras vistas não saía.** A pose de espera sai 2 min depois da
+  vista (decisão 0090) só na da vez: uma segunda espera vista segurava a pose
+  até o teto, 35 min depois de aberta, e o pet não dormia.
+**Escolha:**
+- **Cada espera guarda a vista dela** (`motor::Vista`: o aviso, a hora no
+  relógio do laço e na parede), uma por sessão, até a espera sair: a vista no
+  terminal da sessão, a da memória velha (na gravação) e a que vem no arquivo.
+- **A vez é da espera mais velha que o Renan ainda não viu** (corrige a
+  decisão 0079). Com todas vistas, a que já tinha a vez (nada de ir e
+  voltar), ou a mais velha: o selo "!" e o clique ficam, e nada passa da L1.
+  A espera nova de outra sessão pega a vez de uma vista (a escalada da vista
+  acaba com o motivo `outro_aviso`, e a nova chama e escala desde a L1);
+  vista a da vez, a vez passa na hora à seguinte que ele não viu, no relógio
+  dela (como quando a mais velha sai); respondida a nova, a vez volta à vista
+  (`vez`), que continua sem escalar.
+- **A memória leva a vista de cada espera** (o `vista_ms` e o
+  `vista_laco_ms` de todas, não só da vez), e a volta devolve cada uma; o
+  formato do arquivo não muda.
+- **A pose de cada espera** sai 2 min depois da vista dela, seja ou não a da
+  vez.
+**Testes:** no Motor, a vista que passa a vez na hora (a seguinte já na L2),
+a vez que fica com a que a tinha quando as duas são vistas, a que volta à
+vista sem escalar, e a memória que leva as duas vistas e solta a pose das
+duas; três dourados novos: `reinicio-velho-com-outra-sessao` (a memória velha
+e a pergunta de outra sessão: a L2, a L3 e o voo da volta),
+`pergunta-vista-e-outra-sessao` (o mesmo com o pet de pé: a pergunta vista e
+o Esc) e `reinicio-duas-vezes-com-duas-esperas` (duas esperas vistas de uma
+memória velha: a pose das duas sai 2 min depois da gravação, e no reinício
+seguinte as duas seguem vistas; nada escala na vez da segunda). Nenhum outro
+dourado mudou. Seis mutações reprovaram (a vista que segura a vez, a vez que
+vai e volta, a vista que não passa a vez na hora, a memória só com a vista da
+vez, a volta que esquece a vista do arquivo, a pose que só olha a da vez).
+**Limites:** "vista" continua sendo só a do terminal da sessão da vez (outro
+terminal de sessão em foco não conta até a vez chegar a ela, como antes). Um
+arquivo gravado antes desta decisão traz só a vista da que tinha a vez: numa
+parada curta, as outras voltam sem a vista, como antes.
+**Por quê:** a espera que o Renan viu já cumpriu o trabalho da escalada;
+segurar a vez para ela calava o pet justamente no diálogo que ele não viu, o
+erro contrário ao da decisão 0090, e a parada longa (decisão 0095) só pode
+quietar o que ela pode ter mudado, não o que chega depois dela. Com a vista
+em cada espera, as regras das decisões 0090 e 0095 valem para todas, sem
+depender de qual tem a vez.
+
+## 0099 — A última rodada antes do merge do M5: o refresco da memória pela parede, os dias na lista, o `idle_prompt` de uma vez por turno e a soneca que volta (2026-10-05)
+
+**Problema:** a última leitura do M5 antes do merge achou:
+- **O refresco da memória contava só o relógio do laço.** A idade da memória
+  (`Volta::velha`, 60 s) e a parada contam pela parede, e o refresco de 30 s
+  (decisão 0095) contava pelo relógio do laço, que não anda com a máquina
+  suspensa. Depois de uma noite suspensa com a memória parada, o arquivo
+  ficava com a gravação de antes da suspensão até 30 s acordados depois da
+  volta: um crash ali traria a memória como de horas atrás (as esperas
+  vistas, as janelas sem o endereço e a noite contada como parada, gastando
+  prazos que o pet de pé, no tempo acordado, não gasta). A asserção de
+  compilação que somava o refresco e o batimento contra a memória velha
+  misturava os dois relógios e só valia com a máquina acordada.
+- **A lista do clique dizia até "167 h":** desde a decisão 0096 uma sessão
+  sem evento fica uma semana, e a `balao::duracao` parava nas horas.
+- **O `idle_prompt` "se repete a cada ~60 s"** na pegadinha do CLAUDE.md, na
+  lista do PLANO, no comentário de um teste do cérebro e na descrição do
+  cenário `idle-prompt-repetido`. Isso veio de relatos de antes do M5
+  (`docs/pesquisa/07-desenho-sintese.md`); no 2.1.288 ele sai uma vez por
+  turno, uns 60 s depois do Stop, e nunca com um diálogo na tela
+  (`docs/pesquisa/10-cerebro-m5.md`, T5.1 e T5.7). A decisão 0094 apoiou
+  nisso o pronto e o erro que ficam com ele ("ele se repete").
+- **A soneca volta com a memória das sessões** (decisão 0095), mas a decisão
+  0053 diz que ela não persiste num restart, e o PLANO deixa a persistência
+  para os comandos `soneca` e `acordar` do M7.
+- **Comentários com as regras de antes das decisões 0094 e 0096:** o
+  "esperando você" que "nunca" sai sozinho (`prazo_do_aviso`,
+  `ver_pelo_foco`), as 12 h de vida da sessão (`reconfigurar`, um teste da
+  memória no cérebro, `Memoria::conferir_boot`) e as listas do que fica de
+  fora na volta (`Restauradas::de_fora`, `Restauracao::de_fora`, a intenção
+  e o `docs/CENARIOS.md`) sem as horas do futuro (decisão 0094) ou o instante
+  do laço depois da gravação (decisão 0095).
+- **Nenhum teste dizia** que as 12 h da espera (decisão 0096) contam do
+  último evento da sessão, e não do começo do aviso.
+
+**Escolha:**
+- **O refresco olha os dois relógios:** a decisão de gravar é uma função
+  pura (`nucleo::gravar_memoria_agora`) da última gravação no relógio do
+  laço e na parede, de agora, do que mudou, de haver algo a lembrar e da
+  saída. A memória que não mudou é regravada quando o relógio do laço **ou a
+  parede** andou 30 s (`REFRESCO_MEMORIA_MS`) desde a última gravação, a
+  parede para qualquer lado (o relógio que volta também regrava); o mínimo
+  de 4 s entre gravações continua no relógio do laço, e a saída grava sempre.
+  Na volta de uma suspensão, o primeiro batimento (em até 5 s acordados)
+  regrava. O batimento passa a ser um só (`nucleo::BATIMENTO_MS`, que o laço
+  do Linux e o sem janela usam), e as asserções de compilação dizem o que
+  vale: o mínimo entre gravações é menor que o batimento, e o refresco mais
+  o batimento ficam abaixo da memória velha, os dois pela parede com a
+  máquina acordada.
+- **Os dias na lista:** de 24 h em diante, a duração sai em dias ("2 d"),
+  arredondada para baixo como as outras unidades.
+- **O `idle_prompt` de uma vez por turno** nas docs e nos comentários. Isto
+  corrige a premissa da decisão 0094: o pronto e o erro continuam com ele,
+  não porque ele se repete, mas porque ele não diz que o Renan viu nada
+  (quem os tira é o clique, o terminal da sessão em foco, o próximo prompt
+  ou as 2 h). O cenário `idle-prompt-repetido` fica, como a prova de que um
+  repetido não faz nada (um Claude Code que repetisse, ou o mesmo evento duas
+  vezes).
+- **A soneca** do clique direito volta num reinício do pet, com a memória
+  das sessões (não depois de um boot da máquina): corrige a decisão 0053. O
+  PLANO diz isso, e do M7 ficam os comandos `soneca` e `acordar` do `bin/pet`.
+- **Os comentários** com as regras das decisões 0094 a 0096.
+- **O estado do repositório escrito para a `main` depois do merge** (como no
+  TS.5), no CLAUDE.md e no README: o M5 na lista da `main` (PR #7, `v0.5.0`,
+  decisões 0071–0099), a produção na `main` com o estado do Renan, o hook
+  com o `orig` e o `crn` pelo `bin/pet instalar-host` (o plugin continua
+  0.2.0), as conferências na tela pendentes e o próximo passo: o macOS na
+  branch `m8-macos`, escrita no Mac do Renan (decisões de 0100 em diante, de
+  lá), e depois o M6. Sai a pendência de reescrever o estado antes do merge.
+
+**Testes:** no núcleo, a decisão de gravar (8 h e 5 s depois na parede e 5 s
+no relógio do laço, com a memória igual: grava; sem nada a lembrar, não;
+acordada, só aos 30 s; a parede que volta; o que mudou nunca a menos de 4 s;
+a saída; a primeira gravação) e, pelo `Nucleo`, a memória parada regravada no
+primeiro batimento depois de uma suspensão: os dois reprovaram com a regra de
+antes, só pelo relógio do laço. No balão, os dias ("23 h", "1 d", "6 d", "7
+d" e a linha da lista). No cérebro, a espera que sai 12 h depois do último
+evento da sessão: um evento do subagente 3 h depois da permissão empurra o
+prazo e não muda a hora do aviso, no pet de pé e na volta da memória (13 h
+depois do aviso e 10 h depois do último evento, a espera volta e sai 2 h
+depois da partida). O código já contava do último evento: o teste passou de
+primeira, e três mutações o reprovaram (o prazo do pet de pé contado do
+aviso, a volta contada do aviso, o evento do agente que não conta). Nenhum
+dourado mudou.
+
+**Limites:** um crash nos primeiros segundos depois de uma suspensão, antes
+do primeiro batimento, ainda traz a memória velha, e uma suspensão com o pet
+fora continua contando como parada (decisão 0095). A lista em dias perde as
+horas (uma sessão de 1 d e 23 h mostra "1 d").
+
+**Por quê:** a idade da memória é pela parede, e o refresco que a mantém
+fresca tem de olhar o mesmo relógio: senão uma suspensão, que o pet de pé
+atravessa sem perder nada, vira uma parada longa no primeiro crash. "167 h"
+não se lê de relance. E as docs têm de dizer o que o Claude Code manda de
+verdade e o que o pet faz hoje: um `idle_prompt` que "se repete" ensinaria a
+tratá-lo como lembrete, e uma soneca que "não persiste" esconderia que ela
+volta.
+
+**Adendo (2026-10-05, a ordem dos marcos):** o Renan pediu que a parte macOS
+do M8 venha logo depois do merge do M5, antes do M6. A T8.2 roda no Mac, junto
+com a T8.5 e o macOS da T8.7, na branch `m8-macos`, que outra sessão do Claude
+Code escreve no Mac do Renan. As decisões dessa branch vão de 0100 em diante.
+O Mac é Apple Silicon. O Renan usa vários terminais, então o clique tem de
+levar ao terminal sem depender de qual app ele é. O build é feito pelo Renan no
+próprio Mac. Depois vêm M6 → M7 e o resto do M8. Isto corrige a ordem da
+decisão 0038 ("M4 → M7, depois T8.2–T8.8"): ter um Mac de verdade para testar
+tira o maior risco do macOS, que era não poder conferir nada na tela.
+
 ## 0100 — macOS: o build, os testes e o `bin/pet verificar` verdes no Mac, sem mexer no Linux (2026-10-05)
 
 **Problema:** o M8 pede o Zeca nativo no Mac (Apple Silicon), antes do M6

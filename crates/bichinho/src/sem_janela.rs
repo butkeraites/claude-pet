@@ -25,7 +25,7 @@ use crate::{daemon, vigia};
 
 /// Espera máxima entre duas voltas: o batimento que o vigia e o `/saude`
 /// leem.
-const BATIMENTO: Duration = Duration::from_secs(5);
+const BATIMENTO: Duration = Duration::from_millis(crate::nucleo::BATIMENTO_MS);
 
 /// O daemon sem janela, até a caixa fechar (o processo é morto antes disso).
 pub fn rodar(

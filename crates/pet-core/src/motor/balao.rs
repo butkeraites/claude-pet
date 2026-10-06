@@ -293,13 +293,16 @@ pub fn linhas_da_espera(espera: Option<TipoEspera>, proj: Option<&str>) -> Vec<S
     }
 }
 
-/// "há quanto tempo", curto: 40 s, 3 min, 2 h.
+/// "há quanto tempo", curto: 40 s, 3 min, 2 h, 2 d. Uma sessão sem evento
+/// fica até uma semana na lista (decisão 0096): de um dia em diante, em dias
+/// (decisão 0099).
 pub fn duracao(ms: u64) -> String {
     let s = ms / 1000;
     match s {
         0..60 => format!("{s} s"),
         60..3_600 => format!("{} min", s / 60),
-        _ => format!("{} h", s / 3_600),
+        3_600..86_400 => format!("{} h", s / 3_600),
+        _ => format!("{} d", s / 86_400),
     }
 }
 
@@ -481,6 +484,18 @@ mod testes {
         assert_eq!(duracao(40_000), "40 s");
         assert_eq!(duracao(185_000), "3 min");
         assert_eq!(duracao(7_300_000), "2 h");
+        // Uma sessão sem evento fica até uma semana na lista (decisão 0096):
+        // de um dia em diante, em dias (decisão 0099; antes, até "167 h").
+        const H: u64 = 60 * 60 * 1000;
+        assert_eq!(duracao(24 * H - 1), "23 h");
+        assert_eq!(duracao(24 * H), "1 d");
+        assert_eq!(duracao(2 * 24 * H + 5 * H), "2 d");
+        assert_eq!(duracao(7 * 24 * H - 1), "6 d");
+        assert_eq!(duracao(7 * 24 * H), "7 d");
+        assert_eq!(
+            linha_da_sessao(Some("claude-pet"), "parado", 0, 3 * 24 * H, false),
+            "claude-pet: parado (3 d)"
+        );
         assert_eq!(
             linha_da_sessao(Some("claude-pet"), "pensando", 1_000, 181_000, false),
             "claude-pet: pensando (3 min)"

@@ -1,0 +1,20 @@
+{"t":1000,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":10000,"i":"reacao","nome":"alert","motivo":"aviso","sid8":"s1"}
+{"t":10000,"i":"balao","linhas":["api: pergunta pra você"],"motivo":"aviso"}
+{"t":10000,"i":"escalada","sid8":"s1","nivel":1,"espera":"pergunta","motivo":"aviso"}
+{"t":10000,"i":"base","estado":"waiting","prioridade":"esperando","sid8":"s1"}
+{"t":620000,"i":"escalada","sid8":"s1","nivel":1,"espera":"pergunta","motivo":"restaurada"}
+{"t":620000,"i":"restauracao","sessoes":1,"avisos":1,"velha":true}
+{"t":630000,"i":"balao","linhas":["api: esperando você","não vi a janela dela","api: esperando você (10 min)"],"motivo":"sem_foco"}
+{"t":630000,"i":"clique","resultado":"nao_focou","sid8":"s1"}
+{"t":810000,"i":"reacao","nome":"yawn","motivo":"sono"}
+{"t":1110000,"i":"base","estado":"sleep","prioridade":"dormindo"}
+{"t":1802000,"i":"reacao","nome":"wake","motivo":"acordou"}
+{"t":1802000,"i":"escalada","sid8":"s1","nivel":0,"motivo":"andou"}
+{"t":1802000,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
+{"t":1805800,"i":"turno","sid8":"s1","turno8":"p2","fim":"stop","nivel":"T0","pontuacao":0.0,"reacao":"nod"}
+{"t":1805800,"i":"festa","sid8":"s1","nivel":"T0","reacao":"nod"}
+{"t":1805800,"i":"base","estado":"ready","prioridade":"pronto","sid8":"s1"}
+{"t":1815000,"i":"reacao","nome":"giggle","motivo":"clique"}
+{"t":1815000,"i":"clique","resultado":"focou","sid8":"s1"}
+{"t":1815500,"i":"base","estado":"idle","prioridade":"parado"}

@@ -4505,7 +4505,8 @@ fn a_volta_e_quieta_e_o_dialogo_visto_continua_visto() {
             sessoes: 1,
             avisos: 1,
             janelas: 1,
-            de_fora: 0
+            de_fora: 0,
+            velha: false
         }
     );
     motor.definir_compositor(Some("hyprland-a".into()));
@@ -4627,4 +4628,336 @@ fn outra_instancia_do_compositor_tira_as_janelas_de_antes() {
         .restaurar(&lida, Some("b"), na_volta(PAREDE + 5_000, 0))
         .unwrap();
     assert_eq!(r.janelas, 0);
+}
+
+// --- a revisão da memória (decisão 0095) --------------------------------------
+
+/// As intenções de escalada que fazem barulho: as rajadas, os voos e o pulso.
+fn barulho(motor: &Motor) -> Vec<intencoes::Intencao> {
+    motor
+        .intencoes()
+        .filter(|i| {
+            matches!(
+                i.tipo,
+                intencoes::Tipo::Rajada { .. }
+                    | intencoes::Tipo::Voo { .. }
+                    | intencoes::Tipo::Pulso { ligado: true, .. }
+            )
+        })
+        .cloned()
+        .collect()
+}
+
+/// Vence os prazos do cérebro de um pet que partiu na parede `volta`, até
+/// `ate` no relógio do laço dele.
+fn andar_na_volta(motor: &mut Motor, volta: u64, ate: u64) {
+    let mut voltas = 0;
+    while let Some(p) = motor.prazo_do_cerebro().filter(|p| *p <= ate) {
+        voltas += 1;
+        assert!(voltas < 1_000, "prazo que não anda em {p}");
+        motor.tique(na_volta(volta, p));
+    }
+}
+
+/// O que a restauração anotou: (velha, sossego).
+fn restauracao_anotada(motor: &Motor) -> (bool, Vec<&'static str>) {
+    motor
+        .intencoes()
+        .find_map(|i| match &i.tipo {
+            intencoes::Tipo::Restauracao { velha, sossego, .. } => Some((*velha, sossego.clone())),
+            _ => None,
+        })
+        .expect("a restauração")
+}
+
+/// A sessão `sessao-a` no f00d01 pede permissão aos 4 s com o Renan longe e
+/// noutra janela; `antes` mexe no pet antes de ele parar (o "não perturbe",
+/// a soneca, o compartilhamento). O pet para aos 20 s e volta `parado_ms`
+/// depois, num Motor novo com o personagem: devolve o novo e a parede da
+/// volta.
+fn reinicio_com_espera(
+    antes: impl Fn(&mut Motor, &mut Falsa),
+    dnd: bool,
+    parado_ms: u64,
+) -> (Motor, u64) {
+    let (mut motor, mut janela) = ligado();
+    motor.acertar_relogio(em(0));
+    motor.definir_compositor(Some("hyprland-a".into()));
+    ligar_desktop(&mut motor, 0);
+    ocioso(&mut motor, false, 0);
+    ativou(&mut motor, Some("f00d01"), 1_000);
+    prompt_em(&mut motor, "sessao-a", "api", 2_000);
+    ativou(&mut motor, Some("f00d03"), 3_000);
+    ocioso(&mut motor, true, 3_500);
+    let pedido = Evento {
+        tool: Some("Bash".into()),
+        dnd,
+        ..hook_de("sessao-a", "api", "PermissionRequest", 4_000)
+    };
+    mandar(&mut motor, pedido, 4_000);
+    antes(&mut motor, &mut janela);
+    andar(&mut motor, 20_000);
+    let lida =
+        crate::memoria::ler(&motor.memoria(em(20_000), Some("boot-1".into())).texto()).unwrap();
+    let volta = PAREDE + 20_000 + parado_ms;
+    let (mut novo, _janela) = ligado();
+    novo.gravar_todas_as_intencoes();
+    novo.restaurar(&lida, Some("boot-1"), na_volta(volta, 0))
+        .unwrap();
+    novo.definir_compositor(Some("hyprland-a".into()));
+    (novo, volta)
+}
+
+#[test]
+fn o_sossego_volta_com_a_memoria_e_a_espera_fica_na_l1() {
+    // Sem nada segurando o pet, a espera que volta escala (a prova de que o
+    // teste vê a escalada).
+    let (mut motor, volta) = reinicio_com_espera(|_, _| {}, false, 5_000);
+    andar_na_volta(&mut motor, volta, 10 * 60_000);
+    assert!(!barulho(&motor).is_empty());
+    assert_eq!(restauracao_anotada(&motor), (false, Vec::new()));
+    // O "não perturbe" do último evento, a soneca do clique direito e a
+    // discrição da tela compartilhada voltam, e nada passa da L1 (decisões
+    // 0075, 0081, 0091 e 0095).
+    let compartilhou = |m: &mut Motor, _: &mut Falsa| {
+        for (ligado, ms) in [(true, 10_000), (false, 13_000)] {
+            m.evento_desktop(
+                None,
+                &crate::plataforma::EventoDesktop::Compartilhando(ligado),
+                em(ms),
+            );
+        }
+    };
+    type Antes = Box<dyn Fn(&mut Motor, &mut Falsa)>;
+    let casos: [(&str, Antes, bool); 3] = [
+        (
+            "nao_perturbe",
+            Box::new(|_: &mut Motor, _: &mut Falsa| {}),
+            true,
+        ),
+        (
+            "soneca",
+            Box::new(|m: &mut Motor, j: &mut Falsa| clique_direito(m, j, 12_000)),
+            false,
+        ),
+        ("discricao", Box::new(compartilhou), false),
+    ];
+    for (nome, antes, dnd) in casos {
+        let (mut motor, volta) = reinicio_com_espera(antes, dnd, 5_000);
+        assert_eq!(restauracao_anotada(&motor), (false, vec![nome]), "{nome}");
+        // 4 min: a soneca (30 min) e a discrição (5 min depois do último
+        // sinal) ainda seguram; o "não perturbe", até o próximo evento.
+        andar_na_volta(&mut motor, volta, 4 * 60_000);
+        assert!(barulho(&motor).is_empty(), "{nome}: {:?}", barulho(&motor));
+        assert_eq!(motor.nivel_da_escalada(), 1, "{nome}");
+    }
+    // A discrição acaba 5 min depois do último sinal de antes da partida, e
+    // a escalada volta a subir.
+    let (mut motor, volta) = reinicio_com_espera(compartilhou, false, 5_000);
+    let fim = 13_000 + tela::SEGURA_MS - 25_000;
+    andar_na_volta(&mut motor, volta, fim - 1);
+    assert!(barulho(&motor).is_empty());
+    andar_na_volta(&mut motor, volta, fim + 2 * 60_000);
+    assert!(!barulho(&motor).is_empty());
+    assert!(motor.intencoes().any(
+        |i| i.t_ms == fim && matches!(i.tipo, intencoes::Tipo::Discricao { ligada: false, .. })
+    ));
+}
+
+#[test]
+fn a_memoria_velha_traz_as_esperas_vistas_e_as_janelas_sem_endereco() {
+    // Duas esperas, cada uma no terminal dela, com o Renan longe; o pet volta
+    // 10 min depois: a resposta, o Stop e o idle_prompt podem ter se perdido
+    // na parada (decisão 0095).
+    let duas = |m: &mut Motor, _: &mut Falsa| {
+        ocioso(m, false, 4_500);
+        ativou(m, Some("f00d02"), 5_000);
+        prompt_em(m, "sessao-b", "web", 6_500);
+        ativou(m, Some("f00d03"), 7_000);
+        ocioso(m, true, 7_500);
+        hook_em(m, "sessao-b", "web", "PermissionRequest", 8_000);
+    };
+    let (mut motor, volta) = reinicio_com_espera(duas, false, 10 * 60_000);
+    assert_eq!(restauracao_anotada(&motor), (true, Vec::new()));
+    let escalada = motor.painel_da_tela(0).escalada.expect("a escalada");
+    assert!(escalada.vista, "dada como vista na gravação");
+    for sid in ["sessao-a", "sessao-b"] {
+        let j = janela_da(&motor, sid).expect("a janela");
+        assert_eq!(
+            (j.endereco, j.certeza, j.terminal),
+            (None, janelas::Certeza::SemAnel, None),
+            "{sid}: o endereço pode ser de outra janela agora"
+        );
+    }
+    andar_na_volta(&mut motor, volta, 10 * 60_000);
+    assert!(barulho(&motor).is_empty(), "{:?}", barulho(&motor));
+    // A espera da sessao-a sai (a sessão andou); a vez é da sessao-b, que
+    // também veio da memória velha: nada passa da L1 também.
+    let ferramenta = Evento {
+        tool: Some("Bash".into()),
+        ts: Some(volta + 10 * 60_000 + 1_000),
+        ..hook_de("sessao-a", "api", "PostToolUse", 0)
+    };
+    motor.evento(
+        &ferramenta,
+        volta + 10 * 60_000 + 1_000,
+        na_volta(volta, 10 * 60_000 + 1_000),
+    );
+    let escalada = motor.painel_da_tela(10 * 60_000 + 1_000).escalada;
+    assert!(
+        escalada
+            .as_ref()
+            .is_some_and(|e| e.sid8 == "sessao-b" && e.vista),
+        "{escalada:?}"
+    );
+    andar_na_volta(&mut motor, volta, 30 * 60_000);
+    assert!(barulho(&motor).is_empty(), "{:?}", barulho(&motor));
+    // Uma espera nova da sessao-b, de um evento de agora, escala como sempre.
+    let t = 30 * 60_000 + 1_000;
+    for e in ["PostToolUse", "PermissionRequest"] {
+        let ev = Evento {
+            tool: Some("Bash".into()),
+            ts: Some(volta + t),
+            ..hook_de("sessao-b", "web", e, 0)
+        };
+        motor.evento(&ev, volta + t, na_volta(volta, t));
+    }
+    assert!(
+        motor
+            .painel_da_tela(t)
+            .escalada
+            .is_some_and(|e| e.sid8 == "sessao-b" && !e.vista)
+    );
+    andar_na_volta(&mut motor, volta, t + 2 * 60_000);
+    assert!(!barulho(&motor).is_empty());
+}
+
+#[test]
+fn a_memoria_que_nao_mudou_grava_igual_com_a_parede_andando_diferente() {
+    // A hora em que o Renan viu o diálogo vai como foi anotada: a conta de
+    // parede menos relógio do laço oscila 1 ms entre um batimento e outro, e
+    // pula com a máquina suspensa; nada disso é mudança (decisão 0095).
+    let motor = espera_vista();
+    let uma = motor.memoria(em(20_000), Some("boot-1".into()));
+    for desvio in [1, 60 * 60 * 1000] {
+        let outra = motor.memoria(
+            Agora {
+                parede_ms: PAREDE + 20_000 + desvio,
+                mono_ms: 20_000,
+            },
+            Some("boot-1".into()),
+        );
+        assert!(uma.mesmo_conteudo(&outra), "{desvio}");
+    }
+    let aviso = uma.sessoes[0].aviso.expect("o aviso");
+    assert_eq!(
+        (aviso.vista_ms, aviso.vista_laco_ms),
+        (Some(PAREDE + 9_000), Some(9_000))
+    );
+}
+
+// --- a revisão final (decisão 0098) ----------------------------------------------
+
+#[test]
+fn cada_espera_vista_vai_para_a_memoria_e_solta_a_pose_dela() {
+    // Duas esperas voltam vistas na gravação de uma memória velha: a pose de
+    // nenhuma das duas segura a base (as duas saíram 2 min depois da
+    // gravação), e a memória seguinte leva as duas vistas, cada uma com a
+    // hora dela, não só a da vez (decisão 0098).
+    let duas = |m: &mut Motor, _: &mut Falsa| {
+        ocioso(m, false, 4_500);
+        ativou(m, Some("f00d02"), 5_000);
+        prompt_em(m, "sessao-b", "web", 6_500);
+        ativou(m, Some("f00d03"), 7_000);
+        ocioso(m, true, 7_500);
+        hook_em(m, "sessao-b", "web", "PermissionRequest", 8_000);
+    };
+    let (mut motor, volta) = reinicio_com_espera(duas, false, 10 * 60_000);
+    assert_eq!(motor.painel(None, 0).fotografia.base, "idle");
+    let memoria = motor.memoria(na_volta(volta, 1_000), Some("boot-1".into()));
+    let vistas: Vec<(&str, Option<u64>, Option<i64>)> = memoria
+        .sessoes
+        .iter()
+        .map(|g| {
+            let a = g.aviso.expect("a espera");
+            (g.sid.as_str(), a.vista_ms, a.vista_laco_ms)
+        })
+        .collect();
+    let na_gravacao = (Some(PAREDE + 20_000), Some(-(10 * 60_000)));
+    assert_eq!(
+        vistas,
+        vec![
+            ("sessao-a", na_gravacao.0, na_gravacao.1),
+            ("sessao-b", na_gravacao.0, na_gravacao.1)
+        ]
+    );
+}
+
+#[test]
+fn vista_a_espera_da_vez_a_que_o_renan_nao_viu_escala_na_hora() {
+    // Duas permissões, cada uma no terminal dela, com o Renan noutra janela:
+    // a da api escala (a mais velha). Ele vai ao terminal da api e fica 5 s:
+    // vista, ela não passa mais da L1, e a vez passa na hora à da web, que ele
+    // não viu (antes, ela esperava a da api sair, e o Esc não manda nada;
+    // decisão 0098). A da web já tem 38 s: a L2 sai no mesmo instante.
+    let (mut motor, _janela) = ligado();
+    motor.acertar_relogio(em(0));
+    ligar_desktop(&mut motor, 0);
+    ocioso(&mut motor, false, 0);
+    ativou(&mut motor, Some("f00d01"), 0);
+    prompt_em(&mut motor, "sessao-a", "api", 1_000);
+    ativou(&mut motor, Some("f00d02"), 2_500);
+    prompt_em(&mut motor, "sessao-b", "web", 3_500);
+    ativou(&mut motor, Some("f00d03"), 5_000);
+    hook_em(&mut motor, "sessao-a", "api", "PermissionRequest", 6_000);
+    hook_em(&mut motor, "sessao-b", "web", "PermissionRequest", 7_000);
+    for sid in ["sessao-a", "sessao-b"] {
+        assert_eq!(
+            janela_da(&motor, sid).map(|j| j.certeza),
+            Some(janelas::Certeza::Certa),
+            "{sid}"
+        );
+    }
+    andar(&mut motor, 40_000);
+    assert_eq!(motor.nivel_da_escalada(), 2, "a da api, na L2");
+    ativou(&mut motor, Some("f00d01"), 40_000);
+    let reacoes = andar(&mut motor, 45_000);
+    assert_eq!(
+        chamadas_desde(&motor, 45_000),
+        vec![
+            r#"{"i":"escalada","sid8":"sessao-a","nivel":2,"motivo":"vista"}"#,
+            r#"{"i":"escalada","sid8":"sessao-a","nivel":0,"motivo":"outro_aviso"}"#,
+            r#"{"i":"escalada","sid8":"sessao-b","nivel":1,"espera":"permissao","motivo":"vez"}"#,
+            r#"{"i":"escalada","sid8":"sessao-b","nivel":2,"motivo":"tempo"}"#,
+            r#"{"i":"rajada","sid8":"sessao-b","nivel":2}"#,
+        ]
+    );
+    assert_eq!(reacoes, vec![(45_000, CHAMADA)], "a rajada da web");
+    let escalada = motor.painel_da_tela(45_000).escalada.expect("a da web");
+    assert!(escalada.sid8 == "sessao-b" && !escalada.vista);
+    // Ele vai ao terminal da web: vista também, e a vez fica com ela (com
+    // as duas vistas, a que já tinha a vez; nada de ir e voltar).
+    ativou(&mut motor, Some("f00d02"), 46_000);
+    andar(&mut motor, 52_000);
+    assert_eq!(
+        chamadas_desde(&motor, 46_000),
+        vec![r#"{"i":"escalada","sid8":"sessao-b","nivel":2,"motivo":"vista"}"#]
+    );
+    // A da web respondida: a vez volta à da api, vista, sem escalar.
+    let rodou = Evento {
+        tool: Some("Bash".into()),
+        dur: Some(50),
+        ..hook_de("sessao-b", "web", "PostToolUse", 60_000)
+    };
+    mandar(&mut motor, rodou, 60_000);
+    let escalada = motor.painel_da_tela(60_000).escalada.expect("a da api");
+    assert!(escalada.sid8 == "sessao-a" && escalada.vista && escalada.nivel == 1);
+    andar(&mut motor, 10 * 60_000);
+    assert!(
+        chamadas_desde(&motor, 60_001)
+            .iter()
+            .all(|l| !l.contains("rajada") && !l.contains("voo") && !l.contains("pulso")),
+        "{:?}",
+        chamadas_desde(&motor, 60_001)
+    );
 }

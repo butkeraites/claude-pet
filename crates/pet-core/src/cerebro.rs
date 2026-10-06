@@ -10,7 +10,8 @@
 //! (`sessoes.origens`, padrão `["cli"]`): `claude -p`, SDK e IDE ficam de
 //! fora. Eventos de teste (`teste: true`, do `bin/pet testar`) vivem num
 //! mundo à parte, nunca se misturam com sessões reais e somem 60 s depois
-//! do último evento. `SessionEnd` sempre larga a sessão e o turno dela; o
+//! do último evento; uma sessão real, depois de uma semana sem evento nenhum
+//! ([`VIDA_SESSAO_MS`], decisão 0096). `SessionEnd` sempre larga a sessão e o turno dela; o
 //! tchau (`bye`) só vem quando o processo está saindo (não num `/clear` nem
 //! numa retomada, que seguem com outro `sid`) e não sobra nenhuma sessão.
 //!
@@ -81,7 +82,11 @@
 //! o de espera que sobrou (ele nunca sai com um diálogo na tela; decisão
 //! 0094), e um evento atrasado (mais velho que o estado de agora) não mexe
 //! nele. O pronto e o erro somem sozinhos em [`VIDA_AVISO_MS`]; o "esperando
-//! você" só sai com um evento da própria sessão ou visto.
+//! você" só sai com um evento da própria sessão, visto, ou depois de
+//! [`VIDA_ESPERA_MS`] sem evento nenhum dela (decisão 0096). Numa espera que
+//! a memória das sessões trouxe, um gatilho de diálogo mais de
+//! [`GATILHOS_DO_DIALOGO_MS`] depois dela é outro diálogo: a resposta pode
+//! ter se perdido com o pet fora (decisão 0097).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -89,7 +94,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{Config, ModoCelebracao, Pesos};
 use crate::evento::{self, Evento, ORIG_NOTIFICACAO};
-use crate::memoria::{AvisoGuardado, SessaoGuardada};
+use crate::memoria::{AvisoGuardado, SessaoGuardada, Volta};
 
 /// Acomodação depois de um Stop, e espera pelo Stop atrasado de um turno
 /// trocado.
@@ -98,9 +103,16 @@ pub const ACOMODACAO_MS: u64 = 800;
 pub const JANELA_TS_MS: u64 = 6 * 60 * 60 * 1000;
 /// Uma sessão de teste some depois disto sem eventos.
 pub const VIDA_TESTE_MS: u64 = 60_000;
-/// Uma sessão real some depois disto sem eventos (o `SessionEnd` de um
-/// processo morto nunca chega).
-pub const VIDA_SESSAO_MS: u64 = 12 * 60 * 60 * 1000;
+/// Uma sessão real some depois disto sem eventos: uma semana (decisão 0096;
+/// eram 12 h). O Zeca acompanha todas as sessões abertas, e uma parada não
+/// manda nada; o `SessionEnd` tira a que acaba, e uma máquina que reinicia
+/// não traz nenhuma de volta. A vida só enterra a de um processo que morreu
+/// sem o `SessionEnd`, que fica no fim da lista do clique até lá.
+pub const VIDA_SESSAO_MS: u64 = 7 * 24 * 60 * 60 * 1000;
+/// A espera de uma sessão sem evento nenhum por isto sai, o estado e o aviso
+/// (decisão 0096): um Esc numa pergunta não manda nada (decisão 0090), e a
+/// sessão não sai mais em 12 h, como saía antes.
+pub const VIDA_ESPERA_MS: u64 = 12 * 60 * 60 * 1000;
 /// Uma corrente de agentes sem evento nenhum por isto expira, sem festa
 /// (decisão 0073).
 pub const VIDA_CORRENTE_MS: u64 = 12 * 60 * 60 * 1000;
@@ -119,6 +131,11 @@ pub const ERRO_DE_LIMITE: &str = "rate_limit";
 /// Um gatilho atrasado de um diálogo (até isto antes do aviso) ainda refina
 /// o tipo da espera (decisão 0075).
 pub const JANELA_DO_DIALOGO_MS: u64 = 5_000;
+/// Os gatilhos de um diálogo chegam em até uns 6 s dele (o `PreToolUse` e o
+/// `PermissionRequest` juntos, a notificação `permission_prompt` 6 s depois;
+/// lido no 2.1.288, T5.1): numa espera que a memória das sessões trouxe, um
+/// gatilho mais tarde que isto é de outro diálogo (decisão 0097).
+pub const GATILHOS_DO_DIALOGO_MS: u64 = 10_000;
 /// Arquivos diferentes lembrados por turno. Passou disso, cada arquivo novo
 /// só soma num contador: um processo local mandando `arq` sempre novo não
 /// cresce a memória.
@@ -220,8 +237,12 @@ pub fn instante(mono_ms: u64) -> Instante {
 /// O prazo `dura_ms` depois de `desde`, no relógio do laço; um prazo de antes
 /// da partida já venceu (0).
 pub fn depois(desde: Instante, dura_ms: u64) -> u64 {
-    let dura = i64::try_from(dura_ms).unwrap_or(i64::MAX);
-    u64::try_from(desde.saturating_add(dura)).unwrap_or(0)
+    u64::try_from(desde.saturating_add(duracao(dura_ms))).unwrap_or(0)
+}
+
+/// Uma duração em ms como [`Instante`], para somar a um instante.
+pub fn duracao(ms: u64) -> Instante {
+    i64::try_from(ms).unwrap_or(i64::MAX)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -636,8 +657,10 @@ pub struct Restauradas {
     pub avisos: usize,
     /// Com o último evento há [`VIDA_SESSAO_MS`] ou mais.
     pub expiradas: usize,
-    /// De uma origem que o config não aceita mais, repetidas ou além de
-    /// [`MAX_SESSOES`].
+    /// De uma origem que o config não aceita mais, repetidas, além de
+    /// [`MAX_SESSOES`], com uma hora mais de [`JANELA_TS_MS`] adiante
+    /// (decisão 0094) ou com um instante do laço depois da gravação (decisão
+    /// 0095).
     pub de_fora: usize,
 }
 
@@ -1082,6 +1105,11 @@ struct Sessao {
     aviso: Option<Aviso>,
     /// Veio da memória das sessões e ainda não mandou evento (decisão 0093).
     restaurada: bool,
+    /// A espera que a memória das sessões trouxe: a hora (parede) em que a
+    /// sessão entrou nela, até o estado mudar. A resposta pode ter se perdido
+    /// com o pet fora, e um gatilho de diálogo mais de
+    /// [`GATILHOS_DO_DIALOGO_MS`] depois dela é de outro (decisão 0097).
+    espera_da_memoria: Option<u64>,
 }
 
 impl Sessao {
@@ -1106,6 +1134,7 @@ impl Sessao {
             contadores: Contadores::default(),
             aviso: None,
             restaurada: false,
+            espera_da_memoria: None,
         }
     }
 
@@ -1568,6 +1597,14 @@ impl Sessao {
         }
     }
 
+    /// Quando a espera sai sozinha (decisão 0096): [`VIDA_ESPERA_MS`] depois
+    /// do último evento da sessão, se ela espera.
+    fn prazo_da_espera(&self) -> Option<u64> {
+        let espera = self.estado == EstadoSessao::Esperando
+            || self.aviso.is_some_and(|a| a.tipo == TipoAviso::Esperando);
+        espera.then(|| depois(self.ultimo_mono, VIDA_ESPERA_MS))
+    }
+
     fn resumo_da_corrente(&self) -> Option<ResumoCorrente> {
         self.corrente.as_ref().map(|c| ResumoCorrente {
             aberta: true,
@@ -1605,8 +1642,11 @@ pub fn hora_do_evento(ts: Option<u64>, recebido_ms: u64) -> u64 {
     }
 }
 
-/// Quando um aviso some sozinho: o pronto e o erro em [`VIDA_AVISO_MS`]; o
-/// "esperando você", nunca (só um evento da sessão ou visto).
+/// Quando um aviso some sozinho pela idade dele: o pronto e o erro em
+/// [`VIDA_AVISO_MS`]. O "esperando você" não tem prazo pela idade: sai quando
+/// a sessão anda (o `idle_prompt` inclusive, decisão 0094), visto, ou com a
+/// espera, [`VIDA_ESPERA_MS`] depois do último evento da sessão, o de um
+/// subagente também ([`Sessao::prazo_da_espera`], decisão 0096).
 fn prazo_do_aviso(aviso: Aviso) -> Option<u64> {
     (aviso.tipo != TipoAviso::Esperando).then(|| depois(aviso.desde_mono, VIDA_AVISO_MS))
 }
@@ -1647,8 +1687,8 @@ impl Cerebro {
     /// Troca a configuração: o config relido a cada aprovação de personagem
     /// (decisão 0029) vale também aqui (decisão 0030). Uma sessão de origem
     /// que deixou de contar sai na hora, sem reação: os eventos dela seriam
-    /// ignorados dali em diante e ela só sumiria em 12 h. As outras seguem
-    /// como estavam.
+    /// ignorados dali em diante e ela só sairia depois de uma semana sem evento
+    /// ([`VIDA_SESSAO_MS`], decisão 0096). As outras seguem como estavam.
     pub fn reconfigurar(&mut self, config: ConfigCerebro) {
         self.sessoes.retain(|_, sessao| {
             let origem = sessao.ent.as_deref().unwrap_or("desconhecida");
@@ -1792,6 +1832,8 @@ impl Cerebro {
         let cfg = self.config.clone();
         let mut fechamentos = Vec::new();
         let mut ignorado = None;
+        // O evento é um gatilho de diálogo que põe a sessão a esperar.
+        let mut gatilho = false;
         let sessao = self
             .sessoes
             .entry(chave.clone())
@@ -2044,6 +2086,7 @@ impl Cerebro {
                             }
                             if sessao.turno.as_ref().is_some_and(|t| t.stop.is_none()) {
                                 sessao.estado = EstadoSessao::Esperando;
+                                gatilho = true;
                             }
                         }
                     }
@@ -2069,7 +2112,10 @@ impl Cerebro {
                         sessao.aviso = None;
                     }
                 }
-                Some(_) => sessao.estado = EstadoSessao::Esperando,
+                Some(_) => {
+                    sessao.estado = EstadoSessao::Esperando;
+                    gatilho = true;
+                }
                 None => ignorado = Some("notificacao_sem_tipo"),
             },
             "PreCompact" => sessao.estado = EstadoSessao::Compactando,
@@ -2153,15 +2199,26 @@ impl Cerebro {
             }
             _ => ignorado = Some("evento_desconhecido"),
         }
-        if sessao.estado != estado_antes {
+        // Outro diálogo numa espera que a memória das sessões trouxe (decisão
+        // 0097): a resposta do de antes pode ter se perdido com o pet fora, e
+        // os gatilhos de um diálogo chegam em até uns 6 s dele. Um gatilho
+        // mais tarde é a entrada numa espera nova, como no pet de pé, com a
+        // chamada dela.
+        let outro_dialogo = gatilho
+            && estado_antes == EstadoSessao::Esperando
+            && sessao
+                .espera_da_memoria
+                .is_some_and(|desde| t > desde.saturating_add(GATILHOS_DO_DIALOGO_MS));
+        if sessao.estado != estado_antes || outro_dialogo {
+            sessao.espera_da_memoria = None;
             sessao.estado_desde = t;
             sessao.estado_desde_mono = instante(agora.mono_ms);
             // Os avisos (decisão 0057): mudar de estado resolve o de antes, e
             // entrar em "esperando você" ou em erro abre um. O `idle_prompt`
-            // (repete a cada ~60 s) nunca abre e aqui não resolve (a espera
-            // que sobrou sai no ramo dele; decisão 0094); um evento atrasado,
-            // mais velho que o estado de antes (a permissão que ele pede já
-            // foi respondida), não mexe no aviso.
+            // (uma vez por turno, uns 60 s depois do fim dele) nunca abre e
+            // aqui não resolve (a espera que sobrou sai no ramo dele; decisão
+            // 0094); um evento atrasado, mais velho que o estado de antes (a
+            // permissão que ele pede já foi respondida), não mexe no aviso.
             let ocioso = ev.e == "Notification" && ev.nt.as_deref() == Some("idle_prompt");
             if !ocioso && t >= desde_antes {
                 let tipo = match sessao.estado {
@@ -2324,6 +2381,18 @@ impl Cerebro {
                 sessao.estado_desde = agora.parede_ms;
                 sessao.estado_desde_mono = instante(agora.mono_ms);
             }
+            // A espera sem evento nenhum da sessão por 12 h sai (decisão
+            // 0096): a sessão fica.
+            if sessao.prazo_da_espera().is_some_and(|p| agora.mono_ms >= p) {
+                if sessao.aviso.is_some_and(|a| a.tipo == TipoAviso::Esperando) {
+                    sessao.aviso = None;
+                }
+                if sessao.estado == EstadoSessao::Esperando {
+                    sessao.estado = EstadoSessao::Parada;
+                    sessao.estado_desde = agora.parede_ms;
+                    sessao.estado_desde_mono = instante(agora.mono_ms);
+                }
+            }
         }
         self.registrar(fechamentos, &mut reacoes, agora);
         let antes = self.sessoes.len();
@@ -2395,6 +2464,7 @@ impl Cerebro {
                     aviso,
                     corrente,
                     s.prazo_do_estado(),
+                    s.prazo_da_espera(),
                 ]
             })
             .flatten()
@@ -2449,10 +2519,14 @@ impl Cerebro {
 
     // --- a memória das sessões (decisão 0093) ---------------------------------
 
-    /// As sessões reais para a memória das sessões (decisão 0093), só com
-    /// metadados e sem a janela (quem sabe dela é o Motor). As de teste
-    /// nunca vão.
-    pub fn guardar(&self) -> Vec<SessaoGuardada> {
+    /// As sessões reais para a memória das sessões (decisão 0093), em
+    /// `agora`, só com metadados e sem a janela (quem sabe dela é o Motor):
+    /// cada instante também no relógio do laço, o tempo acordado (decisão
+    /// 0095). As de teste nunca vão. A sessão na acomodação de um Stop que vai
+    /// dar o pronto já leva o pronto (decisão 0095): o turno aberto não volta,
+    /// e uma parada nos 0,8 s da acomodação perderia o pronto que o Stop
+    /// trouxe.
+    pub fn guardar(&self, agora: Agora) -> Vec<SessaoGuardada> {
         self.sessoes
             .values()
             .filter(|s| !s.teste)
@@ -2462,52 +2536,81 @@ impl Cerebro {
                 ent: s.ent.clone(),
                 estado: s.estado,
                 estado_desde_ms: s.estado_desde,
+                estado_desde_laco_ms: Some(s.estado_desde_mono),
                 ultimo_evento_ms: s.ultimo_parede,
+                ultimo_evento_laco_ms: Some(s.ultimo_mono),
                 agendamentos: s.agendamentos,
-                aviso: s.aviso.map(|a| AvisoGuardado {
-                    tipo: a.tipo,
-                    espera: a.espera,
-                    desde_ms: a.desde_ms,
-                    nivel: None,
-                    vista_ms: None,
-                }),
+                aviso: self
+                    .pronto_na_acomodacao(s, agora)
+                    .or(s.aviso)
+                    .map(|a| AvisoGuardado {
+                        tipo: a.tipo,
+                        espera: a.espera,
+                        desde_ms: a.desde_ms,
+                        desde_laco_ms: Some(a.desde_mono),
+                        nivel: None,
+                        vista_ms: None,
+                        vista_laco_ms: None,
+                    }),
                 janela: None,
             })
             .collect()
     }
 
-    /// Restaura as sessões que a memória guardou (decisão 0093), em `agora`:
+    /// O pronto que a acomodação do Stop da sessão `s` vai dar: o mesmo
+    /// fechamento que o [`Self::tique`] faria no fim dela, numa cópia.
+    fn pronto_na_acomodacao(&self, s: &Sessao, agora: Agora) -> Option<Aviso> {
+        let ts_ms = s.turno.as_ref()?.stop.as_ref()?.ts_ms;
+        let mut copia = s.clone();
+        let f = copia.fechar(Fim::Stop, ts_ms, agora, &self.config)?;
+        f.pronto.then(|| Aviso {
+            tipo: TipoAviso::Pronto,
+            espera: None,
+            desde_ms: ts_ms,
+            desde_mono: instante(agora.mono_ms),
+        })
+    }
+
+    /// Restaura as sessões que a memória guardou (decisão 0093), na `volta`:
     /// o relógio do laço recomeçou com o processo, e cada prazo é contado de
-    /// novo a partir das horas de parede de antes ([`Agora::no_laco`]). Volta
-    /// só o que ainda vale pelas regras de sempre: a sessão com o último
-    /// evento há menos de [`VIDA_SESSAO_MS`] e de uma origem aceita (as mais
-    /// novas primeiro, até [`MAX_SESSOES`]); o estado, com o prazo dele (o
-    /// pensando, o trabalhando e o compactando até [`ATIVA_SEM_EVENTO_MS`]
-    /// depois do último evento, o erro e o cansado até [`ERRO_NA_TELA_MS`];
-    /// vencido, parada); o pronto e o erro até [`VIDA_AVISO_MS`]; o
-    /// "esperando você" enquanto a sessão vive. Uma hora além da janela do
-    /// `ts` dos hooks ([`JANELA_TS_MS`]) deixa a sessão de fora. Nada de
+    /// novo a partir dos instantes de antes, pelo tempo acordado até a
+    /// gravação mais a parada do pet ([`Volta::instante`], decisão 0095; num
+    /// arquivo sem o relógio do laço, pela parede). Volta só o que ainda vale
+    /// pelas regras de sempre: a sessão com o último evento há menos de
+    /// [`VIDA_SESSAO_MS`] e de uma origem aceita (as mais novas primeiro, até
+    /// [`MAX_SESSOES`]); o estado, com o prazo dele (o pensando, o trabalhando
+    /// e o compactando até [`ATIVA_SEM_EVENTO_MS`] depois do último evento, o
+    /// erro e o cansado até [`ERRO_NA_TELA_MS`], a espera até
+    /// [`VIDA_ESPERA_MS`]; vencido, parada); o pronto e o erro até
+    /// [`VIDA_AVISO_MS`]; o "esperando você" até [`VIDA_ESPERA_MS`] depois do
+    /// último evento. Uma hora além da janela do `ts` dos hooks ([`JANELA_TS_MS`]), ou
+    /// um instante do laço depois da gravação, deixa a sessão de fora. Nada de
     /// turno, de corrente ou de festa: o turno que estava aberto não é de
     /// confiança (o Stop dele pode ter se perdido com o pet fora), e o
     /// próximo evento dele abre um turno implícito, como no M3. A sessão volta
-    /// marcada como restaurada até o próximo evento dela. Uma que o cérebro
-    /// já acompanha fica como está.
-    pub fn restaurar(&mut self, guardadas: &[SessaoGuardada], agora: Agora) -> Restauradas {
+    /// marcada como restaurada até o próximo evento dela, e a que esperava
+    /// guarda a hora da espera até o estado mudar: o diálogo seguinte pode
+    /// ser outro (decisão 0097). Uma que o cérebro já acompanha fica como
+    /// está.
+    pub fn restaurar(&mut self, guardadas: &[SessaoGuardada], volta: Volta) -> Restauradas {
+        let agora = volta.agora;
+        let mono = instante(agora.mono_ms);
         let mut r = Restauradas::default();
         let mut ordem: Vec<&SessaoGuardada> = guardadas.iter().collect();
         ordem.sort_by_key(|g| std::cmp::Reverse(g.ultimo_evento_ms));
         for g in ordem {
             let chave = (false, g.sid.clone());
-            let idade = agora.parede_ms.saturating_sub(g.ultimo_evento_ms);
-            if idade >= VIDA_SESSAO_MS {
+            let ultimo = volta.instante(g.ultimo_evento_laco_ms, g.ultimo_evento_ms);
+            if mono >= ultimo.saturating_add(duracao(VIDA_SESSAO_MS)) {
                 r.expiradas += 1;
                 continue;
             }
             let origem = g.ent.as_deref().unwrap_or("desconhecida");
             let reais = self.sessoes.keys().filter(|(teste, _)| !teste).count();
-            // Uma hora mais adiante que a janela do `ts` dos hooks (6 h) não
-            // é de verdade (o relógio voltou, o arquivo mexido): os prazos
-            // sairiam do relógio do laço.
+            // Uma hora mais adiante que a janela do `ts` dos hooks (6 h), ou
+            // um instante do laço depois da gravação, não é de verdade (o
+            // relógio voltou, o arquivo mexido): os prazos sairiam do relógio
+            // do laço.
             let limite = agora.parede_ms.saturating_add(JANELA_TS_MS);
             let do_futuro = [
                 Some(g.ultimo_evento_ms),
@@ -2518,7 +2621,15 @@ impl Cerebro {
             ]
             .into_iter()
             .flatten()
-            .any(|ms| ms > limite);
+            .any(|ms| ms > limite)
+                || [
+                    g.ultimo_evento_laco_ms,
+                    g.estado_desde_laco_ms,
+                    g.aviso.and_then(|a| a.desde_laco_ms),
+                    g.aviso.and_then(|a| a.vista_laco_ms),
+                ]
+                .into_iter()
+                .any(|x| volta.depois_da_gravacao(x));
             if self.sessoes.contains_key(&chave)
                 || !self.config.origens.iter().any(|o| o == origem)
                 || reais >= MAX_SESSOES
@@ -2532,36 +2643,44 @@ impl Cerebro {
             s.ent.clone_from(&g.ent);
             s.agendamentos = g.agendamentos;
             s.ultimo_parede = g.ultimo_evento_ms;
-            s.ultimo_mono = agora.no_laco(g.ultimo_evento_ms);
+            s.ultimo_mono = ultimo;
             // O prazo do estado, contado de antes: vencido, a sessão volta
             // parada desde a hora em que ele venceu.
+            let desde = volta.instante(g.estado_desde_laco_ms, g.estado_desde_ms);
             let fim_do_estado = match g.estado {
                 EstadoSessao::Pensando | EstadoSessao::Trabalhando | EstadoSessao::Compactando => {
-                    Some(g.ultimo_evento_ms.saturating_add(ATIVA_SEM_EVENTO_MS))
+                    Some(ultimo.saturating_add(duracao(ATIVA_SEM_EVENTO_MS)))
                 }
                 EstadoSessao::Erro | EstadoSessao::Cansado => {
-                    Some(g.estado_desde_ms.saturating_add(ERRO_NA_TELA_MS))
+                    Some(desde.saturating_add(duracao(ERRO_NA_TELA_MS)))
                 }
-                EstadoSessao::Parada | EstadoSessao::Esperando => None,
+                EstadoSessao::Esperando => Some(ultimo.saturating_add(duracao(VIDA_ESPERA_MS))),
+                EstadoSessao::Parada => None,
             };
-            (s.estado, s.estado_desde) = match fim_do_estado {
-                Some(fim) if agora.parede_ms >= fim => (EstadoSessao::Parada, fim),
-                _ => (g.estado, g.estado_desde_ms),
+            (s.estado, s.estado_desde, s.estado_desde_mono) = match fim_do_estado {
+                Some(fim) if mono >= fim => (EstadoSessao::Parada, agora.na_parede(fim), fim),
+                _ => (g.estado, g.estado_desde_ms, desde),
             };
-            s.estado_desde_mono = agora.no_laco(s.estado_desde);
             s.aviso = g.aviso.and_then(|a| {
-                let vivo = a.tipo == TipoAviso::Esperando
-                    || agora.parede_ms.saturating_sub(a.desde_ms) < VIDA_AVISO_MS;
+                let desde_mono = volta.instante(a.desde_laco_ms, a.desde_ms);
+                let vivo = if a.tipo == TipoAviso::Esperando {
+                    mono < ultimo.saturating_add(duracao(VIDA_ESPERA_MS))
+                } else {
+                    mono < desde_mono.saturating_add(duracao(VIDA_AVISO_MS))
+                };
                 vivo.then(|| Aviso {
                     tipo: a.tipo,
                     espera: a.espera.filter(|_| a.tipo == TipoAviso::Esperando),
                     desde_ms: a.desde_ms,
-                    desde_mono: agora.no_laco(a.desde_ms),
+                    desde_mono,
                 })
             });
             if s.aviso.is_some() {
                 r.avisos += 1;
             }
+            // A espera de antes: o próximo diálogo pode ser outro (decisão
+            // 0097).
+            s.espera_da_memoria = (s.estado == EstadoSessao::Esperando).then_some(s.estado_desde);
             s.restaurada = true;
             self.sessoes.insert(chave.clone(), s);
             r.chaves.push(chave);
@@ -3405,7 +3524,8 @@ mod testes {
         let roteiro = vec![
             chega(0, prompt("p1")),
             chega(1_000, edit_teste("p1")),
-            // Esc no meio da resposta: nenhum Stop. Um minuto depois:
+            // O Stop se perdeu (o pet estava fora); uns 60 s depois, o
+            // idle_prompt fecha o turno:
             chega(61_000, ocioso.clone()),
             Ate(70_000),
         ];
@@ -3414,7 +3534,7 @@ mod testes {
         assert_eq!(r.turnos[0].fim, Fim::Ocioso);
         assert_eq!(r.sessoes[0].estado, EstadoSessao::Parada);
         assert!(!r.sessoes[0].turno_aberto);
-        // Repetido a cada minuto não faz nada.
+        // Um segundo (repetido, ou o mesmo evento duas vezes) não faz nada.
         assert_eq!(rodar(&mut c, vec![chega(121_000, ocioso)]), vec![]);
         assert_eq!(c.resumo().turnos.len(), 1);
     }
@@ -3671,12 +3791,13 @@ mod testes {
         assert_eq!(c.proximo_prazo(), Some(1_000 + ACOMODACAO_MS));
         assert!(c.tique(em(1_799)).is_empty());
         assert_eq!(c.tique(em(1_800))[0].nome, ACENO);
-        // O pronto some em 2 h (decisão 0057); a sessão, em 12 h.
+        // O pronto some em 2 h (decisão 0057); a sessão, numa semana (decisão
+        // 0096).
         assert_eq!(c.proximo_prazo(), Some(1_800 + VIDA_AVISO_MS));
         assert!(c.tique(em(1_800 + VIDA_AVISO_MS)).is_empty());
         assert!(c.pendencias().is_empty());
         assert_eq!(c.proximo_prazo(), Some(1_000 + VIDA_SESSAO_MS));
-        // Real sem eventos por 12 h some calada.
+        // Real sem eventos por uma semana some calada.
         assert!(c.tique(em(1_000 + VIDA_SESSAO_MS)).is_empty());
         assert!(c.resumo().sessoes.is_empty());
     }
@@ -3815,8 +3936,9 @@ mod testes {
         rodar(&mut c, vec![chega(160_000, notificacao("idle_prompt"))]);
         assert_eq!(c.resumo().sessoes[0].estado, EstadoSessao::Parada);
         assert_eq!(aviso_de(&c), None);
-        // O pronto e o erro ficam com o idle_prompt (ele se repete; quem os
-        // tira é o Renan).
+        // O pronto e o erro ficam com o idle_prompt: ele sai uma vez por turno,
+        // uns 60 s depois do Stop, e não diz que o Renan viu nada; quem os tira
+        // é o Renan (decisão 0099).
         rodar(
             &mut c,
             vec![
@@ -3870,7 +3992,79 @@ mod testes {
     }
 
     #[test]
-    fn o_pronto_e_o_erro_somem_em_2_h_e_o_esperando_fica() {
+    fn a_espera_sai_12_h_depois_do_ultimo_evento_da_sessao_e_nao_do_aviso() {
+        // A espera sai sem evento nenhum da sessão por 12 h (decisão 0096): o
+        // subagente lançado antes da permissão, que segue trabalhando, empurra
+        // o prazo; a hora do aviso não conta.
+        const H: u64 = 60 * 60 * 1000;
+        let do_agente = |e: Evento| Evento {
+            agente: true,
+            aid: Some("ag1".into()),
+            ..e
+        };
+        let mut a = novo();
+        rodar(
+            &mut a,
+            vec![
+                chega(0, prompt("p1")),
+                chega(
+                    50,
+                    do_agente(Evento {
+                        turno: Some("p1".into()),
+                        ..ev("SubagentStart")
+                    }),
+                ),
+                chega(100, permissao("p1")),
+                chega(3 * H, do_agente(ferramenta("p1", "Read", None, 5))),
+            ],
+        );
+        let espera = |c: &Cerebro| {
+            c.resumo()
+                .sessoes
+                .first()
+                .map(|s| (s.estado, s.aviso.map(|a| (a.tipo, a.desde_ms))))
+        };
+        let esperando = Some((
+            EstadoSessao::Esperando,
+            Some((TipoAviso::Esperando, BASE + 100)),
+        ));
+        let parada = Some((EstadoSessao::Parada, None));
+        assert_eq!(
+            espera(&a),
+            esperando,
+            "o evento do agente não muda o estado nem a hora do aviso"
+        );
+        assert_eq!(a.proximo_prazo(), Some(3 * H + VIDA_ESPERA_MS));
+        // Na volta da memória, a mesma conta: gravada às 4 h e de volta às 13
+        // h (13 h depois do aviso, 10 h depois do último evento), a espera
+        // volta e sai 2 h depois da partida.
+        let memoria = gravada(&a, em(4 * H));
+        let volta = BASE + 13 * H;
+        let mut b = novo();
+        restaurar_em(&mut b, &memoria, depois_da_volta(volta, 0));
+        assert_eq!(espera(&b), esperando, "13 h depois do aviso: volta");
+        assert_eq!(b.proximo_prazo(), Some(2 * H));
+        // No pet de pé: 12 h depois do aviso, a espera fica; 12 h depois do
+        // último evento, sai, e a sessão fica.
+        rodar(&mut a, vec![Ate(100 + VIDA_ESPERA_MS)]);
+        assert_eq!(espera(&a), esperando);
+        rodar(&mut a, vec![Ate(3 * H + VIDA_ESPERA_MS - 1)]);
+        assert_eq!(espera(&a), esperando);
+        rodar(&mut a, vec![Ate(3 * H + VIDA_ESPERA_MS)]);
+        assert_eq!(espera(&a), parada);
+        assert_eq!(
+            a.resumo().sessoes[0].estado_desde_ms,
+            BASE + 3 * H + VIDA_ESPERA_MS
+        );
+        // Na volta, na mesma hora de parede.
+        b.tique(depois_da_volta(volta, 2 * H - 1));
+        assert_eq!(espera(&b), esperando);
+        b.tique(depois_da_volta(volta, 2 * H));
+        assert_eq!(espera(&b), parada);
+    }
+
+    #[test]
+    fn o_pronto_e_o_erro_somem_em_2_h_e_a_espera_em_12_h_sem_evento() {
         let mut c = novo();
         rodar(
             &mut c,
@@ -3887,9 +4081,23 @@ mod testes {
             &mut c,
             vec![chega(0, prompt("p1")), chega(100, permissao("p1"))],
         );
-        assert_eq!(c.proximo_prazo(), Some(100 + VIDA_SESSAO_MS));
+        assert_eq!(c.proximo_prazo(), Some(100 + VIDA_ESPERA_MS));
         rodar(&mut c, vec![Ate(VIDA_AVISO_MS + 1_000)]);
         assert_eq!(aviso_de(&c), Some(TipoAviso::Esperando));
+        // Sem evento nenhum da sessão por 12 h, a espera sai e a sessão fica
+        // (decisão 0096): até uma semana sem evento.
+        rodar(&mut c, vec![Ate(100 + VIDA_ESPERA_MS - 1)]);
+        assert_eq!(aviso_de(&c), Some(TipoAviso::Esperando));
+        rodar(&mut c, vec![Ate(100 + VIDA_ESPERA_MS)]);
+        assert_eq!(aviso_de(&c), None);
+        let s = &c.resumo().sessoes[0];
+        assert_eq!(
+            (s.estado, s.estado_desde_ms),
+            (EstadoSessao::Parada, BASE + 100 + VIDA_ESPERA_MS)
+        );
+        assert_eq!(c.proximo_prazo(), Some(100 + VIDA_SESSAO_MS));
+        rodar(&mut c, vec![Ate(100 + VIDA_SESSAO_MS)]);
+        assert!(c.resumo().sessoes.is_empty());
     }
 
     #[test]
@@ -4688,7 +4896,8 @@ mod testes {
             ]
         };
         assert!(rodar(&mut c, abrir()).is_empty());
-        // A sessão continua viva (o Renan usa o terminal, o idle_prompt), e
+        // A sessão continua viva (os dois idle_prompt são sintéticos, só para
+        // mantê-la viva), e
         // o agente nunca volta: a corrente expira 12 h depois do último
         // evento dela (o fechamento do Stop, na acomodação).
         let ocioso = Evento {
@@ -5020,7 +5229,8 @@ mod testes {
         assert_eq!(c.resumo().sessoes[0].estado, EstadoSessao::Compactando);
         rodar(&mut c, vec![Ate(1_000 + ATIVA_SEM_EVENTO_MS)]);
         assert_eq!(c.resumo().sessoes[0].estado, EstadoSessao::Parada);
-        // Esperando você não volta sozinho.
+        // Esperando você não volta sozinho no prazo de 5 min (sai em 12 h sem
+        // evento, decisão 0096).
         let mut c = novo();
         rodar(
             &mut c,
@@ -5103,6 +5313,20 @@ mod testes {
         }
     }
 
+    /// A memória que o cérebro `c` grava em `agora`, com o relógio do laço
+    /// (como o Motor grava).
+    fn gravada(c: &Cerebro, agora: Agora) -> crate::memoria::Memoria {
+        let mut m = crate::memoria::Memoria::nova(agora.parede_ms, None);
+        m.laco_ms = Some(agora.mono_ms);
+        m.sessoes = c.guardar(agora);
+        m
+    }
+
+    /// Restaura `m` no cérebro `c` em `agora`.
+    fn restaurar_em(c: &mut Cerebro, m: &crate::memoria::Memoria, agora: Agora) -> Restauradas {
+        c.restaurar(&m.sessoes, Volta::de(m, agora))
+    }
+
     #[test]
     fn a_memoria_volta_com_o_relogio_do_laco_do_zero_e_a_parede_adiante() {
         // O pet A roda 10 min: s1 termina um turno aos 100 s (o pronto) e
@@ -5140,14 +5364,14 @@ mod testes {
                 Ate(600_000),
             ],
         );
-        let guardadas = a.guardar();
-        assert_eq!(guardadas.len(), 2, "a de teste nunca vai");
+        let guardadas = gravada(&a, em(600_000));
+        assert_eq!(guardadas.sessoes.len(), 2, "a de teste nunca vai");
         // O pet B parte 30 s depois: o relógio do laço do zero, a parede
         // adiante.
         let volta = BASE + 630_000;
         let em = |mono| depois_da_volta(volta, mono);
         let mut b = novo();
-        let r = b.restaurar(&guardadas, em(0));
+        let r = restaurar_em(&mut b, &guardadas, em(0));
         assert_eq!(
             (r.chaves.len(), r.avisos, r.expiradas, r.de_fora),
             (2, 1, 0, 0)
@@ -5167,8 +5391,8 @@ mod testes {
         );
         assert_eq!(
             s1.aviso.map(|a| (a.tipo, a.desde_ms, a.desde_mono)),
-            Some((TipoAviso::Pronto, BASE + 100_000, -530_000)),
-            "o pronto de 530 s antes da partida"
+            Some((TipoAviso::Pronto, BASE + 100_000, -529_200)),
+            "o pronto do fim da acomodação, 529,2 s antes da partida (decisão 0095)"
         );
         let s2r = sessao(&b, "bbbbbbbb");
         assert_eq!(
@@ -5190,13 +5414,14 @@ mod testes {
             (EstadoSessao::Parada, BASE + 800_000)
         );
         // O pronto some 2 h depois de antes, não da partida.
-        let fim_do_pronto = VIDA_AVISO_MS - 530_000;
+        let fim_do_pronto = VIDA_AVISO_MS - 529_200;
         assert_eq!(b.proximo_prazo(), Some(fim_do_pronto));
         b.tique(em(fim_do_pronto - 1));
         assert!(sessao(&b, "aaaaaaaa").aviso.is_some());
         b.tique(em(fim_do_pronto));
         assert!(sessao(&b, "aaaaaaaa").aviso.is_none());
-        // E as sessões saem 12 h depois do último evento de antes.
+        // E as sessões saem uma semana depois do último evento de antes
+        // (decisão 0096).
         let fim_de_s1 = VIDA_SESSAO_MS + 160_000 - 630_000;
         let fim_de_s2 = VIDA_SESSAO_MS + 500_000 - 630_000;
         assert_eq!(b.proximo_prazo(), Some(fim_de_s1));
@@ -5229,8 +5454,9 @@ mod testes {
             vec![chega(0, prompt("p1")), chega(5_000, stop("p1")), Ate(6_000)],
         );
         let volta = BASE + 60_000;
+        let m = gravada(&a, em(6_000));
         let mut b = novo();
-        b.restaurar(&a.guardar(), depois_da_volta(volta, 0));
+        restaurar_em(&mut b, &m, depois_da_volta(volta, 0));
         assert!(b.resumo().sessoes[0].restaurada);
         // O prompt digitado tira o pronto e a marca; o Stop festeja.
         let mut p2 = prompt("p2");
@@ -5249,7 +5475,7 @@ mod testes {
         );
         // O SessionEnd tira a restaurada, com o tchau de sempre.
         let mut c = novo();
-        c.restaurar(&a.guardar(), depois_da_volta(volta, 0));
+        restaurar_em(&mut c, &m, depois_da_volta(volta, 0));
         let fim_da_sessao = Evento {
             reason: Some("prompt_input_exit".into()),
             ..ev("SessionEnd")
@@ -5270,11 +5496,21 @@ mod testes {
             ent: Some("cli".into()),
             estado: EstadoSessao::Parada,
             estado_desde_ms: ultimo,
+            estado_desde_laco_ms: None,
             ultimo_evento_ms: ultimo,
+            ultimo_evento_laco_ms: None,
             agendamentos: None,
             aviso: None,
             janela: None,
         }
+    }
+
+    /// Uma memória só com as horas de parede (a da decisão 0093), gravada em
+    /// `gravada_ms`.
+    fn so_parede(sessoes: Vec<SessaoGuardada>, gravada_ms: u64) -> crate::memoria::Memoria {
+        let mut m = crate::memoria::Memoria::nova(gravada_ms, None);
+        m.sessoes = sessoes;
+        m
     }
 
     #[test]
@@ -5286,12 +5522,21 @@ mod testes {
             tipo,
             espera: (tipo == TipoAviso::Esperando).then_some(TipoEspera::Plano),
             desde_ms: desde,
+            desde_laco_ms: None,
             nivel: None,
             vista_ms: None,
+            vista_laco_ms: None,
         };
         let mut lista = vec![
-            guardada("velha", antes(13 * H)),
-            guardada("quase-12-h", antes(VIDA_SESSAO_MS - 1)),
+            guardada("velha", antes(VIDA_SESSAO_MS)),
+            guardada("quase-uma-semana", antes(VIDA_SESSAO_MS - 1)),
+            guardada("de-13-h", antes(13 * H)),
+            SessaoGuardada {
+                estado: EstadoSessao::Esperando,
+                estado_desde_ms: antes(13 * H),
+                aviso: Some(aviso(TipoAviso::Esperando, antes(13 * H))),
+                ..guardada("espera-de-13-h", antes(13 * H))
+            },
             SessaoGuardada {
                 estado: EstadoSessao::Trabalhando,
                 ..guardada("trabalhando-6-min", antes(6 * 60_000))
@@ -5347,7 +5592,7 @@ mod testes {
         let mut viva = prompt("p1");
         viva.sid = Some("ja-acompanhada".into());
         c.receber(&viva, volta, depois_da_volta(volta, 0));
-        let r = c.restaurar(&lista, depois_da_volta(volta, 0));
+        let r = restaurar_em(&mut c, &so_parede(lista, volta), depois_da_volta(volta, 0));
         assert_eq!((r.expiradas, r.de_fora), (1, 6));
         let estado = |sid: &str| {
             c.resumo()
@@ -5356,8 +5601,18 @@ mod testes {
                 .find(|s| s.chave.1 == sid)
                 .map(|s| (s.estado, s.estado_desde_ms, s.aviso.map(|a| a.tipo)))
         };
-        assert_eq!(estado("velha"), None, "13 h: fora");
-        assert!(estado("quase-12-h").is_some());
+        assert_eq!(estado("velha"), None, "uma semana: fora");
+        assert!(estado("quase-uma-semana").is_some());
+        assert_eq!(
+            estado("de-13-h"),
+            Some((EstadoSessao::Parada, antes(13 * H), None)),
+            "13 h: volta (decisão 0096)"
+        );
+        assert_eq!(
+            estado("espera-de-13-h"),
+            Some((EstadoSessao::Parada, antes(H), None)),
+            "a espera sai 12 h depois do último evento; a sessão volta"
+        );
         assert_eq!(
             estado("trabalhando-6-min"),
             Some((EstadoSessao::Parada, antes(60_000), None)),
@@ -5388,7 +5643,7 @@ mod testes {
                 antes(11 * H),
                 Some(TipoAviso::Esperando)
             )),
-            "o esperando você não vence sozinho"
+            "a espera de 11 h com um evento há 1 min fica: sai 12 h depois do último evento"
         );
         assert_eq!(estado("do-sdk"), None);
         assert_eq!(estado("sem-origem"), None);
@@ -5411,16 +5666,201 @@ mod testes {
                 .count(),
             1
         );
-        // Os prazos de agora: o da quase-12-h é o primeiro (1 ms).
+        // Os prazos de agora: o da quase-uma-semana é o primeiro (1 ms).
         assert_eq!(c.proximo_prazo(), Some(1));
         // O teto: as mais novas primeiro, até MAX_SESSOES.
         lista = (0..MAX_SESSOES as u64 + 2)
             .map(|i| guardada(&format!("s{i}"), antes(1_000 + i)))
             .collect();
         let mut c = novo();
-        let r = c.restaurar(&lista, depois_da_volta(volta, 0));
+        let r = restaurar_em(&mut c, &so_parede(lista, volta), depois_da_volta(volta, 0));
         assert_eq!((r.chaves.len(), r.de_fora), (MAX_SESSOES, 2));
         assert!(!c.tem_sessao(&(false, format!("s{}", MAX_SESSOES + 1))));
         assert!(c.tem_sessao(&(false, "s0".into())));
+    }
+
+    #[test]
+    fn a_maquina_suspensa_nao_conta_na_volta_como_no_pet_que_nao_reiniciou() {
+        // O pet A: um turno com o pronto aos 100 s; a máquina dorme mais que a
+        // vida da sessão (o relógio do laço para; a parede, não) e acorda; o
+        // pet grava 1 h de relógio do laço depois do Stop (decisão 0095).
+        const H: u64 = 60 * 60 * 1000;
+        let mut a = novo();
+        rodar(
+            &mut a,
+            vec![
+                chega(50_000, prompt("p1")),
+                chega(60_000, ferramenta("p1", "Edit", Some("aaaaaaaaaaaa"), 40)),
+                chega(100_000, stop("p1")),
+                Ate(101_000),
+            ],
+        );
+        let acordado = Agora {
+            parede_ms: BASE + 100_000 + H + VIDA_SESSAO_MS + H,
+            mono_ms: 100_000 + H,
+        };
+        // O pet que não reinicia conta só o tempo acordado: a sessão e o
+        // pronto ficam.
+        a.tique(acordado);
+        assert!(a.tem_sessao(&(false, SID.into())));
+        assert_eq!(aviso_de(&a), Some(TipoAviso::Pronto));
+        let m = gravada(&a, acordado);
+        // O pet B parte 20 s depois, e devolve o mesmo.
+        let volta = acordado.parede_ms + 20_000;
+        let mut b = novo();
+        let r = restaurar_em(&mut b, &m, depois_da_volta(volta, 0));
+        assert_eq!((r.chaves.len(), r.expiradas), (1, 0));
+        assert_eq!(aviso_de(&b), Some(TipoAviso::Pronto));
+        // O pronto some 2 h (acordado) depois do fim da acomodação de antes,
+        // mais os 20 s da parada.
+        assert_eq!(b.proximo_prazo(), Some(VIDA_AVISO_MS - (H - 800) - 20_000));
+        // Pela parede (o arquivo da decisão 0093), a sessão teria morrido.
+        let mut so_parede = m.clone();
+        so_parede.laco_ms = None;
+        let mut c = novo();
+        let r = restaurar_em(&mut c, &so_parede, depois_da_volta(volta, 0));
+        assert_eq!((r.chaves.len(), r.expiradas), (0, 1));
+        // Um instante do laço depois da gravação não é de verdade (o arquivo
+        // mexido): a sessão fica de fora.
+        let mut mexido = m.clone();
+        mexido.sessoes[0].ultimo_evento_laco_ms = Some(instante(acordado.mono_ms) + 1);
+        let mut d = novo();
+        let r = restaurar_em(&mut d, &mexido, depois_da_volta(volta, 0));
+        assert_eq!((r.chaves.len(), r.de_fora), (0, 1));
+    }
+
+    #[test]
+    fn um_dialogo_novo_numa_espera_restaurada_e_outra_espera() {
+        // Uma pergunta aos 10 s; o pet para aos 20 s e volta 2 min depois. A
+        // resposta pode ter se perdido com ele fora: o primeiro gatilho de
+        // diálogo depois da volta, mais de 10 s depois da espera de antes, é
+        // outro diálogo, com a espera nova (decisão 0097).
+        let mut a = novo();
+        rodar(
+            &mut a,
+            vec![
+                chega(1_000, prompt("p1")),
+                chega(10_000, dialogo("PreToolUse", "p1", "AskUserQuestion")),
+                chega(
+                    10_015,
+                    dialogo("PermissionRequest", "p1", "AskUserQuestion"),
+                ),
+                Ate(20_000),
+            ],
+        );
+        let m = gravada(&a, em(20_000));
+        let volta = BASE + 140_000;
+        let receber = |c: &mut Cerebro, mono: u64, mut e: Evento| {
+            e.ts = Some(volta + mono);
+            c.receber(&e, volta + mono, depois_da_volta(volta, mono));
+        };
+        let estado_de = |c: &Cerebro| {
+            let s = &c.resumo().sessoes[0];
+            (s.estado, s.estado_desde_ms - BASE)
+        };
+        let restaurado = || {
+            let mut b = novo();
+            restaurar_em(&mut b, &m, depois_da_volta(volta, 0));
+            assert_eq!(
+                espera_de(&b),
+                Some((TipoAviso::Esperando, Some(TipoEspera::Pergunta), 10_000))
+            );
+            b
+        };
+        // A permissão de um Bash aos 150 s: a espera nova, desde ela, com o
+        // estado de novo desde ela.
+        let mut b = restaurado();
+        receber(&mut b, 10_000, permissao("p1"));
+        assert_eq!(
+            espera_de(&b),
+            Some((TipoAviso::Esperando, Some(TipoEspera::Permissao), 150_000))
+        );
+        assert_eq!(estado_de(&b), (EstadoSessao::Esperando, 150_000));
+        // Os eventos de um subagente no meio não mudam o estado nem a espera:
+        // o diálogo novo depois deles também é outro.
+        let mut b = restaurado();
+        let do_agente = Evento {
+            agente: true,
+            aid: Some("x1".into()),
+            ..ferramenta("p1", "Read", None, 5)
+        };
+        receber(&mut b, 5_000, do_agente);
+        assert_eq!(espera_de(&b).map(|e| e.2), Some(10_000));
+        receber(&mut b, 10_000, permissao("p1"));
+        assert_eq!(espera_de(&b).map(|e| e.2), Some(150_000));
+        // O formulário de um servidor MCP só manda a notificação: também é
+        // outro diálogo.
+        let mut b = restaurado();
+        receber(&mut b, 10_000, notificacao("elicitation_dialog"));
+        assert_eq!(
+            espera_de(&b),
+            Some((TipoAviso::Esperando, Some(TipoEspera::Elicitacao), 150_000))
+        );
+        // A notificação do mesmo diálogo (6 s depois dele) só refina: o pet
+        // parou 2 s depois do PermissionRequest e voltou 2 s depois.
+        let curta = gravada(&a, em(12_000));
+        let mut c = novo();
+        restaurar_em(&mut c, &curta, depois_da_volta(BASE + 14_000, 0));
+        let mut n = notificacao("permission_prompt");
+        n.ts = Some(BASE + 16_000);
+        c.receber(&n, BASE + 16_000, depois_da_volta(BASE + 14_000, 2_000));
+        assert_eq!(
+            espera_de(&c),
+            Some((TipoAviso::Esperando, Some(TipoEspera::Pergunta), 10_000))
+        );
+        // A sessão andou (a resposta chegou): daí em diante, as regras do pet
+        // de pé. O diálogo seguinte abre a espera dele, e um gatilho dele 30
+        // s depois só refina.
+        let mut b = restaurado();
+        receber(&mut b, 1_000, ferramenta("p1", "AskUserQuestion", None, 0));
+        assert_eq!(espera_de(&b), None);
+        receber(&mut b, 2_000, permissao("p1"));
+        receber(&mut b, 32_000, notificacao("permission_prompt"));
+        assert_eq!(espera_de(&b).map(|e| e.2), Some(142_000));
+        // A espera vista antes da partida (o clique que tira o aviso; o
+        // estado fica "esperando"): o diálogo novo depois da volta chama.
+        let mut sem_aviso = m.clone();
+        sem_aviso.sessoes[0].aviso = None;
+        let mut d = novo();
+        restaurar_em(&mut d, &sem_aviso, depois_da_volta(volta, 0));
+        assert_eq!(espera_de(&d), None);
+        receber(&mut d, 10_000, permissao("p1"));
+        assert_eq!(
+            espera_de(&d),
+            Some((TipoAviso::Esperando, Some(TipoEspera::Permissao), 150_000))
+        );
+    }
+
+    #[test]
+    fn a_parada_na_acomodacao_do_stop_guarda_o_pronto_que_ele_trouxe() {
+        // O Stop chegou e a acomodação de 0,8 s ainda corre quando o pet
+        // para: o pronto vai na memória (o turno aberto não volta, decisão
+        // 0095). O de um turno de máquina, não.
+        for (prompt_do_turno, pronto) in [(prompt("p1"), true), (aviso_de_tarefa("p1"), false)] {
+            let mut a = novo();
+            rodar(
+                &mut a,
+                vec![
+                    chega(1_000, prompt_do_turno),
+                    chega(5_000, ferramenta("p1", "Edit", Some("aaaaaaaaaaaa"), 40)),
+                    chega(10_000, stop("p1")),
+                    Ate(10_500),
+                ],
+            );
+            assert_eq!(aviso_de(&a), None, "na acomodação, ainda sem o pronto");
+            let m = gravada(&a, em(10_500));
+            let aviso = m.sessoes[0].aviso;
+            assert_eq!(
+                aviso.map(|a| (a.tipo, a.desde_ms, a.desde_laco_ms)),
+                pronto.then_some((TipoAviso::Pronto, BASE + 10_000, Some(10_500))),
+            );
+            let mut b = novo();
+            restaurar_em(&mut b, &m, depois_da_volta(BASE + 11_500, 0));
+            assert_eq!(aviso_de(&b), pronto.then_some(TipoAviso::Pronto));
+            // A cópia não mexeu no cérebro de antes: a festa e o pronto saem
+            // na hora deles.
+            assert_eq!(a.tique(em(10_800)).len(), 1);
+            assert_eq!(aviso_de(&a), pronto.then_some(TipoAviso::Pronto));
+        }
     }
 }

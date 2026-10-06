@@ -2,13 +2,18 @@
 //! `sessoes.json` na pasta do estado, só com metadados das sessões reais; a
 //! partida seguinte, com o mesmo estado, devolve as sessões abertas sem
 //! evento nenhum, marcadas como restauradas e sem tocar nada; um arquivo de
-//! outra partida da máquina (outro boot id) não traz nada.
+//! outra partida da máquina (outro boot id) não traz nada. Com uma instância
+//! de mentira do Hyprland, a descoberta tira as janelas vistas noutra
+//! instância (decisão 0095).
 
 mod comum;
 
 use std::path::Path;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use comum::Daemon;
+use comum::hyprland::HyprlandFalso;
 use serde_json::{Value, json};
 
 const SID: &str = "5e55a0d3-1111-4222-8333-444444444444";
@@ -52,12 +57,21 @@ fn o_sigterm_grava_e_a_partida_seguinte_devolve_as_sessoes() {
         "o SIGTERM sai sozinho: {}",
         primeiro.log()
     );
+    // Quem gravou foi a saída, não o batimento (decisão 0095).
+    assert!(
+        primeiro
+            .log()
+            .contains("memória das sessões: 1 sessão(ões) gravada(s) na saída"),
+        "{}",
+        primeiro.log()
+    );
     let texto = std::fs::read_to_string(&arquivo).expect("o SIGTERM gravou a memória");
     assert!(texto.contains(SID), "{texto}");
     assert!(!texto.contains("7e57e57e"), "a de teste nunca vai: {texto}");
     let memoria: Value = serde_json::from_str(&texto).unwrap();
     assert_eq!(memoria["versao"], 1);
     assert!(memoria["boot"].is_string());
+    assert!(memoria["laco_ms"].is_u64(), "o relógio do laço: {texto}");
     assert_eq!(memoria["sessoes"][0]["aviso"]["tipo"], "pronto");
     // A partida seguinte, sem evento nenhum: a sessão está lá, restaurada.
     let segundo = subir_com_estado(&estado);
@@ -95,5 +109,90 @@ fn o_sigterm_grava_e_a_partida_seguinte_devolve_as_sessoes() {
             .any(|i| i["i"] == "restauracao" && i["motivo"] == "maquina_reiniciou")
     );
     drop(terceiro);
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+/// O boot id desta máquina, como o daemon lê.
+fn boot_id() -> String {
+    std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
+        .expect("o boot id do Linux")
+        .trim()
+        .to_owned()
+}
+
+#[test]
+fn a_descoberta_tira_as_janelas_vistas_noutra_instancia_do_compositor() {
+    // Duas sessões guardadas, cada uma com a janela vista numa instância do
+    // Hyprland: a de mentira (`a_1790000000_1`) e outra (um logout e um
+    // login). Na partida, a memória volta antes de achar o compositor; quando
+    // a descoberta acha a instância, a janela da outra sai, e a desta fica.
+    let pasta = comum::pasta_temporaria("memoria-compositor");
+    let estado = pasta.join("estado");
+    std::fs::create_dir_all(&estado).unwrap();
+    let agora = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let sessao = |sid: &str, proj: &str, endereco: &str, compositor: &str| {
+        json!({
+            "sid": sid, "proj": proj, "ent": "cli", "estado": "parada",
+            "estado_desde_ms": agora - 1_000, "ultimo_evento_ms": agora - 1_000,
+            "janela": {
+                "endereco": endereco, "compositor": compositor,
+                "certeza": "certa", "em_ms": agora - 2_000
+            }
+        })
+    };
+    let memoria = json!({
+        "versao": 1, "gravada_ms": agora, "boot": boot_id(),
+        "sessoes": [
+            sessao("a1a1a1a1-desta", "api", "f00d01", "a_1790000000_1"),
+            sessao("b2b2b2b2-outra", "web", "f00d02", "z_1700000000_9"),
+        ]
+    });
+    std::fs::write(estado.join("sessoes.json"), memoria.to_string()).unwrap();
+    let h = HyprlandFalso::novo("memoria", "activewindowv2>>f00d03\n");
+    let d = Daemon::subir_com(
+        false,
+        &[
+            ("PET_ESTADO", estado.to_str().unwrap()),
+            ("PET_HOST_RUNTIME", h.runtime().as_str()),
+        ],
+    );
+    let janela = |e: &Value, sid8: &str| {
+        e["sessoes"]
+            .as_array()
+            .and_then(|s| s.iter().find(|s| s["sid8"] == sid8))
+            .map(|s| s["janela"].clone())
+            .unwrap_or(Value::Null)
+    };
+    let limite = Instant::now() + Duration::from_secs(15);
+    let e = loop {
+        let e = d.get_json("/v1/estado");
+        if e["desktop"]["eventos"] == "ligado" && janela(&e, "b2b2b2b2")["certeza"] == "fechou" {
+            break e;
+        }
+        assert!(
+            Instant::now() < limite,
+            "a descoberta não tirou a janela da outra instância: {e:#}\nlog:\n{}",
+            d.log()
+        );
+        thread::sleep(Duration::from_millis(50));
+    };
+    assert_eq!(janela(&e, "b2b2b2b2")["endereco"], Value::Null);
+    assert_eq!(
+        (
+            &janela(&e, "a1a1a1a1")["endereco"],
+            &janela(&e, "a1a1a1a1")["certeza"]
+        ),
+        (&json!("f00d01"), &json!("certa")),
+        "a desta instância fica"
+    );
+    assert!(
+        d.log()
+            .contains("1 janela(s) de sessão ficaram sem endereço")
+    );
+    assert!(h.comandos_intocado());
+    drop(d);
     let _ = std::fs::remove_dir_all(&pasta);
 }

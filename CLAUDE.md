@@ -19,7 +19,7 @@ O plano completo, com marcos M0–M9 e como verificar cada um, está em
 
 ## Estado do repositório
 
-**Na `main` (tags `v0.1.0`–`v0.4.1`):**
+**Na `main` (tags `v0.1.0`–`v0.5.0`):**
 - M0 (fundação) e M1 (overlay nítido e barato; portão fechado com a tela
   acesa, decisão 0005);
 - M2 (o Zeca do pack, aprovado pelo Renan pela folha de contato, decisões
@@ -38,43 +38,48 @@ O plano completo, com marcos M0–M9 e como verificar cada um, está em
   pelo `ext_idle_notifier_v1` e os avisos em ciclo;
 - o **Zeca original** em CC0 (PR #6, `v0.4.1`, decisões 0065–0070): o
   gerador em `arte/zeca-livre/` e as skins `zeca-livre` (tema claro) e
-  `zeca-livre-escuro` (com o anel), redistribuíveis.
+  `zeca-livre-escuro` (com o anel), redistribuíveis;
+- o **M5** (PR #7, `v0.5.0`, decisões 0071–0099), o cérebro completo e a
+  tela dele. O cérebro (T5.1–T5.10, decisões 0071–0080): a pesquisa com o
+  2.1.288 (`docs/pesquisa/10-cerebro-m5.md`), o hook com `orig` e `crn`, as
+  correntes de agentes e os turnos de máquina, a pontuação T0–T3 com os pesos
+  no config, os prazos do estado, os avisos com a escalada L1–L4, a festa e a
+  tela (a mesclagem, a base, os selos, o sono, a discrição), tudo num
+  registro de intenções do Motor com cenários dourados (`cenarios/`,
+  `docs/CENARIOS.md`), `bin/pet simular` e `bin/pet eventos --salvar`. A
+  tela (T5.11–T5.20, decisões 0081–0088; `docs/pesquisa/11-tela-m5.md`): o
+  `screencast` do socket2 com a discrição que segura, a base segurada no
+  animador com o ritmo de cada estado, os selos ao lado do corpo com o pulso
+  da L4, o voo da escalada até o alto-centro, o confete das festas T2 e T3,
+  o `/v1/estado.desenho`, as demonstrações do `bin/pet testar` e a prova do
+  orçamento em relógio falso. A revisão das três revisões adversariais
+  (T5.21–T5.24, decisões 0089–0092): os agentes que um workflow lança depois
+  do Stop são da corrente, o pedido digitado com a corrente aberta festeja
+  sozinho, a pose de espera vem do aviso (o clique, o teto e o diálogo visto
+  no terminal da sessão a soltam), a escalada olha o terminal da sessão que
+  espera, os voos da volta têm a conta deles e só saem com o pet na tela, a
+  espera cabe no orçamento (o ritmo atento e a pose parada da L2 em diante),
+  a tela compartilhada é discreta como o "não perturbe" e o
+  `scripts/medir-custo.sh` mede o pet acordado. A memória das sessões
+  (T5.25–T5.26, decisões 0093–0096): o pet que reinicia devolve, quietas, as
+  sessões abertas do Claude de `/state/sessoes.json` (só metadados), com o
+  sossego de antes (o "não perturbe", a soneca, a discrição) e os prazos no
+  tempo acordado, como o pet que não reinicia; a memória gravada há mais de
+  60 s volta com as esperas vistas e sem os endereços das janelas; nada volta
+  depois de um boot da máquina, e as janelas de outro compositor saem. Uma
+  sessão sem evento só sai depois de uma semana (a espera, em 12 h). A
+  revisão final (T5.27–T5.28, decisões 0097–0099): o diálogo novo numa
+  espera que voltou da memória chama como no pet de pé, a espera que o Renan
+  já viu não segura a vez de uma ainda não vista (cada espera guarda a vista
+  dela, também na memória), o refresco da memória olha também a parede (uma
+  suspensão não a deixa velha) e a lista do clique conta em dias.
 
 O plugin instalado é o 0.2.0 (exec form), da worktree estável na `main`, com
-o `~/.local/bin/bichinho` dela. O andamento por tarefa está no
-`PROGRESS.md`.
-
-**Na branch `m5-cerebro` (sem PR ainda):** o M5 inteiro. A primeira
-metade, o cérebro (T5.1–T5.10, decisões 0071–0080): a pesquisa com o 2.1.288
-(`docs/pesquisa/10-cerebro-m5.md`), o hook com `orig` e `crn`, as correntes
-de agentes e os turnos de máquina, a pontuação T0–T3 com os pesos no config,
-os prazos do estado, os avisos com a escalada L1–L4, a festa e a tela (a
-mesclagem, a base, os selos, o sono, a discrição), tudo num registro de
-intenções do Motor com cenários dourados (`cenarios/`, `docs/CENARIOS.md`),
-`bin/pet simular` e `bin/pet eventos --salvar`. A segunda metade, a tela
-(T5.11–T5.20, decisões 0081–0088; `docs/pesquisa/11-tela-m5.md`): o
-`screencast` do socket2 com a discrição que segura, a base segurada no
-animador com o ritmo de cada estado, os selos ao lado do corpo com o pulso
-da L4, o voo da escalada até o alto-centro, o confete das festas T2 e T3, o
-`/v1/estado.desenho`, as demonstrações do `bin/pet testar` e a prova do
-orçamento em relógio falso. A revisão das três revisões adversariais
-(T5.21–T5.24, decisões 0089–0092): os agentes que um workflow lança depois do
-Stop são da corrente, o pedido digitado com a corrente aberta festeja sozinho,
-a pose de espera vem do aviso (o clique, o teto e o diálogo visto no
-terminal da sessão a soltam), a escalada olha o terminal da sessão que
-espera, os voos da volta têm a conta deles e só saem com o pet na tela, a
-espera cabe no orçamento (o ritmo atento e a pose parada da L2 em diante), a
-tela compartilhada é discreta como o "não perturbe" e o
-`scripts/medir-custo.sh` mede o pet acordado. Depois da revisão, a memória
-das sessões (T5.25–T5.26, decisões 0093 e 0094): o pet que reinicia devolve,
-quietas, as sessões abertas do Claude de `/state/sessoes.json` (só
-metadados), com os prazos refeitos pela hora de parede; nada volta depois de
-um boot da máquina, e as janelas de outro compositor saem. A produção roda a
-branch (com o estado do Renan intacto); a conferência na tela pede a sessão
-desbloqueada. Para voltar a produção para a `main` antes do merge:
-`git -C ~/Documents/claude-pet switch main && bin/pet subir`, no clone (nunca
-na worktree estável; nunca mexa no `/state`), e depois `switch m5-cerebro`
-de novo para trabalhar.
+o `~/.local/bin/bichinho` dela, posto pelo `bin/pet instalar-host` depois do
+merge do M5: o hook manda o `orig` e o `crn` (decisão 0072; o plugin não
+mudou). A produção roda a `main` (`bin/pet subir` no clone), com o estado do
+Renan em `/state`: as aprovações, as posições e a memória das sessões. O
+andamento por tarefa está no `PROGRESS.md`.
 
 **Na tela do Renan:** o `zeca-livre-escuro` no tamanho `pequeno` (D = 4 no
 eDP-1), aprovado em 2026-10-05 (decisão 0070). O `zeca` do pack continua
@@ -89,30 +94,28 @@ aprovação. A pilha de dev (`PET_DEBUG=1`) mostra a skin xadrez `_teste`, ou o
 personagem aprovado com `PET_DEBUG_PERSONAGEM=1`. Formato, arte e aprovação
 em `docs/SKINS.md`.
 
-**Rumo (2026-10-03, decisões 0035–0042):** lançamento open source para
+**Rumo (2026-10-03, decisões 0035–0042; a ordem, decisão 0099):** lançamento open source para
 Linux, macOS e Windows, com o app **bichinho** (o personagem continua Zeca);
 o PLANO tem o M8 (multiplataforma) e o M9 (publicação). A pesquisa está em
-`docs/pesquisa/09-multiplataforma.md`. O M5 (cérebro completo e a tela dele)
-está na branch `m5-cerebro`, à espera do PR e da revisão do Renan; depois
-vem o M6 (o encanto: balões 9-slice, física das partículas, o voo
-atravessando a tela, a variedade parada).
+`docs/pesquisa/09-multiplataforma.md`. O próximo passo é o macOS, na branch
+`m8-macos`, escrita no Mac do Renan (Apple Silicon) por outra sessão do
+Claude Code: o pet nativo, com o clique que leva ao terminal sem depender de
+qual app de terminal é, e o build feito pelo Renan no Mac (decisões de 0100
+em diante). Depois vem o M6 (o encanto: balões 9-slice, física das
+partículas, o voo atravessando a tela, a variedade parada).
 
 **Pendentes** (pedem a tela acesa e desbloqueada, ou o Renan):
-- o PR do M5 (`m5-cerebro` → `main`, corpo conferido pelo `NOMES_DE_TERCEIROS`
-  antes do `gh pr create`), a revisão do Renan e, depois do merge, a troca do
-  README (o hook mudou: `bin/pet instalar-host`);
 - a conferência na tela do M5: `bin/pet foto` da base, dos selos, do voo da
   L3 e da volta com o "!!", do confete do T2 e da chuva do T3, a nitidez
   (`cargo xtask nitidez`) e o `scripts/medir-custo.sh --personagem` (com as
   fases `trabalhando` e `dormindo`; decisão 0091), para o orçamento no
   compositor de verdade;
-- as sobras das sessões aninhadas das pesquisas do M5, fora do repositório
-  (só com o OK do Renan para apagar): as pastas
-  `~/.claude/projects/-home-barbaruiva-Documents-claude-pet-tmp-m5-pesquisa-sessao-{a,b,c}`
-  e `/tmp/claude-1000/-home-barbaruiva-Documents-claude-pet-tmp-m5-pesquisa-sessao-{a,b,c}`,
-  o plano `~/.claude/plans/planeje-como-criar-um-lazy-stream.md` e as linhas
-  delas no `~/.claude/history.jsonl` (as da revisão, `tmp/m5-revisao`, e as
-  duas da conferência da memória, `tmp/m5-memoria/sessao`, também);
+- as linhas das sessões aninhadas do M5 no `~/.claude/history.jsonl` (só
+  com o OK do Renan para apagar): as das pesquisas (`tmp/m5-pesquisa/sessao/{a,b,c}`),
+  as da revisão (`tmp/m5-revisao/sessao`) e as das conferências da memória
+  (`tmp/m5-memoria/sessao` e `tmp/m5-memoria-rev/sessao`, duas cada). As
+  pastas das pesquisas e o plano que sobrou foram apagados em 2026-10-05, com
+  o OK do Renan;
 - a conferência na tela do M4 (`scripts/verificar-m4.sh` e `--manual`, com
   o checklist do HDMI, da tampa e da suspensão) e o
   `scripts/e2e-monitor.sh --autorizo` (o Renan digita «sim» a cada vez);
@@ -282,7 +285,10 @@ Fora dele, use `~/.cargo/bin/cargo`.
 
 - O Hyprland desconecta um cliente do socket2 com 64 eventos acumulados:
   drene sempre, numa thread só para isso.
-- `idle_prompt` se repete a cada ~60 s; nunca trate como aviso novo.
+- O `idle_prompt` sai uma vez por turno, uns 60 s depois do Stop, e nunca
+  com um diálogo na tela (no 2.1.288; `docs/pesquisa/10-cerebro-m5.md`;
+  decisão 0099): nunca trate como aviso novo nem como o Renan vendo o pronto.
+  Um repetido (o cenário `idle-prompt-repetido`) não faz nada.
 - O Stop não chega quando o usuário aperta Esc no meio da resposta.
 - Hooks async chegam fora de ordem: o Stop pode chegar depois do prompt
   seguinte, e um Stop hook de outro plugin manda a continuação segundos
@@ -361,7 +367,8 @@ Fora dele, use `~/.cargo/bin/cargo`.
   PATH, os dois faltam e o pet degrada sem quebrar.
 - No 2.1.288 o Esc numa pergunta e o plano recusado sem comentário **não
   mandam evento nenhum** (nem Stop, nem `idle_prompt`): a sessão fica
-  "esperando" até o próximo prompt. Por isso a pose de espera vem do aviso e
+  "esperando" até o próximo prompt, ou 12 h sem evento nenhum dela (decisão
+  0096). Por isso a pose de espera vem do aviso e
   tem prazo, e 5 s no terminal da sessão dão o diálogo por visto (decisão
   0090). O título do terminal fica ✳ o tempo todo (no tmux, conferido): ele
   diz "terminal do Claude", não "parado".
@@ -419,20 +426,36 @@ Fora dele, use `~/.cargo/bin/cargo`.
   janela ativa na conexão). Sem conexão Wayland o socket2 continua lido: todo
   prazo que o Motor anuncia tem de vencer também no
   `Motor::vencer_sem_conexao`, senão o laço gira a 100% de CPU.
-- **A memória das sessões** (`/state/sessoes.json`, decisão 0093): o pet
-  grava no batimento de 5 s quando ela muda e no SIGTERM (um `kill -9` perde
-  os últimos segundos), e lê na partida, antes de achar o compositor. Volta
-  só o que ainda vale pelas regras de sempre, quieto (nem festa, nem chamada
-  de novo; a escalada segue do tempo que passou), marcado `restaurada` no
-  `/v1/estado.sessoes` até o próximo evento da sessão, e a intenção
-  `restauracao` diz quantas. O turno aberto na parada não volta: a sessão
-  fica no estado dela até 5 min depois do último evento, ou até o
+- **A memória das sessões** (`/state/sessoes.json`, decisões 0093 e 0095): o
+  pet grava no batimento de 5 s quando ela muda, regrava a parada a cada 30 s
+  no relógio do laço ou na parede (depois de uma suspensão, no primeiro
+  batimento; decisão 0099) e grava sempre no SIGTERM (o log diz "gravada(s) na
+  saída"; um `kill -9` perde os últimos segundos), e lê na partida, antes de
+  achar o compositor. Volta só o que ainda vale pelas regras de sempre, quieto
+  (nem festa, nem chamada de novo; a escalada segue do tempo que passou), com
+  o sossego de antes (o "não perturbe", a soneca, a discrição) e os prazos no
+  tempo acordado (os `*_laco_ms`: uma suspensão da máquina não conta, como no
+  pet de pé), marcado `restaurada` no `/v1/estado.sessoes` até o próximo
+  evento da sessão, e a intenção `restauracao` diz quantas e o que mais
+  voltou. A memória gravada há mais de 60 s é velha (`velha` na intenção e no
+  log): as esperas voltam vistas (nada acima da L1) e as janelas sem o
+  endereço. Cada espera vista vai para o arquivo com a hora dela, e uma vista
+  não segura a vez de uma espera que o Renan não viu (decisão 0098). Na espera
+  que voltou, um gatilho de diálogo mais de 10 s depois dela é outro diálogo e
+  chama, como no pet de pé (decisão 0097). O turno aberto na parada não volta:
+  a sessão fica no estado dela até 5 min depois do último evento, ou até o
   `idle_prompt` (que também tira a espera que sobrou: ele nunca sai com um
   diálogo na tela; decisão 0094). Outro boot id: nada volta
   (`maquina_reiniciou`); outra instância do Hyprland: as sessões ficam sem as
-  janelas. O arquivo é do
-  volume do Renan: leia (`docker compose exec -T bichinho cat
-  /state/sessoes.json`, só metadados), nunca mexa nele na produção.
+  janelas. O arquivo é do volume do Renan: leia (`docker compose exec -T
+  bichinho cat /state/sessoes.json`, só metadados), nunca mexa nele na
+  produção.
+- **Uma sessão real só sai do pet** com o `SessionEnd` (também quando o
+  terminal fecha: o SIGHUP manda o `SessionEnd` com `other`, conferido
+  matando o tmux de uma sessão aninhada), com a máquina que reinicia ou
+  depois de uma semana sem evento nenhum (decisão 0096); a espera sem evento
+  por 12 h sai sozinha (`expirou`). Um processo que morre sem o `SessionEnd`
+  (`kill -9`, crash) deixa a sessão no fim da lista do clique até lá.
 - **Uma sessão do Claude aberta antes de o plugin ser instalado** não manda
   nada até um `/reload-plugins` nela (a sessão principal do Renan só chegou
   ao pet em 2026-10-05, depois de um), e mesmo depois só aparece no pet com o
@@ -440,11 +463,17 @@ Fora dele, use `~/.cargo/bin/cargo`.
   viu.
 - Para conferir a memória ao vivo sem tocar na produção: um daemon de
   rascunho da branch na 27391 (`PET_ESCUTA`, `PET_PORTA_PUBLICA`,
-  `PET_ESTADO` e `PET_CONFIG` numa pasta de `tmp/`, `PET_HOST_RUNTIME=/nao/existe`),
-  parado pelo PID com SIGTERM, e uma sessão aninhada com `PET_PORTA=27391`;
-  para simular um boot, troque o `boot` no arquivo do rascunho. Nos
-  cenários, o passo `reinicio` faz o mesmo em relógio falso (um evento com o
-  pet fora se perde; a linha do tempo continua no `t` do cenário).
+  `PET_ESTADO` e `PET_CONFIG` numa pasta de `tmp/`, `PET_HOST_RUNTIME=/nao/existe`;
+  com `PET_DEBUG=1`, o `/v1/debug/eventos` mostra o que chegou), parado pelo
+  PID com SIGTERM, e uma sessão aninhada com `PET_PORTA=27391`; para simular
+  um boot, troque o `boot` no arquivo do rascunho, e para a memória velha,
+  deixe o rascunho parado mais de 60 s. Sem o `dumpable` (decisão 0061), o
+  `/proc/<pid>/environ` do daemon é do root: ache o PID do rascunho pelo
+  `/proc/<pid>/cmdline` (`target/debug/bichinho rodar`; o
+  `/usr/local/bin/bichinho` é o da produção, no container). Nos cenários, o passo `reinicio` faz o
+  mesmo em relógio falso (um evento com o pet fora se perde; a linha do tempo
+  continua no `t` do cenário; um `parado_ms` de mais de 60 s dá a memória
+  velha).
 - O `shellcheck` não está instalado no host (o `bin/pet verificar` pula).
   Rodado pela imagem oficial, que depois foi removida:
   `docker run --rm --network none -v "$PWD:/mnt:ro" -w /mnt

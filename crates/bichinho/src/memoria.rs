@@ -58,6 +58,8 @@ pub fn ler(estado: &Path) -> Leitura {
 
 /// Grava de uma vez: um arquivo temporário na mesma pasta, só do dono, e o
 /// `rename` por cima do de antes (quem lê nunca vê um arquivo pela metade).
+/// Numa falha (o disco cheio, o arquivo virou uma pasta), o temporário sai e
+/// o arquivo de antes fica como estava (decisão 0095).
 pub fn gravar(estado: &Path, memoria: &Memoria) -> std::io::Result<()> {
     fs::create_dir_all(estado)?;
     let temporario = estado.join(format!("{ARQUIVO}.tmp"));
@@ -69,9 +71,16 @@ pub fn gravar(estado: &Path, memoria: &Memoria) -> std::io::Result<()> {
         opcoes.mode(0o600);
     }
     let mut arquivo = opcoes.open(&temporario)?;
-    arquivo.write_all(memoria.texto().as_bytes())?;
-    drop(arquivo);
-    fs::rename(&temporario, caminho(estado))
+    let gravou = arquivo
+        .write_all(memoria.texto().as_bytes())
+        .and_then(|()| {
+            drop(arquivo);
+            fs::rename(&temporario, caminho(estado))
+        });
+    if gravou.is_err() {
+        let _ = fs::remove_file(&temporario);
+    }
+    gravou
 }
 
 /// O boot id da máquina: no Linux, `/proc/sys/kernel/random/boot_id` (o do
@@ -138,6 +147,30 @@ mod testes {
             let modo = fs::metadata(caminho(&estado)).unwrap().permissions().mode();
             assert_eq!(modo & 0o777, 0o600, "só o dono lê");
         }
+    }
+
+    #[test]
+    fn a_gravacao_que_falha_nao_deixa_temporario_e_o_de_antes_fica() {
+        let a = Ambiente::novo("memoria-falha");
+        let estado = a.raiz.join("estado");
+        let memoria = Memoria::nova(1_790_000_000_000, Some("boot-1".into()));
+        // O arquivo de antes virou uma pasta com algo dentro: o rename falha.
+        fs::create_dir_all(caminho(&estado).join("dentro")).unwrap();
+        assert!(gravar(&estado, &memoria).is_err());
+        assert!(!estado.join(format!("{ARQUIVO}.tmp")).exists());
+        assert!(caminho(&estado).join("dentro").is_dir());
+        // A pasta sem escrita: nem o temporário nasce.
+        fs::remove_dir_all(caminho(&estado)).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&estado, fs::Permissions::from_mode(0o500)).unwrap();
+            assert!(gravar(&estado, &memoria).is_err());
+            fs::set_permissions(&estado, fs::Permissions::from_mode(0o700)).unwrap();
+            assert!(!estado.join(format!("{ARQUIVO}.tmp")).exists());
+        }
+        gravar(&estado, &memoria).unwrap();
+        assert!(matches!(ler(&estado), Leitura::Lida(_)));
     }
 
     #[test]

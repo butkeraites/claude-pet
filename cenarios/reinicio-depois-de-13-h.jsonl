@@ -1,4 +1,4 @@
-{"cenario": "reinicio-depois-de-13-h", "descricao": "o pet volta 11 h depois de parar: a sessão com o último evento há 13 h não volta (a vida de 12 h conta do último evento, de antes da partida); a de 11 h volta e sai sozinha na hora dela, 12 h depois do último evento", "padrao": {"ent": "cli"}}
+{"cenario": "reinicio-depois-de-13-h", "descricao": "o pet volta 11 h depois de parar (a memória velha): as duas sessões voltam, a do último evento há 13 h e a de 11 h, e ficam na lista do clique com o tempo de cada uma, também uma hora depois: a vida de uma sessão sem evento é de uma semana, contada do último evento de antes da partida (decisão 0096; eram 12 h)", "padrao": {"ent": "cli"}}
 {"t": 0, "desktop": {"ligado": true}}
 {"t": 0, "desktop": {"ocioso": false}}
 {"t": 1000, "evento": {"e": "SessionStart", "sid": "s1", "proj": "velha", "src": "startup"}}

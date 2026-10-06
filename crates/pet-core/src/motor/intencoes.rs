@@ -91,7 +91,7 @@ pub enum Tipo {
     /// velho saiu e este passou a ser o mais velho), 2 a 4 quando sobe
     /// (`tempo`, `voltou`) e 0 quando acaba (`andou`: a sessão andou; `visto`:
     /// o clique; `sessao_saiu`; `outro_aviso`: um mais urgente passou à
-    /// frente). `restaurada`, com o nível de antes: a memória das sessões
+    /// frente; `expirou`: 12 h sem evento nenhum da sessão, decisão 0096). `restaurada`, com o nível de antes: a memória das sessões
     /// trouxe o aviso na partida do pet, e a escalada segue do tempo que
     /// passou, sem chamar de novo (decisão 0093).
     Escalada {
@@ -169,16 +169,23 @@ pub enum Tipo {
         tirou_balao: bool,
     },
     /// A memória das sessões na partida do pet (decisão 0093): quantas
-    /// sessões e avisos voltaram e quantas ficaram de fora (expiradas, de
-    /// outra origem, com um campo ruim), ou o `motivo` de nada voltar
-    /// (`maquina_reiniciou`, `sem_boot`, `arquivo_ruim`, `versao`, `grande`).
-    /// Nada toca: nem reação, nem festa, nem balão.
+    /// sessões e avisos voltaram e quantas ficaram de fora (as razões de
+    /// [`super::Restauracao::de_fora`]), se a memória era velha (`velha`,
+    /// gravada há mais de 60 s: as esperas voltam vistas e as janelas sem o
+    /// endereço), o sossego que voltou (`nao_perturbe`, `soneca`,
+    /// `discricao`; decisão 0095), ou o `motivo` de nada voltar
+    /// (`maquina_reiniciou`, `sem_boot`, `arquivo_ruim`, `versao`, `grande`,
+    /// `erro_de_leitura`). Nada toca: nem reação, nem festa, nem balão.
     Restauracao {
         sessoes: u32,
         #[serde(skip_serializing_if = "eh_zero")]
         avisos: u32,
         #[serde(skip_serializing_if = "eh_zero")]
         de_fora: u32,
+        #[serde(skip_serializing_if = "eh_falso")]
+        velha: bool,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        sossego: Vec<&'static str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         motivo: Option<&'static str>,
     },

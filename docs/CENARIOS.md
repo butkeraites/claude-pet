@@ -59,7 +59,10 @@ Uma linha JSON por passo, com `t` em ms desde o começo do cenário:
   desktop: o cenário conta de novo (`ligado`, `ocioso`, `janela_ativa`).
   Opções: `"maquina": true` (a máquina reiniciou: outro boot id; o compositor
   também é outro), `"compositor": true` (outra instância do compositor: as
-  janelas de antes não existem mais) e `"arquivo": "corrompido"`.
+  janelas de antes não existem mais) e `"arquivo": "corrompido"`. A memória
+  gravada leva o relógio do laço e o sossego (o "não perturbe", a soneca, a
+  discrição; decisão 0095), e um `parado_ms` de mais de 60 s faz dela uma
+  memória velha (as esperas voltam vistas, as janelas sem o endereço).
 - Linhas vazias e as que começam por `#` são comentários.
 
 O executor (`pet_core::cenario`) roda o Motor com a janela de mentira pronta
@@ -82,12 +85,12 @@ Cada linha tem `t` (ms do relógio do laço) e `i` (o tipo). O
 | `balao` | um balão | `linhas`, `motivo` (`festa`, `aviso`, `aviso_refinado`, `erro`, `cansado`, `lista`, `sem_foco`, `pedido`) |
 | `base` | a base que o pet segura mudou | `estado` (o da skin: `waiting`, `error`, `sleep`, `ready`, `working`, `thinking`, `idle`), `prioridade`, `sid8`, `profundo` (o sono profundo, sem commit) |
 | `selos` | os selos das outras sessões mudaram | `mais` (o "+N"), `bandeiras` (a cor de cada pronto, 0 a 7), `corrente` (o "…") |
-| `escalada` | a escalada do aviso de espera mais velho | `sid8`, `nivel` (1 a 4; 0 no fim), `espera` (no começo), `motivo` (`aviso`, `vez`, `tempo`, `voltou`, `andou`, `visto`, `sessao_saiu`, `outro_aviso`; `vista`, com o nível de agora, quando o Renan viu o diálogo 5 s no terminal da sessão: nada mais passa da L1, decisão 0090; `restaurada`, com o nível de antes, quando a memória das sessões trouxe o aviso na partida: a escalada segue do tempo que passou, sem chamar de novo, decisão 0093) |
+| `escalada` | a escalada da espera da vez: a mais velha que o Renan ainda não viu, ou, com todas vistas, a que já tinha a vez (decisão 0098) | `sid8`, `nivel` (1 a 4; 0 no fim), `espera` (no começo), `motivo` (`aviso`, `vez`, `tempo`, `voltou`, `andou`, `visto`, `sessao_saiu`, `outro_aviso`, quando a vez passa a outra espera, uma que o Renan não viu ou uma mais velha; `expirou`, 12 h sem evento nenhum da sessão, que fica, decisão 0096; `vista`, com o nível de agora, quando o Renan viu o diálogo 5 s no terminal da sessão: nada mais passa da L1, decisão 0090; `restaurada`, com o nível de antes, quando a memória das sessões trouxe o aviso na partida: a escalada segue do tempo que passou, sem chamar de novo, decisão 0093; numa memória velha, ela volta vista, decisão 0095) |
 | `rajada` | a chamada (`alert`) de novo, na L2 e na L4 | `sid8`, `nivel` |
 | `voo` | o voo até o alto-centro do monitor e de volta | `destino` (`alto_centro`), `motivo` (`escalada`, até 3 na L3; `voltou`, até 3 da volta do Renan, com a conta deles, decisão 0090), `sid8` |
 | `pulso` | o selo do aviso pulsando (uma troca de cor por segundo) liga ou desliga (L4) | `ligado`, `sid8` |
 | `discricao` | a tela compartilhada (2 s de sinal somados) liga; 5 min sem sinal desligam (decisão 0081) | `ligada`, `tirou_balao` |
-| `restauracao` | a memória das sessões na partida do pet (decisão 0093): nada toca | `sessoes` e `avisos` que voltaram, `de_fora` (expiradas, de outra origem, repetidas, além do teto, com um campo ruim), ou o `motivo` de nada voltar (`maquina_reiniciou`, `sem_boot`, `arquivo_ruim`, `versao`, `grande`) |
+| `restauracao` | a memória das sessões na partida do pet (decisão 0093): nada toca | `sessoes` e `avisos` que voltaram, `de_fora` (expiradas, uma semana sem evento, decisão 0096; de outra origem; repetidas; além do teto; com um campo ruim; com uma hora mais de 6 h adiante, decisão 0094, ou um instante do laço depois da gravação, decisão 0095), `velha` (gravada há mais de 60 s: as esperas voltam vistas, as janelas sem o endereço; decisão 0095), `sossego` (o que voltou: `nao_perturbe`, `soneca`, `discricao`), ou o `motivo` de nada voltar (`maquina_reiniciou`, `sem_boot`, `arquivo_ruim`, `versao`, `grande`, `erro_de_leitura`) |
 | `clique` | o que um clique fez | `resultado` (`focou`, `nao_focou`, `lista`, `soneca`, `nada`), `sid8` |
 
 As reações (`reacao`, `rajada`, a `reacao` de cada `festa`) vão para o

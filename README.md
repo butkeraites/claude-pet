@@ -15,17 +15,19 @@ no terminal:
 Pode ser arrastado com o mouse para qualquer lugar e sempre aparece no
 monitor que está em foco. Sem som.
 
-> **Estado:** em construção. Na `main` (`v0.4.1`): o overlay nítido no
+> **Estado:** em construção. Na `main` (`v0.5.0`): o overlay nítido no
 > Hyprland (M1), o Zeca com aprovação do personagem (M2), hooks → reação
 > (M3), a costura para Windows e macOS com o hook nativo (parte do M8),
-> arrastar, seguir o monitor ativo e o clique que leva ao terminal (M4) e o
-> Zeca original, arte livre em CC0. Na branch `m5-cerebro`: o M5 inteiro,
-> o cérebro completo (as festas pelo trabalho, as correntes de agentes, os
-> avisos com a escalada, a tela com selos, sono e discrição), decidido num
-> registro de intenções com cenários dourados, e a tela que desenha isso (o
-> Zeca em cada estado, os selos das outras sessões, o voo da escalada, o
-> confete das festas grandes, a discrição ao compartilhar a tela). O destino
-> é um lançamento open source para Linux, macOS e Windows. O repositório de
+> arrastar, seguir o monitor ativo e o clique que leva ao terminal (M4), o
+> Zeca original, arte livre em CC0, e o M5: o cérebro completo (as festas
+> pelo trabalho, as correntes de agentes, os avisos com a escalada, a tela
+> com selos, sono e discrição), decidido num registro de intenções com
+> cenários dourados, a tela que desenha isso (o Zeca em cada estado, os selos
+> das outras sessões, o voo da escalada, o confete das festas grandes, a
+> discrição ao compartilhar a tela) e a memória das sessões (o pet que
+> reinicia não esquece as sessões abertas do Claude). O próximo passo é o
+> macOS, na branch `m8-macos`; depois, o M6 (o encanto). O destino é um
+> lançamento open source para Linux, macOS e Windows. O repositório de
 > desenvolvimento ainda se chama `claude-pet`. Veja `PLANO.md` para os marcos
 > e `PROGRESS.md` para o andamento.
 
@@ -324,7 +326,9 @@ pede que você digite «sim» no terminal).
   bloqueada, depois que ela some). Com 5 s no terminal da sessão, ele dá o
   diálogo por visto e não escala mais (um Esc numa pergunta ou um plano
   recusado não mandam evento nenhum, e a pose de espera sai 2 min depois);
-  o clique que leva ao terminal também a tira. Com o "não perturbe" do
+  o clique que leva ao terminal também a tira. Com mais de uma sessão
+  esperando, a chamada cresce para a mais antiga que você ainda não viu; a
+  que você já viu fica no «!» e no clique. Com o "não perturbe" do
   Omarchy ou na soneca, só a primeira chamada. O "não perturbe" vem com os
   eventos do Claude: ligado no meio de uma espera, vale no próximo evento de
   qualquer sessão; para calar na hora, o clique direito (a soneca).
@@ -338,13 +342,22 @@ pede que você digite «sim» no terminal).
 - **Quando o pet reinicia** (uma atualização, um crash), as sessões abertas
   do Claude não somem: elas voltam de `/state/sessoes.json` (só metadados:
   ids opacos, a pasta do projeto, o estado, os avisos e o terminal de cada
-  uma), no estado em que estavam, sem festa nem chamada de novo; uma espera
-  segue a chamada de onde parou. O turno que estava no meio não volta: a
-  sessão fica trabalhando até 5 min depois do último evento, e o próximo
-  evento dela segue normalmente. Depois de reiniciar a máquina, ele começa
-  vazio (todo Claude de antes acabou); depois de sair e entrar de novo na
-  sessão gráfica, as sessões voltam sem o terminal de antes até o próximo
+  uma), no estado em que estavam, sem festa nem chamada de novo, com o "não
+  perturbe", a soneca e a discrição da tela compartilhada de antes; uma
+  espera segue a chamada de onde parou. Se o pet ficou parado mais de 1 min
+  (a pergunta pode ter sido respondida nesse meio-tempo), a espera volta
+  quieta (o «!» e o clique, sem chamar de novo), e o terminal de cada sessão
+  só volta com o próximo prompt. Um diálogo novo depois da volta, da mesma
+  sessão ou de outra, chama como sempre. O turno que estava no meio não
+  volta: a sessão fica trabalhando até 5 min depois do último evento, e o
+  próximo evento dela segue normalmente. Depois de reiniciar a máquina, ele
+  começa vazio (todo Claude de antes acabou); depois de sair e entrar de novo
+  na sessão gráfica, as sessões voltam sem o terminal de antes até o próximo
   prompt.
+- **Todas as sessões abertas** ficam na lista do clique, mesmo paradas há
+  dias: uma sessão só sai quando o Claude dela fecha (também fechando o
+  terminal) ou depois de uma semana sem nada; uma espera sem nenhum sinal da
+  sessão por 12 h sai sozinha.
 
 `bin/pet testar medio`, `grande`, `pergunta` e `dois-prontos` mostram cada
 uma dessas coisas com sessões de teste (que somem em 60 s), e o
