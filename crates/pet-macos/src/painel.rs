@@ -212,6 +212,10 @@ impl Painel {
         let j = self.janela.as_mut().unwrap();
         j.monitor = monitor;
         j.tela = nova;
+        // A escala do monitor novo pode diferir (Retina ↔ externo): o
+        // CALayer guarda a sua, senão os blocos D×D saem fracionados
+        // (revisão do M8).
+        j.layer.setContentsScale(j.tela.escala);
         j.ultima_cena.clear();
         self.eventos.push(EventoOverlay::Pronta);
     }
