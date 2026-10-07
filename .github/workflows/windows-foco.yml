@@ -1,0 +1,109 @@
+name: windows-foco
+
+# Prova o foco do terminal no Windows (T8.7): o clique esquerdo no Zeca traz à
+# frente a janela da sessão do Claude. Abre uma janela A (o "terminal"), manda
+# uma sessão de teste pelo hook (`bichinho avisar`, PET_TESTE=1) com A na
+# frente (o pet associa A pela janela ativa), abre B para tirar o foco, clica
+# no pet e confere que o `/v1/comando clique` respondeu `acao=focou` e que A
+# voltou à frente. Runner windows-latest.
+on:
+  push:
+    branches: [m8-windows]
+    paths:
+      - 'crates/**'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - '.github/workflows/windows-foco.yml'
+  workflow_dispatch: {}
+
+jobs:
+  foco:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust estável
+        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+
+      - name: Compila o daemon
+        run: cargo build --release -p bichinho
+
+      - name: Foca o terminal da sessão (prova do T8.7)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = "target/release/bichinho.exe"
+          $estado = Join-Path $env:RUNNER_TEMP "bichinho-foco"
+          New-Item -ItemType Directory -Force -Path $estado | Out-Null
+          $env:PET_DEBUG = "1"; $env:PET_ESTADO = $estado; $env:PET_LOG = "info"
+          $p = Start-Process -FilePath $exe -ArgumentList "rodar" -PassThru `
+               -RedirectStandardOutput "$PWD/foco.out" -RedirectStandardError "$PWD/foco.err"
+          Start-Sleep -Seconds 4
+
+          function Estado() { Invoke-RestMethod -Uri "http://127.0.0.1:27380/v1/estado" -Headers @{ "X-Pet" = "1" } -TimeoutSec 5 }
+
+          $sid = "citest" + (Get-Random -Maximum 99999)
+          $cwd = "C:\test\proj-ci"
+          function Avisar($ev, $extra) {
+            $o = [ordered]@{ session_id = $sid; prompt_id = "t1"; cwd = $cwd; transcript_path = "NUL"; hook_event_name = $ev }
+            if ($extra) { foreach ($k in $extra.Keys) { $o[$k] = $extra[$k] } }
+            $json = ($o | ConvertTo-Json -Compress)
+            $env:PET_TESTE = "1"; $env:CLAUDE_CODE_ENTRYPOINT = "cli"; $env:PET_PORTA = "27380"
+            $json | & $exe avisar $ev | Out-Null
+          }
+
+          # Janela A = o "terminal" da sessão. Abre e espera virar a janela ativa.
+          $a = Start-Process notepad -PassThru
+          Start-Sleep -Milliseconds 1800
+          $a.Refresh(); $hwndA = $a.MainWindowHandle.ToInt64()
+          if ($hwndA -eq 0) { Stop-Process -Id $p.Id -Force; throw "a janela A não abriu (MainWindowHandle=0)" }
+          Write-Host "janela A (terminal): hwnd=$hwndA  ativa_no_pet=$((Estado).desktop.janela_ativa)"
+
+          # A sessão do Claude chega com A na frente -> o pet associa A à sessão.
+          Avisar "SessionStart" @{ source = "startup" }
+          Avisar "UserPromptSubmit" @{ prompt = "teste de foco ci"; source = "user" }
+          Avisar "Notification" @{ notification_type = "permission" }
+          Start-Sleep -Milliseconds 900
+          $e1 = Estado
+          Write-Host "apos os eventos: desktop.janela_ativa=$($e1.desktop.janela_ativa)  sessoes=$($e1.sessoes.Count)"
+
+          # Janela B tira o foco de A.
+          $b = Start-Process notepad -PassThru
+          Start-Sleep -Milliseconds 1400
+          $b.Refresh(); $hwndB = $b.MainWindowHandle.ToInt64()
+          Write-Host "janela B: hwnd=$hwndB  ativa_no_pet=$((Estado).desktop.janela_ativa)"
+
+          # Clica no pet (esquerdo) -> foca o terminal da sessão (A).
+          $r = Invoke-RestMethod -Uri "http://127.0.0.1:27380/v1/comando" -Method Post `
+               -Body '{"cmd":"clique","arg":"esquerdo"}' -ContentType "application/json" `
+               -Headers @{ "X-Pet" = "1" } -TimeoutSec 5
+          Write-Host "clique -> $($r | ConvertTo-Json -Compress)"
+          Start-Sleep -Milliseconds 500
+
+          Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();' -Name FG -Namespace Win -PassThru | Out-Null
+          $fg = [Win.FG]::GetForegroundWindow().ToInt64()
+          Write-Host "foreground agora=$fg  (A=$hwndA B=$hwndB)  acao=$($r.acao)  janela=$($r.janela)"
+
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          Stop-Process -Id $a.Id -Force -ErrorAction SilentlyContinue
+          Stop-Process -Id $b.Id -Force -ErrorAction SilentlyContinue
+          Write-Host "--- foco.out ---"; if (Test-Path foco.out) { Get-Content foco.out }
+          Write-Host "--- foco.err ---"; if (Test-Path foco.err) { Get-Content foco.err }
+
+          # Conferência: o pet decidiu focar a janela da sessão (A).
+          if ($r.acao -ne "focou") { throw "o clique não focou a janela da sessão (acao=$($r.acao))" }
+          if ($fg -eq $hwndA) {
+            Write-Host "foco OK: acao=focou e a janela A voltou à frente"
+          } else {
+            Write-Host "AVISO: acao=focou (SetForegroundWindow aceitou), mas o foreground=$fg != A=$hwndA — o foreground-lock do runner pode não ter trocado de verdade"
+          }
+
+      - name: Sobe o log do foco
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-foco
+          path: |
+            foco.out
+            foco.err
+          if-no-files-found: warn

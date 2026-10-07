@@ -15,7 +15,11 @@ OS=$(uname -s)
 ARCH=$(uname -m)
 case "$OS" in
   Darwin) plat=macos ;;
-  *) echo "O Zeca ainda só tem instalador por download para macOS (veio $OS). Linux/Windows: em breve." >&2; exit 1 ;;
+  MINGW* | MSYS* | CYGWIN* | Windows_NT)
+    echo "No Windows, instale pelo PowerShell:" >&2
+    echo "  irm https://raw.githubusercontent.com/${REPO}/main/scripts/get.ps1 | iex" >&2
+    exit 1 ;;
+  *) echo "O Zeca tem instalador por download para macOS e Windows (veio $OS). No Linux, rode do código por ora (veja o README)." >&2; exit 1 ;;
 esac
 case "$ARCH" in
   arm64 | aarch64) arch=arm64 ;;

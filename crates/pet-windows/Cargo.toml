@@ -1,17 +1,32 @@
 [package]
 name = "pet-windows"
-description = "Backend do Windows (M8, T8.4): por enquanto só o esboço que compila."
+description = "Backend do Windows (M8): janela layered (UpdateLayeredWindow) como Overlay, GetForegroundWindow/SetForegroundWindow como Desktop, e o laço de mensagens."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 publish = false
 
-# Só no Windows: em outro sistema o crate fica vazio (decisão 0040). Sem
-# dependência de SDK por enquanto: o `cargo check --target
-# x86_64-pc-windows-msvc` roda neste notebook, sem linkar.
+# Só no Windows: em outro sistema o crate fica vazio (decisão 0040). O crate
+# `windows` (Win32) foi provado no spike; o `cargo clippy --target
+# x86_64-pc-windows-msvc` não linka, então roda no CI de Linux/macOS também.
 [target.'cfg(windows)'.dependencies]
 pet-core.workspace = true
+windows = { version = "0.58", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_System_Console",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Threading",
+  "Win32_UI_Accessibility",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_HiDpi",
+] }
 
-[lints]
-workspace = true
+# `[lints]` próprio (não herda o `unsafe_code = "forbid"` do workspace): o Win32
+# pede `unsafe`, que só este crate usa (CLAUDE.md, decisões 0040 e 0101). Cada
+# bloco `unsafe` precisa de um `// SAFETY:` (enforçado pelo lint).
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "warn"

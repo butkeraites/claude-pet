@@ -33,6 +33,8 @@ mod ingress;
 mod laco;
 #[cfg(target_os = "macos")]
 mod laco_macos;
+#[cfg(windows)]
+mod laco_windows;
 mod memoria;
 mod nucleo;
 mod observador;

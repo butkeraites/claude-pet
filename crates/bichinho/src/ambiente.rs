@@ -65,10 +65,9 @@ impl Ambiente {
                 .map_err(|_| format!("PET_PORTA_PUBLICA inválida: «{texto}»"))?,
             None => escuta.port(),
         };
-        let home = var("HOME").unwrap_or_else(|| "/tmp".to_owned());
         let pasta_estado = var("PET_ESTADO")
             .map(PathBuf::from)
-            .unwrap_or_else(|| estado_padrao(&home));
+            .unwrap_or_else(|| estado_padrao(&var));
         Ok(Ambiente {
             escuta,
             porta_publica,
@@ -105,13 +104,27 @@ impl Ambiente {
     }
 }
 
-/// A pasta de estado padrão (sem `PET_ESTADO`), por sistema: no macOS, como
+/// A pasta de estado padrão (sem `PET_ESTADO`), por sistema: no Windows,
+/// `%LOCALAPPDATA%\bichinho` (ou `%APPDATA%`; decisão 0108); no macOS, como
 /// manda a convenção, `~/Library/Application Support/bichinho` (decisão 0100);
-/// no resto (Linux fora do Docker, Windows até o M8), o XDG
-/// `~/.local/state/bichinho`.
-fn estado_padrao(home: &str) -> PathBuf {
+/// no Linux (fora do Docker), o XDG `~/.local/state/bichinho`.
+fn estado_padrao(var: &impl Fn(&str) -> Option<String>) -> PathBuf {
+    #[cfg(windows)]
+    {
+        if let Some(base) = var("LOCALAPPDATA").or_else(|| var("APPDATA")) {
+            if !base.trim().is_empty() {
+                return PathBuf::from(base).join("bichinho");
+            }
+        }
+    }
+    // `USERPROFILE` no Windows (sem LOCALAPPDATA), `HOME` no resto.
+    let home = var("HOME")
+        .or_else(|| var("USERPROFILE"))
+        .unwrap_or_else(|| "/tmp".to_owned());
     if cfg!(target_os = "macos") {
         PathBuf::from(home).join("Library/Application Support/bichinho")
+    } else if cfg!(windows) {
+        PathBuf::from(home).join("AppData/Local/bichinho")
     } else {
         PathBuf::from(home).join(".local/state/bichinho")
     }
@@ -136,14 +149,33 @@ mod testes {
 
     #[test]
     fn estado_padrao_por_sistema() {
-        let p = estado_padrao("/Users/x");
+        let so_home = |n: &str| (n == "HOME").then(|| "/Users/x".to_owned());
+        let p = estado_padrao(&so_home);
         #[cfg(target_os = "macos")]
         assert_eq!(
             p,
             PathBuf::from("/Users/x/Library/Application Support/bichinho")
         );
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "linux")]
         assert_eq!(p, PathBuf::from("/Users/x/.local/state/bichinho"));
+
+        // No Windows, o `%LOCALAPPDATA%` vence; sem ele, cai no `%USERPROFILE%`.
+        #[cfg(windows)]
+        {
+            let com_appdata = |n: &str| match n {
+                "LOCALAPPDATA" => Some(r"C:\Users\x\AppData\Local".to_owned()),
+                _ => None,
+            };
+            assert_eq!(
+                estado_padrao(&com_appdata),
+                PathBuf::from(r"C:\Users\x\AppData\Local").join("bichinho")
+            );
+            let so_perfil = |n: &str| (n == "USERPROFILE").then(|| r"C:\Users\x".to_owned());
+            assert_eq!(
+                estado_padrao(&so_perfil),
+                PathBuf::from(r"C:\Users\x").join("AppData/Local/bichinho")
+            );
+        }
     }
 
     #[test]

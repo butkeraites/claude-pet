@@ -1,35 +1,58 @@
-//! Backend do Windows (M8, T8.4; decisões 0038 e 0040).
+//! Backend do Windows (M8): a janela pequena que anda (`WS_EX_LAYERED |
+//! TOPMOST | TOOLWINDOW | NOACTIVATE`, DIB BGRA pré-multiplicado desenhado com
+//! `UpdateLayeredWindow`) como [`pet_core::plataforma::Overlay`], o monitor e a
+//! janela ativos como [`pet_core::plataforma::Desktop`], e o laço de mensagens
+//! (`MsgWaitForMultipleObjectsEx` + `PeekMessageW`), com a
+//! [`pet_core::plataforma::Caixa`] acordando o laço por `PostThreadMessageW`.
 //!
-//! Vazio por enquanto, mas compilando: o `cargo check --target
-//! x86_64-pc-windows-msvc` prova que o núcleo (`pet-core`) e o daemon não
-//! dependem de nada do Linux. O que vem aqui, pela pesquisa
-//! (`docs/pesquisa/09-multiplataforma.md`):
+//! O palco do Motor (pixels do dispositivo, origem no topo esquerda do monitor)
+//! é o próprio sistema de coordenadas da tela no Windows, então as conversões
+//! são triviais (`pixels::Tela`), sem os flips do macOS.
 //!
-//! - a janela pequena que anda (`WS_EX_LAYERED | TOOLWINDOW | NOACTIVATE |
-//!   TOPMOST`, DIB de 32 bits pré-multiplicado, clique pelo alfa) como
-//!   [`pet_core::plataforma::Overlay`];
-//! - o monitor ativo e o foco da janela da sessão como
-//!   [`pet_core::plataforma::Desktop`];
-//! - o laço `MsgWaitForMultipleObjectsEx`, com a
-//!   [`pet_core::plataforma::Caixa`] acordando o laço por `PostMessageW`.
-//!
-//! O hook dos plugins (`bichinho avisar`) já compila para este sistema: só
-//! usa a `std` (decisão 0041); rodar de verdade pede uma máquina ou o CI
-//! (T8.2). Até a janela chegar, o daemon roda o laço sem janela (o cérebro e
-//! o `/v1/estado`).
-//!
-//! O `unsafe` do Win32 fica só neste crate, com `// SAFETY:` em cada bloco
-//! (o workspace o proíbe no resto). Hoje nem isso: o crate não tem `unsafe`.
+//! O `unsafe` do Win32 fica só neste crate, com `// SAFETY:` em cada bloco.
 
 #![cfg(windows)]
 
+#[macro_use]
+extern crate pet_core;
+
+mod app;
+mod desktop;
+mod painel;
+mod pixels;
+mod punho;
+
+pub use app::{Despertador, instalar_encerramento, pediram_encerrar, preparar, rodar_fatia};
+pub use desktop::DesktopWin;
+pub use painel::Painel;
+pub use punho::PunhoWin;
+
 use pet_core::plataforma::{CapDesktop, CapOverlay};
 
-/// O que a janela do Windows vai saber fazer (nada, por enquanto).
-pub fn capacidades() -> (CapOverlay, CapDesktop) {
-    (CapOverlay::default(), CapDesktop::default())
+/// O que a janela do Windows sabe fazer (como o macOS: janela pequena que anda,
+/// com área de toque e cursor próprios; o ritmo é do laço, não do compositor).
+pub fn cap_overlay() -> CapOverlay {
+    CapOverlay {
+        tela_inteira: false,
+        regiao_de_toque: true,
+        escala_fracionaria: true,
+        cursor: true,
+        ritmo_do_compositor: false,
+    }
 }
 
-/// Por que o pet ainda não aparece aqui: o daemon roda o laço sem janela
-/// (o cérebro e o `/v1/estado` funcionam) até a janela do T8.4 chegar.
-pub const SEM_JANELA: &str = "o pet ainda não aparece no Windows (M8, T8.4)";
+/// O que a ligação com o desktop sabe fazer. A janela segue o monitor sozinha
+/// (como o macOS), então `segue_foco` é falso; a janela ativa e o foco do
+/// terminal (T8.7) já valem.
+pub fn cap_desktop() -> CapDesktop {
+    CapDesktop {
+        segue_foco: false,
+        janela_ativa: true,
+        foca_janela: true,
+        nao_perturbe: false,
+    }
+}
+
+/// Fallback: enquanto o backend não está ligado no daemon, o laço sem janela
+/// roda (o cérebro e o `/v1/estado`).
+pub const SEM_JANELA: &str = "o pet ainda não aparece no Windows (M8)";

@@ -18,15 +18,23 @@ He sits on top of everything, follows your active monitor, and can be dragged an
 
 ## Install
 
-One command (macOS, Apple Silicon or Intel):
+One command.
+
+**macOS** (Apple Silicon or Intel):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/butkeraites/claude-pet/main/scripts/get.sh | sh
 ```
 
-That's it — it downloads a signed build, drops the pet on your screen, wires it into Claude Code, and starts at login. No repo, no toolchain, no config.
+**Windows** (PowerShell):
 
-> Linux and Windows are on the way. On Linux you can run it from source today (see [Development](#development)).
+```powershell
+irm https://raw.githubusercontent.com/butkeraites/claude-pet/main/scripts/get.ps1 | iex
+```
+
+That's it — it downloads a build, drops the pet on your screen, wires it into Claude Code, and starts at login. No repo, no toolchain, no config. (The Windows build isn't code-signed yet, so SmartScreen warns once — choose *More info → Run anyway*.)
+
+> Linux is on the way. On Linux you can run it from source today (see [Development](#development)).
 
 Open a new terminal, run `claude`, and Zeca starts reacting. To remove: `claude plugin uninstall bichinho` and `~/Library/Application Support/bichinho`'s LaunchAgent (`scripts/mac-desinstalar.sh --tudo`).
 
