@@ -5087,3 +5087,37 @@ desenha e tira screenshot — provado nos spikes).
 traduz), o que mantém os testes em relógio falso e o orçamento de commits valendo
 igual. Entregar o pet animando e reagindo primeiro, e o ponteiro depois, segue a
 ordem do M8 (a janela antes do arraste) e deixa cada corte conferível.
+
+## 0112 — Instalar o Zeca no Windows por download: PowerShell, autostart na chave Run, launcher escondido (2026-10-07)
+
+**Problema:** o instalar-por-download (decisão 0109) era só macOS. O Windows
+precisa do mesmo «um comando, sem o repo nem cargo», mas com as convenções dele
+(PowerShell, `%LOCALAPPDATA%`, autostart, um daemon de console que não pode
+piscar uma janela).
+
+**Decisão:** o espelho do macOS, com as peças do Windows:
+- **Um comando:** `irm …/get.ps1 | iex` (`scripts/get.ps1`) baixa o
+  `zeca-windows-x64.zip` do release e roda o `scripts/instalar-local.ps1`.
+- **Pacote** (`scripts/win-empacotar.ps1`, e o job `windows` do `release.yml`):
+  o `bichinho.exe`, a skin CC0 `zeca-livre-escuro` **já aprovada** (snapshot +
+  `aprovacao.json`), o plugin e o `instalar-local.ps1`, num `.zip`. A impressão
+  digital da skin é calculada no PowerShell **exatamente** como o daemon
+  (`pet_core::aprovacao::impressao`: o sha256 do texto «sha256(arquivo)  nome\n»
+  de `skin.json`, `sheet.json`, `sheet.png`), então o Zeca sobe aprovado sem
+  ninguém aprovar nada (a mesma licença da decisão 0109: é a skin padrão do
+  projeto, CC0, não uma de terceiros).
+- **Lugares:** `%LOCALAPPDATA%\bichinho` (o `PET_ESTADO` padrão do Windows, com
+  o config, o snapshot aprovado e `bin\bichinho.exe`). O `bin` entra no **PATH
+  do usuário** para o hook (`bichinho avisar`) achar o binário.
+- **Autostart:** a **chave Run** `HKCU\Software\Microsoft\Windows\
+  CurrentVersion\Run\Zeca` (não a pasta Inicializar), apontando para um launcher
+  `.vbs` que roda `bichinho.exe rodar` **escondido** (`WScript.Shell.Run …, 0`):
+  um daemon de console pela Run key piscaria uma janela; o `.vbs` com janela 0
+  não. O launcher põe o `PET_CONFIG` antes de subir.
+- **Sem assinatura** por ora: o SmartScreen avisa uma vez (normal para OSS
+  pequeno); o Authenticode fica para depois.
+
+**Por quê:** é a mesma arquitetura e a mesma licença-da-skin da decisão 0109,
+só com o que o Windows pede. O CI `windows-instalar` prova o caminho inteiro
+(monta, instala, o Zeca real sobe `tela=ativa` sem debug), o que de quebra
+valida que a impressão calculada no PowerShell bate com a do daemon.
