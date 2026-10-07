@@ -94,18 +94,8 @@ impl Tela {
 
     /// Um ponto da tela (físico) vira um ponto do palco (físico, topo do
     /// monitor). Para o click-through pelo plano B (`GetCursorPos`).
-    // Usado no corte do ponteiro/arrasto (plano B), que vem a seguir.
-    #[allow(dead_code)]
     pub fn tela_para_palco(&self, sx: i32, sy: i32) -> (i32, i32) {
         (sx - self.monitor.left, sy - self.monitor.top)
-    }
-
-    /// Um ponto local da janela (cliente, topo esquerda) vira palco: a janela
-    /// está em `bbox` no palco, então é só somar.
-    // Usado no corte do ponteiro/arrasto, que vem a seguir.
-    #[allow(dead_code)]
-    pub fn janela_para_palco(&self, bbox: Ret, cx: i32, cy: i32) -> (i32, i32) {
-        (bbox.x + cx, bbox.y + cy)
     }
 }
 

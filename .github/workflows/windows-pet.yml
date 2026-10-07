@@ -1,10 +1,12 @@
 name: windows-pet
 
-# Prova na tela que o backend nativo do Windows (T8.4, decisão 0111) desenha e
-# anima o Zeca: compila o daemon `bichinho`, roda `bichinho rodar` com a skin
-# `_teste` (PET_DEBUG=1, sem aprovação), tira um screenshot do desktop parado,
-# manda uma reação (`/v1/comando` `tocar`) e tira outro. Automático, num runner
-# windows-latest (que desenha e deixa capturar a tela — provado nos spikes).
+# Prova na tela que o backend nativo do Windows (T8.4, decisão 0111) desenha,
+# anima e **reage ao ponteiro**: compila o daemon `bichinho`, roda com a skin
+# `_teste` (PET_DEBUG=1, sem aprovação) num runner windows-latest, e então
+# sintetiza mouse de verdade (SetCursorPos + mouse_event) para arrastar o Zeca
+# e clicar com o direito; confere pelo `/v1/estado` que ele moveu e cochilou,
+# tira screenshots e sobe tudo. O runner desenha e deixa capturar a tela e
+# mover o cursor (provado nos spikes).
 on:
   push:
     branches: [m8-windows]
@@ -22,9 +24,10 @@ jobs:
       - name: Compila o daemon
         run: cargo build --release -p bichinho
 
-      - name: Roda o pet + screenshots (parado e reagindo)
+      - name: Roda o pet, arrasta e clica (prova do ponteiro)
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           $exe = "target/release/bichinho.exe"
           $estado = Join-Path $env:RUNNER_TEMP "bichinho-estado"
           New-Item -ItemType Directory -Force -Path $estado | Out-Null
@@ -37,6 +40,11 @@ jobs:
           Start-Sleep -Seconds 4
 
           Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          # P/Invoke do user32 por -MemberDefinition (sem here-string, que o YAML
+          # estraga). Flags do mouse_event: LD=0x0002 LU=0x0004 RD=0x0008 RU=0x0010.
+          $sig = '[DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y); [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, IntPtr e);'
+          Add-Type -MemberDefinition $sig -Name Mouse -Namespace Win -PassThru | Out-Null
+
           function Tira($nome) {
             $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
             $bmp = New-Object System.Drawing.Bitmap $vs.Width, $vs.Height
@@ -46,25 +54,52 @@ jobs:
             $g.Dispose(); $bmp.Dispose()
             Write-Host "screenshot: $nome ($($vs.Width)x$($vs.Height))"
           }
-
-          # 1) o Zeca parado (idle)
-          Tira "pet-parado.png"
-
-          # 2) manda uma reação e captura (best-effort: a animação é curta)
-          try {
-            $r = Invoke-WebRequest -Uri "http://127.0.0.1:27380/v1/comando" -Method Post `
-                 -Body '{"cmd":"tocar","arg":"done_big"}' -ContentType "application/json" `
-                 -Headers @{ "X-Pet" = "1" } -UseBasicParsing -TimeoutSec 5
-            Write-Host "tocar done_big -> HTTP $($r.StatusCode): $($r.Content)"
-          } catch {
-            Write-Host "tocar falhou (best-effort): $_"
+          function Estado() {
+            Invoke-RestMethod -Uri "http://127.0.0.1:27380/v1/estado" -Headers @{ "X-Pet" = "1" } -TimeoutSec 5
           }
+
+          $e0 = Estado
+          $sd = $e0.sprite_disp
+          if ($null -eq $sd) { Stop-Process -Id $p.Id -Force; throw "o pet não está na tela (sprite_disp nulo)" }
+          Write-Host "sprite_disp inicial: x=$($sd.x) y=$($sd.y) w=$($sd.w) h=$($sd.h) visivel=$($e0.visivel)"
+          $cx = [int]($sd.x + $sd.w / 2); $cy = [int]($sd.y + $sd.h / 2)
+          Tira "pet-1-parado.png"
+
+          # --- ARRASTO: pega o pet e o leva ~250px para a esquerda ---
+          [Win.Mouse]::SetCursorPos($cx, $cy); Start-Sleep -Milliseconds 400   # deixa o click-through soltar
+          [Win.Mouse]::mouse_event(0x0002, 0, 0, 0, [IntPtr]::Zero)
+          $destX = [Math]::Max(40, $cx - 250)
+          for ($x = $cx; $x -ge $destX; $x -= 25) { [Win.Mouse]::SetCursorPos($x, $cy); Start-Sleep -Milliseconds 40 }
+          Start-Sleep -Milliseconds 120
+          $emid = Estado; Write-Host "no meio do arrasto: arrastando=$($emid.arrastando)"
+          Tira "pet-2-arrastando.png"
+          [Win.Mouse]::mouse_event(0x0004, 0, 0, 0, [IntPtr]::Zero)
+          Start-Sleep -Milliseconds 400
+          $e1 = Estado; $sd1 = $e1.sprite_disp
+          Write-Host "sprite_disp pos-arrasto: x=$($sd1.x) y=$($sd1.y)"
+          Tira "pet-3-apos-arrasto.png"
+
+          # --- CLIQUE DIREITO: soneca ---
+          $cx1 = [int]($sd1.x + $sd1.w / 2); $cy1 = [int]($sd1.y + $sd1.h / 2)
+          [Win.Mouse]::SetCursorPos($cx1, $cy1); Start-Sleep -Milliseconds 400
+          [Win.Mouse]::mouse_event(0x0008, 0, 0, 0, [IntPtr]::Zero); Start-Sleep -Milliseconds 60
+          [Win.Mouse]::mouse_event(0x0010, 0, 0, 0, [IntPtr]::Zero)
           Start-Sleep -Milliseconds 600
-          Tira "pet-reagindo.png"
+          $e2 = Estado
+          Write-Host "soneca_restante_s=$($e2.soneca_restante_s)"
+          Tira "pet-4-soneca.png"
 
           Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
           Write-Host "--- daemon.out ---"; if (Test-Path daemon.out) { Get-Content daemon.out }
           Write-Host "--- daemon.err ---"; if (Test-Path daemon.err) { Get-Content daemon.err }
+
+          # --- CONFERÊNCIA ---
+          $moveu = ($sd1.x -ne $sd.x) -or ($sd1.y -ne $sd.y)
+          $dormiu = $null -ne $e2.soneca_restante_s
+          Write-Host "RESULTADO: moveu=$moveu  dormiu=$dormiu"
+          if (-not $moveu) { throw "o arrasto não moveu o pet (sprite_disp igual ao inicial)" }
+          if (-not $dormiu) { throw "o clique direito não pôs o pet em soneca" }
+          Write-Host "ponteiro OK: o arrasto moveu o Zeca e o clique direito deu soneca"
 
       - name: Sobe os screenshots e o log
         if: always()
@@ -72,8 +107,10 @@ jobs:
         with:
           name: windows-pet
           path: |
-            pet-parado.png
-            pet-reagindo.png
+            pet-1-parado.png
+            pet-2-arrastando.png
+            pet-3-apos-arrasto.png
+            pet-4-soneca.png
             daemon.out
             daemon.err
           if-no-files-found: warn

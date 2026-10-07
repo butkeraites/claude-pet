@@ -4,15 +4,20 @@
 //! pet-core já entrega). A janela é reposicionada e redimensionada a cada
 //! quadro para o retângulo da cena no palco (a "janela pequena que anda").
 //!
-//! Este primeiro corte desenha e anima; o ponteiro (arrasto, clique) e o
-//! click-through pelo plano B entram depois.
+//! Desenha e anima o pet, e trata o ponteiro (arrasto, clique, clique direito)
+//! pelo plano B do click-through (decisão 0111): a janela alterna
+//! `WS_EX_TRANSPARENT` conforme o cursor está sobre a caixa de toque do pet,
+//! e o `SetCapture` segura o mouse durante o arraste. A lógica do arraste e do
+//! clique mora no Motor; aqui só traduzimos os eventos do Win32.
 
+use std::cell::RefCell;
 use std::sync::Once;
 
 use pet_core::cena::Elemento;
 use pet_core::geometria::Ret;
 use pet_core::plataforma::{
-    CapOverlay, Cursor, Desenho, EventoOverlay, Fase, InfoOverlay, Monitor, Overlay, UltimoQuadro,
+    Botao, CapOverlay, Cursor, Desenho, EventoOverlay, EventoPonteiro, Fase, InfoOverlay, Monitor,
+    Overlay, UltimoQuadro,
 };
 use pet_core::skin::Skin;
 
@@ -24,10 +29,13 @@ use windows::Win32::Graphics::Gdi::{
     SelectObject,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, GetCursorPos, GetForegroundWindow,
-    RegisterClassW, SW_HIDE, SW_SHOWNA, ShowWindow, ULW_ALPHA, UpdateLayeredWindow, WNDCLASSW,
-    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, GWL_EXSTYLE, GetCursorPos, GetForegroundWindow,
+    GetWindowLongPtrW, IDC_HAND, IDC_SIZEALL, LoadCursorW, RegisterClassW, SW_HIDE, SW_SHOWNA,
+    SetCursor, SetWindowLongPtrW, ShowWindow, ULW_ALPHA, UpdateLayeredWindow, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_MOUSEMOVE, WM_RBUTTONDOWN, WM_RBUTTONUP, WNDCLASSW, WS_EX_LAYERED,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
 };
 use windows::core::w;
 
@@ -54,9 +62,87 @@ fn registrar(hinst: HINSTANCE) {
     });
 }
 
+/// O estado que a `wndproc` (mouse) e o `Painel` compartilham. O daemon é de
+/// uma thread só (o laço e a `wndproc` rodam na principal), então um
+/// `thread_local` basta — sem ponteiro cru nem `GWLP_USERDATA`.
+#[derive(Default)]
+struct Ponteiro {
+    eventos: Vec<EventoPonteiro>,
+    /// Onde a janela está no palco (para converter cliente → palco).
+    bbox: Option<Ret>,
+    /// Um botão está apertado: segura o click-through (o arraste continua).
+    apertado: bool,
+}
+
+thread_local! {
+    static PONTEIRO: RefCell<Ponteiro> = RefCell::new(Ponteiro::default());
+}
+
+/// Empilha um evento do ponteiro, convertendo o cliente (topo esquerda da
+/// janela) para o palco pela `bbox` atual. Coordenadas nunca vão para o log.
+fn empurrar_ponteiro(lp: LPARAM, faz: impl Fn(i32, i32) -> EventoPonteiro) {
+    let cx = (lp.0 & 0xFFFF) as i16 as i32;
+    let cy = ((lp.0 >> 16) & 0xFFFF) as i16 as i32;
+    PONTEIRO.with(|p| {
+        let mut p = p.borrow_mut();
+        if let Some(bbox) = p.bbox {
+            let ev = faz(bbox.x + cx, bbox.y + cy);
+            p.eventos.push(ev);
+        }
+    });
+}
+
 extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
-    // SAFETY: repasse padrão; o ponteiro (mouse) entra num corte seguinte.
-    unsafe { DefWindowProcW(hwnd, msg, wp, lp) }
+    match msg {
+        WM_LBUTTONDOWN => {
+            PONTEIRO.with(|p| p.borrow_mut().apertado = true);
+            // SAFETY: handle válido; segura o mouse durante o arraste.
+            unsafe {
+                let _ = SetCapture(hwnd);
+            }
+            empurrar_ponteiro(lp, |x, y| EventoPonteiro::Apertou {
+                botao: Botao::Esquerdo,
+                x,
+                y,
+            });
+            LRESULT(0)
+        }
+        WM_MOUSEMOVE => {
+            empurrar_ponteiro(lp, |x, y| EventoPonteiro::Moveu { x, y });
+            LRESULT(0)
+        }
+        WM_LBUTTONUP => {
+            PONTEIRO.with(|p| p.borrow_mut().apertado = false);
+            // SAFETY: libera o mouse depois do arraste.
+            unsafe {
+                let _ = ReleaseCapture();
+            }
+            empurrar_ponteiro(lp, |x, y| EventoPonteiro::Soltou {
+                botao: Botao::Esquerdo,
+                x,
+                y,
+            });
+            LRESULT(0)
+        }
+        WM_RBUTTONDOWN => {
+            empurrar_ponteiro(lp, |x, y| EventoPonteiro::Apertou {
+                botao: Botao::Direito,
+                x,
+                y,
+            });
+            LRESULT(0)
+        }
+        WM_RBUTTONUP => {
+            empurrar_ponteiro(lp, |x, y| EventoPonteiro::Soltou {
+                botao: Botao::Direito,
+                x,
+                y,
+            });
+            LRESULT(0)
+        }
+        // SAFETY: repasse padrão do Win32 para o resto.
+        _ => unsafe { DefWindowProcW(hwnd, msg, wp, lp) },
+    }
 }
 
 /// A janela viva: o handle, a tela onde está e o que ela guarda do último
@@ -83,6 +169,9 @@ pub struct Painel {
     agora_ms: u64,
     eventos: Vec<EventoOverlay>,
     hinst: HINSTANCE,
+    /// A janela está em `WS_EX_TRANSPARENT` agora (os cliques atravessam). A
+    /// janela nasce assim; o `atualizar_click_through` só alterna quando muda.
+    atravessa: bool,
 }
 
 impl Painel {
@@ -96,6 +185,7 @@ impl Painel {
             agora_ms: 0,
             eventos: Vec::new(),
             hinst: HINSTANCE(hmod.0),
+            atravessa: true,
         }
     }
 
@@ -141,9 +231,48 @@ impl Painel {
         self.eventos.push(EventoOverlay::Pronta);
     }
 
-    /// O plano B do click-through entra depois; por ora não faz nada (a janela
-    /// nasce `TRANSPARENT`, sempre atravessa).
-    pub fn atualizar_click_through(&mut self) {}
+    /// Alterna o click-through pela posição do cursor (plano B, decisão 0111).
+    /// O laço chama a cada volta. Com um botão apertado, a janela continua
+    /// pegando (o arraste segue mesmo quando o pet anda atrás do cursor).
+    pub fn atualizar_click_through(&mut self) {
+        if self.saindo {
+            return;
+        }
+        let (hwnd, dentro) = {
+            let Some(j) = self.janela.as_ref() else {
+                return;
+            };
+            let apertado = PONTEIRO.with(|p| p.borrow().apertado);
+            let dentro = if apertado {
+                true
+            } else if let Some(toque) = j.toque {
+                let mut pt = POINT::default();
+                // SAFETY: lê a posição do cursor na tela (sem efeito colateral).
+                unsafe {
+                    let _ = GetCursorPos(&mut pt);
+                }
+                let (x, y) = j.tela.tela_para_palco(pt.x, pt.y);
+                toque.contem(x, y)
+            } else {
+                false
+            };
+            (j.hwnd, dentro)
+        };
+        let atravessar = !dentro;
+        if atravessar != self.atravessa {
+            self.atravessa = atravessar;
+            // SAFETY: alterna o bit `WS_EX_TRANSPARENT` da janela viva.
+            unsafe {
+                let cur = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+                let novo = if atravessar {
+                    cur | WS_EX_TRANSPARENT.0
+                } else {
+                    cur & !WS_EX_TRANSPARENT.0
+                };
+                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, novo as isize);
+            }
+        }
+    }
 
     /// Esconde a janela (sem fantasma: o Windows não tem fade da camada).
     fn esconder(j: &mut Janela) {
@@ -154,6 +283,7 @@ impl Painel {
             }
             j.conteudo = false;
         }
+        PONTEIRO.with(|p| p.borrow_mut().bbox = None);
     }
 }
 
@@ -327,6 +457,12 @@ impl Overlay for Painel {
         }
         self.saindo = false;
         self.destruir_em = None;
+        self.atravessa = true;
+        PONTEIRO.with(|p| {
+            let mut p = p.borrow_mut();
+            p.bbox = None;
+            p.apertado = false;
+        });
     }
 
     fn desenhar(
@@ -380,6 +516,7 @@ impl Overlay for Painel {
         j.conteudo = true;
         j.seq += 1;
         j.commit_ms = agora;
+        PONTEIRO.with(|p| p.borrow_mut().bbox = Some(bbox));
         Ok(Desenho::Enviado {
             retangulos: 1,
             area: w as i64 * h as i64,
@@ -392,8 +529,19 @@ impl Overlay for Painel {
         }
     }
 
-    fn cursor(&mut self, _cursor: Cursor) {
-        // O cursor próprio entra com o ponteiro/arrasto.
+    fn cursor(&mut self, cursor: Cursor) {
+        // O Windows não tem par mão-aberta/mão-fechada: a mão (IDC_HAND) para
+        // «dá para pegar» e as setas de mover (IDC_SIZEALL) para «segurando».
+        let nome = match cursor {
+            Cursor::Pegar => IDC_HAND,
+            Cursor::Agarrar => IDC_SIZEALL,
+        };
+        // SAFETY: carrega um cursor do sistema e o aplica, na thread do laço.
+        unsafe {
+            if let Ok(h) = LoadCursorW(None, nome) {
+                SetCursor(h);
+            }
+        }
     }
 
     fn info(&self) -> InfoOverlay {
@@ -437,7 +585,10 @@ impl Overlay for Painel {
     }
 
     fn eventos(&mut self) -> Vec<EventoOverlay> {
-        std::mem::take(&mut self.eventos)
+        let mut saida = std::mem::take(&mut self.eventos);
+        let ponteiro = PONTEIRO.with(|p| std::mem::take(&mut p.borrow_mut().eventos));
+        saida.extend(ponteiro.into_iter().map(EventoOverlay::Ponteiro));
+        saida
     }
 
     fn encerrar(&mut self, _confirmar: bool) {
