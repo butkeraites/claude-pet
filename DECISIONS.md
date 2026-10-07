@@ -5121,3 +5121,31 @@ piscar uma janela).
 só com o que o Windows pede. O CI `windows-instalar` prova o caminho inteiro
 (monta, instala, o Zeca real sobe `tela=ativa` sem debug), o que de quebra
 valida que a impressão calculada no PowerShell bate com a do daemon.
+
+## 0113 — Assinar o Windows pelo SignPath Foundation (grátis p/ OSS), ligado por variável do repo (2026-10-07)
+
+**Problema:** o build do Windows sai sem assinatura e o SmartScreen avisa.
+Assinar com um certificado próprio ficou caro e manual desde 2023 (todo
+Authenticode OV/EV exige token de hardware ou HSM na nuvem). Queremos assinar
+sem custo e sem segredo de longa duração em arquivo.
+
+**Decisão:** assinar pelo **SignPath Foundation** (code-signing grátis para
+open source, com o certificado deles, integrado ao GitHub Actions):
+- O job `windows` do `release.yml` compila o `bichinho.exe`, e um passo
+  **condicional** (`if: ${{ vars.SIGNPATH_ORG_ID != '' }}`) sobe o exe como
+  artefato e o submete ao SignPath (`signpath/github-action-submit-signing-request`),
+  que devolve o exe assinado; o `win-empacotar.ps1 -SkipBuild` empacota o exe já
+  assinado. Sem a variável, o release sai sem assinar, como antes — o CI fica
+  pronto e desligado.
+- A config não-segreda vai em **variáveis** do repo (`SIGNPATH_ORG_ID`,
+  `SIGNPATH_PROJECT_SLUG`, `SIGNPATH_POLICY_SLUG`) e só o token em **segredo**
+  (`SIGNPATH_API_TOKEN`). O guia da inscrição e da configuração está em
+  `docs/assinatura-windows.md`.
+- A alternativa paga considerada foi o **Azure Trusted Signing** (~US$ 10/mês,
+  também com reputação no SmartScreen); o Foundation é grátis e combina com um
+  projeto OSS.
+
+**Por quê:** grátis, sem token de hardware, sem segredo de longa duração em
+arquivo (o SignPath guarda a chave), e liga sozinho quando o Renan configurar a
+org — sem mexer no código de novo. O caminho crítico é a inscrição (revisão
+humana do SignPath), que não dá para fazer do CI.
