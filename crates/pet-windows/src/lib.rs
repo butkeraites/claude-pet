@@ -13,6 +13,9 @@
 
 #![cfg(windows)]
 
+#[macro_use]
+extern crate pet_core;
+
 mod app;
 mod desktop;
 mod painel;
@@ -39,13 +42,13 @@ pub fn cap_overlay() -> CapOverlay {
 }
 
 /// O que a ligação com o desktop sabe fazer. A janela segue o monitor sozinha
-/// (como o macOS), então `segue_foco` é falso; o rastreio da janela ativa e o
-/// foco/clique entram num corte seguinte.
+/// (como o macOS), então `segue_foco` é falso; a janela ativa e o foco do
+/// terminal (T8.7) já valem.
 pub fn cap_desktop() -> CapDesktop {
     CapDesktop {
         segue_foco: false,
-        janela_ativa: false,
-        foca_janela: false,
+        janela_ativa: true,
+        foca_janela: true,
         nao_perturbe: false,
     }
 }
