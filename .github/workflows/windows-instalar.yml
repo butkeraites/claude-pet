@@ -8,6 +8,13 @@ name: windows-instalar
 on:
   push:
     branches: [m8-windows]
+    paths:
+      - 'scripts/*.ps1'
+      - 'crates/**'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - 'skins/zeca-livre-escuro/**'
+      - '.github/workflows/windows-instalar.yml'
   workflow_dispatch: {}
 
 jobs:

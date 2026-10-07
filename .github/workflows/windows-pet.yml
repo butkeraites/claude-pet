@@ -10,6 +10,11 @@ name: windows-pet
 on:
   push:
     branches: [m8-windows]
+    paths:
+      - 'crates/**'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - '.github/workflows/windows-pet.yml'
   workflow_dispatch: {}
 
 jobs:
