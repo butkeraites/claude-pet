@@ -1,8 +1,8 @@
 name: windows-spike
 
-# Spike (M8 Windows): compila e roda uma janela de teste num runner
-# windows-latest e sobe um screenshot do desktop como artefato — prova que dá
-# para conferir o overlay do Windows automaticamente no CI.
+# Spike (M8 Windows): compila e roda o overlay layered do Rust (crate `windows`,
+# UpdateLayeredWindow, alfa por pixel) num runner windows-latest e sobe um
+# screenshot do desktop — prova a técnica do pet-windows na tela, automático.
 on:
   push:
     branches: [windows-spike]
@@ -13,15 +13,34 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.0.x"
-      - name: Compila + roda (janela + screenshot)
-        working-directory: tools/windows-spike
-        run: dotnet run -c Release
+
+      - name: Rust estável
+        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+
+      - name: Compila o spike layered
+        working-directory: tools/win-layered-spike
+        run: cargo build --release
+
+      - name: Roda o overlay + tira o screenshot
+        shell: pwsh
+        run: |
+          $exe = "tools/win-layered-spike/target/release/win-layered-spike.exe"
+          $p = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 3
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
+          Write-Host "VirtualScreen: $($vs.Width)x$($vs.Height)"
+          $bmp = New-Object System.Drawing.Bitmap $vs.Width, $vs.Height
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.CopyFromScreen($vs.X, $vs.Y, 0, 0, $vs.Size)
+          $bmp.Save("$PWD/screenshot.png")
+          $g.Dispose(); $bmp.Dispose()
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          Write-Host "screenshot salvo"
+
       - name: Sobe o screenshot
         uses: actions/upload-artifact@v4
         with:
-          name: windows-spike-screenshot
-          path: tools/windows-spike/screenshot.png
+          name: windows-layered-screenshot
+          path: screenshot.png
           if-no-files-found: error
