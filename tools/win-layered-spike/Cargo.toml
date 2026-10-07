@@ -6,8 +6,12 @@ publish = false
 
 # Spike descartável (M8 Windows): prova a técnica do overlay do pet no Rust com
 # o crate `windows` — uma janela layered (alfa por pixel), topmost, click-through,
-# desenhada com UpdateLayeredWindow. Fica fora do workspace principal.
+# desenhada com UpdateLayeredWindow, com o Zeca de verdade rasterizado pelo
+# pet-core. Fica fora do workspace principal.
 [workspace]
+
+[dependencies]
+pet-core = { path = "../../crates/pet-core" }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
