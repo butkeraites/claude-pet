@@ -1,0 +1,27 @@
+name: windows-spike
+
+# Spike (M8 Windows): compila e roda uma janela de teste num runner
+# windows-latest e sobe um screenshot do desktop como artefato — prova que dá
+# para conferir o overlay do Windows automaticamente no CI.
+on:
+  push:
+    branches: [windows-spike]
+  workflow_dispatch: {}
+
+jobs:
+  spike:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Compila + roda (janela + screenshot)
+        working-directory: tools/windows-spike
+        run: dotnet run -c Release
+      - name: Sobe o screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-spike-screenshot
+          path: tools/windows-spike/screenshot.png
+          if-no-files-found: error
