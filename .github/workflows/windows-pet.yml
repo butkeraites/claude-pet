@@ -1,0 +1,79 @@
+name: windows-pet
+
+# Prova na tela que o backend nativo do Windows (T8.4, decisão 0111) desenha e
+# anima o Zeca: compila o daemon `bichinho`, roda `bichinho rodar` com a skin
+# `_teste` (PET_DEBUG=1, sem aprovação), tira um screenshot do desktop parado,
+# manda uma reação (`/v1/comando` `tocar`) e tira outro. Automático, num runner
+# windows-latest (que desenha e deixa capturar a tela — provado nos spikes).
+on:
+  push:
+    branches: [m8-windows]
+  workflow_dispatch: {}
+
+jobs:
+  pet:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust estável
+        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+
+      - name: Compila o daemon
+        run: cargo build --release -p bichinho
+
+      - name: Roda o pet + screenshots (parado e reagindo)
+        shell: pwsh
+        run: |
+          $exe = "target/release/bichinho.exe"
+          $estado = Join-Path $env:RUNNER_TEMP "bichinho-estado"
+          New-Item -ItemType Directory -Force -Path $estado | Out-Null
+          $env:PET_DEBUG = "1"          # a skin `_teste` vira o personagem (sem aprovação)
+          $env:PET_ESTADO = $estado
+          $env:PET_LOG = "info"
+          # roda da raiz do repo para achar `skins/_teste`
+          $p = Start-Process -FilePath $exe -ArgumentList "rodar" -PassThru `
+               -RedirectStandardOutput "$PWD/daemon.out" -RedirectStandardError "$PWD/daemon.err"
+          Start-Sleep -Seconds 4
+
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          function Tira($nome) {
+            $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
+            $bmp = New-Object System.Drawing.Bitmap $vs.Width, $vs.Height
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.CopyFromScreen($vs.X, $vs.Y, 0, 0, $vs.Size)
+            $bmp.Save("$PWD/$nome")
+            $g.Dispose(); $bmp.Dispose()
+            Write-Host "screenshot: $nome ($($vs.Width)x$($vs.Height))"
+          }
+
+          # 1) o Zeca parado (idle)
+          Tira "pet-parado.png"
+
+          # 2) manda uma reação e captura (best-effort: a animação é curta)
+          try {
+            $r = Invoke-WebRequest -Uri "http://127.0.0.1:27380/v1/comando" -Method Post `
+                 -Body '{"cmd":"tocar","arg":"done_big"}' -ContentType "application/json" `
+                 -Headers @{ "X-Pet" = "1" } -UseBasicParsing -TimeoutSec 5
+            Write-Host "tocar done_big -> HTTP $($r.StatusCode): $($r.Content)"
+          } catch {
+            Write-Host "tocar falhou (best-effort): $_"
+          }
+          Start-Sleep -Milliseconds 600
+          Tira "pet-reagindo.png"
+
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          Write-Host "--- daemon.out ---"; if (Test-Path daemon.out) { Get-Content daemon.out }
+          Write-Host "--- daemon.err ---"; if (Test-Path daemon.err) { Get-Content daemon.err }
+
+      - name: Sobe os screenshots e o log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-pet
+          path: |
+            pet-parado.png
+            pet-reagindo.png
+            daemon.out
+            daemon.err
+          if-no-files-found: warn
