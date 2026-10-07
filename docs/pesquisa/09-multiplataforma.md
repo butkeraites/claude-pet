@@ -311,13 +311,13 @@ Sobre os runners:
 
 ##### Critical Files for Implementation
 
-- `/home/barbaruiva/Documents/claude-pet/crates/claude-pet/src/laco.rs`: vira o Motor, mais a ligação com o calloop.
-- `/home/barbaruiva/Documents/claude-pet/crates/claude-pet/src/wl/mod.rs`: separar o que é pet e cena do que é superfície Wayland.
-- `/home/barbaruiva/Documents/claude-pet/crates/claude-pet/src/ingress.rs` e `/home/barbaruiva/Documents/claude-pet/crates/claude-pet/src/comando.rs`: a `Caixa` no lugar do canal do calloop, mais o token.
-- `/home/barbaruiva/Documents/claude-pet/crates/claude-pet/src/descoberta.rs`: a descoberta Wayland genérica; o Hyprland vira um adaptador.
-- `/home/barbaruiva/Documents/claude-pet/plugin/scripts/avisar.sh` e `/home/barbaruiva/Documents/claude-pet/plugin/hooks/hooks.json`: viram `claude-pet avisar` em exec form.
-- `/home/barbaruiva/Documents/claude-pet/xtask/src/zeca/mod.rs`: vira o `pet-arte` ("traga seu pack" no binário).
-- `/home/barbaruiva/Documents/claude-pet/crates/pet-core/src/raster.rs`: o BGRA pré-multiplicado já serve aos três SOs.
+- `~/Documents/claude-pet/crates/claude-pet/src/laco.rs`: vira o Motor, mais a ligação com o calloop.
+- `~/Documents/claude-pet/crates/claude-pet/src/wl/mod.rs`: separar o que é pet e cena do que é superfície Wayland.
+- `~/Documents/claude-pet/crates/claude-pet/src/ingress.rs` e `~/Documents/claude-pet/crates/claude-pet/src/comando.rs`: a `Caixa` no lugar do canal do calloop, mais o token.
+- `~/Documents/claude-pet/crates/claude-pet/src/descoberta.rs`: a descoberta Wayland genérica; o Hyprland vira um adaptador.
+- `~/Documents/claude-pet/plugin/scripts/avisar.sh` e `~/Documents/claude-pet/plugin/hooks/hooks.json`: viram `claude-pet avisar` em exec form.
+- `~/Documents/claude-pet/xtask/src/zeca/mod.rs`: vira o `pet-arte` ("traga seu pack" no binário).
+- `~/Documents/claude-pet/crates/pet-core/src/raster.rs`: o BGRA pré-multiplicado já serve aos três SOs.
 
 ### Marcos propostos
 
@@ -1171,7 +1171,7 @@ Versões atuais:
 - Shimeji-Desktop (port do Shimeji-ee para Java 25) usa uma JWindow por mascote, com alfa por pixel e contains() pelo alfa; no X11 marca a janela como _NET_WM_WINDOW_TYPE_DOCK. Shijima-Qt (Qt6) foi arquivado: o autor diz que o Qt foi a escolha errada; no macOS ele pede Acessibilidade e no KDE/GNOME usa plugins de shell. *Evidência:* github.com/DalekCraft2/Shimeji-Desktop .../platform/win/WindowsTranslucentWindow.java, x11/X11TranslucentWindow.java ; github.com/pixelomer/Shijima-Qt README. *Confiança:* alta.
 - Os pets que reagem ao Claude Code (Clyde, CoPet, sidecrab, tokibean, agent-pet) usam Tauri 2 com macos-private-api, alguns com tauri-nspanel, objc2 ou o crate windows. Desktop Goose é fechado (Windows/macOS, sem Linux); VPet é WPF, só Windows, com o copyright da arte separado do código. *Evidência:* src-tauri/Cargo.toml de QingJ01/Clyde, ChanceYu/CoPet, zvoque/sidecrab, ZGhey/tokibean, xiangking/agent-pet ; https://samperson.itch.io/desktop-goose ; github.com/LorisYounger/VPet README. *Confiança:* alta.
 - x11rb sem a feature allow-unsafe-code usa uma conexão em Rust puro, sem libxcb; as extensões (shape, shm, randr) ficam atrás de features. *Evidência:* github.com/psychon/x11rb README. *Confiança:* alta.
-- No projeto, o workspace proíbe unsafe (unsafe_code = forbid). Pela decisão 0005, cada commit da camada repinta o monitor no Hyprland, e o plano B era uma superfície pequena com palco grande só para voo e confete. *Evidência:* /home/barbaruiva/Documents/claude-pet-m2/Cargo.toml ; /home/barbaruiva/Documents/claude-pet-m2/DECISIONS.md (decisões 0004, 0005, 0016). *Confiança:* alta.
+- No projeto, o workspace proíbe unsafe (unsafe_code = forbid). Pela decisão 0005, cada commit da camada repinta o monitor no Hyprland, e o plano B era uma superfície pequena com palco grande só para voo e confete. *Evidência:* ~/Documents/claude-pet-m2/Cargo.toml ; ~/Documents/claude-pet-m2/DECISIONS.md (decisões 0004, 0005, 0016). *Confiança:* alta.
 
 ### Recomendações
 
@@ -1521,11 +1521,11 @@ extensions/gnome-shell/ GJS (ESM), released on EGO separately
 * https://docs.docker.com/desktop/setup/install/linux/
 
 **Local files:**
-* /home/barbaruiva/Documents/claude-pet/crates/claude-pet/src/descoberta.rs
-* /home/barbaruiva/Documents/claude-pet/crates/claude-pet/src/wl/superficie.rs
-* /home/barbaruiva/Documents/claude-pet/crates/claude-pet/src/wl/saida.rs
-* /home/barbaruiva/Documents/claude-pet/plugin/scripts/avisar.sh
-* /home/barbaruiva/Documents/claude-pet-m2/docs/pesquisa/03-hyprland.md
+* ~/Documents/claude-pet/crates/claude-pet/src/descoberta.rs
+* ~/Documents/claude-pet/crates/claude-pet/src/wl/superficie.rs
+* ~/Documents/claude-pet/crates/claude-pet/src/wl/saida.rs
+* ~/Documents/claude-pet/plugin/scripts/avisar.sh
+* ~/Documents/claude-pet-m2/docs/pesquisa/03-hyprland.md
 
 ### Fatos conferidos
 
@@ -1560,8 +1560,8 @@ extensions/gnome-shell/ GJS (ESM), released on EGO separately
 - Which sessions start XDG autostart and graphical-session.target. niri.service has BindsTo=graphical-session.target and Wants=xdg-desktop-autostart.target. uwsm binds graphical-session-pre.target, graphical-session.target and xdg-desktop-autostart.target. cosmic-session processes ~/.config/autostart (or defers to systemd) and signals graphical-session.target. sway's default config has no systemd integration. *Evidência:* raw.githubusercontent.com/YaLTeR/niri/main/resources/niri.service; raw.githubusercontent.com/Vladimir-csp/uwsm/master/README.md; raw.githubusercontent.com/pop-os/cosmic-session/master/src/main.rs; raw.githubusercontent.com/swaywm/sway/master/config.in. *Confiança:* alta.
 - cargo-dist is actively maintained (v0.33.0 released 2026-09-11, with musl and gnu Linux targets). Its installers are shell, powershell, npm, homebrew and msi. deb, rpm, AUR and Flatpak appear only as requested future installers. *Evidência:* https://github.com/axodotdev/cargo-dist/releases; https://axodotdev.github.io/cargo-dist/book/installers/index.html. *Confiança:* media.
 - Docker Desktop for Linux runs a virtual machine with its own docker context (desktop-linux), so containers there do not share the host's Wayland socket the way native Docker Engine or Podman do. *Evidência:* https://docs.docker.com/desktop/setup/install/linux/. *Confiança:* alta.
-- In the current code, the daemon only connects to Wayland after descoberta::procurar finds base/hypr/<HIS> with a hyprland.lock and both .socket2.sock and wayland-N accept a connection. On a desktop without Hyprland it never connects. The wl/ layer itself is almost generic (NULL output, 1x1 transparent map until enter + preferred_scale, viewporter, fractional-scale, cursor-shape); the main Hyprland-specific detail is the 'FALLBACK' output name. *Evidência:* /home/barbaruiva/Documents/claude-pet/crates/claude-pet/src/descoberta.rs (header and procurar); crates/claude-pet/src/wl/superficie.rs (header); crates/claude-pet/src/wl/saida.rs:12. *Confiança:* alta.
-- The plugin hook avisar.sh depends on jq (with only a minimal payload without it), curl, GNU date +%s%3N (with a fallback), sha256sum or shasum, and Omarchy's DND state file. jq is not installed by default on many distributions (general knowledge, not verified). *Evidência:* /home/barbaruiva/Documents/claude-pet/plugin/scripts/avisar.sh. *Confiança:* media.
+- In the current code, the daemon only connects to Wayland after descoberta::procurar finds base/hypr/<HIS> with a hyprland.lock and both .socket2.sock and wayland-N accept a connection. On a desktop without Hyprland it never connects. The wl/ layer itself is almost generic (NULL output, 1x1 transparent map until enter + preferred_scale, viewporter, fractional-scale, cursor-shape); the main Hyprland-specific detail is the 'FALLBACK' output name. *Evidência:* ~/Documents/claude-pet/crates/claude-pet/src/descoberta.rs (header and procurar); crates/claude-pet/src/wl/superficie.rs (header); crates/claude-pet/src/wl/saida.rs:12. *Confiança:* alta.
+- The plugin hook avisar.sh depends on jq (with only a minimal payload without it), curl, GNU date +%s%3N (with a fallback), sha256sum or shasum, and Omarchy's DND state file. jq is not installed by default on many distributions (general knowledge, not verified). *Evidência:* ~/Documents/claude-pet/plugin/scripts/avisar.sh. *Confiança:* media.
 
 ### Recomendações
 
@@ -1891,10 +1891,10 @@ Fora deste tema, mas bloqueante para "open source": a arte atual vem de um pacot
 - Hooks de plugin recebem CLAUDE_PLUGIN_ROOT, CLAUDE_PLUGIN_DATA, CLAUDE_PROJECT_DIR e CLAUDE_PLUGIN_OPTION_<KEY>; no Windows os caminhos substituidos usam barras normais; o processo do hook herda o ambiente do pai (TERM_PROGRAM etc.). *Evidência:* https://code.claude.com/docs/en/plugins/manifest-reference.md (Environment variables); https://code.claude.com/docs/en/plugins/components.md; hooks.md linha sobre heranca de ambiente. *Confiança:* alta.
 - O bin/ de um plugin entra so no PATH da ferramenta Bash, nao no dos hooks; claude.ai e Cowork nao instalam plugins com bin/ no topo. *Evidência:* https://code.claude.com/docs/en/plugins/components.md (Executables); manifest-reference.md (Standard layout). *Confiança:* alta.
 - Git for Windows e opcional no Windows nativo; sem ele o Claude usa a ferramenta PowerShell e detecta pwsh.exe com fallback para powershell.exe. *Evidência:* https://code.claude.com/docs/en/setup.md (Set up on Windows); tools-reference.md. *Confiança:* alta.
-- CLAUDE_CODE_ENTRYPOINT nao e documentado. No binario 2.1.288 aparecem os valores cli (vira sdk-cli sem interatividade), sdk-ts, sdk-py, mcp, claude-code-github-action, claude-vscode, claude-desktop, claude-desktop-3p, local-agent, remote, remote_desktop, remote_mobile, remote_projects, remote_trigger, remote_cowork, remote_cowork_trigger, remote_baku, claude-in-slack e claude-in-teams; nesta sessao o valor foi cli. *Evidência:* grep no binario /home/barbaruiva/.local/share/mise/installs/claude/2.1.288/claude; env da sessao. *Confiança:* media.
+- CLAUDE_CODE_ENTRYPOINT nao e documentado. No binario 2.1.288 aparecem os valores cli (vira sdk-cli sem interatividade), sdk-ts, sdk-py, mcp, claude-code-github-action, claude-vscode, claude-desktop, claude-desktop-3p, local-agent, remote, remote_desktop, remote_mobile, remote_projects, remote_trigger, remote_cowork, remote_cowork_trigger, remote_baku, claude-in-slack e claude-in-teams; nesta sessao o valor foi cli. *Evidência:* grep no binario ~/.local/share/mise/installs/claude/2.1.288/claude; env da sessao. *Confiança:* media.
 - Hooks type http fazem POST do JSON completo do hook; headers aceitam interpolacao de variaveis de ambiente listadas em allowedEnvVars; async nao se aplica a eles; politicas allowedHttpHookUrls e httpHookAllowedEnvVars podem restringi-los. *Evidência:* https://code.claude.com/docs/en/hooks.md (HTTP hook fields; HTTP response handling; allowlists). *Confiança:* alta.
 - claude agents --json e a forma suportada de ler o estado das sessoes de fora do Claude Code. Campos: cwd, kind (interactive ou background), startedAt, pid, status (busy, waiting, idle), waitingFor, sessionId e name. Ja ~/.claude/jobs nao e uma interface estavel. *Evidência:* https://code.claude.com/docs/en/agent-view.md (List sessions as JSON; Read session state from a script). *Confiança:* alta.
-- Existe ~/.claude/sessions/<pid>.json com pid, sessionId, cwd, entrypoint, name, status e waitingFor; a doc so diz que guarda um arquivo pequeno por sessao em execucao, sem definir formato. *Evidência:* /home/barbaruiva/.claude/sessions/1713473.json (lido); https://code.claude.com/docs/en/claude-directory.md. *Confiança:* media.
+- Existe ~/.claude/sessions/<pid>.json com pid, sessionId, cwd, entrypoint, name, status e waitingFor; a doc so diz que guarda um arquivo pequeno por sessao em execucao, sem definir formato. *Evidência:* ~/.claude/sessions/1713473.json (lido); https://code.claude.com/docs/en/claude-directory.md. *Confiança:* media.
 - Mods (v2.1.287+, ligados por padrao) sao handlers JS dentro do Claude Code com $.http.fetch, $.process.run, $.env e eventos turn/session; rodam no CLI, no Desktop, na extensao do VS Code e em -p; orgs podem restringir com allowManagedModsOnly. *Evidência:* https://code.claude.com/docs/en/plugins/mods/overview.md; https://code.claude.com/docs/en/plugins/mods/api.md; mods/reference.md. *Confiança:* alta.
 - A fonte de plugin command do marketplace roda um comando, via sh ou cmd.exe no Windows, que imprime o diretorio do plugin; o modo link e recusado no Windows (usar copy); admins podem desligar com disableCommandPluginSources. *Evidência:* https://code.claude.com/docs/en/plugins/marketplace-reference.md (command plugin source). *Confiança:* alta.
 - O dicionario AppleScript do Terminal.app tem tab.tty (somente leitura), tab.selected (leitura e escrita) e, na janela, index, frontmost e selected tab. *Evidência:* Copia do Terminal.sdef em github.com/JXA-userland/JXA packages/@jxa/types/tools/sdefs/Terminal.sdef. *Confiança:* alta.
@@ -2083,7 +2083,7 @@ Scripts como `irm | iex` normalmente não marcam o arquivo com Mark of the Web, 
 
 **Hooks no Windows:**
 - O Claude Code roda os hooks no Git Bash, se ele estiver instalado; senão, no PowerShell.
-- O `/home/barbaruiva/Documents/claude-pet/plugin/scripts/avisar.sh` depende de `sh`, `curl` e `jq`. O Git for Windows traz `sh` e `curl`, mas não traz `jq`. Sem `jq`, o hook cai no payload mínimo, sem os ids de sessão. Sem Git Bash, ele não roda.
+- O `~/Documents/claude-pet/plugin/scripts/avisar.sh` depende de `sh`, `curl` e `jq`. O Git for Windows traz `sh` e `curl`, mas não traz `jq`. Sem `jq`, o hook cai no payload mínimo, sem os ids de sessão. Sem Git Bash, ele não roda.
 - **Solução portátil:** um hook na forma exec que chama o próprio binário, por exemplo `command: claude-pet` com `args: [hook, Stop]`, e a lista branca escrita em Rust. No Windows a forma exec exige um `.exe` de verdade, e o binário é um.
 - Existem também hooks do tipo `http`, mas eles fazem POST do evento JSON **inteiro**, não aceitam `async` e esperam a resposta. Isso contraria a regra do projeto de mandar só metadados.
 
@@ -2094,7 +2094,7 @@ Scripts como `irm | iex` normalmente não marcam o arquivo com Mark of the Web, 
 - **`.deb` e `.rpm`:** ficam fora do dist; dá para gerar com `cargo-deb`, `cargo-generate-rpm` ou nFPM num job à parte.
 - **AppImage:** acrescenta pouco a um binário estático.
 - **Flatpak:** encaixa mal, por causa da sandbox com o layer-shell, do socket do Hyprland e da porta no loopback.
-- **Imagem no GHCR:** grátis para pacote público, mas nunca com `skins-locais`. O `/home/barbaruiva/Documents/claude-pet-m2/Dockerfile` copia `skins-locais/`; no CI público a pasta chega vazia, mas um push feito localmente vazaria a arte.
+- **Imagem no GHCR:** grátis para pacote público, mas nunca com `skins-locais`. O `~/Documents/claude-pet-m2/Dockerfile` copia `skins-locais/`; no CI público a pasta chega vazia, mas um push feito localmente vazaria a arte.
 - **Escopo honesto para o README:** o overlay depende do `wlr-layer-shell`.
   - Funciona em Hyprland, KDE KWin, niri, Sway, river, labwc, Wayfire, Mir, Treeland e Jay.
   - **Não funciona no GNOME (Mutter) nem no Weston.**
@@ -2123,7 +2123,7 @@ Trocar o binário sozinho no macOS sem Developer ID reabre os pedidos de permiss
 **O que já ajuda:** imagens base fixadas por digest, `--locked`, `strip` e `panic=abort`.
 
 **O que falta:**
-- Fixar a versão exata do Rust no CI. O `/home/barbaruiva/Documents/claude-pet-m2/rust-toolchain.toml` diz `stable` por causa da decisão 0015; no CI, use a mesma 1.98.1 da imagem.
+- Fixar a versão exata do Rust no CI. O `~/Documents/claude-pet-m2/rust-toolchain.toml` diz `stable` por causa da decisão 0015; no CI, use a mesma 1.98.1 da imagem.
 - Usar `--remap-path-prefix` para tirar `$HOME` e o caminho do repositório de dentro do binário. O `trim-paths` do Cargo ainda é instável.
 - Fixar os timestamps dentro do tar e do zip.
 - Conferir: dois builds devem dar o mesmo SHA256.
@@ -2182,7 +2182,7 @@ Outros dados da página:
 - O DevilutionX segue o mesmo desenho (exige que o usuário traga o `DIABDAT.MPQ`).
 
 **O que precisa mudar para o lançamento:**
-1. Levar o montador do Zeca para o binário distribuído, como `claude-pet skin instalar <zip>`. Hoje ele está em `/home/barbaruiva/Documents/claude-pet/xtask/src/zeca`, e o usuário final não tem o repositório nem o toolchain.
+1. Levar o montador do Zeca para o binário distribuído, como `claude-pet skin instalar <zip>`. Hoje ele está em `~/Documents/claude-pet/xtask/src/zeca`, e o usuário final não tem o repositório nem o toolchain.
 2. Nunca baixar o pack automaticamente do itch.io.
 3. Validar o formato do pack e falhar com uma mensagem clara se ele mudar.
 4. Mostrar só a skin livre no README e nas páginas de release. Foto ou GIF do Zeca, só com permissão da artista.
@@ -2221,7 +2221,7 @@ Outros dados da página:
 #### 2.5 Encomendar um papagaio original
 
 **Escopo:**
-- A folha do Zeca (`/home/barbaruiva/Documents/claude-pet-m2/skins-locais/zeca/sheet.json`) usa 20 animações nativas com **92 quadros**, que viram 166 células com as compostas.
+- A folha do Zeca (`~/Documents/claude-pet-m2/skins-locais/zeca/sheet.json`) usa 20 animações nativas com **92 quadros**, que viram 166 células com as compostas.
 - O mínimo que cobre os estados do pet fica em uns **55–60 quadros**: parado, sentar e levantar, piar, comer, dormir e acordar, decolar, voar, planar, pousar e susto.
 
 **Preço — estimativa de baixa confiança:**
@@ -2324,7 +2324,7 @@ Some o desenho do personagem. Licença CC0 ou cessão de direitos pode custar ma
 - O dist gera estes instaladores: shell, powershell, npm, homebrew (uma fórmula num tap próprio, não cask) e msi (WiX v3). Não gera .deb, .rpm, AppImage nem dmg; cask, winget, Flatpak e Docker estão só na lista de pedidos. *Evidência:* https://axodotdev.github.io/cargo-dist/book/installers/index.html; homebrew.html: 'Does not support Cask'; msi.html: 'WiX v4 isn't yet supported'. *Confiança:* alta.
 - No dist, install-updater = true instala o programa <pacote>-update (axoupdater), só nos instaladores shell e PowerShell. github-attestations = true só funciona em repositório público ou no plano Enterprise, e o usuário confere com gh attestation verify. *Evidência:* https://axodotdev.github.io/cargo-dist/book/installers/updater.html; .../supplychain-security/attestations/github.html: 'only supports public repositories and private repositories of an organization with the GitHub Enterprise plan'. *Confiança:* alta.
 - O codesign de macOS no dist é experimental e não há notarização embutida. O livro só documenta assinatura de Windows, e a referência de configuração não menciona macos-sign nem notarização. *Evidência:* Sumário do livro em https://axodotdev.github.io/cargo-dist/book/ (só 'Windows Signing'); o CHANGELOG cita 'experimental macOS codesigning'; config.md sem 'notar'. *Confiança:* media.
-- O dist trata publish = false como sinal para não distribuir o pacote; dist = true no pacote força a distribuição. O crate claude-pet tem publish = false. *Evidência:* config.md do dist: 'dist = true ... in spite of signals like Cargo's publish = false'; /home/barbaruiva/Documents/claude-pet-m2/crates/claude-pet/Cargo.toml. *Confiança:* alta.
+- O dist trata publish = false como sinal para não distribuir o pacote; dist = true no pacote força a distribuição. O crate claude-pet tem publish = false. *Evidência:* config.md do dist: 'dist = true ... in spite of signals like Cargo's publish = false'; ~/Documents/claude-pet-m2/crates/claude-pet/Cargo.toml. *Confiança:* alta.
 - O Homebrew 5.0.0 (2025-11-12) depreciou casks sem assinatura de código, marcou para setembro de 2026 o desligamento dos casks oficiais que falham no Gatekeeper e depreciou --no-quarantine. O 6.0.0 (2026-06-11) reafirma o prazo. *Evidência:* https://brew.sh/2025/11/12/homebrew-5.0.0/ e https://brew.sh/2026/06/11/homebrew-6.0.0/. *Confiança:* alta.
 - Desde o Homebrew 6.0.0, um tap de terceiros precisa de confiança explícita. Instalar pelo nome completo (usuario/repo/formula) confia só naquele item. *Evidência:* https://brew.sh/2026/06/11/homebrew-6.0.0/; https://docs.brew.sh/Taps: 'Install a fully qualified item to trust only that item'. *Confiança:* alta.
 - O Homebrew 7.0.0 (2026-09-13) passou a rodar as operações de fórmula e cask em sandbox e pôs o macOS Intel no Tier 3, com remoção em 2027-09-01. *Evidência:* https://brew.sh/2026/09/13/homebrew-7.0.0/. *Confiança:* alta.
@@ -2349,10 +2349,10 @@ Some o desenho do personagem. Licença CC0 ou cessão de direitos pode custar ma
 - Um marketplace de plugins é um repositório com .claude-plugin/marketplace.json, adicionado com /plugin marketplace add dono/repo. O auto-update de marketplace de terceiros vem desligado, e dá para submeter o plugin ao diretório da Anthropic. *Evidência:* https://code.claude.com/docs/en/plugin-marketplaces; https://code.claude.com/docs/en/plugins/host-marketplace: 'Background auto-update is off for your marketplace by default'. *Confiança:* alta.
 - A licença do pack diz: pode usar em projetos comerciais e não comerciais, pode editar, não pode redistribuir nem revender, mesmo editado; crédito é bem-vindo. Custa US$ 0,50 ou mais, tem quadros de 48x48 e 21 animações. Não há contato da artista na página nem no perfil, e os comentários estão vazios. *Evidência:* https://exclusiveolive.itch.io/cute-parrots-pixel-art-asset-pack e https://exclusiveolive.itch.io/. *Confiança:* alta.
 - Outra licença do itch.io deixa explícito o sentido comum dessa cláusula: proíbe redistribuir como asset avulso, mas o asset precisa ser integrado a um projeto. *Evidência:* https://pop-shop-packs.itch.io/pigeons-2d-pixel-asset-pack: 'Cannot be resold or redistributed as a standalone game asset; Must be integrated into a project'. *Confiança:* media.
-- A folha local do Zeca usa 20 animações nativas do pack com 92 quadros, que somam 166 células com as tags compostas. *Evidência:* /home/barbaruiva/Documents/claude-pet-m2/skins-locais/zeca/sheet.json (meta.frameTags). *Confiança:* alta.
-- O histórico do git (todas as branches) não tem nenhum arquivo do pack, só imagens de teste e a skin xadrez. Já o DECISIONS.md e o PLANO.md citavam um personagem de terceiros como referência de estilo (reescritos na decisão 0035). *Evidência:* git log --all --name-only em /home/barbaruiva/Documents/claude-pet; /home/barbaruiva/Documents/claude-pet-m2/DECISIONS.md linhas 13-16, 398, 422; PLANO.md linhas 18-20. *Confiança:* alta.
-- O Dockerfile copia skins-locais/ para dentro da imagem. *Evidência:* /home/barbaruiva/Documents/claude-pet-m2/Dockerfile: 'COPY skins-locais/ /opt/claude-pet/skins-locais/'. *Confiança:* alta.
-- O hook atual depende de sh, curl e jq. Sem jq ele manda só o nome do evento. *Evidência:* /home/barbaruiva/Documents/claude-pet/plugin/scripts/avisar.sh (cabeçalho) e plugin/hooks/hooks.json ('sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\"'). *Confiança:* alta.
+- A folha local do Zeca usa 20 animações nativas do pack com 92 quadros, que somam 166 células com as tags compostas. *Evidência:* ~/Documents/claude-pet-m2/skins-locais/zeca/sheet.json (meta.frameTags). *Confiança:* alta.
+- O histórico do git (todas as branches) não tem nenhum arquivo do pack, só imagens de teste e a skin xadrez. Já o DECISIONS.md e o PLANO.md citavam um personagem de terceiros como referência de estilo (reescritos na decisão 0035). *Evidência:* git log --all --name-only em ~/Documents/claude-pet; ~/Documents/claude-pet-m2/DECISIONS.md linhas 13-16, 398, 422; PLANO.md linhas 18-20. *Confiança:* alta.
+- O Dockerfile copia skins-locais/ para dentro da imagem. *Evidência:* ~/Documents/claude-pet-m2/Dockerfile: 'COPY skins-locais/ /opt/claude-pet/skins-locais/'. *Confiança:* alta.
+- O hook atual depende de sh, curl e jq. Sem jq ele manda só o nome do evento. *Evidência:* ~/Documents/claude-pet/plugin/scripts/avisar.sh (cabeçalho) e plugin/hooks/hooks.json ('sh \"${CLAUDE_PLUGIN_ROOT}/scripts/avisar.sh\"'). *Confiança:* alta.
 - Fato sobre um personagem de terceiros (estreia, visual e família) omitido por regra do projeto (decisão 0035). O que importa para o risco: o malandro com chapéu de palha e gravata-borboleta é um arquétipo, e a associação vem da combinação dos elementos, não de um deles. *Evidência:* omitida (decisão 0035). *Confiança:* alta.
 - O nome de um personagem não é protegido por direito autoral, mas pode ser protegido como marca. Ideias também não são protegidas. *Evidência:* https://www.copyright.gov/circs/circ33.pdf: lista 'The name of a character'; 'may be protectable under federal or state trademark laws'. *Confiança:* alta.
 - Personagem só é protegido quando é suficientemente delineado e especialmente distintivo (teste de DC Comics v. Towle). Personagens-tipo e arquétipos não são protegidos. *Evidência:* https://en.wikipedia.org/wiki/Copyright_protection_for_fictional_characters (fonte secundária). *Confiança:* media.
@@ -2372,7 +2372,7 @@ Some o desenho do personagem. Licença CC0 ou cessão de direitos pode custar ma
 2. Escolha um nome de produto sem 'Claude' e sem colisão (por exemplo 'bichinho', descrito como 'para o Claude Code'). Já existe um xtrimsystems/claude-pet.
 3. Recomendação da pesquisa, não adotada (o Renan manteve o nome Zeca, decisão 0035): um nome público que não remeta a personagem de terceiros, evitando nomes de papagaios famosos de TV e cinema.
 4. No README e nas releases, mostre só a skin livre. Nunca publique fotos ou GIFs do Zeca derivado do pack sem permissão escrita da exclusiveOlive.
-5. Leve o montador do Zeca (hoje em /home/barbaruiva/Documents/claude-pet/xtask/src/zeca) para dentro do binário distribuído, como 'claude-pet skin instalar <zip>'. O comando deve validar o formato do pack, falhar com mensagem clara e nunca baixar do itch.io por conta própria.
+5. Leve o montador do Zeca (hoje em ~/Documents/claude-pet/xtask/src/zeca) para dentro do binário distribuído, como 'claude-pet skin instalar <zip>'. O comando deve validar o formato do pack, falhar com mensagem clara e nunca baixar do itch.io por conta própria.
 6. Deixe uma skin livre como padrão já no primeiro lançamento (CC0, ou uma ave simples desenhada no pipeline de grades de texto) e trate o Zeca do pack como opcional.
 7. Encomende um papagaio original em CC BY 4.0 ou CC0. Escopo de 55 a 60 quadros essenciais (cerca de 92 para a paridade com o pack), três orçamentos, licença por escrito na fatura, entrega do .aseprite, garantia de obra original e sem IA, e briefing sem citar personagem ou estúdio de terceiros nem enviar o pack.
 8. Comente na página do pack da exclusiveOlive usando o modelo do relatório, pedindo permissão para embutir nos binários oficiais e, se possível, CC BY no repositório. Exija resposta por escrito: silêncio não é permissão.

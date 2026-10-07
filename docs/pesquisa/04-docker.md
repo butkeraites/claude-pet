@@ -62,7 +62,7 @@ Scope: brief items 1–8. Everything here was checked read-only on this machine 
 - **Compose and buildx:** Compose 5.5.1 (v5 removed the internal builder; builds go through Bake) and buildx 0.37.0.
 
 ### Session
-- **Linger:** `loginctl show-user 1000` reports `Linger=yes` (`/var/lib/systemd/linger/barbaruiva`). `/run/user/1000` and `user@1000` live from boot to shutdown, so logging out does not destroy the runtime dir on this host.
+- **Linger:** `loginctl show-user 1000` reports `Linger=yes` (`/var/lib/systemd/linger/youruser`). `/run/user/1000` and `user@1000` live from boot to shutdown, so logging out does not destroy the runtime dir on this host.
 - **Autologin:** SDDM's helper runs `uwsm start -g -1 -e -D Hyprland hyprland.desktop --autologin`.
 - **Greeter:** the SDDM greeter runs its own Hyprland (`/etc/sddm.conf.d/10-wayland.conf`) under the sddm uid. Its runtime dir is another 0700 dir under `/run/user`, unreadable by uid 1000.
 
@@ -813,7 +813,7 @@ Query helper for Hyprland commands: `s.connect(f"{RT}/hypr/{sig}/.socket.sock");
 - **[high]** dockerd and containerd run in the host mount namespace (MountFlags empty, PrivateMounts=no, PrivateTmp=no), so rslave propagation from /run reaches containers.  
   _Evidência:_ systemctl show docker.service containerd.service -p MountFlags -p PrivateMounts -p PrivateTmp
 - **[high]** Linger=yes for uid 1000, so /run/user/1000 and user@1000 exist from boot to shutdown; logout does not remove the runtime dir on this host.  
-  _Evidência:_ loginctl show-user 1000 (Linger=yes); /var/lib/systemd/linger/barbaruiva
+  _Evidência:_ loginctl show-user 1000 (Linger=yes); /var/lib/systemd/linger/youruser
 - **[high]** docker.service and docker.socket are both enabled (containerd.service disabled; dockerd pulls it in via Wants=), and a drop-in sets DefaultDependencies=no. Stock Omarchy enables only docker.socket.  
   _Evidência:_ systemctl is-enabled docker.service docker.socket containerd.service; /etc/systemd/system/docker.service.d/no-block-boot.conf; /usr/share/omarchy/install/config/enable-services.sh
 - **[high]** Docker 29.7.2 (API 1.55), containerd 2.3.5, runc 1.5.1, docker-init 0.19.0 (tini); seccomp builtin profile; cgroupns; no userns-remap; live-restore off; iptables backend; userland proxy on; Compose 5.5.1 (builds delegated to Bake), buildx 0.37.0.  
