@@ -9,10 +9,14 @@
 mod comum;
 
 use std::path::Path;
+// Só o teste da descoberta do compositor (Linux) usa estes.
+#[cfg(target_os = "linux")]
 use std::thread;
+#[cfg(target_os = "linux")]
 use std::time::{Duration, Instant};
 
 use comum::Daemon;
+#[cfg(target_os = "linux")]
 use comum::hyprland::HyprlandFalso;
 use serde_json::{Value, json};
 
@@ -112,7 +116,10 @@ fn o_sigterm_grava_e_a_partida_seguinte_devolve_as_sessoes() {
     let _ = std::fs::remove_dir_all(&pasta);
 }
 
-/// O boot id desta máquina, como o daemon lê.
+/// O boot id desta máquina, como o daemon lê (só no Linux; o macOS lê pelo
+/// `sysctl`, e o único teste que usa isto é o da descoberta do compositor,
+/// que é do Wayland).
+#[cfg(target_os = "linux")]
 fn boot_id() -> String {
     std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
         .expect("o boot id do Linux")
@@ -120,6 +127,9 @@ fn boot_id() -> String {
         .to_owned()
 }
 
+// A descoberta das janelas por instância do compositor é do Hyprland/Wayland
+// (Linux); no macOS não existe esse conceito, então o teste é só no Linux.
+#[cfg(target_os = "linux")]
 #[test]
 fn a_descoberta_tira_as_janelas_vistas_noutra_instancia_do_compositor() {
     // Duas sessões guardadas, cada uma com a janela vista numa instância do
