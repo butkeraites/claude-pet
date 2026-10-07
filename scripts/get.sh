@@ -1,0 +1,43 @@
+#!/bin/sh
+# scripts/get.sh — instale o Zeca com UM comando, sem o repo e sem cargo:
+#
+#   curl -fsSL https://raw.githubusercontent.com/butkeraites/claude-pet/main/scripts/get.sh | sh
+#
+# Detecta o sistema, baixa o pacote de release do GitHub (binário já
+# compilado e assinado) e roda o setup local. Variáveis opcionais:
+#   ZECA_VERSION=vX.Y.Z  fixa a versão (padrão: a última release)
+#   ZECA_REPO=dono/repo  outro repositório
+set -eu
+
+REPO="${ZECA_REPO:-butkeraites/claude-pet}"
+
+OS=$(uname -s)
+ARCH=$(uname -m)
+case "$OS" in
+  Darwin) plat=macos ;;
+  *) echo "O Zeca ainda só tem instalador por download para macOS (veio $OS). Linux/Windows: em breve." >&2; exit 1 ;;
+esac
+case "$ARCH" in
+  arm64 | aarch64) arch=arm64 ;;
+  x86_64) arch=x64 ;;
+  *) echo "arquitetura não suportada: $ARCH" >&2; exit 1 ;;
+esac
+
+asset="zeca-${plat}-${arch}.tar.gz"
+if [ -n "${ZECA_VERSION:-}" ]; then
+  url="https://github.com/${REPO}/releases/download/${ZECA_VERSION}/${asset}"
+else
+  url="https://github.com/${REPO}/releases/latest/download/${asset}"
+fi
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT INT TERM
+
+printf '🦜 Baixando o Zeca (%s/%s)…\n' "$plat" "$arch"
+if ! curl -fSL --proto '=https' --tlsv1.2 "$url" -o "$tmp/zeca.tar.gz"; then
+  echo "falhou baixar $url" >&2
+  echo "  (há um release com esse pacote? veja https://github.com/${REPO}/releases)" >&2
+  exit 1
+fi
+tar -xzf "$tmp/zeca.tar.gz" -C "$tmp"
+sh "$tmp/instalar-local.sh"
