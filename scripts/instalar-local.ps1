@@ -58,8 +58,9 @@ sh.Environment("PROCESS")("PET_CONFIG") = "$base"
 sh.Run """$exe"" rodar", 0, False
 "@ | Set-Content -Encoding ascii $vbs
 $run = "wscript.exe `"$vbs`""
-New-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" `
-    -Name "Zeca" -Value $run -PropertyType String -Force | Out-Null
+$runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+if (-not (Test-Path $runKey)) { New-Item -Path $runKey -Force | Out-Null }
+New-ItemProperty -Path $runKey -Name "Zeca" -Value $run -PropertyType String -Force | Out-Null
 
 # sobe agora
 Start-Process wscript.exe -ArgumentList "`"$vbs`""
