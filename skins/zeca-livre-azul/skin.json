@@ -1,0 +1,104 @@
+{
+  "autor": "projeto bichinho (arte original feita com o Claude)",
+  "celula": [
+    48,
+    48
+  ],
+  "chao": [
+    "respira",
+    "ginga",
+    "blink",
+    "peck",
+    "nod",
+    "chirp",
+    "wave",
+    "work_session",
+    "yawn",
+    "sleep",
+    "wake"
+  ],
+  "corpo_px": 34,
+  "dados": "sheet.json",
+  "escala_padrao": 3,
+  "estados": {
+    "alert": [
+      "attention_call"
+    ],
+    "bye": [
+      "wave"
+    ],
+    "dangle": [
+      "fly"
+    ],
+    "done_big": [
+      "big_flight"
+    ],
+    "done_medium": [
+      "short_flight"
+    ],
+    "done_small": [
+      "hop"
+    ],
+    "error": [
+      "scared"
+    ],
+    "giggle": [
+      "chirp"
+    ],
+    "hello": [
+      "chirp"
+    ],
+    "idle": [
+      "respira",
+      "blink",
+      "ginga"
+    ],
+    "land": [
+      "landing"
+    ],
+    "nod": [
+      "nod"
+    ],
+    "ready": [
+      "chirp"
+    ],
+    "sleep": [
+      "sleep"
+    ],
+    "thinking": [
+      "peck"
+    ],
+    "waiting": [
+      "attention_call"
+    ],
+    "wake": [
+      "wake"
+    ],
+    "wave": [
+      "wave"
+    ],
+    "working": [
+      "work_session"
+    ],
+    "yawn": [
+      "yawn"
+    ]
+  },
+  "folha": "sheet.png",
+  "fonte": "arte/zeca-livre/zeca.py (o gerador, no repositório do bichinho)",
+  "formato": 1,
+  "id": "zeca-livre-azul",
+  "licenca": "CC0-1.0",
+  "nome": "Zeca (azul)",
+  "pe": [
+    26,
+    46
+  ],
+  "redistribuivel": true,
+  "toque": [
+    7,
+    11,
+    33,
+    34
+  ]
+}
