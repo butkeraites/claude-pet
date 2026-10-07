@@ -4977,3 +4977,38 @@ campo a campo), então o daemon pode ver e reagir às sessões já abertas sem
 depender do `/reload-plugins` — o passo manual que ainda sobrava na instalação.
 No limite, o observador deixa o Zeca funcionar sem o plugin, com o hook como
 enriquecimento.
+
+## 0109 — Instalar o Zeca por download: um comando, sem o repo nem cargo (o pipeline de release e o `get.sh`) (2026-10-07)
+
+**Problema:** o Zeca só se instalava do repo, compilando (cargo). Para o
+projeto open source, instalar tem que ser um comando numa máquina limpa — sem
+repo nem toolchain, do nível de um `npx`.
+
+**Decisão:** um pipeline de release no GitHub Actions + um instalador por
+download.
+
+- **CI** (`.github/workflows/release.yml`): nos tags `vX.Y.Z`, compila e assina
+  (ad-hoc) o `Bichinho.app` por arch (arm64 e x64, em runners nativos), monta um
+  `zeca-macos-<arch>.tar.gz` (o app + a skin padrão CC0 **já aprovada** + o
+  plugin + o setup) e sobe no release.
+- **`scripts/get.sh`** (o `curl -fsSL … | sh`): detecta SO/arch, baixa o pacote
+  do release e roda o setup local.
+- **`scripts/instalar-local.sh`**: setup **sem cargo** — copia o `.app`, o hook
+  no PATH, o config, a skin aprovada no estado, sobe o LaunchAgent e instala o
+  plugin (de uma fonte estável, não do tmp do download).
+- **A skin padrão já aprovada, sem cargo:** o snapshot aprovado é
+  byte-idêntico à skin do repo (`skin.json`, `sheet.json`, `sheet.png`) + um
+  `aprovacao.json`; o CI gera o `aprovacao.json` com a impressão (o sha256 duplo,
+  como o `skin-aprovar`), e o daemon mostra o Zeca só com o snapshot no estado,
+  sem `PET_SKINS` nem rodar a aprovação (conferido). O portão de aprovação
+  (decisões 0026/0029) continua para skins de terceiros; a CC0 padrão vem
+  confiada no pacote. A `curl` não põe quarantine, então o app ad-hoc roda sem o
+  Gatekeeper barrar.
+
+**Limites deste corte:** só macOS (Linux/Windows: próximos — o Linux hoje roda
+em Docker, o nativo é novo). A assinatura é ad-hoc (notarização depois). A fonte
+é o GitHub Releases; o `npx` e o Homebrew ficam para depois. O
+`scripts/instalar.sh` (do repo, que compila) continua para o dev.
+
+**Por quê:** é o que faz qualquer pessoa instalar o Zeca sem o repo — o
+pré-requisito do projeto open source.
