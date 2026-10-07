@@ -49,9 +49,18 @@ Zeca only ever handles **metadata** — event names, a session id, the project f
 
 ## Make it yours 🎨
 
-Zeca is just the default (his art is **CC0** — public domain — so you can do anything with it). The whole point is *your* pet: a sprite sheet + a small `skin.json` that maps animations to states (`idle`, `done_small`, `calling`, …). See [docs/SKINS.md](docs/SKINS.md) for the format.
+Zeca is just the default — his art is **CC0** (public domain), so you can do anything with it. The whole point is *your* pet.
 
-Making a custom sprite dead-simple (and a gallery to share them) is an active goal — contributions very welcome.
+<div align="center">
+<img src="docs/img/zeca-done.gif" width="128" alt="Zeca (green)">
+<img src="docs/img/zeca-azul.gif" width="128" alt="Zeca (blue)">
+<img src="docs/img/zeca-fogo.gif" width="128" alt="Zeca (fire)">
+<br><em>Same bird, three palettes — all three ship in <code>skins/</code>.</em>
+</div>
+
+A skin is just a **sprite sheet + a small `skin.json`** that maps animations to states (`idle`, `done_small`, `calling`, …). The blue and fire Zecas above are palette swaps of the original sheet, made by a tiny, reproducible script ([`arte/zeca-livre/recolorir.py`](arte/zeca-livre/recolorir.py)) — so even a recolor is a one-liner. Bring a whole new sprite sheet and you've got your own creature.
+
+See [docs/SKINS.md](docs/SKINS.md) for the format. Making custom sprites dead-simple — and a gallery to share them — is an active goal; contributions very welcome.
 
 ## How it works
 
