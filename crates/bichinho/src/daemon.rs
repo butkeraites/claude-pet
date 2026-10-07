@@ -95,20 +95,45 @@ fn rodar_no_sistema(
     crate::laco_macos::rodar(ambiente, config, comp, ouvinte)
 }
 
-/// Sem backend de janela ainda (Windows até o M8): o laço sem janela, com o
-/// cérebro e o `/v1/estado`.
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+/// Windows (M8): a janela nativa layered (`UpdateLayeredWindow`) pelo laço de
+/// mensagens. Com `PET_SEM_JANELA=1`, o laço sem janela (os testes do daemon não
+/// abrem uma janela na tela; o cérebro e o `/v1/estado` funcionam igual).
+#[cfg(windows)]
 fn rodar_no_sistema(
     ambiente: Ambiente,
     config: ConfigEfetiva,
     comp: Arc<Compartilhado>,
     ouvinte: TcpListener,
 ) -> ExitCode {
-    #[cfg(windows)]
-    let motivo = pet_windows::SEM_JANELA;
-    #[cfg(not(windows))]
-    let motivo = "este sistema ainda não tem backend de janela";
-    crate::sem_janela::rodar(ambiente, config, comp, ouvinte, motivo)
+    if std::env::var("PET_SEM_JANELA").as_deref() == Ok("1") {
+        aviso!("PET_SEM_JANELA=1: laço sem janela (sem janela nativa)");
+        return crate::sem_janela::rodar(
+            ambiente,
+            config,
+            comp,
+            ouvinte,
+            "PET_SEM_JANELA=1: sem janela",
+        );
+    }
+    crate::laco_windows::rodar(ambiente, config, comp, ouvinte)
+}
+
+/// Sem backend de janela ainda: o laço sem janela, com o cérebro e o
+/// `/v1/estado`.
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+fn rodar_no_sistema(
+    ambiente: Ambiente,
+    config: ConfigEfetiva,
+    comp: Arc<Compartilhado>,
+    ouvinte: TcpListener,
+) -> ExitCode {
+    crate::sem_janela::rodar(
+        ambiente,
+        config,
+        comp,
+        ouvinte,
+        "este sistema ainda não tem backend de janela",
+    )
 }
 
 /// Liga a entrada HTTP (uma thread) à caixa do laço do sistema.

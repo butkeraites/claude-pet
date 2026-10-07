@@ -5035,3 +5035,55 @@ em português e não havia licença de código.
 **Por quê:** é o que faz o projeto ser compartilhável e colaborável. MIT maximiza
 a adoção; CC0 na arte deixa a comunidade fazer o que quiser com o sprite. (O
 `curl | sh` público só funciona com o repo aberto — o próximo passo.)
+
+## 0111 — Backend do Windows (Win32 nativo, `pet-windows`): janela layered que anda, laço de mensagens, sem flip (2026-10-07)
+
+**Problema:** o M8 quer o Zeca nativo no Windows (T8.4). O Win32 pede `unsafe`,
+que o workspace proíbe no `pet-core` e no daemon do Linux; e falta um backend que
+anime e reaja (o spike `tools/win-layered-spike` já provou a janela layered e o
+raster do pet-core na tela do runner).
+
+**Decisão:** o primeiro corte do `crates/pet-windows` entrega o Zeca animando e
+reagindo, na mesma forma do macOS (decisão 0102), deixando o ponteiro para depois:
+- **Janela:** uma só, pequena, *layered* (`WS_EX_LAYERED | TOPMOST | TOOLWINDOW |
+  NOACTIVATE | TRANSPARENT`, `WS_POPUP`), reposicionada e redimensionada ao
+  retângulo da cena a cada quadro (a "janela que anda", `tela_inteira: false`).
+  Desenho com `UpdateLayeredWindow` e um DIB **BGRA pré-multiplicado** — o que o
+  raster do `pet-core` já entrega, sem conversão. Esconder é `SW_HIDE` (sem
+  fantasma; o Windows não tem fade da camada).
+- **Coordenadas (`pixels::Tela`):** o palco do Motor (pixels do dispositivo,
+  origem no topo esquerda do monitor) **é** o sistema de coordenadas da tela no
+  Windows, então as conversões são só somar a origem do monitor — **sem os flips
+  de Y do macOS**. DPI por-monitor v2 (`SetProcessDpiAwarenessContext`) para os
+  `HMONITOR`/posições virem em pixels físicos; a escala do monitor vai no
+  `Monitor` como no macOS.
+- **Laço (`laco_windows`):** `MsgWaitForMultipleObjectsEx` + `PeekMessageW` em
+  fatias (o análogo do `NSApplication.run` em fatias); a caixa acorda a thread
+  principal por `PostThreadMessageW` (o `Despertador`, de qualquer thread);
+  Ctrl+C / fechar o console marca o encerramento (`SetConsoleCtrlHandler`) e o
+  laço sai com calma, gravando a memória das sessões. O monitor ativo é seguido
+  pela própria janela (`MonitorFromWindow(GetForegroundWindow())`), como o
+  `NSScreen.main` do macOS, então `Desktop::capacidades().segue_foco` é falso.
+- **`DesktopWin` mínimo:** anuncia `Ligado(true)` (o Motor acende o pet) e nada
+  mais; `janela_ativa`/`foca_janela` desligados por ora (honesto nas
+  capacidades). O foco do terminal e o anel de ativações são a T8.7 do Windows.
+- **Estado:** `%LOCALAPPDATA%\bichinho` (ou `%APPDATA%`; `%USERPROFILE%` de
+  reserva), no lugar do `~/.local/state` que não vale no Windows.
+- **`unsafe`:** só no `pet-windows`, com `// SAFETY:` em cada bloco (o
+  `[lints.clippy]` próprio opta por sair do `unsafe_code = forbid` do workspace,
+  como o `pet-macos`); o `cargo clippy --target x86_64-pc-windows-msvc` do
+  `bin/pet verificar` confere sem linkar nem SDK. `PET_SEM_JANELA=1` cai no laço
+  sem janela (os testes do daemon não abrem janela).
+
+**Pendentes (próximos cortes):** o ponteiro — arraste, clique direito e o
+click-through pelo plano B (alternar `WS_EX_TRANSPARENT` pela posição do cursor,
+como o `ignoresMouseEvents` do macOS; por isso a janela nasce `TRANSPARENT` e
+`pixels::tela_para_palco`/`janela_para_palco` já existem) —, o `SetWinEventHook`
+do foco, o foco do terminal (T8.7 Windows, `SetForegroundWindow`), o autostart
+pela chave Run, e a conferência visual no CI (runner `windows-latest`, que
+desenha e tira screenshot — provado nos spikes).
+
+**Por quê:** é a mesma arquitetura do macOS (toda a lógica no Motor, o backend só
+traduz), o que mantém os testes em relógio falso e o orçamento de commits valendo
+igual. Entregar o pet animando e reagindo primeiro, e o ponteiro depois, segue a
+ordem do M8 (a janela antes do arraste) e deixa cada corte conferível.
