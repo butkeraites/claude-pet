@@ -29,7 +29,7 @@ Sources: read-only queries on this host (`hyprctl -j …`, raw sockets via Pytho
 ## 1. IPC (verified in source and live)
 **Paths:** `$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket.sock` is the request socket; `.socket2.sock` is the event socket.
 * On this host: `/run/user/1000/hypr/efb50993780079460b0cbed1363e2166a2de1d9f_1790020208_1687561921/`.
-* Permissions: `hypr/` and `<HIS>/` are mode 0700; both sockets are `srwxr-xr-x` owned by barbaruiva. Connecting needs write permission, so **the container must run as UID 1000**.
+* Permissions: `hypr/` and `<HIS>/` are mode 0700; both sockets are `srwxr-xr-x` owned by youruser. Connecting needs write permission, so **the container must run as UID 1000**.
 * The same directory holds `hyprland.lock`, whose content is `1501\nwayland-1` (compositor PID, then the Wayland socket name). A container can use it to discover the instance; never hardcode the HIS or `wayland-1`. `hyprland.log` is also there.
 * The HIS changes on every Hyprland start.
 

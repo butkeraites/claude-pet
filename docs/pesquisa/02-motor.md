@@ -432,7 +432,7 @@ services:
   pet:
     image: claude-pet:local
     build: { context: ., args: { APP_UID: "${APP_UID:-1000}", APP_GID: "${APP_GID:-1000}" } }
-    user: "${APP_UID:-1000}:${APP_GID:-1000}"   # must match the socket owner (srwxr-xr-x barbaruiva)
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"   # must match the socket owner (srwxr-xr-x youruser)
     restart: "no"                                # lifecycle owned by systemd --user (see risks)
     read_only: true
     network_mode: none                           # if ingress is the UNIX socket

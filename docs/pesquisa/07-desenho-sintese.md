@@ -1407,9 +1407,9 @@ hl.layer_rule({ name = "bichinho", match = { namespace = "^bichinho$" }, order =
 | Upstream drift in Claude Code fields or Hyprland events | tolerant parsers, scenario goldens, `validate --strict` after every Claude Code update |
 
 ### Critical files for implementation
-- /home/barbaruiva/Documents/bichinho/crates/bichinho/src/wl/surface.rs
-- /home/barbaruiva/Documents/bichinho/crates/bichinho-core/src/brain.rs
-- /home/barbaruiva/Documents/bichinho/crates/bichinho/src/daemon.rs
-- /home/barbaruiva/Documents/bichinho/plugin/scripts/avisar.sh (+ plugin/hooks/hooks.json)
-- /home/barbaruiva/Documents/bichinho/docker-compose.yml (+ Dockerfile)
+- ~/Documents/bichinho/crates/bichinho/src/wl/surface.rs
+- ~/Documents/bichinho/crates/bichinho-core/src/brain.rs
+- ~/Documents/bichinho/crates/bichinho/src/daemon.rs
+- ~/Documents/bichinho/plugin/scripts/avisar.sh (+ plugin/hooks/hooks.json)
+- ~/Documents/bichinho/docker-compose.yml (+ Dockerfile)
 
