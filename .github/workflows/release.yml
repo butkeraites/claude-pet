@@ -65,10 +65,37 @@ jobs:
       - name: Rust estável
         run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
 
+      - name: Compila o daemon
+        run: cargo build --release -p bichinho
+
+      # --- Assinatura Authenticode pelo SignPath Foundation (grátis p/ OSS) ---
+      # Desligada até a org estar configurada: só roda quando a variável do repo
+      # SIGNPATH_ORG_ID existir (veja docs/assinatura-windows.md). Sobe o exe
+      # como artefato, o SignPath assina e devolve por cima do mesmo arquivo.
+      - name: Sobe o exe não assinado (para o SignPath)
+        if: ${{ vars.SIGNPATH_ORG_ID != '' }}
+        id: exe_unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: bichinho-exe-unsigned
+          path: target/release/bichinho.exe
+
+      - name: Assina o bichinho.exe (SignPath)
+        if: ${{ vars.SIGNPATH_ORG_ID != '' }}
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORG_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.exe_unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: target/release
+
       - name: Pacote (bichinho.exe + skin CC0 aprovada + plugin + setup)
         shell: pwsh
         run: |
-          scripts/win-empacotar.ps1 -Staging staging
+          scripts/win-empacotar.ps1 -Staging staging -SkipBuild
           Compress-Archive -Path staging/* -DestinationPath zeca-windows-x64.zip -Force
           Get-Item zeca-windows-x64.zip | Format-List Name, Length
 

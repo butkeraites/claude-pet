@@ -4,15 +4,28 @@
 # Compila o daemon antes (release). Sem assinatura: o SmartScreen avisa uma vez.
 #
 #   scripts/win-empacotar.ps1 -Staging staging
-param([Parameter(Mandatory = $true)][string]$Staging)
+#
+# -SkipBuild usa o target\release\bichinho.exe que já existe (o release compila,
+# assina pelo SignPath e só então empacota).
+param(
+    [Parameter(Mandatory = $true)][string]$Staging,
+    [switch]$SkipBuild
+)
 $ErrorActionPreference = "Stop"
 
 $raiz = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $cargo = if ($env:CARGO) { $env:CARGO } else { "cargo" }
 
-Write-Host "- compilando o daemon (release)"
-& $cargo build --release -p bichinho
-if ($LASTEXITCODE -ne 0) { throw "cargo build falhou" }
+if ($SkipBuild) {
+    if (-not (Test-Path (Join-Path $raiz "target\release\bichinho.exe"))) {
+        throw "-SkipBuild mas não achei target\release\bichinho.exe"
+    }
+    Write-Host "- usando o bichinho.exe já compilado"
+} else {
+    Write-Host "- compilando o daemon (release)"
+    & $cargo build --release -p bichinho
+    if ($LASTEXITCODE -ne 0) { throw "cargo build falhou" }
+}
 
 if (Test-Path $Staging) { Remove-Item -Recurse -Force $Staging }
 New-Item -ItemType Directory -Force -Path $Staging | Out-Null
