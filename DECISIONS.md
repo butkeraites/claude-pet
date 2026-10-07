@@ -5012,3 +5012,26 @@ em Docker, o nativo é novo). A assinatura é ad-hoc (notarização depois). A f
 
 **Por quê:** é o que faz qualquer pessoa instalar o Zeca sem o repo — o
 pré-requisito do projeto open source.
+
+## 0110 — A cara pública e a licença: README em inglês, código MIT, arte CC0 (2026-10-07)
+
+**Problema:** para o projeto open source (a visão do Renan, 2026-10-07), o repo
+precisa de uma cara pública que chame atenção e de licenças claras; o README era
+em português e não havia licença de código.
+
+**Decisão:**
+- `README.md` em inglês (o pitch, o install de um comando, os GIFs do Zeca, como
+  funciona, a privacidade, o "make it yours", contribuir); o português vira
+  `README.pt-BR.md`, linkado no topo.
+- Licença do **código: MIT** (permissiva, pró-adoção). A **arte** do Zeca
+  (`arte/zeca-livre/`, `skins/zeca-livre*`, os GIFs de `docs/img/`) continua
+  **CC0 1.0**. `LICENSE` na raiz com as duas, e a nota no README.
+- `CONTRIBUTING.md` em inglês com as regras de ouro (privacidade, nada de
+  terceiros, `unsafe` só nas camadas de plataforma, o orçamento, a arte) e como
+  contribuir (o portão `bin/pet verificar`, uma linha no PROGRESS, DECISIONS só
+  cresce).
+- Os GIFs do Zeca (CC0, de `cargo xtask`) em `docs/img/` como demo.
+
+**Por quê:** é o que faz o projeto ser compartilhável e colaborável. MIT maximiza
+a adoção; CC0 na arte deixa a comunidade fazer o que quiser com o sprite. (O
+`curl | sh` público só funciona com o repo aberto — o próximo passo.)
