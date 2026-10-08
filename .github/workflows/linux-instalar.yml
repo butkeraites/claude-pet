@@ -1,0 +1,80 @@
+name: linux-instalar
+
+# Prova o instalador por download no Linux (M9): compila o binário musl estático,
+# monta o pacote (linux-empacotar.sh), roda o instalar-local-linux.sh e confere
+# que o Zeca **real** (a skin CC0 `zeca-livre-escuro`) sobe JÁ APROVADO
+# (tela=ativa) — o que valida a impressão digital do snapshot no Linux. O runner
+# é headless (sem compositor), então o daemon roda com PET_SEM_JANELA=1; o
+# overlay em Hyprland de verdade fica para a conferência na máquina do Renan.
+on:
+  push:
+    branches: [m9-linux]
+    paths:
+      - 'scripts/*.sh'
+      - 'crates/**'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - 'skins/zeca-livre-escuro/**'
+      - '.github/workflows/linux-instalar.yml'
+  workflow_dispatch: {}
+
+jobs:
+  instalar:
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+      CC_x86_64_unknown_linux_musl: musl-gcc
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust estável + alvo musl
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+          rustup target add x86_64-unknown-linux-musl
+
+      - name: musl-tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Monta o pacote
+        run: scripts/linux-empacotar.sh staging
+
+      - name: Instala e confere (headless, PET_SEM_JANELA)
+        run: |
+          set -eu
+          export PET_SEM_JANELA=1
+          ./staging/instalar-local.sh
+
+          # O instalador subiu um daemon; mata e sobe um fresco, determinístico,
+          # apontando para o estado instalado.
+          pkill -f 'bichinho rodar' 2>/dev/null || true
+          sleep 1
+
+          SUP="$HOME/.local/state/bichinho"
+          test -f "$HOME/.config/systemd/user/bichinho.service" || { echo "serviço systemd não criado"; exit 1; }
+          test -L "$HOME/.local/bin/bichinho" || { echo "symlink do binário no PATH não criado"; exit 1; }
+
+          PET_SEM_JANELA=1 PET_CONFIG="$SUP" "$HOME/.local/bin/bichinho" rodar &
+          PID=$!
+          for _ in $(seq 1 40); do
+            curl -s --noproxy '*' -H 'X-Pet: 1' 127.0.0.1:27380/v1/estado >/dev/null 2>&1 && break
+            sleep 0.3
+          done
+          e=$(curl -s --noproxy '*' -H 'X-Pet: 1' 127.0.0.1:27380/v1/estado || true)
+          # Headless não tem compositor, então `tela` fica "aguardando"; a
+          # aprovação se vê pelo `skin.id` (null quando NÃO aprovado) e `origem`.
+          get() { printf '%s' "$e" | python3 -c "import sys,json;d=json.load(sys.stdin);print(($1) if ($1) is not None else 'None')" 2>/dev/null || echo "?"; }
+          tela=$(get 'd.get("tela")')
+          skin=$(get '(d.get("skin") or {}).get("id")')
+          origem=$(get '(d.get("skin") or {}).get("origem")')
+          debug=$(get 'd.get("debug")')
+          versao=$(get 'd.get("versao")')
+          echo "skin.id=$skin  origem=$origem  tela=$tela  debug=$debug  versao=$versao"
+          kill "$PID" 2>/dev/null || true
+
+          test "$skin" = "zeca-livre-escuro" || { echo "o Zeca não ficou aprovado (skin.id=$skin) — a impressão do snapshot pode não bater"; exit 1; }
+          test "$debug" = "False" || { echo "daemon em debug (não deveria)"; exit 1; }
+          echo "instalador Linux OK: skin aprovada ($skin, origem=$origem), serviço systemd e PATH prontos (overlay em Hyprland fica pro Renan)"
+
+      - name: Para o daemon
+        if: always()
+        run: pkill -f 'bichinho rodar' || true

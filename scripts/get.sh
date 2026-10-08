@@ -15,11 +15,12 @@ OS=$(uname -s)
 ARCH=$(uname -m)
 case "$OS" in
   Darwin) plat=macos ;;
+  Linux) plat=linux ;;
   MINGW* | MSYS* | CYGWIN* | Windows_NT)
     echo "No Windows, instale pelo PowerShell:" >&2
     echo "  irm https://raw.githubusercontent.com/${REPO}/main/scripts/get.ps1 | iex" >&2
     exit 1 ;;
-  *) echo "O Zeca tem instalador por download para macOS e Windows (veio $OS). No Linux, rode do código por ora (veja o README)." >&2; exit 1 ;;
+  *) echo "O Zeca tem instalador por download para macOS, Linux e Windows (veio $OS)." >&2; exit 1 ;;
 esac
 case "$ARCH" in
   arm64 | aarch64) arch=arm64 ;;
@@ -27,9 +28,14 @@ case "$ARCH" in
   *) echo "arquitetura não suportada: $ARCH" >&2; exit 1 ;;
 esac
 
-# Um pacote universal no macOS (binário arm64 + Intel via lipo): não depende do
-# arch nem do runner Intel escasso do CI (decisão 0114).
-asset="zeca-macos.tar.gz"
+case "$plat" in
+  # macOS: um pacote universal (binário arm64 + Intel via lipo; decisão 0114).
+  macos) asset="zeca-macos.tar.gz" ;;
+  # Linux: musl estático x86_64, por ora (precisa de Hyprland; decisão 0115).
+  linux)
+    [ "$arch" = x64 ] || { echo "no Linux há pacote só para x86_64 por ora (veio $ARCH); rode do código (veja o README)." >&2; exit 1; }
+    asset="zeca-linux-x64.tar.gz" ;;
+esac
 if [ -n "${ZECA_VERSION:-}" ]; then
   url="https://github.com/${REPO}/releases/download/${ZECA_VERSION}/${asset}"
 else

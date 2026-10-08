@@ -5170,3 +5170,35 @@ pacote único no macOS (não precisa mais detectar arch). Substitui o
 escasso; um download só, mais simples pro usuário; o `lipo` é padrão do Xcode
 (presente nos runners e nos Macs de dev). O custo é o binário ~2× (as duas
 arquiteturas juntas), irrelevante pro tamanho dele.
+
+## 0115 — Instalar o Zeca no Linux por download: binário musl nativo, systemd --user, Hyprland (2026-10-08)
+
+**Problema:** o Linux não tinha instalador por download (só "from source" ou o
+Docker da produção). É a maior lacuna de alcance — o Zeca nasceu no Linux
+(Hyprland/Omarchy), e Linux é um público grande para o lançamento.
+
+**Decisão:** o espelho do macOS/Windows (decisões 0109 e 0112), **nativo** (sem
+Docker):
+- **Pacote** (`scripts/linux-empacotar.sh`, job `linux` do `release.yml`): o
+  binário **musl estático** (o mesmo tipo da imagem Docker, self-contained — o
+  wayland-client é Rust puro), a skin CC0 `zeca-livre-escuro` já aprovada
+  (impressão pelo `sha256sum`, igual ao `pet_core::aprovacao::impressao`), o
+  plugin e o `instalar-local-linux.sh`, num `zeca-linux-x64.tar.gz`.
+- **Instalador** (`scripts/instalar-local-linux.sh`, chamado pelo `get.sh`; o do
+  macOS fica intacto): binário em `~/.local/share/bichinho/bin` (symlink em
+  `~/.local/bin` para o hook), config e snapshot aprovado em
+  `~/.local/state/bichinho`, **autostart por `systemd --user`**
+  (`bichinho.service`, `WantedBy=graphical-session.target`), e pluga no Claude
+  Code. O daemon acha o Wayland do usuário por `PET_HOST_RUNTIME=/run/user` (o
+  default; o Docker usa o mount).
+- **Escopo: Hyprland** por ora — a descoberta é do Hyprland (`hyprland.lock`);
+  "qualquer Wayland com layer-shell" é a T8.3, futura.
+- **Headless:** `PET_SEM_JANELA=1` no Linux (como no macOS/Windows) para o daemon
+  rodar sem compositor (CI, diagnóstico).
+- **Sem assinatura** (o Linux não tem SmartScreen/Gatekeeper; o musl é
+  self-contained).
+
+**Prova:** o CI `linux-instalar` compila o musl, instala e confere `tela=ativa`
+headless (valida a impressão do snapshot no Linux). O **overlay em Hyprland de
+verdade** fica para a conferência na máquina do Renan — não dá para testar em CI
+headless, e um daemon nativo conflita com a produção Docker na porta 27380.
