@@ -20,7 +20,7 @@ He sits on top of everything, follows your active monitor, and can be dragged an
 
 One command.
 
-**macOS** (Apple Silicon or Intel):
+**macOS** (Apple Silicon or Intel) **or Linux** (Hyprland):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/butkeraites/claude-pet/main/scripts/get.sh | sh
@@ -34,13 +34,14 @@ irm https://raw.githubusercontent.com/butkeraites/claude-pet/main/scripts/get.ps
 
 That's it — it downloads a build, drops the pet on your screen, wires it into Claude Code, and starts at login. No repo, no toolchain, no config. (The Windows build isn't code-signed yet, so SmartScreen warns once — choose *More info → Run anyway*.)
 
-> Linux is on the way. On Linux you can run it from source today (see [Development](#development)).
+> Linux needs a Wayland compositor with layer-shell — **Hyprland** today; more compositors (and X11) are on the way. You can always run from source (see [Development](#development)).
 
 Open a new terminal, run `claude`, and Zeca starts reacting.
 
 To remove — first `claude plugin uninstall bichinho`, then:
 - **macOS:** `scripts/mac-desinstalar.sh --tudo` (removes the app, the LaunchAgent, and `~/Library/Application Support/bichinho`).
 - **Windows:** delete the `Zeca` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, stop `bichinho.exe`, and delete `%LOCALAPPDATA%\bichinho`.
+- **Linux:** `systemctl --user disable --now bichinho`, then delete `~/.local/state/bichinho` and `~/.local/share/bichinho`.
 
 ## What he does
 
