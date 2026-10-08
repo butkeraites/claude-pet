@@ -69,6 +69,19 @@ fn rodar_no_sistema(
     comp: Arc<Compartilhado>,
     ouvinte: TcpListener,
 ) -> ExitCode {
+    // Com `PET_SEM_JANELA=1`, o laço sem janela (sem Wayland) — para rodar sem
+    // compositor (CI headless, diagnóstico); o cérebro e o `/v1/estado`
+    // funcionam igual. Em produção, o laço do Wayland (Hyprland).
+    if std::env::var("PET_SEM_JANELA").as_deref() == Ok("1") {
+        aviso!("PET_SEM_JANELA=1: laço sem janela (sem Wayland)");
+        return crate::sem_janela::rodar(
+            ambiente,
+            config,
+            comp,
+            ouvinte,
+            "PET_SEM_JANELA=1: sem janela",
+        );
+    }
     crate::laco::rodar(ambiente, config, comp, ouvinte)
 }
 
