@@ -15,6 +15,8 @@ cd "$RAIZ"
 SAIDA="${1:-$RAIZ/tmp/Bichinho.app}"
 BUNDLE_ID="dev.bichinho.pet"
 CARGO="${CARGO:-$HOME/.cargo/bin/cargo}"
+RUSTUP="${RUSTUP:-$(dirname "$CARGO")/rustup}"
+command -v "$RUSTUP" >/dev/null 2>&1 || RUSTUP=rustup
 VERSAO="$(sed -n 's/^version = "\([^"]*\)".*/\1/p' Cargo.toml | head -n1)"
 [ -n "$VERSAO" ] || VERSAO="0.1.0"
 
@@ -23,13 +25,22 @@ if ! git diff --quiet 2>/dev/null; then
   fonte="${fonte}-sujo"
 fi
 
-echo "▸ compilando o binário de release (fonte $fonte)"
-BICHINHO_FONTE="$fonte" "$CARGO" build --release -p bichinho
+# Binário universal (arm64 + Intel) num runner só, sem depender do runner Intel
+# escasso do CI (decisão 0114): compila os dois alvos e junta com `lipo`.
+echo "▸ alvos do macOS (arm64 + Intel)"
+"$RUSTUP" target add aarch64-apple-darwin x86_64-apple-darwin
+
+echo "▸ compilando o binário de release universal (fonte $fonte)"
+BICHINHO_FONTE="$fonte" "$CARGO" build --release --target aarch64-apple-darwin -p bichinho
+BICHINHO_FONTE="$fonte" "$CARGO" build --release --target x86_64-apple-darwin -p bichinho
 
 echo "▸ montando $SAIDA"
 rm -rf "$SAIDA"
 mkdir -p "$SAIDA/Contents/MacOS"
-cp target/release/bichinho "$SAIDA/Contents/MacOS/bichinho"
+lipo -create -output "$SAIDA/Contents/MacOS/bichinho" \
+  target/aarch64-apple-darwin/release/bichinho \
+  target/x86_64-apple-darwin/release/bichinho
+echo "  $(lipo -archs "$SAIDA/Contents/MacOS/bichinho")"
 
 cat > "$SAIDA/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

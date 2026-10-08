@@ -27,7 +27,9 @@ case "$ARCH" in
   *) echo "arquitetura não suportada: $ARCH" >&2; exit 1 ;;
 esac
 
-asset="zeca-${plat}-${arch}.tar.gz"
+# Um pacote universal no macOS (binário arm64 + Intel via lipo): não depende do
+# arch nem do runner Intel escasso do CI (decisão 0114).
+asset="zeca-macos.tar.gz"
 if [ -n "${ZECA_VERSION:-}" ]; then
   url="https://github.com/${REPO}/releases/download/${ZECA_VERSION}/${asset}"
 else

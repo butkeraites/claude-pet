@@ -12,24 +12,19 @@ permissions:
   contents: write
 
 jobs:
+  # Um runner Apple Silicon só: compila os dois alvos e junta num binário
+  # universal (arm64 + Intel) com lipo — sem depender do runner Intel escasso
+  # (decisão 0114). Um pacote (zeca-macos.tar.gz) roda nas duas arquiteturas.
   macos:
-    name: macOS ${{ matrix.arch }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-14 # Apple Silicon
-            arch: arm64
-          - runner: macos-13 # Intel
-            arch: x64
-    runs-on: ${{ matrix.runner }}
+    name: macOS (universal)
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
       - name: Rust estável
         run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
 
-      - name: Bichinho.app (compila + assina ad-hoc)
+      - name: Bichinho.app universal (compila arm64 + Intel, lipo, assina ad-hoc)
         env:
           CARGO: cargo
         run: scripts/mac-empacotar.sh staging/Bichinho.app
@@ -47,14 +42,14 @@ jobs:
           cp -R plugin staging/plugin
           cp -R .claude-plugin staging/.claude-plugin
           cp scripts/instalar-local.sh staging/instalar-local.sh
-          tar -czf "zeca-macos-${{ matrix.arch }}.tar.gz" -C staging .
-          ls -la "zeca-macos-${{ matrix.arch }}.tar.gz"
+          tar -czf "zeca-macos.tar.gz" -C staging .
+          ls -la "zeca-macos.tar.gz"
 
       - name: Publica no release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: zeca-macos-${{ matrix.arch }}.tar.gz
+          files: zeca-macos.tar.gz
 
   windows:
     name: Windows x64

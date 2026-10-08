@@ -5149,3 +5149,24 @@ open source, com o certificado deles, integrado ao GitHub Actions):
 arquivo (o SignPath guarda a chave), e liga sozinho quando o Renan configurar a
 org — sem mexer no código de novo. O caminho crítico é a inscrição (revisão
 humana do SignPath), que não dá para fazer do CI.
+
+## 0114 — Release do macOS como binário universal (arm64 + Intel) num runner só (2026-10-08)
+
+**Problema:** o release do macOS (decisão 0109) usava uma matriz com `macos-14`
+(Apple Silicon) e `macos-13` (Intel). O runner Intel do GitHub Actions é escasso:
+num dry-run o job `macos-13` ficou 36 min na fila sem runner. Um release de
+verdade ficaria preso ou incompleto (o asset Intel só sairia quando/se um runner
+aparecesse; os usuários de Intel tomariam 404 até lá).
+
+**Decisão:** empacotar o macOS como **binário universal** num runner Apple
+Silicon só. O `mac-empacotar.sh` compila os dois alvos (`aarch64-apple-darwin` e
+`x86_64-apple-darwin`) e junta com `lipo` no binário do `.app`; o job `macos` do
+`release.yml` roda só em `macos-14` (sem a matriz) e publica **um** pacote,
+`zeca-macos.tar.gz`, que roda em Intel e Apple Silicon. O `get.sh` baixa esse
+pacote único no macOS (não precisa mais detectar arch). Substitui o
+`zeca-macos-<arch>.tar.gz` da decisão 0109.
+
+**Por quê:** releases rápidos e confiáveis, sem depender do runner Intel
+escasso; um download só, mais simples pro usuário; o `lipo` é padrão do Xcode
+(presente nos runners e nos Macs de dev). O custo é o binário ~2× (as duas
+arquiteturas juntas), irrelevante pro tamanho dele.
