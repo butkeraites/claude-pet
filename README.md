@@ -4,6 +4,12 @@
 
 **A pixel-art desktop pet that lives on your screen and reacts to [Claude Code](https://claude.com/claude-code).**
 
+[![Latest release](https://img.shields.io/github/v/release/butkeraites/claude-pet?color=34d399&label=release)](https://github.com/butkeraites/claude-pet/releases)
+[![Downloads](https://img.shields.io/github/downloads/butkeraites/claude-pet/total?color=34d399&label=downloads)](https://github.com/butkeraites/claude-pet/releases)
+[![Stars](https://img.shields.io/github/stars/butkeraites/claude-pet?color=34d399)](https://github.com/butkeraites/claude-pet/stargazers)
+[![License: MIT](https://img.shields.io/badge/license-MIT-34d399)](LICENSE)
+![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-34d399)
+
 <img src="docs/img/zeca-done.gif" alt="Zeca celebrating" width="160">
 
 Zeca celebrates when Claude finishes, calls you when it needs you, and naps when you step away.
