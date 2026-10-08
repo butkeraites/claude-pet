@@ -36,7 +36,11 @@ That's it — it downloads a build, drops the pet on your screen, wires it into 
 
 > Linux is on the way. On Linux you can run it from source today (see [Development](#development)).
 
-Open a new terminal, run `claude`, and Zeca starts reacting. To remove: `claude plugin uninstall bichinho` and `~/Library/Application Support/bichinho`'s LaunchAgent (`scripts/mac-desinstalar.sh --tudo`).
+Open a new terminal, run `claude`, and Zeca starts reacting.
+
+To remove — first `claude plugin uninstall bichinho`, then:
+- **macOS:** `scripts/mac-desinstalar.sh --tudo` (removes the app, the LaunchAgent, and `~/Library/Application Support/bichinho`).
+- **Windows:** delete the `Zeca` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, stop `bichinho.exe`, and delete `%LOCALAPPDATA%\bichinho`.
 
 ## What he does
 
