@@ -32,7 +32,7 @@ curl -fsSL https://raw.githubusercontent.com/butkeraites/claude-pet/main/scripts
 irm https://raw.githubusercontent.com/butkeraites/claude-pet/main/scripts/get.ps1 | iex
 ```
 
-That's it — it downloads a build, drops the pet on your screen, wires it into Claude Code, and starts at login. No repo, no toolchain, no config. (Windows builds are being set up for code signing through [SignPath Foundation](https://signpath.org/) — free code signing for open source. Until it's live, SmartScreen may warn once, so choose *More info → Run anyway*.)
+That's it — it downloads a build, drops the pet on your screen, wires it into Claude Code, and starts at login. No repo, no toolchain, no config. (The Windows build isn't code-signed yet, so SmartScreen warns once — choose *More info → Run anyway*.)
 
 > Linux is on the way. On Linux you can run it from source today (see [Development](#development)).
 
