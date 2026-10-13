@@ -5300,3 +5300,14 @@ grande`); a produção segue `pequeno` e nenhum código de tamanho mudou. A pose
 `perched` só aparece "de verdade" com a skin atualizada reaprovada pelo Renan
 (até lá, cai na pose de sempre); o galho, o acender, a silhueta, o tchau e o poof
 já valem em qualquer skin.
+
+**Correção (2026-10-13, uso ao vivo):** o **`done` agora traz o pet de volta**
+do galho — a regra de antes ("o `done` fica calado enquanto escondido") foi
+revertida porque, na prática, um trabalho terminando e o Zeca não voltar
+pareceu errado ao Renan. Um fim de trabalho (a festa T0–T3, não a reação
+discreta de máquina, nem o tchau) tira o pet do galho e ele **comemora**
+(`Motor::festa` chama `voltar_do_galho("festa")` antes de festejar). Só o
+**galho** volta assim: o esconder manual (`/v1/comando esconder`) e a proteção
+de tela seguem suprimindo a festa. Os gatilhos de volta agora são: foco numa
+janela do Claude (só Linux por ora), espera/escalada nova, **fim de trabalho**
+e o `mostrar`.

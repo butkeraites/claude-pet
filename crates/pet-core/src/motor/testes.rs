@@ -878,6 +878,33 @@ fn escondido_no_galho_uma_espera_nova_traz_de_volta() {
     assert_eq!(motor.galho(), "nenhum", "a espera nova traz o pet de volta");
 }
 
+#[test]
+fn escondido_no_galho_um_done_traz_de_volta() {
+    let (mut motor, mut janela) = ligado();
+    motor.acertar_relogio(em(0));
+    olhando(&mut motor, false, 0);
+    ocioso(&mut motor, false, 0);
+    janela.mostrou();
+    // Esconde no galho.
+    let (x, y) = meio_do_corpo(&janela);
+    ponteiro(&mut motor, &mut janela, apertou(x, y), 1_000);
+    ponteiro(&mut motor, &mut janela, moveu(x - 100, y), 1_010);
+    let (zx, zy) = centro_do_poleiro(&motor);
+    ponteiro(&mut motor, &mut janela, soltou(zx, zy), 1_100);
+    motor.vencer(&mut janela, 1_100 + galho::POUSANDO_MS + 1_000);
+    assert_eq!(motor.galho(), "escondido");
+    // Um trabalho termina: o pet volta do galho e comemora (decisão 0116,
+    // correção de 2026-10-13: o `done` deixou de ficar calado no galho).
+    turno_pequeno(&mut motor, "s1", "api", 5_000);
+    andar(&mut motor, 30_000);
+    assert_eq!(
+        motor.galho(),
+        "nenhum",
+        "o fim de um trabalho traz o pet de volta"
+    );
+    assert!(motor.quer_mostrar());
+}
+
 // --- seguir o monitor ativo (decisão 0051) ----------------------------------
 
 fn hdmi() -> Monitor {
