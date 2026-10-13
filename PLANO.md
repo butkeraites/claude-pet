@@ -868,6 +868,11 @@ Atualizado em 2026-10-05 com a pesquisa do M5 (`docs/pesquisa/10-cerebro-m5.md`,
 - "voltou!" via `ext_idle_notifier_v1`;
 - primeira aparição com "Oi! Me arrasta pra onde quiser";
 - dica "sem sinal do Claude Code — rode `bin/pet doutor`" se nenhum hook chegar em 5 min.
+- **T6.1** esconder no galho (decisão 0116): arrastar o Zeca faz aparecer um
+  poleiro; soltar nele leva o Zeca a voar até lá, fazer a pose `perched` e sumir;
+  ele volta sozinho quando o Renan foca uma janela do Claude Code **ou** quando o
+  Claude precisa (escalada L1+), além do clique e do `mostrar`. Config
+  `comportamento.galho`; arte (`galho`, `perched`) por skin.
 
 *Correção (2026-10-05, revisão do M5, decisão 0092):* o M5 já entregou as micro-ações sorteadas, o bocejo, o sono e o sono profundo (decisão 0082) e a chuva de confete do T3 (decisão 0085); ficam para o M6 o piscar e o olhar em volta, a física das partículas, o voo atravessando a tela, o holofote "PRONTO!", o "voltou!" com o resumo, os balões 9-slice e a primeira aparição. O T3 do M5 dura até 4,5 s (o portão abaixo mede o do M6).
 

@@ -189,6 +189,16 @@ pub enum Tipo {
         #[serde(skip_serializing_if = "Option::is_none")]
         motivo: Option<&'static str>,
     },
+    /// Esconder no galho (decisão 0116): a `fase` (`oferecido` ao começar o
+    /// arraste com o poleiro; `pousando` ao soltar nele; `escondido` quando
+    /// some; `nenhum` ao voltar) e, só na volta, o `motivo` (`foco`: o Renan
+    /// focou uma janela do Claude; `escalada`: o Claude precisa; `mostrar`: o
+    /// comando manual).
+    Galho {
+        fase: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        motivo: Option<&'static str>,
+    },
 }
 
 fn eh_zero(n: &u32) -> bool {

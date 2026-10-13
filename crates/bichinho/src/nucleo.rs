@@ -196,6 +196,7 @@ impl Nucleo {
         // relógio.
         motor.semear(agora_desde_1970_ms() ^ (u64::from(std::process::id()) << 32));
         motor.definir_tamanho(config.config().tamanho, None, 0);
+        motor.definir_galho_ligado(config.config().galho);
         motor.definir_posicoes(ler_posicoes(&onde.estado));
         let mut nucleo = Nucleo {
             comp,
@@ -373,6 +374,7 @@ impl Nucleo {
         }
         let cerebro = ConfigCerebro::de(&config.config());
         let tamanho = config.config().tamanho;
+        self.motor.definir_galho_ligado(config.config().galho);
         self.comp.definir_config(config);
         let mudou_tamanho = tamanho != self.motor.tamanho();
         if mudou_tamanho {
@@ -589,6 +591,13 @@ impl Nucleo {
 
     /// Toca as reações e publica o cérebro.
     fn depois_do_cerebro(&mut self, reacoes: Vec<Reacao>, mut ov: Option<&mut dyn Punho>) {
+        // Reconcilia a visibilidade antes de tocar: o pet que voltou do galho
+        // pela escalada (decisão 0116) precisa da janela de pé para a chamada
+        // aparecer. É barato quando nada muda (passo "nada").
+        let agora = self.agora_ms();
+        if let Some(ov) = janela(&mut ov) {
+            self.motor.aplicar_visibilidade(ov, agora);
+        }
         for reacao in &reacoes {
             self.reagir(reacao, punho(&mut ov));
         }

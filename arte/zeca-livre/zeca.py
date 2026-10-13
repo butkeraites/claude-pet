@@ -1348,6 +1348,16 @@ ANIMS['landing'] = [
     F(120, eye='EYE_HAPPY', hat_d=(0, 1)),
     F(300),
 ]
+# -- pousado (esconder no galho, decisão 0116): acomodado e malandro, respira devagar; o
+#    galho em si é desenhado pelo app (o pet só precisa da pose). Agachado (SQ) com o olho
+#    sly, como quem se encostou; laço calmo (a cabeça desce 1 px e o chapéu atrasa).
+PERCH = dict(SQ, eye='EYE_SLY')
+ANIMS['perched'] = [
+    F(640, **PERCH),
+    F(360, **PERCH, head_d=(0, 1), hat_d=(1, 1)),
+    F(640, **PERCH, head_d=(0, 1)),
+    F(360, **PERCH, hat_d=(0, -1)),
+]
 
 def anim_layers(name):
     return [(ms, pose(**kw)) for ms, kw in ANIMS[name]]
@@ -1535,8 +1545,8 @@ DARK, LIGHT = '#0B0C16', '#EFF1F5'
 RING_COLORS = dict(PALETTE, Q=RING)
 KEY = {'idle': 8, 'blink': 2, 'chirp': 4, 'peck': 4, 'hop': 4, 'fly': 0, 'scared': 3, 'sleep': 2, 'attention': 3, 'work': 1,
        'nod': 1, 'wave': 1, 'yawn': 2, 'wake': 3, 'work_in': 0, 'work_out': 0, 'sleep_in': 1, 'sleep_out': 1,
-       'attention_in': 0, 'attention_out': 0, 'takeoff': 2, 'landing': 1}
-LOOPS = {'idle', 'fly', 'sleep', 'attention', 'work'}
+       'attention_in': 0, 'attention_out': 0, 'takeoff': 2, 'landing': 1, 'perched': 0}
+LOOPS = {'idle', 'fly', 'sleep', 'attention', 'work', 'perched'}
 # trechos que o app pode tocar separados (ex.: respirar em loop e sortear a ginga).  Rodada 3: o
 # 'respira' e so 0-3 (os quadros 4-6 repetiam os 0-2, e a costura 6->0 descia cabeca e chapeu
 # juntos, sem o atraso do chapeu)
@@ -1552,7 +1562,7 @@ TITLES = {'idle': 'idle (ginga)', 'blink': 'piscar', 'chirp': 'piar', 'peck': 'b
           'nod': 'aceno (tirada de chapéu)', 'wave': 'tchau (asa)', 'yawn': 'bocejo', 'wake': 'acordar (espreguiça)',
           'work_in': 'entrar no trabalho', 'work_out': 'sair do trabalho', 'sleep_in': 'adormecer',
           'sleep_out': 'acordar do sono', 'attention_in': 'entrar na chamada', 'attention_out': 'sair da chamada',
-          'takeoff': 'decolar', 'landing': 'pousar'}
+          'takeoff': 'decolar', 'landing': 'pousar', 'perched': 'pousado (no galho)'}
 
 def frames_of(name, ring=False):
     out = []
@@ -1589,7 +1599,7 @@ def manifest():
             'chirp': 'notificacao / saudacao', 'peck': 'variacao do ocioso', 'blink': 'variacao do ocioso',
             'fly': 'entrando ou saindo da tela', 'idle': 'parado',
             'nod': 'resposta sem trabalho (aceno discreto)', 'wave': 'tchau / aceno', 'yawn': 'cansado, comeco da soneca',
-            'wake': 'fim da soneca',
+            'wake': 'fim da soneca', 'perched': 'escondido no galho (arrastado ate o poleiro)',
         },
         'animacoes': {},
     }

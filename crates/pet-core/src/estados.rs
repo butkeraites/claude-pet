@@ -141,6 +141,12 @@ pub const CATALOGO: &[Estado] = &[
         receita: receita("pose parada com quique e poeira", &["idle"]),
     },
     Estado {
+        chave: "perched",
+        descricao: "pousado no galho (esconder, decisão 0116)",
+        reservas: &["idle"],
+        receita: receita("pose parada acomodada", &["idle"]),
+    },
+    Estado {
         chave: "giggle",
         descricao: "clique (risadinha)",
         reservas: &["wave"],

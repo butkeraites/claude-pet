@@ -5202,3 +5202,101 @@ Docker):
 headless (valida a impressão do snapshot no Linux). O **overlay em Hyprland de
 verdade** fica para a conferência na máquina do Renan — não dá para testar em CI
 headless, e um daemon nativo conflita com a produção Docker na porta 27380.
+
+## 0116 — Esconder no galho: arrastar o Zeca para um poleiro, ele some até você olhar o Claude (ou ele precisar) (2026-10-12)
+
+**Problema:** o esconder de hoje (`/v1/comando esconder`, decisão 0005/M1) é um
+comando seco: o Zeca some até o `mostrar`. O Renan quis um jeito lúdico e físico
+de guardar o Zeca sem perdê-lo de vista — arrastar, aparecer um **galho**, pousar
+nele e o Zeca sumir — e que ele volte sozinho quando o Renan está olhando o Claude
+ou quando o Claude realmente precisa dele.
+
+**Decisão:** um novo modo de esconder, atrás do arraste, separado do esconder por
+comando (o `visivel`, decisão 0005). Toda a lógica mora no Motor (`pet-core`
+puro), então nasce portável (Linux, macOS, Windows); só o feed de "janela do
+Claude em foco" é de cada plataforma, e já existe (Linux pelo `activewindow` do
+socket2; macOS/Windows pela T8.7).
+
+- **Config** `comportamento.galho` (`ligado`/`desligado`, padrão `ligado`).
+  Desligado, o arraste é exatamente o de hoje.
+- **Gesto** (no Motor, sobre `motor::arraste`):
+  - ao **começar** o arraste (`Gesto::Comecou`), se o config liga e a skin tem o
+    galho, o Motor desenha um **poleiro** numa borda da tela (a zona de pouso);
+  - ao **soltar** (`Gesto::Soltou`) com a célula dentro da caixa do poleiro, o
+    Zeca voa até ele (reaproveitando a máquina de `motor::voo`), faz a pose
+    `perched` e **some**;
+  - soltar fora do poleiro é o arraste normal (pousa onde está, salva posição,
+    decisão 0049).
+- **Estado novo** no Motor: um campo `galho: EstadoGalho`, à parte do `visivel`.
+  Fases: `Nenhum`, `Oferecido` (arrastando, poleiro na tela), `Pousando` (voo +
+  pose), `Escondido` (sumido, esperando a volta). Só `Escondido` tira o pet da
+  tela; o `quer_mostrar()` passa a exigir também não estar `Escondido`.
+- **A volta** (escolha do Renan — "foco OU quando precisa"):
+  - `desktop.olhando_claude` sobe para `true` (o Renan focou uma janela do Claude
+    Code) — gatilho de borda;
+  - a escalada chega a L1+ (o Claude precisa): o Zeca volta **e** chama normal;
+  - clique no pet e `/v1/comando mostrar`: volta (override manual);
+  - o **`done` comum NÃO** traz de volta — a festa fica suprimida enquanto
+    escondido no galho, como no esconder por comando. O `done` entra na janela da
+    sessão, mas não aparece na tela.
+- **Arte por skin** (escolha do Renan): a skin declara os quadros `galho` (o
+  poleiro) e `perched` (a pose pousado). Sem esses estados, a skin **não** oferece
+  o galho (o arraste degrada para o de hoje), e o `lint-skin` avisa. O **Zeca
+  livre** (CC0) ganha os quadros no gerador (`arte/zeca-livre/zeca.py`); o **Zeca
+  do pack** precisa de folha de contato nova e **reaprovação do Renan**
+  (decisões 0026 e 0029) — até lá, a produção fica sem o galho, sem quebrar.
+- **Intenção/estado:** nova intenção `Tipo::Galho { fase }` no registro
+  (`motor::intencoes`) e o galho no `/v1/estado` (p.ex. `galho: escondido`). As
+  intenções não dependem da skin: os cenários dourados rodam sem personagem.
+
+**Prova:** cenários dourados novos (pousar → a volta pelo foco, a volta pela
+escalada, o `done` calado enquanto escondido, a volta pelo clique/`mostrar`),
+testes de unidade do arraste + galho em relógio falso e a prova de orçamento (a
+rajada do voo até o poleiro ≤ 30 fps, na grade de 34 ms, decisão 0088).
+`bin/pet simular` e `bin/pet testar` demonstram.
+
+**Correção (2026-10-12, ao implementar):** o galho (o poleiro) é **desenhado
+pelo Motor** (blocos, como os selos e o confete), não exigido da skin — assim a
+feature vale em qualquer skin na hora, inclusive a produção, sem arte nova nem
+reaprovação (o Renan escolheu o híbrido). Uma skin pode trazer a pose `perched`
+para o pet pousado (o `pet.segurar("perched")`, com a pose de sempre de reserva
+se faltar) e, mais adiante, um sprite próprio de galho. O gatilho "clique no
+pet" caiu: o pet escondido não está na tela para receber o clique; o override
+manual é o `mostrar` (e o `esconder` assume o controle como esconder comum). A
+volta pela escalada é por uma espera **nova** depois de esconder (uma que já
+esperava segue calada); o `done` comum fica calado enquanto escondido.
+
+**Correção (2026-10-13, conferência ao vivo no Mac):** na tela, o poleiro no
+**canto superior direito** ficou difícil de achar (pequeno, só durante o arraste,
+e no Mac a janela do pet é só o retângulo do pet, sem o overlay inteiro do Linux),
+e o galho **sozinho não dizia** que soltar o Zeca ali o faz sumir; ao soltar, ele
+sumia na hora, sem sinal de "posição certa", sem pouso e sem despedida. O Renan
+(direção de arte) guiou o afino, aprovado ao vivo:
+
+- **Posição:** o poleiro foi para a **borda esquerda, no meio vertical** do
+  monitor em que o pet está (`galho::poleiro`), mais fácil de achar.
+- **Indicador de esconder** (desenhado pelo Motor, em qualquer skin, sem
+  reaprovação): na oferta, uma **silhueta translúcida de papagaio** (topete,
+  cabeça redonda, bico curvo, corpo e rabo — não um pato) com um **"Zzz"**
+  subindo ao lado (`Elemento::Bloco` com alfa < 255 + `Elemento::Glifo`, o
+  estilo do selo de soneca, decisão 0053). A silhueta **não** usa o sprite da
+  skin (evita acoplar à aprovação e o "dois Zecas").
+- **Acende na zona:** enquanto arrasta, o galho fica apagado longe e **acende**
+  (madeira e folhas claras + uma listra de brilho) quando o corpo do pet entra
+  na zona de pouso = "pode soltar aqui" (o `aceso` do `galho::elementos`, da
+  posição do pet em `na_zona`).
+- **Pousar → tchau → poof:** ao soltar na zona, o pet **assenta na barra** (os
+  pés no meio dela, `celula_do_poleiro`, pose `perched` ou a de sempre se a skin
+  não a tem), **acena tchau** (a reação `bye`) e **some num poof** (a nuvem do
+  `motor::poof`, reusada), em vez de piscar fora. Fases novas no
+  `galho::Estado`: `Pousando` (assenta + tchau, `POUSANDO_MS`) e `Sumindo` (o
+  poof, o pet já invisível), antes de `Escondido`; o poof conta do prazo do
+  pousado (não do tique que o venceu), para completar mesmo com o relógio
+  pulando de uma vez.
+
+O composto maior deixa a zona de pouso (poleiro + folga) mais generosa. O "muito
+grande" visto na conferência era só a config da demo (`aparencia.tamanho =
+grande`); a produção segue `pequeno` e nenhum código de tamanho mudou. A pose
+`perched` só aparece "de verdade" com a skin atualizada reaprovada pelo Renan
+(até lá, cai na pose de sempre); o galho, o acender, a silhueta, o tchau e o poof
+já valem em qualquer skin.
