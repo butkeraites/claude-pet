@@ -58,6 +58,20 @@ teto = 20
 t2 = 4
 t3 = 12
 
+[comportamento]
+# Esconder no galho (decisão 0116): ao arrastar o Zeca aparece um poleiro na
+# esquerda, no meio do monitor; soltar o Zeca nele o faz sumir até um trabalho
+# terminar, o foco numa janela do Claude ou a escalada de um aviso o trazerem
+# de volta. "ligado" (padrão) ou "desligado". Ou PET_COMPORTAMENTO_GALHO.
+galho = "ligado"
+# Boas-vindas e dicas (decisão 0117): na primeira vez que o Zeca aparece ele
+# diz "Oi, eu sou o Zeca! Me arrasta pra onde quiser." (uma vez só); e, se
+# nenhum sinal do Claude chegar em 5 min (hook não instalado, `claude` fora do
+# PATH, sessão aberta antes do plugin), ele avisa uma vez para rodar
+# `bin/pet doutor`. "ligado" (padrão) ou "desligado". Ou
+# PET_COMPORTAMENTO_BOAS_VINDAS.
+boas_vindas = "ligado"
+
 [sessoes]
 # De onde vêm as sessões do Claude Code que o pet acompanha
 # ($CLAUDE_CODE_ENTRYPOINT): "cli" é o terminal. Acrescente "sdk-cli" para

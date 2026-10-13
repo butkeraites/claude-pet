@@ -19,7 +19,7 @@ use pet_core::cerebro::{Agora, ConfigCerebro, Reacao};
 use pet_core::config::ConfigEfetiva;
 use pet_core::evento;
 use pet_core::memoria::{MEMORIA_VELHA_MS, Memoria, Recusa};
-use pet_core::motor::{Clicou, Motor, Posicoes, Tocou};
+use pet_core::motor::{Clicou, Marcos, Motor, Posicoes, Tocou};
 use pet_core::plataforma::{EventoDesktop, EventoOverlay, EventoPonteiro, Overlay, Punho};
 
 use crate::comando::{Comando, Recebido};
@@ -33,6 +33,9 @@ use crate::personagem::{self, Escolha, NaTela, Onde, mesma_tela};
 const VOLTAS_DE_EVENTOS: usize = 8;
 /// As posições do pet por monitor, em `/state` (decisão 0049).
 pub const ARQUIVO_POSICOES: &str = "posicoes.json";
+/// Os marcos do pet (a saudação e a dica de silêncio), em `/state`
+/// (decisão 0117).
+pub const ARQUIVO_MARCOS: &str = "marcos.json";
 /// O batimento do laço principal de cada sistema (no Linux, o `laco`; sem
 /// janela, o `sem_janela`): alimenta o vigia e o `/saude` e chama a gravação
 /// da memória das sessões.
@@ -131,6 +134,34 @@ fn gravar_posicoes(estado: &Path, json: &str) -> std::io::Result<()> {
     std::fs::rename(&temporario, estado.join(ARQUIVO_POSICOES))
 }
 
+/// Lê os marcos salvos; sem arquivo, ou com um que não serve, o pet
+/// cumprimenta como na primeira vez.
+fn ler_marcos(estado: &Path) -> Marcos {
+    let caminho = estado.join(ARQUIVO_MARCOS);
+    match std::fs::read_to_string(&caminho) {
+        Ok(texto) => match Marcos::ler(&texto) {
+            Ok(marcos) => marcos,
+            Err(motivo) => {
+                aviso!("marcos ignorados ({}): {motivo}", caminho.display());
+                Marcos::default()
+            }
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Marcos::default(),
+        Err(e) => {
+            aviso!("não consegui ler {}: {e}", caminho.display());
+            Marcos::default()
+        }
+    }
+}
+
+/// Grava os marcos de uma vez (arquivo temporário e `rename`).
+fn gravar_marcos(estado: &Path, json: &str) -> std::io::Result<()> {
+    std::fs::create_dir_all(estado)?;
+    let temporario = estado.join(format!("{ARQUIVO_MARCOS}.tmp"));
+    std::fs::write(&temporario, json)?;
+    std::fs::rename(&temporario, estado.join(ARQUIVO_MARCOS))
+}
+
 /// Reempresta a conexão por um trecho. O `as_deref_mut` não serve: ele não
 /// encurta o tempo de vida do `dyn Punho` dentro do `Option`.
 fn punho<'a>(p: &'a mut Option<&mut dyn Punho>) -> Option<&'a mut dyn Punho> {
@@ -197,7 +228,9 @@ impl Nucleo {
         motor.semear(agora_desde_1970_ms() ^ (u64::from(std::process::id()) << 32));
         motor.definir_tamanho(config.config().tamanho, None, 0);
         motor.definir_galho_ligado(config.config().galho);
+        motor.definir_boas_vindas(config.config().boas_vindas);
         motor.definir_posicoes(ler_posicoes(&onde.estado));
+        motor.definir_marcos(ler_marcos(&onde.estado));
         let mut nucleo = Nucleo {
             comp,
             motor,
@@ -375,6 +408,7 @@ impl Nucleo {
         let cerebro = ConfigCerebro::de(&config.config());
         let tamanho = config.config().tamanho;
         self.motor.definir_galho_ligado(config.config().galho);
+        self.motor.definir_boas_vindas(config.config().boas_vindas);
         self.comp.definir_config(config);
         let mudou_tamanho = tamanho != self.motor.tamanho();
         if mudou_tamanho {
@@ -667,6 +701,7 @@ impl Nucleo {
         }
         self.publicar_avisos();
         self.guardar_posicoes();
+        self.guardar_marcos();
     }
 
     /// Grava as posições do pet em `/state` se elas mudaram (um arraste
@@ -676,6 +711,17 @@ impl Nucleo {
             match gravar_posicoes(&self.onde.estado, &json) {
                 Ok(()) => depurar!("posição do pet guardada"),
                 Err(e) => aviso!("não consegui guardar a posição do pet: {e}"),
+            }
+        }
+    }
+
+    /// Grava os marcos do pet em `/state` se eles mudaram (o pet cumprimentou
+    /// ou avisou do silêncio; decisão 0117).
+    fn guardar_marcos(&mut self) {
+        if let Some(json) = self.motor.marcos_para_gravar() {
+            match gravar_marcos(&self.onde.estado, &json) {
+                Ok(()) => depurar!("marcos do pet guardados"),
+                Err(e) => aviso!("não consegui guardar os marcos do pet: {e}"),
             }
         }
     }
@@ -716,6 +762,7 @@ impl Nucleo {
         // O clique viu um aviso (a janela já estava ativa).
         mudou |= self.publicar_avisos();
         self.guardar_posicoes();
+        self.guardar_marcos();
         mudou
     }
 

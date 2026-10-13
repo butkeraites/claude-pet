@@ -35,6 +35,7 @@ pub mod escalada;
 pub mod galho;
 pub mod intencoes;
 pub mod janelas;
+pub mod marcos;
 mod pet;
 mod poof;
 pub mod posicoes;
@@ -69,6 +70,7 @@ use crate::sorteio::Sorteio;
 pub use arraste::{Arraste, Gesto};
 pub use balao::Balao;
 pub use desktop::{EstadoDesktop, PainelDesktop};
+pub use marcos::Marcos;
 pub use pet::{Palco, Pet};
 pub use posicoes::{Fracao, Posicoes};
 pub use tela::{PainelTela, Prioridade, Selos, Sono};
@@ -95,6 +97,18 @@ pub const POUSADO: &str = "perched";
 pub const TCHAU: &str = "bye";
 /// A risadinha do clique.
 pub const RISADINHA: &str = "giggle";
+
+/// Quanto tempo depois de o pet aparecer pela primeira vez ele cumprimenta
+/// (decisão 0117): dá tempo de o poof da chegada passar e o pet se assentar.
+const ATRASO_BOAS_VINDAS_MS: u64 = 1_500;
+/// Sem nenhum evento do Claude por tanto tempo, o pet avisa uma vez que não
+/// chega sinal (o hook não instalado, o `claude` fora do PATH, uma sessão
+/// aberta antes do plugin; decisão 0117). Longo, para um intervalo normal
+/// entre prompts nunca disparar: o aviso só sai quando NENHUM evento chegou.
+const SEM_SINAL_MS: u64 = 5 * 60 * 1_000;
+/// Se, no prazo da saudação ou da dica, o pet ainda não pode aparecer (sem
+/// palco, escondido, na proteção de tela), tenta de novo depois disto.
+const RETENTAR_BOAS_VINDAS_MS: u64 = 10_000;
 
 /// O que [`Motor::vencer_galho`] fez nesta passada (decisão 0116).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -421,6 +435,22 @@ pub struct Motor {
     galho_tchau_ms: Option<u64>,
     /// O esconder no galho está ligado (`comportamento.galho`).
     galho_ligado: bool,
+    /// As boas-vindas e a dica de silêncio estão ligadas
+    /// (`comportamento.boas_vindas`, decisão 0117).
+    boas_vindas_ligado: bool,
+    /// O que o pet já fez e não repete, lido de `/state` na partida
+    /// (decisão 0117).
+    marcos: Marcos,
+    /// Os marcos mudaram desde a última gravação.
+    marcos_novos: bool,
+    /// Quando cumprimentar na primeira aparição (o prazo da saudação).
+    boas_vindas_ms: Option<u64>,
+    /// Quando avisar que não chega sinal do Claude, se nenhum evento chegou
+    /// até lá.
+    dica_sem_sinal_ms: Option<u64>,
+    /// Algum evento do Claude já chegou nesta partida do daemon: desarma a
+    /// dica de silêncio para sempre (o hook funciona).
+    recebeu_evento: bool,
     estresse: Option<Estresse>,
     commits: Commits,
     /// A próxima troca de quadro da animação.
@@ -522,6 +552,12 @@ impl Motor {
             galho: galho::Estado::default(),
             galho_tchau_ms: None,
             galho_ligado: true,
+            boas_vindas_ligado: true,
+            marcos: Marcos::default(),
+            marcos_novos: false,
+            boas_vindas_ms: None,
+            dica_sem_sinal_ms: None,
+            recebeu_evento: false,
             estresse: None,
             commits: Commits::default(),
             proximo_quadro: None,
@@ -954,6 +990,117 @@ impl Motor {
         if self.posicoes.de(chave) != Some(fracao) {
             self.posicoes.guardar(chave, fracao);
             self.posicoes_novas = true;
+        }
+    }
+
+    // --- marcos (a primeira aparição e a dica de silêncio, decisão 0117) ------
+
+    /// Os marcos lidos de `/state` na partida (quem lê é o núcleo do daemon).
+    pub fn definir_marcos(&mut self, marcos: Marcos) {
+        self.marcos = marcos;
+        self.marcos_novos = false;
+    }
+
+    pub fn marcos(&self) -> Marcos {
+        self.marcos
+    }
+
+    /// O arquivo dos marcos, se eles mudaram desde a última vez (quem grava é
+    /// o núcleo do daemon).
+    pub fn marcos_para_gravar(&mut self) -> Option<String> {
+        if !self.marcos_novos {
+            return None;
+        }
+        self.marcos_novos = false;
+        Some(self.marcos.json())
+    }
+
+    /// Liga/desliga as boas-vindas e a dica de silêncio
+    /// (`comportamento.boas_vindas`). Desligar desarma os prazos pendentes.
+    pub fn definir_boas_vindas(&mut self, ligado: bool) {
+        self.boas_vindas_ligado = ligado;
+        if !ligado {
+            self.boas_vindas_ms = None;
+            self.dica_sem_sinal_ms = None;
+        }
+    }
+
+    /// Arma a saudação da primeira aparição e a dica de silêncio quando uma
+    /// janela conecta (decisão 0117). A saudação só se o pet ainda não
+    /// cumprimentou; a dica só se nenhum evento chegou, não há sessão real
+    /// aberta (a memória não trouxe nenhuma) e ela ainda não foi dada.
+    fn armar_boas_vindas(&mut self, agora_ms: u64) {
+        if !self.boas_vindas_ligado {
+            return;
+        }
+        if !self.marcos.ja_cumprimentou {
+            self.boas_vindas_ms = Some(agora_ms + ATRASO_BOAS_VINDAS_MS);
+        }
+        if !self.recebeu_evento && !self.marcos.ja_avisou_sem_sinal && self.sem_sessao_real() {
+            self.dica_sem_sinal_ms = Some(agora_ms + SEM_SINAL_MS);
+        }
+    }
+
+    /// Nenhuma sessão real do Claude é conhecida (só as de teste, se alguma).
+    fn sem_sessao_real(&self) -> bool {
+        self.cerebro.resumo_das_sessoes().iter().all(|s| s.teste)
+    }
+
+    /// Um evento do Claude chegou (o hook funciona): a dica de silêncio sai de
+    /// cena para sempre nesta partida, e o aviso já dado some, para poder
+    /// sair de novo se o sinal se perder outra vez (decisão 0117).
+    fn ouviu_o_claude(&mut self) {
+        self.recebeu_evento = true;
+        self.dica_sem_sinal_ms = None;
+        if self.marcos.ja_avisou_sem_sinal {
+            self.marcos.ja_avisou_sem_sinal = false;
+            self.marcos_novos = true;
+        }
+    }
+
+    /// Vence os prazos da saudação e da dica de silêncio (decisão 0117): se o
+    /// pet pode aparecer, mostra o balão (uma vez só, gravado nos marcos);
+    /// senão, tenta de novo mais tarde. Chamado por [`Self::vencer`] e
+    /// [`Self::vencer_sem_conexao`].
+    fn vencer_boas_vindas(&mut self, agora_ms: u64) {
+        if self.boas_vindas_ms.is_some_and(|ate| agora_ms >= ate) {
+            self.boas_vindas_ms = None;
+            if self.palco.is_some() && self.na_tela() {
+                self.marcos.ja_cumprimentou = true;
+                self.marcos_novos = true;
+                self.balao_decidido(
+                    vec![
+                        "Oi, eu sou o Zeca!".into(),
+                        "Me arrasta pra onde quiser.".into(),
+                    ],
+                    "boas_vindas",
+                    agora_ms,
+                );
+            } else {
+                // Ainda não dá para aparecer: tenta de novo.
+                self.boas_vindas_ms = Some(agora_ms + RETENTAR_BOAS_VINDAS_MS);
+            }
+        }
+        if self.dica_sem_sinal_ms.is_some_and(|ate| agora_ms >= ate) {
+            self.dica_sem_sinal_ms = None;
+            if self.recebeu_evento || self.marcos.ja_avisou_sem_sinal || !self.sem_sessao_real() {
+                // Chegou sinal, ou já avisei, ou há sessão: nada a fazer.
+            } else if self.palco.is_some() && self.na_tela() {
+                self.marcos.ja_avisou_sem_sinal = true;
+                self.marcos_novos = true;
+                self.balao_decidido(
+                    vec![
+                        "Cadê o Claude?".into(),
+                        "Não chegou nada ainda.".into(),
+                        "Se for engano, rode:".into(),
+                        "bin/pet doutor".into(),
+                    ],
+                    "sem_sinal",
+                    agora_ms,
+                );
+            } else {
+                self.dica_sem_sinal_ms = Some(agora_ms + RETENTAR_BOAS_VINDAS_MS);
+            }
         }
     }
 
@@ -1464,6 +1611,9 @@ impl Motor {
     /// com o Renan longe do teclado (decisão 0073).
     pub fn evento(&mut self, ev: &Evento, recebido_ms: u64, agora: Agora) -> Vec<Reacao> {
         self.acertar_relogio(agora);
+        // Qualquer evento do Claude prova que o hook funciona: a dica de
+        // silêncio sai de cena (decisão 0117).
+        self.ouviu_o_claude();
         // O "não perturbe" do Omarchy vem em todo evento (decisão 0075).
         self.nao_perturbe = ev.dnd;
         if self.nao_perturbe {
@@ -1931,6 +2081,7 @@ impl Motor {
         self.estresse = None;
         self.commits = Commits::default();
         self.proximo_quadro = None;
+        self.armar_boas_vindas(agora_ms);
     }
 
     /// A janela acabou com a sessão (o compositor caiu). Um foco pedido pelo
@@ -3262,6 +3413,7 @@ impl Motor {
             PassoGalho::Nada => {}
         }
         self.vencer_viagem(punho.janela(), agora_ms);
+        self.vencer_boas_vindas(agora_ms);
         if self.balao.as_ref().is_some_and(|b| agora_ms >= b.ate_ms) {
             self.balao = None;
             self.desenhar(punho.janela(), agora_ms, false);
@@ -3314,6 +3466,7 @@ impl Motor {
         // Sem janela, não há para onde viajar: o prazo de conferir o foco
         // sai, e a camada nova (com output NULL) nasce no monitor em foco.
         self.seguir.decidir(agora_ms, None, false);
+        self.vencer_boas_vindas(agora_ms);
         if self.balao.as_ref().is_some_and(|b| agora_ms >= b.ate_ms) {
             self.balao = None;
         }
@@ -3346,6 +3499,8 @@ impl Motor {
             self.focando.iter().map(|f| f.ate_ms).min(),
             self.galho.prazo(),
             self.galho_tchau_ms,
+            self.boas_vindas_ms,
+            self.dica_sem_sinal_ms,
         ]
         .into_iter()
         .flatten()
