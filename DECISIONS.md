@@ -5265,3 +5265,38 @@ pet" caiu: o pet escondido não está na tela para receber o clique; o override
 manual é o `mostrar` (e o `esconder` assume o controle como esconder comum). A
 volta pela escalada é por uma espera **nova** depois de esconder (uma que já
 esperava segue calada); o `done` comum fica calado enquanto escondido.
+
+**Correção (2026-10-13, conferência ao vivo no Mac):** na tela, o poleiro no
+**canto superior direito** ficou difícil de achar (pequeno, só durante o arraste,
+e no Mac a janela do pet é só o retângulo do pet, sem o overlay inteiro do Linux),
+e o galho **sozinho não dizia** que soltar o Zeca ali o faz sumir; ao soltar, ele
+sumia na hora, sem sinal de "posição certa", sem pouso e sem despedida. O Renan
+(direção de arte) guiou o afino, aprovado ao vivo:
+
+- **Posição:** o poleiro foi para a **borda esquerda, no meio vertical** do
+  monitor em que o pet está (`galho::poleiro`), mais fácil de achar.
+- **Indicador de esconder** (desenhado pelo Motor, em qualquer skin, sem
+  reaprovação): na oferta, uma **silhueta translúcida de papagaio** (topete,
+  cabeça redonda, bico curvo, corpo e rabo — não um pato) com um **"Zzz"**
+  subindo ao lado (`Elemento::Bloco` com alfa < 255 + `Elemento::Glifo`, o
+  estilo do selo de soneca, decisão 0053). A silhueta **não** usa o sprite da
+  skin (evita acoplar à aprovação e o "dois Zecas").
+- **Acende na zona:** enquanto arrasta, o galho fica apagado longe e **acende**
+  (madeira e folhas claras + uma listra de brilho) quando o corpo do pet entra
+  na zona de pouso = "pode soltar aqui" (o `aceso` do `galho::elementos`, da
+  posição do pet em `na_zona`).
+- **Pousar → tchau → poof:** ao soltar na zona, o pet **assenta na barra** (os
+  pés no meio dela, `celula_do_poleiro`, pose `perched` ou a de sempre se a skin
+  não a tem), **acena tchau** (a reação `bye`) e **some num poof** (a nuvem do
+  `motor::poof`, reusada), em vez de piscar fora. Fases novas no
+  `galho::Estado`: `Pousando` (assenta + tchau, `POUSANDO_MS`) e `Sumindo` (o
+  poof, o pet já invisível), antes de `Escondido`; o poof conta do prazo do
+  pousado (não do tique que o venceu), para completar mesmo com o relógio
+  pulando de uma vez.
+
+O composto maior deixa a zona de pouso (poleiro + folga) mais generosa. O "muito
+grande" visto na conferência era só a config da demo (`aparencia.tamanho =
+grande`); a produção segue `pequeno` e nenhum código de tamanho mudou. A pose
+`perched` só aparece "de verdade" com a skin atualizada reaprovada pelo Renan
+(até lá, cai na pose de sempre); o galho, o acender, a silhueta, o tchau e o poof
+já valem em qualquer skin.

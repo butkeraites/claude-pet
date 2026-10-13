@@ -759,14 +759,20 @@ fn galho_oferece_o_poleiro_pousa_some_e_o_foco_traz_de_volta() {
             .any(|e| matches!(e, Elemento::Bloco { .. })),
         "o galho é desenhado pelo Motor"
     );
-    // Solta no poleiro: o pet pousa (ainda na tela) e some no prazo.
+    // Solta no poleiro: o pet assenta (ainda na tela), acena tchau, dá o poof
+    // e some. Antes do prazo do pousado, segue pousado; depois, entra no poof
+    // (sumindo) e, passado ele, fica escondido.
     let (zx, zy) = centro_do_poleiro(&motor);
     ponteiro(&mut motor, &mut janela, soltou(zx, zy), 1_100);
     assert_eq!(motor.galho(), "pousando");
     assert!(motor.quer_mostrar(), "pousado, ainda visível");
-    let some = 1_100 + galho::POUSO_MS;
-    motor.vencer(&mut janela, some - 1);
-    assert_eq!(motor.galho(), "pousando", "antes do prazo não some");
+    let poof = 1_100 + galho::POUSANDO_MS;
+    motor.vencer(&mut janela, poof - 1);
+    assert_eq!(motor.galho(), "pousando", "antes do prazo segue pousado");
+    motor.vencer(&mut janela, poof);
+    assert_eq!(motor.galho(), "sumindo", "entra no poof");
+    assert!(motor.quer_mostrar(), "no poof ainda está na tela");
+    let some = poof + 1_000;
     motor.vencer(&mut janela, some);
     assert_eq!(motor.galho(), "escondido");
     assert!(!motor.quer_mostrar());
@@ -821,7 +827,8 @@ fn soltar_fora_do_poleiro_pousa_normal() {
     ponteiro(&mut motor, &mut janela, apertou(x, y), 1_000);
     ponteiro(&mut motor, &mut janela, moveu(x - 100, y), 1_010);
     assert_eq!(motor.galho(), "oferecido");
-    // Solta longe do poleiro (para a esquerda-baixo): o galho sai, pousa.
+    // Solta longe do poleiro (o poleiro é na esquerda-meio; aqui solta perto
+    // do próprio canto do pet): o galho sai, pousa.
     ponteiro(&mut motor, &mut janela, soltou(x - 300, y + 100), 1_100);
     assert_eq!(motor.galho(), "nenhum");
     assert!(motor.quer_mostrar());
@@ -836,7 +843,7 @@ fn escondido_no_galho_o_mostrar_traz_de_volta() {
     ponteiro(&mut motor, &mut janela, moveu(x - 100, y), 1_010);
     let (zx, zy) = centro_do_poleiro(&motor);
     ponteiro(&mut motor, &mut janela, soltou(zx, zy), 1_100);
-    motor.vencer(&mut janela, 1_100 + galho::POUSO_MS);
+    motor.vencer(&mut janela, 1_100 + galho::POUSANDO_MS + 1_000);
     assert_eq!(motor.galho(), "escondido");
     // O mostrar manual assume o controle: o galho sai e o pet volta.
     motor.definir_visivel(true);
@@ -858,7 +865,7 @@ fn escondido_no_galho_uma_espera_nova_traz_de_volta() {
     ponteiro(&mut motor, &mut janela, moveu(x - 100, y), 1_010);
     let (zx, zy) = centro_do_poleiro(&motor);
     ponteiro(&mut motor, &mut janela, soltou(zx, zy), 1_100);
-    motor.vencer(&mut janela, 1_100 + galho::POUSO_MS);
+    motor.vencer(&mut janela, 1_100 + galho::POUSANDO_MS + 1_000);
     assert_eq!(motor.galho(), "escondido");
     // O Claude pede permissão (uma espera nova): o pet volta.
     mandar(

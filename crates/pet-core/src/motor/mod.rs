@@ -91,8 +91,33 @@ pub const SOLTO: &str = "land";
 /// O estado em laço do pet pousado no galho (decisão 0116); a skin que não o
 /// tem cai na pose de sempre.
 pub const POUSADO: &str = "perched";
+/// O aceno de tchau do pet pousado antes de sumir no galho (decisão 0116).
+pub const TCHAU: &str = "bye";
 /// A risadinha do clique.
 pub const RISADINHA: &str = "giggle";
+
+/// O que [`Motor::vencer_galho`] fez nesta passada (decisão 0116).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PassoGalho {
+    /// Nada venceu.
+    Nada,
+    /// Uma fase avançou (o tchau ou o início do poof): redesenhar.
+    Redesenhar,
+    /// O pet ficou escondido no galho: reconciliar a visibilidade.
+    Escondeu,
+}
+
+impl PassoGalho {
+    /// Fica com o passo mais forte (Escondeu > Redesenhar > Nada).
+    fn com(self, outro: PassoGalho) -> PassoGalho {
+        use PassoGalho::*;
+        match (self, outro) {
+            (Escondeu, _) | (_, Escondeu) => Escondeu,
+            (Redesenhar, _) | (_, Redesenhar) => Redesenhar,
+            _ => Nada,
+        }
+    }
+}
 /// O bocejo de quando a soneca começa e o despertar de quando ela acaba.
 pub const BOCEJO: &str = "yawn";
 pub const DESPERTAR: &str = "wake";
@@ -392,6 +417,8 @@ pub struct Motor {
     visivel: bool,
     /// Esconder no galho (decisão 0116): a fase do poleiro.
     galho: galho::Estado,
+    /// Quando o pet pousado acena tchau (entre o assentar e o poof).
+    galho_tchau_ms: Option<u64>,
     /// O esconder no galho está ligado (`comportamento.galho`).
     galho_ligado: bool,
     estresse: Option<Estresse>,
@@ -493,6 +520,7 @@ impl Motor {
             palco: None,
             visivel: true,
             galho: galho::Estado::default(),
+            galho_tchau_ms: None,
             galho_ligado: true,
             estresse: None,
             commits: Commits::default(),
@@ -1862,6 +1890,7 @@ impl Motor {
         // 0116). Quem chama reconcilia a visibilidade logo em seguida.
         if !matches!(self.galho, galho::Estado::Nenhum) {
             self.galho = galho::Estado::Nenhum;
+            self.galho_tchau_ms = None;
         }
     }
 
@@ -1896,6 +1925,7 @@ impl Motor {
         // sim (decisão 0116): quem o guardou volta pelo foco ou pela escalada.
         if self.galho.poleiro_na_tela() {
             self.galho = galho::Estado::Nenhum;
+            self.galho_tchau_ms = None;
         }
         self.seguir.esquecer();
         self.estresse = None;
@@ -1924,6 +1954,7 @@ impl Motor {
         // galho fica (decisão 0116).
         if self.galho.poleiro_na_tela() {
             self.galho = galho::Estado::Nenhum;
+            self.galho_tchau_ms = None;
         }
         self.seguir.esquecer();
         self.estresse = None;
@@ -2416,6 +2447,7 @@ impl Motor {
         ov.cursor(Cursor::Pegar);
         // Soltou fora do poleiro: o galho sai (decisão 0116).
         self.galho = galho::Estado::Nenhum;
+        self.galho_tchau_ms = None;
         if let Some(pet) = self.pet.as_mut() {
             pet.largar(agora_ms);
             pet.tocar(SOLTO, agora_ms);
@@ -2426,18 +2458,25 @@ impl Motor {
         self.seguir.conferir_em(agora_ms);
     }
 
-    /// Soltou o pet no poleiro (decisão 0116): ele pousa na pose (ou a de
-    /// sempre, se a skin não tem `perched`) e some em [`galho::POUSO_MS`]. A
-    /// posição não é guardada: ao voltar, o pet aparece onde morava.
+    /// Soltou o pet no poleiro (decisão 0116): ele assenta no galho (os pés na
+    /// barra, a pose `perched` ou a de sempre se a skin não a tem), acena tchau
+    /// e some num poof. A posição não é guardada: ao voltar, aparece onde
+    /// morava.
     fn pousar_no_galho(&mut self, ov: &mut dyn Overlay, agora_ms: u64) {
         ov.cursor(Cursor::Pegar);
+        // Assenta o pet no galho: os pés sobre a barra, para ele pousar ali.
+        if let Some(celula) = self.celula_do_poleiro() {
+            self.mover_para(celula);
+        }
         if let Some(pet) = self.pet.as_mut() {
             pet.largar(agora_ms);
             pet.segurar(POUSADO, agora_ms);
         }
         self.galho = galho::Estado::Pousando {
-            ate_ms: agora_ms + galho::POUSO_MS,
+            ate_ms: agora_ms + galho::POUSANDO_MS,
         };
+        // Depois de assentar, ele acena tchau (até o poof começar).
+        self.galho_tchau_ms = Some(agora_ms + galho::ASSENTA_MS);
         self.anotar(
             agora_ms,
             intencoes::Tipo::Galho {
@@ -2449,16 +2488,61 @@ impl Motor {
         self.seguir.conferir_em(agora_ms);
     }
 
-    /// O pet pousado some quando o prazo vence (decisão 0116): larga a pose e
-    /// fica escondido no galho. `true` se mudou (quem tem janela reconcilia a
-    /// visibilidade depois).
-    fn vencer_galho(&mut self, agora_ms: u64) -> bool {
+    /// A célula (canto da arte, no palco) para o pet pousar com os pés no meio
+    /// da barra do galho; presa à área útil.
+    fn celula_do_poleiro(&self) -> Option<(i32, i32)> {
+        let palco = self.palco?;
+        let pet = self.pet.as_ref()?;
+        let p = galho::poleiro(palco.area, palco.d);
+        let pe = pet.skin().ancoras.pe;
+        let x = p.x + p.w / 2 - pe.0 * palco.d;
+        let y = p.y + galho::BARRA_Y * palco.d - pe.1 * palco.d;
+        Some((x, y))
+    }
+
+    /// A sequência do pet pousado no galho (decisão 0116): depois de assentar,
+    /// acena tchau; depois, o poof (o pet some da tela, mas a janela segue para
+    /// a nuvem); no fim do poof, fica escondido. Avança todas as fases que o
+    /// relógio já passou.
+    fn vencer_galho(&mut self, agora_ms: u64) -> PassoGalho {
+        let mut passo = PassoGalho::Nada;
+        // O tchau, depois de assentar.
+        if let Some(tchau) = self.galho_tchau_ms
+            && agora_ms >= tchau
+        {
+            self.galho_tchau_ms = None;
+            if let Some(pet) = self.pet.as_mut() {
+                pet.tocar(TCHAU, agora_ms);
+            }
+            passo = passo.com(PassoGalho::Redesenhar);
+        }
+        // Pousado → o poof de saída (o pet larga a pose e some da tela).
         if let galho::Estado::Pousando { ate_ms } = self.galho
             && agora_ms >= ate_ms
         {
+            self.galho_tchau_ms = None;
             if let Some(pet) = self.pet.as_mut() {
                 pet.largar(agora_ms);
             }
+            // O poof conta do prazo do pousado (não do tique que o venceu), para
+            // completar mesmo quando o relógio pula de uma vez (decisão 0116).
+            self.galho = galho::Estado::Sumindo {
+                inicio_ms: ate_ms,
+                ate_ms: ate_ms + poof::DURACAO_MS,
+            };
+            self.anotar(
+                agora_ms,
+                intencoes::Tipo::Galho {
+                    fase: "sumindo",
+                    motivo: None,
+                },
+            );
+            passo = passo.com(PassoGalho::Redesenhar);
+        }
+        // Fim do poof → escondido de vez.
+        if let galho::Estado::Sumindo { ate_ms, .. } = self.galho
+            && agora_ms >= ate_ms
+        {
             self.galho = galho::Estado::Escondido;
             self.anotar(
                 agora_ms,
@@ -2467,9 +2551,9 @@ impl Motor {
                     motivo: None,
                 },
             );
-            return true;
+            passo = PassoGalho::Escondeu;
         }
-        false
+        passo
     }
 
     /// O pet volta do galho (decisão 0116): o foco numa janela do Claude, a
@@ -2485,6 +2569,7 @@ impl Motor {
             pet.largar(agora_ms);
         }
         self.galho = galho::Estado::Nenhum;
+        self.galho_tchau_ms = None;
         self.anotar(
             agora_ms,
             intencoes::Tipo::Galho {
@@ -2970,11 +3055,30 @@ impl Motor {
         }
         let (mut cena, mut proxima) = pet.cena(&palco, agora_ms);
         // O galho atrás do pet, enquanto arrasta e enquanto ele pousa (decisão
-        // 0116): o Motor o desenha, então vale em qualquer skin.
+        // 0116): o Motor o desenha, então vale em qualquer skin. Na oferta ele
+        // mostra a silhueta e o "Zzz" e acende quando o pet entra na zona;
+        // pousado, só a barra (o próprio pet ocupa o galho); sumindo, a barra
+        // com o poof de saída e o pet já invisível.
         if self.galho.poleiro_na_tela() {
-            let mut com_galho = galho::elementos(palco.area, palco.d);
-            com_galho.append(&mut cena);
-            cena = com_galho;
+            let oferecido = matches!(self.galho, galho::Estado::Oferecido);
+            let aceso = !oferecido
+                || pet.toque_no_palco(&palco).is_some_and(|c| {
+                    galho::na_zona(palco.area, palco.d, c.x + c.w / 2, c.y + c.h / 2)
+                });
+            let mut com_galho = galho::elementos(palco.area, palco.d, aceso, oferecido);
+            if let Some(inicio_ms) = self.galho.sumindo() {
+                if let Some((passo, prazo)) = poof::passo(inicio_ms, agora_ms)
+                    && let Some(corpo) = pet.toque_no_palco(&palco)
+                {
+                    com_galho.extend(poof::nuvem(corpo, palco.d, passo, false));
+                    proxima = Some(proxima.map_or(prazo, |p| p.min(prazo)));
+                }
+                // O pet já sumiu: só o galho e a nuvem.
+                cena = com_galho;
+            } else {
+                com_galho.append(&mut cena);
+                cena = com_galho;
+            }
         }
         // O poof da viagem (decisão 0051): a nuvem em volta do corpo, e o pet
         // some na saída e aparece na chegada.
@@ -3151,9 +3255,11 @@ impl Motor {
     pub fn vencer(&mut self, punho: &mut dyn Punho, agora_ms: u64) {
         let gesto = self.arraste.vencer(agora_ms);
         self.aplicar_gesto(punho, gesto, agora_ms);
-        // O pet pousado some no prazo e some da tela (decisão 0116).
-        if self.vencer_galho(agora_ms) {
-            self.aplicar_visibilidade(punho.janela(), agora_ms);
+        // A sequência do pet pousado no galho: tchau, poof e sumir (decisão 0116).
+        match self.vencer_galho(agora_ms) {
+            PassoGalho::Escondeu => self.aplicar_visibilidade(punho.janela(), agora_ms),
+            PassoGalho::Redesenhar => self.desenhar(punho.janela(), agora_ms, false),
+            PassoGalho::Nada => {}
         }
         self.vencer_viagem(punho.janela(), agora_ms);
         if self.balao.as_ref().is_some_and(|b| agora_ms >= b.ate_ms) {
@@ -3239,6 +3345,7 @@ impl Motor {
             self.coracao_ate,
             self.focando.iter().map(|f| f.ate_ms).min(),
             self.galho.prazo(),
+            self.galho_tchau_ms,
         ]
         .into_iter()
         .flatten()
