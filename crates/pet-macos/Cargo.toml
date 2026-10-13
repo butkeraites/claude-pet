@@ -51,6 +51,10 @@ objc2-core-graphics = { version = "0.3", features = [
   "CGColorSpace",
   "CGContext",
   "CGBitmapContext",
+  # Tempo de inatividade do HID (`CGEventSourceSecondsSinceLastEventType`): o
+  # sinal de "ocioso" do macOS, sem pedir Acessibilidade (decisão 0118).
+  "CGEventSource",
+  "CGEventTypes",
 ] }
 objc2-core-foundation = { version = "0.3", features = [
   "CFBase",

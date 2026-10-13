@@ -59,10 +59,12 @@ pub fn cap_overlay() -> CapOverlay {
     }
 }
 
-/// As capacidades da ligação com o desktop no macOS.
+/// As capacidades da ligação com o desktop no macOS. Deve bater com
+/// [`DesktopMac::capacidades`] (a fonte usada no laço); decisão 0118.
 pub fn cap_desktop() -> CapDesktop {
     CapDesktop {
-        segue_foco: true,
+        // O painel segue o monitor sozinho (NSScreen.main); o Desktop não.
+        segue_foco: false,
         janela_ativa: true,
         foca_janela: true,
         // O "não perturbe"/Focus do macOS fica para depois.

@@ -5354,3 +5354,37 @@ repassada no compose (`PET_COMPORTAMENTO_BOAS_VINDAS`) e documentada no
 são parte das intenções que os cenários provam, então ficam **de fora** dos
 dourados (o executor de cenários e o helper `ligado()` dos testes desligam o
 `boas_vindas`); a cobertura é por testes próprios do Motor em relógio falso.
+
+## 0118 — Sinal de "ocioso" no macOS: tempo de inatividade do HID, sem Acessibilidade (2026-10-13)
+
+O cérebro já sabe escalar um aviso quando o Renan sai de perto (a escalada
+L2–L4, decisão 0062): L2 aos 30 s parado, L3 aos 90 s, L4 aos 5 min, e o voo da
+volta quando ele retorna. Mas essa máquina come o `EventoDesktop::Ocioso(bool)`,
+que **só o Linux mandava** (o `ext_idle_notifier_v1` do Wayland). No macOS (e no
+Windows) o `Desktop` só emitia `Ligado`/`JanelaInicial`/`JanelaAtiva`, então
+`desktop.ocioso` ficava `None` ("não se sabe") e a escalada nunca passava de L1
+— justo para a maioria dos usuários novos. Esta decisão cobre o **macOS**; o
+Windows e os outros sinais (olhando o Claude por título, bloqueio/protetor de
+tela) vêm em itens próprios.
+
+**Fonte:** `CGEventSourceSecondsSinceLastEventType(HIDSystemState,
+kCGAnyInputEventType)` — o tempo, no sistema inteiro, desde o último input de
+teclado/mouse. É uma leitura pura de um contador do CoreGraphics: não cria
+eventos, não vê títulos de janela e **não** pede a permissão de Acessibilidade
+(ao contrário da janela exata do clique, decisão 0106). O binding do objc2 já é
+uma `fn` segura, então nem há `unsafe` novo; só ligamos as features
+`CGEventSource`/`CGEventTypes` do `objc2-core-graphics`.
+
+**Onde:** no `DesktopMac::pollar()`, que o `laco_macos` já chama toda volta
+(~100 ms com o pet na tela). Compara o tempo com `OCIOSO_MS` (5 s, a mesma
+constante do Linux) e empurra `Ocioso(true/false)` em `self.eventos` **só nas
+transições** (um campo `ocioso: Option<bool>` lembra o último), do jeito que o
+Wayland faz; a primeira leitura semeia o estado atual. O `info()` do desktop
+passa a listar o protocolo `"HID idle"`, análogo ao `ext_idle_notifier_v1`.
+
+**Núcleo intacto:** o Motor, a escalada e os testes/cenários já tratam o
+`Ocioso` (decisão 0062) e são agnósticos de plataforma — nada de dourado mudou;
+isto é só a fonte do sinal. De quebra, a `cap_desktop()` livre do `pet-macos`
+(resíduo sem consumidor) dizia `segue_foco: true`, divergindo da
+`DesktopMac::capacidades()` (o `false` correto: o painel segue o monitor
+sozinho); alinhada para não virar armadilha.

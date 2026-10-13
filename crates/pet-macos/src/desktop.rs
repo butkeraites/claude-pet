@@ -16,7 +16,9 @@ use objc2::MainThreadMarker;
 use objc2_app_kit::{NSApplication, NSApplicationActivationOptions, NSWorkspace};
 use objc2_application_services::AXUIElement;
 use objc2_core_foundation::CFRetained;
+use objc2_core_graphics::{CGEventSource, CGEventSourceStateID, CGEventType};
 
+use pet_core::motor::OCIOSO_MS;
 use pet_core::plataforma::{Alca, CapDesktop, Desktop, ErroFoco, EventoDesktop, InfoDesktop};
 
 use crate::ax;
@@ -34,6 +36,9 @@ pub struct DesktopMac {
     acc: bool,
     /// Já pediu a Acessibilidade uma vez (o diálogo do sistema).
     pediu: bool,
+    /// O último estado de ociosidade emitido (`None` até a primeira leitura);
+    /// só emite `Ocioso` nas transições, como o Wayland (decisão 0118).
+    ocioso: Option<bool>,
 }
 
 impl DesktopMac {
@@ -75,9 +80,7 @@ impl DesktopMac {
                 });
             }
             self.ultimo = bundle;
-            return;
-        }
-        if bundle != self.ultimo {
+        } else if bundle != self.ultimo {
             if let Some((b, pid)) = &frente {
                 self.lembrar_janela(b, *pid);
             }
@@ -86,6 +89,19 @@ impl DesktopMac {
                 parede_ms: parede_ms(),
             });
             self.ultimo = bundle;
+        }
+        self.emitir_ocioso();
+    }
+
+    /// Emite `Ocioso(true/false)` nas transições, a partir do tempo de
+    /// inatividade do HID (teclado/mouse) em todo o sistema. O limiar é o mesmo
+    /// do Linux (`OCIOSO_MS`, 5 s; decisão 0062), e a primeira leitura semeia o
+    /// estado atual — como o `ext_idle_notifier_v1` do Wayland (decisão 0118).
+    fn emitir_ocioso(&mut self) {
+        let agora = segundos_sem_input() * 1000.0 >= OCIOSO_MS as f64;
+        if self.ocioso != Some(agora) {
+            self.ocioso = Some(agora);
+            self.eventos.push(EventoDesktop::Ocioso(agora));
         }
     }
 
@@ -154,7 +170,10 @@ impl Desktop for DesktopMac {
     }
 
     fn info(&self) -> InfoDesktop {
-        let mut protocolos = vec!["NSWorkspace".to_owned()];
+        // "HID idle": o tempo de inatividade do CGEventSource (sempre vale no
+        // macOS, sem pedir Acessibilidade); o análogo do `ext_idle_notifier_v1`
+        // do Wayland.
+        let mut protocolos = vec!["NSWorkspace".to_owned(), "HID idle".to_owned()];
         if self.acc {
             protocolos.push("Acessibilidade".to_owned());
         }
@@ -179,4 +198,16 @@ fn parede_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+/// Segundos desde o último input de teclado/mouse no sistema inteiro. Leitura
+/// pura de um contador do CoreGraphics: não cria eventos, não lê títulos de
+/// janela e **não** pede a permissão de Acessibilidade (ao contrário da janela
+/// exata). O binding do objc2 já é uma `fn` segura.
+fn segundos_sem_input() -> f64 {
+    // `kCGAnyInputEventType` (0xFFFF_FFFF): qualquer input de HID.
+    CGEventSource::seconds_since_last_event_type(
+        CGEventSourceStateID::HIDSystemState,
+        CGEventType(0xFFFF_FFFF),
+    )
 }
