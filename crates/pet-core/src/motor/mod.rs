@@ -32,6 +32,7 @@ pub mod arraste;
 pub mod balao;
 mod desktop;
 pub mod escalada;
+pub mod galho;
 pub mod intencoes;
 pub mod janelas;
 mod pet;
@@ -87,6 +88,9 @@ pub const LADO_CONFETE: i32 = 3;
 pub const ARRASTADO: &str = "dangle";
 /// O estado que ele toca ao ser solto.
 pub const SOLTO: &str = "land";
+/// O estado em laço do pet pousado no galho (decisão 0116); a skin que não o
+/// tem cai na pose de sempre.
+pub const POUSADO: &str = "perched";
 /// A risadinha do clique.
 pub const RISADINHA: &str = "giggle";
 /// O bocejo de quando a soneca começa e o despertar de quando ela acaba.
@@ -164,6 +168,9 @@ pub struct Painel {
     pub reacao: Option<String>,
     /// O pet está sendo arrastado.
     pub arrastando: bool,
+    /// A fase do esconder no galho (decisão 0116): `nenhum`, `oferecido`,
+    /// `pousando`, `escondido`.
+    pub galho: &'static str,
     /// A fase da viagem para o monitor em foco (`poof`, `saindo`,
     /// `chegando`, `entrando`), se houver uma.
     pub viagem: Option<&'static str>,
@@ -383,6 +390,10 @@ pub struct Motor {
     palco: Option<Palco>,
     /// O pet deve estar na tela (`/v1/comando` esconde e mostra).
     visivel: bool,
+    /// Esconder no galho (decisão 0116): a fase do poleiro.
+    galho: galho::Estado,
+    /// O esconder no galho está ligado (`comportamento.galho`).
+    galho_ligado: bool,
     estresse: Option<Estresse>,
     commits: Commits,
     /// A próxima troca de quadro da animação.
@@ -481,6 +492,8 @@ impl Motor {
             pet: None,
             palco: None,
             visivel: true,
+            galho: galho::Estado::default(),
+            galho_ligado: true,
             estresse: None,
             commits: Commits::default(),
             proximo_quadro: None,
@@ -988,11 +1001,12 @@ impl Motor {
 
     // --- avisos de espera e a escalada (decisão 0075) --------------------------
 
-    /// O pet pode aparecer para chamar ou festejar: ninguém mandou esconder e
-    /// a proteção de tela não está na tela. Não depende de haver personagem:
-    /// as intenções são as mesmas sem skin.
+    /// O pet pode aparecer para chamar ou festejar: ninguém mandou esconder, a
+    /// proteção de tela não está na tela e ele não está escondido no galho
+    /// (decisão 0116). Não depende de haver personagem: as intenções são as
+    /// mesmas sem skin.
     fn na_tela(&self) -> bool {
-        self.visivel && !self.desktop.protetor_ativo()
+        self.visivel && !self.desktop.protetor_ativo() && !self.galho.escondido()
     }
 
     /// Um balão que o Motor decidiu (o erro, a chamada): na intenção e na
@@ -1167,6 +1181,20 @@ impl Motor {
         let mut reacoes = Vec::new();
         let mut chamados = BTreeMap::new();
         let mut novos = Vec::new();
+        // Escondido no galho, uma espera NOVA (o Claude precisa) traz o pet de
+        // volta antes de chamar (decisão 0116); uma que já esperava quando ele
+        // se escondeu segue calada. Quem tem janela reconcilia a visibilidade
+        // logo depois do cérebro.
+        if !matches!(self.galho, galho::Estado::Nenhum) {
+            let tem_nova = esperando.iter().any(|p| {
+                self.chamados
+                    .get(&p.chave)
+                    .is_none_or(|(desde, _)| *desde != p.aviso.desde_ms)
+            });
+            if tem_nova {
+                self.voltar_do_galho("escalada", agora_ms);
+            }
+        }
         // Uma espera vista que já saiu não volta mais.
         self.vistas.retain(|chave, v| {
             esperando
@@ -1830,12 +1858,31 @@ impl Motor {
 
     pub fn definir_visivel(&mut self, visivel: bool) {
         self.visivel = visivel;
+        // O mostrar/esconder manual assume o controle: o galho sai (decisão
+        // 0116). Quem chama reconcilia a visibilidade logo em seguida.
+        if !matches!(self.galho, galho::Estado::Nenhum) {
+            self.galho = galho::Estado::Nenhum;
+        }
     }
 
-    /// O pet deve aparecer agora: há personagem, ninguém mandou esconder e
-    /// a proteção de tela não está na tela (decisão 0053).
+    /// Esconder no galho (decisão 0116): liga/desliga pelo `comportamento.galho`.
+    pub fn definir_galho_ligado(&mut self, ligado: bool) {
+        self.galho_ligado = ligado;
+    }
+
+    /// A fase do esconder no galho, para o `/v1/estado` (decisão 0116).
+    pub fn galho(&self) -> &'static str {
+        self.galho.nome()
+    }
+
+    /// O pet deve aparecer agora: há personagem, ninguém mandou esconder, a
+    /// proteção de tela não está na tela (decisão 0053) e ele não está
+    /// escondido no galho (decisão 0116).
     pub fn quer_mostrar(&self) -> bool {
-        self.visivel && self.pet.is_some() && !self.desktop.protetor_ativo()
+        self.visivel
+            && self.pet.is_some()
+            && !self.desktop.protetor_ativo()
+            && !self.galho.escondido()
     }
 
     /// Uma janela nova (o compositor conectou): o pet recomeça a animação
@@ -1845,6 +1892,11 @@ impl Motor {
         self.pet = self.skin.clone().map(|skin| self.pet_novo(skin, agora_ms));
         self.palco = None;
         self.arraste.cancelar();
+        // Um arraste no meio não sobrevive à janela nova; o escondido no galho
+        // sim (decisão 0116): quem o guardou volta pelo foco ou pela escalada.
+        if self.galho.poleiro_na_tela() {
+            self.galho = galho::Estado::Nenhum;
+        }
         self.seguir.esquecer();
         self.estresse = None;
         self.commits = Commits::default();
@@ -1868,6 +1920,11 @@ impl Motor {
         self.ausente_desde = None;
         self.balao = None;
         self.arraste.cancelar();
+        // Idem ao [`Self::conectou`]: o arraste no meio sai, o escondido no
+        // galho fica (decisão 0116).
+        if self.galho.poleiro_na_tela() {
+            self.galho = galho::Estado::Nenhum;
+        }
         self.seguir.esquecer();
         self.estresse = None;
         self.commits = Commits::default();
@@ -2264,6 +2321,18 @@ impl Motor {
                 // Pegou o pet no meio do voo: o voo acaba onde ele está, e o
                 // arraste segue dali (decisão 0084).
                 self.cancelar_voo(false, agora_ms);
+                // Esconder no galho (decisão 0116): o poleiro aparece como zona
+                // de pouso enquanto arrasta.
+                if self.galho_ligado {
+                    self.galho = galho::Estado::Oferecido;
+                    self.anotar(
+                        agora_ms,
+                        intencoes::Tipo::Galho {
+                            fase: "oferecido",
+                            motivo: None,
+                        },
+                    );
+                }
                 if let Some(pet) = self.pet.as_mut() {
                     pet.segurar(ARRASTADO, agora_ms);
                 }
@@ -2283,11 +2352,22 @@ impl Motor {
             } => {
                 self.mover_para(celula);
                 let ov = punho.janela();
+                // Esconder no galho (decisão 0116): soltou na zona de pouso do
+                // poleiro → o pet pousa e some.
+                let no_poleiro = matches!(self.galho, galho::Estado::Oferecido)
+                    && self
+                        .palco
+                        .is_some_and(|p| galho::na_zona(p.area, p.d, x, y));
+                if no_poleiro {
+                    self.pousar_no_galho(ov, agora_ms);
+                    return;
+                }
                 match self.pouso_fora(ov, x, y, pegada) {
                     // Solto fora do monitor: vai já para o monitor debaixo do
                     // ponteiro (o compositor já o focou), e pousa lá.
                     Some(pouso) => {
                         ov.cursor(Cursor::Pegar);
+                        self.galho = galho::Estado::Nenhum;
                         if let Some(pet) = self.pet.as_mut() {
                             pet.largar(agora_ms);
                         }
@@ -2334,6 +2414,8 @@ impl Motor {
     /// guardada para aquele monitor (decisão 0049).
     fn pousar(&mut self, ov: &mut dyn Overlay, agora_ms: u64) {
         ov.cursor(Cursor::Pegar);
+        // Soltou fora do poleiro: o galho sai (decisão 0116).
+        self.galho = galho::Estado::Nenhum;
         if let Some(pet) = self.pet.as_mut() {
             pet.largar(agora_ms);
             pet.tocar(SOLTO, agora_ms);
@@ -2342,6 +2424,75 @@ impl Motor {
         self.desenhar(ov, agora_ms, false);
         // O foco pode ter mudado de monitor durante o arraste.
         self.seguir.conferir_em(agora_ms);
+    }
+
+    /// Soltou o pet no poleiro (decisão 0116): ele pousa na pose (ou a de
+    /// sempre, se a skin não tem `perched`) e some em [`galho::POUSO_MS`]. A
+    /// posição não é guardada: ao voltar, o pet aparece onde morava.
+    fn pousar_no_galho(&mut self, ov: &mut dyn Overlay, agora_ms: u64) {
+        ov.cursor(Cursor::Pegar);
+        if let Some(pet) = self.pet.as_mut() {
+            pet.largar(agora_ms);
+            pet.segurar(POUSADO, agora_ms);
+        }
+        self.galho = galho::Estado::Pousando {
+            ate_ms: agora_ms + galho::POUSO_MS,
+        };
+        self.anotar(
+            agora_ms,
+            intencoes::Tipo::Galho {
+                fase: "pousando",
+                motivo: None,
+            },
+        );
+        self.desenhar(ov, agora_ms, false);
+        self.seguir.conferir_em(agora_ms);
+    }
+
+    /// O pet pousado some quando o prazo vence (decisão 0116): larga a pose e
+    /// fica escondido no galho. `true` se mudou (quem tem janela reconcilia a
+    /// visibilidade depois).
+    fn vencer_galho(&mut self, agora_ms: u64) -> bool {
+        if let galho::Estado::Pousando { ate_ms } = self.galho
+            && agora_ms >= ate_ms
+        {
+            if let Some(pet) = self.pet.as_mut() {
+                pet.largar(agora_ms);
+            }
+            self.galho = galho::Estado::Escondido;
+            self.anotar(
+                agora_ms,
+                intencoes::Tipo::Galho {
+                    fase: "escondido",
+                    motivo: None,
+                },
+            );
+            return true;
+        }
+        false
+    }
+
+    /// O pet volta do galho (decisão 0116): o foco numa janela do Claude, a
+    /// escalada L1+ ou o `mostrar`. `true` se estava no galho (quem tem janela
+    /// reconcilia a visibilidade depois).
+    fn voltar_do_galho(&mut self, motivo: &'static str, agora_ms: u64) -> bool {
+        if matches!(self.galho, galho::Estado::Nenhum) {
+            return false;
+        }
+        if self.galho.pousando()
+            && let Some(pet) = self.pet.as_mut()
+        {
+            pet.largar(agora_ms);
+        }
+        self.galho = galho::Estado::Nenhum;
+        self.anotar(
+            agora_ms,
+            intencoes::Tipo::Galho {
+                fase: "nenhum",
+                motivo: Some(motivo),
+            },
+        );
+        true
     }
 
     /// Esconder, a janela fechada ou o fim da conexão largam o arraste sem
@@ -2699,7 +2850,13 @@ impl Motor {
         let ativa_antes = self.desktop.janela_ativa.clone();
         let ligado_antes = self.desktop.ligado;
         let ocioso_antes = self.desktop.ocioso;
+        let olhando_antes = self.desktop.olhando_claude;
         let mudou = self.desktop.aplicar(evento, agora.parede_ms);
+        // O Renan passou a olhar uma janela do Claude: o pet volta do galho
+        // (decisão 0116).
+        let voltou_do_galho = !olhando_antes
+            && self.desktop.olhando_claude
+            && self.voltar_do_galho("foco", agora.mono_ms);
         if self.desktop.ocioso != Some(true) {
             // A volta conta só para quem ficou longe de verdade: sem mexer
             // há 60 s ou mais, não de volta ao terminal da sessão que espera
@@ -2763,8 +2920,9 @@ impl Motor {
             }
         }
         // A proteção de tela do Omarchy abriu ou fechou: o pet sai e volta
-        // (decisão 0053).
-        if self.desktop.protetor_ativo() != protetor_antes {
+        // (decisão 0053). Ou o pet voltou do galho pelo foco (decisão 0116).
+        let mudou_protetor = self.desktop.protetor_ativo() != protetor_antes;
+        if mudou_protetor {
             info!(
                 "proteção de tela {}",
                 if protetor_antes {
@@ -2773,9 +2931,14 @@ impl Motor {
                     "abriu: o pet se esconde"
                 }
             );
-            if let Some(ov) = ov {
-                self.aplicar_visibilidade(ov, agora.mono_ms);
-            }
+        }
+        if voltou_do_galho {
+            info!("galho: o Renan olhou o Claude, o pet volta");
+        }
+        if (mudou_protetor || voltou_do_galho)
+            && let Some(ov) = ov
+        {
+            self.aplicar_visibilidade(ov, agora.mono_ms);
         }
         mudou
     }
@@ -2806,6 +2969,13 @@ impl Motor {
             return;
         }
         let (mut cena, mut proxima) = pet.cena(&palco, agora_ms);
+        // O galho atrás do pet, enquanto arrasta e enquanto ele pousa (decisão
+        // 0116): o Motor o desenha, então vale em qualquer skin.
+        if self.galho.poleiro_na_tela() {
+            let mut com_galho = galho::elementos(palco.area, palco.d);
+            com_galho.append(&mut cena);
+            cena = com_galho;
+        }
         // O poof da viagem (decisão 0051): a nuvem em volta do corpo, e o pet
         // some na saída e aparece na chegada.
         let poof = match self.seguir.fase() {
@@ -2981,6 +3151,10 @@ impl Motor {
     pub fn vencer(&mut self, punho: &mut dyn Punho, agora_ms: u64) {
         let gesto = self.arraste.vencer(agora_ms);
         self.aplicar_gesto(punho, gesto, agora_ms);
+        // O pet pousado some no prazo e some da tela (decisão 0116).
+        if self.vencer_galho(agora_ms) {
+            self.aplicar_visibilidade(punho.janela(), agora_ms);
+        }
         self.vencer_viagem(punho.janela(), agora_ms);
         if self.balao.as_ref().is_some_and(|b| agora_ms >= b.ate_ms) {
             self.balao = None;
@@ -3045,6 +3219,9 @@ impl Motor {
             self.coracao_ate = None;
         }
         self.focando.retain(|f| agora_ms < f.ate_ms);
+        // O prazo do pet pousado vence mesmo sem janela, senão o laço gira
+        // (decisão 0116, como a 0059).
+        self.vencer_galho(agora_ms);
         if self.proximo_quadro.is_some_and(|p| p <= agora_ms) {
             self.proximo_quadro = None;
         }
@@ -3061,6 +3238,7 @@ impl Motor {
             self.soneca_ate,
             self.coracao_ate,
             self.focando.iter().map(|f| f.ate_ms).min(),
+            self.galho.prazo(),
         ]
         .into_iter()
         .flatten()
@@ -3223,6 +3401,7 @@ impl Motor {
                 .and_then(|pet| pet.reacao(agora_ms))
                 .map(str::to_owned),
             arrastando: self.arraste.arrastando(),
+            galho: self.galho.nome(),
             viagem: self.seguir.fase().map(FaseViagem::nome),
             balao: self.balao(agora_ms).map(|b| b.linhas.clone()),
             soneca_restante_s: self

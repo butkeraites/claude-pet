@@ -60,6 +60,7 @@ struct Chave {
 }
 
 const MODOS_CELEBRACAO: &[&str] = &["proporcional", "sempre_grande", "discreta", "desligada"];
+const LIGADO_DESLIGADO: &[&str] = &["ligado", "desligado"];
 
 const CHAVES: &[Chave] = &[
     Chave {
@@ -77,6 +78,13 @@ const CHAVES: &[Chave] = &[
         caminho: "celebracao.modo",
         tipo: Tipo::Opcao(MODOS_CELEBRACAO),
         padrao: "proporcional",
+    },
+    // Esconder no galho: arrastar o pet faz aparecer um poleiro; soltar nele
+    // some o pet até o foco numa janela do Claude ou a escalada (decisão 0116).
+    Chave {
+        caminho: "comportamento.galho",
+        tipo: Tipo::Opcao(LIGADO_DESLIGADO),
+        padrao: "ligado",
     },
     // De onde vêm as sessões que contam (`$CLAUDE_CODE_ENTRYPOINT`): só o
     // terminal por padrão; `claude -p`, SDK e IDE ficam de fora (decisão
@@ -217,6 +225,8 @@ pub struct Config {
     pub sessoes_origens: Vec<String>,
     /// A pontuação dos turnos.
     pub pontuacao: Pesos,
+    /// Esconder no galho ligado (decisão 0116).
+    pub galho: bool,
 }
 
 impl ConfigEfetiva {
@@ -350,6 +360,7 @@ impl ConfigEfetiva {
                 t2: self.numero("pontuacao.t2"),
                 t3: self.numero("pontuacao.t3"),
             },
+            galho: self.texto("comportamento.galho") != "desligado",
         }
     }
 }

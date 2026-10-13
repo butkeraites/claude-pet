@@ -226,6 +226,7 @@ impl Compartilhado {
             "shm_bytes": painel.shm_bytes,
             "reacao": painel.reacao,
             "arrastando": painel.arrastando,
+            "galho": painel.galho,
             "viagem": painel.viagem,
             "balao": painel.balao,
             "soneca_restante_s": painel.soneca_restante_s,

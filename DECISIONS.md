@@ -5254,3 +5254,14 @@ escalada, o `done` calado enquanto escondido, a volta pelo clique/`mostrar`),
 testes de unidade do arraste + galho em relógio falso e a prova de orçamento (a
 rajada do voo até o poleiro ≤ 30 fps, na grade de 34 ms, decisão 0088).
 `bin/pet simular` e `bin/pet testar` demonstram.
+
+**Correção (2026-10-12, ao implementar):** o galho (o poleiro) é **desenhado
+pelo Motor** (blocos, como os selos e o confete), não exigido da skin — assim a
+feature vale em qualquer skin na hora, inclusive a produção, sem arte nova nem
+reaprovação (o Renan escolheu o híbrido). Uma skin pode trazer a pose `perched`
+para o pet pousado (o `pet.segurar("perched")`, com a pose de sempre de reserva
+se faltar) e, mais adiante, um sprite próprio de galho. O gatilho "clique no
+pet" caiu: o pet escondido não está na tela para receber o clique; o override
+manual é o `mostrar` (e o `esconder` assume o controle como esconder comum). A
+volta pela escalada é por uma espera **nova** depois de esconder (uma que já
+esperava segue calada); o `done` comum fica calado enquanto escondido.
