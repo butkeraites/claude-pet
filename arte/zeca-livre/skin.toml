@@ -76,6 +76,8 @@ sleep = ["sleep"]
 # arrastado: bate asas em laço; solto: o pouso com poeira dos dois lados.
 dangle = ["fly"]
 land = ["landing"]
+# pousado no galho (esconder, decisão 0116): acomodado e malandro, respira devagar (laço).
+perched = ["perched"]
 # clique (risadinha): o pio com o olho feliz; oi: o pio; tchau: o aceno de asa.
 giggle = ["chirp"]
 hello = ["chirp"]
@@ -167,6 +169,11 @@ partes = [{ anim = "fly" }]
 nome = "landing"
 nota = "pousa com poeira dos dois lados e o chapéu quicando"
 partes = [{ anim = "landing" }]
+
+[[tag]]
+nome = "perched"
+nota = "pousado no galho (esconder, decisão 0116): agachado e malandro, respira devagar (laço)"
+partes = [{ anim = "perched" }]
 
 [[tag]]
 nome = "short_flight"

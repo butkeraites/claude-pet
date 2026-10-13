@@ -3059,8 +3059,96 @@
       "trimmed": false
     },
     {
-      "duration": 120,
+      "duration": 640,
       "filename": "quadro 139",
+      "frame": {
+        "h": 48,
+        "w": 48,
+        "x": 48,
+        "y": 432
+      },
+      "rotated": false,
+      "sourceSize": {
+        "h": 48,
+        "w": 48
+      },
+      "spriteSourceSize": {
+        "h": 48,
+        "w": 48,
+        "x": 0,
+        "y": 0
+      },
+      "trimmed": false
+    },
+    {
+      "duration": 360,
+      "filename": "quadro 140",
+      "frame": {
+        "h": 48,
+        "w": 48,
+        "x": 96,
+        "y": 432
+      },
+      "rotated": false,
+      "sourceSize": {
+        "h": 48,
+        "w": 48
+      },
+      "spriteSourceSize": {
+        "h": 48,
+        "w": 48,
+        "x": 0,
+        "y": 0
+      },
+      "trimmed": false
+    },
+    {
+      "duration": 640,
+      "filename": "quadro 141",
+      "frame": {
+        "h": 48,
+        "w": 48,
+        "x": 144,
+        "y": 432
+      },
+      "rotated": false,
+      "sourceSize": {
+        "h": 48,
+        "w": 48
+      },
+      "spriteSourceSize": {
+        "h": 48,
+        "w": 48,
+        "x": 0,
+        "y": 0
+      },
+      "trimmed": false
+    },
+    {
+      "duration": 360,
+      "filename": "quadro 142",
+      "frame": {
+        "h": 48,
+        "w": 48,
+        "x": 192,
+        "y": 432
+      },
+      "rotated": false,
+      "sourceSize": {
+        "h": 48,
+        "w": 48
+      },
+      "spriteSourceSize": {
+        "h": 48,
+        "w": 48,
+        "x": 0,
+        "y": 0
+      },
+      "trimmed": false
+    },
+    {
+      "duration": 120,
+      "filename": "quadro 143",
       "frame": {
         "h": 48,
         "w": 48,
@@ -3082,100 +3170,12 @@
     },
     {
       "duration": 80,
-      "filename": "quadro 140",
-      "frame": {
-        "h": 48,
-        "w": 48,
-        "x": 48,
-        "y": 432
-      },
-      "rotated": false,
-      "sourceSize": {
-        "h": 48,
-        "w": 48
-      },
-      "spriteSourceSize": {
-        "h": 48,
-        "w": 48,
-        "x": 0,
-        "y": 0
-      },
-      "trimmed": false
-    },
-    {
-      "duration": 80,
-      "filename": "quadro 141",
-      "frame": {
-        "h": 48,
-        "w": 48,
-        "x": 96,
-        "y": 432
-      },
-      "rotated": false,
-      "sourceSize": {
-        "h": 48,
-        "w": 48
-      },
-      "spriteSourceSize": {
-        "h": 48,
-        "w": 48,
-        "x": 0,
-        "y": 0
-      },
-      "trimmed": false
-    },
-    {
-      "duration": 90,
-      "filename": "quadro 142",
-      "frame": {
-        "h": 48,
-        "w": 48,
-        "x": 144,
-        "y": 384
-      },
-      "rotated": false,
-      "sourceSize": {
-        "h": 48,
-        "w": 48
-      },
-      "spriteSourceSize": {
-        "h": 48,
-        "w": 48,
-        "x": 0,
-        "y": 0
-      },
-      "trimmed": false
-    },
-    {
-      "duration": 80,
-      "filename": "quadro 143",
-      "frame": {
-        "h": 48,
-        "w": 48,
-        "x": 192,
-        "y": 384
-      },
-      "rotated": false,
-      "sourceSize": {
-        "h": 48,
-        "w": 48
-      },
-      "spriteSourceSize": {
-        "h": 48,
-        "w": 48,
-        "x": 0,
-        "y": 0
-      },
-      "trimmed": false
-    },
-    {
-      "duration": 90,
       "filename": "quadro 144",
       "frame": {
         "h": 48,
         "w": 48,
         "x": 240,
-        "y": 384
+        "y": 432
       },
       "rotated": false,
       "sourceSize": {
@@ -3197,7 +3197,7 @@
         "h": 48,
         "w": 48,
         "x": 288,
-        "y": 384
+        "y": 432
       },
       "rotated": false,
       "sourceSize": {
@@ -3394,182 +3394,6 @@
       "frame": {
         "h": 48,
         "w": 48,
-        "x": 336,
-        "y": 384
-      },
-      "rotated": false,
-      "sourceSize": {
-        "h": 48,
-        "w": 48
-      },
-      "spriteSourceSize": {
-        "h": 48,
-        "w": 48,
-        "x": 0,
-        "y": 0
-      },
-      "trimmed": false
-    },
-    {
-      "duration": 100,
-      "filename": "quadro 155",
-      "frame": {
-        "h": 48,
-        "w": 48,
-        "x": 384,
-        "y": 384
-      },
-      "rotated": false,
-      "sourceSize": {
-        "h": 48,
-        "w": 48
-      },
-      "spriteSourceSize": {
-        "h": 48,
-        "w": 48,
-        "x": 0,
-        "y": 0
-      },
-      "trimmed": false
-    },
-    {
-      "duration": 100,
-      "filename": "quadro 156",
-      "frame": {
-        "h": 48,
-        "w": 48,
-        "x": 432,
-        "y": 384
-      },
-      "rotated": false,
-      "sourceSize": {
-        "h": 48,
-        "w": 48
-      },
-      "spriteSourceSize": {
-        "h": 48,
-        "w": 48,
-        "x": 0,
-        "y": 0
-      },
-      "trimmed": false
-    },
-    {
-      "duration": 120,
-      "filename": "quadro 157",
-      "frame": {
-        "h": 48,
-        "w": 48,
-        "x": 0,
-        "y": 432
-      },
-      "rotated": false,
-      "sourceSize": {
-        "h": 48,
-        "w": 48
-      },
-      "spriteSourceSize": {
-        "h": 48,
-        "w": 48,
-        "x": 0,
-        "y": 0
-      },
-      "trimmed": false
-    },
-    {
-      "duration": 300,
-      "filename": "quadro 158",
-      "frame": {
-        "h": 48,
-        "w": 48,
-        "x": 0,
-        "y": 0
-      },
-      "rotated": false,
-      "sourceSize": {
-        "h": 48,
-        "w": 48
-      },
-      "spriteSourceSize": {
-        "h": 48,
-        "w": 48,
-        "x": 0,
-        "y": 0
-      },
-      "trimmed": false
-    },
-    {
-      "duration": 120,
-      "filename": "quadro 159",
-      "frame": {
-        "h": 48,
-        "w": 48,
-        "x": 96,
-        "y": 144
-      },
-      "rotated": false,
-      "sourceSize": {
-        "h": 48,
-        "w": 48
-      },
-      "spriteSourceSize": {
-        "h": 48,
-        "w": 48,
-        "x": 0,
-        "y": 0
-      },
-      "trimmed": false
-    },
-    {
-      "duration": 80,
-      "filename": "quadro 160",
-      "frame": {
-        "h": 48,
-        "w": 48,
-        "x": 48,
-        "y": 432
-      },
-      "rotated": false,
-      "sourceSize": {
-        "h": 48,
-        "w": 48
-      },
-      "spriteSourceSize": {
-        "h": 48,
-        "w": 48,
-        "x": 0,
-        "y": 0
-      },
-      "trimmed": false
-    },
-    {
-      "duration": 80,
-      "filename": "quadro 161",
-      "frame": {
-        "h": 48,
-        "w": 48,
-        "x": 96,
-        "y": 432
-      },
-      "rotated": false,
-      "sourceSize": {
-        "h": 48,
-        "w": 48
-      },
-      "spriteSourceSize": {
-        "h": 48,
-        "w": 48,
-        "x": 0,
-        "y": 0
-      },
-      "trimmed": false
-    },
-    {
-      "duration": 90,
-      "filename": "quadro 162",
-      "frame": {
-        "h": 48,
-        "w": 48,
         "x": 144,
         "y": 384
       },
@@ -3588,7 +3412,7 @@
     },
     {
       "duration": 80,
-      "filename": "quadro 163",
+      "filename": "quadro 155",
       "frame": {
         "h": 48,
         "w": 48,
@@ -3610,7 +3434,7 @@
     },
     {
       "duration": 90,
-      "filename": "quadro 164",
+      "filename": "quadro 156",
       "frame": {
         "h": 48,
         "w": 48,
@@ -3632,12 +3456,188 @@
     },
     {
       "duration": 80,
-      "filename": "quadro 165",
+      "filename": "quadro 157",
       "frame": {
         "h": 48,
         "w": 48,
         "x": 288,
         "y": 384
+      },
+      "rotated": false,
+      "sourceSize": {
+        "h": 48,
+        "w": 48
+      },
+      "spriteSourceSize": {
+        "h": 48,
+        "w": 48,
+        "x": 0,
+        "y": 0
+      },
+      "trimmed": false
+    },
+    {
+      "duration": 90,
+      "filename": "quadro 158",
+      "frame": {
+        "h": 48,
+        "w": 48,
+        "x": 336,
+        "y": 384
+      },
+      "rotated": false,
+      "sourceSize": {
+        "h": 48,
+        "w": 48
+      },
+      "spriteSourceSize": {
+        "h": 48,
+        "w": 48,
+        "x": 0,
+        "y": 0
+      },
+      "trimmed": false
+    },
+    {
+      "duration": 100,
+      "filename": "quadro 159",
+      "frame": {
+        "h": 48,
+        "w": 48,
+        "x": 384,
+        "y": 384
+      },
+      "rotated": false,
+      "sourceSize": {
+        "h": 48,
+        "w": 48
+      },
+      "spriteSourceSize": {
+        "h": 48,
+        "w": 48,
+        "x": 0,
+        "y": 0
+      },
+      "trimmed": false
+    },
+    {
+      "duration": 100,
+      "filename": "quadro 160",
+      "frame": {
+        "h": 48,
+        "w": 48,
+        "x": 432,
+        "y": 384
+      },
+      "rotated": false,
+      "sourceSize": {
+        "h": 48,
+        "w": 48
+      },
+      "spriteSourceSize": {
+        "h": 48,
+        "w": 48,
+        "x": 0,
+        "y": 0
+      },
+      "trimmed": false
+    },
+    {
+      "duration": 120,
+      "filename": "quadro 161",
+      "frame": {
+        "h": 48,
+        "w": 48,
+        "x": 0,
+        "y": 432
+      },
+      "rotated": false,
+      "sourceSize": {
+        "h": 48,
+        "w": 48
+      },
+      "spriteSourceSize": {
+        "h": 48,
+        "w": 48,
+        "x": 0,
+        "y": 0
+      },
+      "trimmed": false
+    },
+    {
+      "duration": 300,
+      "filename": "quadro 162",
+      "frame": {
+        "h": 48,
+        "w": 48,
+        "x": 0,
+        "y": 0
+      },
+      "rotated": false,
+      "sourceSize": {
+        "h": 48,
+        "w": 48
+      },
+      "spriteSourceSize": {
+        "h": 48,
+        "w": 48,
+        "x": 0,
+        "y": 0
+      },
+      "trimmed": false
+    },
+    {
+      "duration": 120,
+      "filename": "quadro 163",
+      "frame": {
+        "h": 48,
+        "w": 48,
+        "x": 96,
+        "y": 144
+      },
+      "rotated": false,
+      "sourceSize": {
+        "h": 48,
+        "w": 48
+      },
+      "spriteSourceSize": {
+        "h": 48,
+        "w": 48,
+        "x": 0,
+        "y": 0
+      },
+      "trimmed": false
+    },
+    {
+      "duration": 80,
+      "filename": "quadro 164",
+      "frame": {
+        "h": 48,
+        "w": 48,
+        "x": 240,
+        "y": 432
+      },
+      "rotated": false,
+      "sourceSize": {
+        "h": 48,
+        "w": 48
+      },
+      "spriteSourceSize": {
+        "h": 48,
+        "w": 48,
+        "x": 0,
+        "y": 0
+      },
+      "trimmed": false
+    },
+    {
+      "duration": 80,
+      "filename": "quadro 165",
+      "frame": {
+        "h": 48,
+        "w": 48,
+        "x": 288,
+        "y": 432
       },
       "rotated": false,
       "sourceSize": {
@@ -4098,6 +4098,94 @@
       "frame": {
         "h": 48,
         "w": 48,
+        "x": 144,
+        "y": 384
+      },
+      "rotated": false,
+      "sourceSize": {
+        "h": 48,
+        "w": 48
+      },
+      "spriteSourceSize": {
+        "h": 48,
+        "w": 48,
+        "x": 0,
+        "y": 0
+      },
+      "trimmed": false
+    },
+    {
+      "duration": 80,
+      "filename": "quadro 187",
+      "frame": {
+        "h": 48,
+        "w": 48,
+        "x": 192,
+        "y": 384
+      },
+      "rotated": false,
+      "sourceSize": {
+        "h": 48,
+        "w": 48
+      },
+      "spriteSourceSize": {
+        "h": 48,
+        "w": 48,
+        "x": 0,
+        "y": 0
+      },
+      "trimmed": false
+    },
+    {
+      "duration": 90,
+      "filename": "quadro 188",
+      "frame": {
+        "h": 48,
+        "w": 48,
+        "x": 240,
+        "y": 384
+      },
+      "rotated": false,
+      "sourceSize": {
+        "h": 48,
+        "w": 48
+      },
+      "spriteSourceSize": {
+        "h": 48,
+        "w": 48,
+        "x": 0,
+        "y": 0
+      },
+      "trimmed": false
+    },
+    {
+      "duration": 80,
+      "filename": "quadro 189",
+      "frame": {
+        "h": 48,
+        "w": 48,
+        "x": 288,
+        "y": 384
+      },
+      "rotated": false,
+      "sourceSize": {
+        "h": 48,
+        "w": 48
+      },
+      "spriteSourceSize": {
+        "h": 48,
+        "w": 48,
+        "x": 0,
+        "y": 0
+      },
+      "trimmed": false
+    },
+    {
+      "duration": 90,
+      "filename": "quadro 190",
+      "frame": {
+        "h": 48,
+        "w": 48,
         "x": 336,
         "y": 384
       },
@@ -4116,7 +4204,7 @@
     },
     {
       "duration": 100,
-      "filename": "quadro 187",
+      "filename": "quadro 191",
       "frame": {
         "h": 48,
         "w": 48,
@@ -4138,7 +4226,7 @@
     },
     {
       "duration": 100,
-      "filename": "quadro 188",
+      "filename": "quadro 192",
       "frame": {
         "h": 48,
         "w": 48,
@@ -4160,7 +4248,7 @@
     },
     {
       "duration": 120,
-      "filename": "quadro 189",
+      "filename": "quadro 193",
       "frame": {
         "h": 48,
         "w": 48,
@@ -4182,7 +4270,7 @@
     },
     {
       "duration": 300,
-      "filename": "quadro 190",
+      "filename": "quadro 194",
       "frame": {
         "h": 48,
         "w": 48,
@@ -4204,7 +4292,7 @@
     },
     {
       "duration": 260,
-      "filename": "quadro 191",
+      "filename": "quadro 195",
       "frame": {
         "h": 48,
         "w": 48,
@@ -4226,7 +4314,7 @@
     },
     {
       "duration": 120,
-      "filename": "quadro 192",
+      "filename": "quadro 196",
       "frame": {
         "h": 48,
         "w": 48,
@@ -4248,7 +4336,7 @@
     },
     {
       "duration": 130,
-      "filename": "quadro 193",
+      "filename": "quadro 197",
       "frame": {
         "h": 48,
         "w": 48,
@@ -4270,7 +4358,7 @@
     },
     {
       "duration": 110,
-      "filename": "quadro 194",
+      "filename": "quadro 198",
       "frame": {
         "h": 48,
         "w": 48,
@@ -4292,7 +4380,7 @@
     },
     {
       "duration": 130,
-      "filename": "quadro 195",
+      "filename": "quadro 199",
       "frame": {
         "h": 48,
         "w": 48,
@@ -4314,7 +4402,7 @@
     },
     {
       "duration": 110,
-      "filename": "quadro 196",
+      "filename": "quadro 200",
       "frame": {
         "h": 48,
         "w": 48,
@@ -4336,7 +4424,7 @@
     },
     {
       "duration": 160,
-      "filename": "quadro 197",
+      "filename": "quadro 201",
       "frame": {
         "h": 48,
         "w": 48,
@@ -4358,7 +4446,7 @@
     },
     {
       "duration": 320,
-      "filename": "quadro 198",
+      "filename": "quadro 202",
       "frame": {
         "h": 48,
         "w": 48,
@@ -4513,19 +4601,27 @@
       },
       {
         "color": "#000000ff",
-        "data": "takeoff + fly ×3 + landing",
+        "data": "perched",
         "direction": "forward",
         "from": 139,
+        "name": "perched",
+        "to": 142
+      },
+      {
+        "color": "#000000ff",
+        "data": "takeoff + fly ×3 + landing",
+        "direction": "forward",
+        "from": 143,
         "name": "short_flight",
-        "to": 158
+        "to": 162
       },
       {
         "color": "#000000ff",
         "data": "takeoff + fly ×6 + landing + chirp",
         "direction": "forward",
-        "from": 159,
+        "from": 163,
         "name": "big_flight",
-        "to": 198
+        "to": 202
       }
     ],
     "image": "sheet.png",

@@ -60,7 +60,8 @@
   "nod": "resposta sem trabalho (aceno discreto)",
   "wave": "tchau / aceno",
   "yawn": "cansado, comeco da soneca",
-  "wake": "fim da soneca"
+  "wake": "fim da soneca",
+  "perched": "escondido no galho (arrastado ate o poleiro)"
  },
  "animacoes": {
   "idle": {
@@ -882,6 +883,32 @@
      "arquivo": "frames/landing_04.png",
      "escuro": "frames/escuro/landing_04.png",
      "ms": 300
+    }
+   ]
+  },
+  "perched": {
+   "titulo": "pousado (no galho)",
+   "loop": true,
+   "quadros": [
+    {
+     "arquivo": "frames/perched_00.png",
+     "escuro": "frames/escuro/perched_00.png",
+     "ms": 640
+    },
+    {
+     "arquivo": "frames/perched_01.png",
+     "escuro": "frames/escuro/perched_01.png",
+     "ms": 360
+    },
+    {
+     "arquivo": "frames/perched_02.png",
+     "escuro": "frames/escuro/perched_02.png",
+     "ms": 640
+    },
+    {
+     "arquivo": "frames/perched_03.png",
+     "escuro": "frames/escuro/perched_03.png",
+     "ms": 360
     }
    ]
   }
