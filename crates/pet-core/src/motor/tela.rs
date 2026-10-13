@@ -403,6 +403,12 @@ impl Motor {
     /// e nada fica para depois (decisão 0076).
     fn festa(&mut self, r: Reacao, agora_ms: u64) -> Option<Reacao> {
         let nivel = r.nivel.unwrap_or(Nivel::T0);
+        // Um trabalho que termina traz o pet de volta do galho para comemorar
+        // (decisão 0116, correção de 2026-10-13, escolha do Renan): só o galho;
+        // o esconder manual e a proteção de tela seguem suprimindo.
+        if self.galho.escondido() && self.visivel && !self.desktop.protetor_ativo() {
+            self.voltar_do_galho("festa", agora_ms);
+        }
         if !self.na_tela() {
             // O T3 que ninguém viu não gasta o intervalo dele (decisão 0092).
             if nivel == Nivel::T3 {
