@@ -5311,3 +5311,46 @@ discreta de máquina, nem o tchau) tira o pet do galho e ele **comemora**
 de tela seguem suprimindo a festa. Os gatilhos de volta agora são: foco numa
 janela do Claude (só Linux por ora), espera/escalada nova, **fim de trabalho**
 e o `mostrar`.
+
+## 0117 — Boas-vindas na primeira aparição e uma dica quando o Claude está em silêncio (2026-10-13)
+
+Primeira melhoria da retomada do M6 ("o encanto"), escolhida item a item com o
+Renan. Dois balões de onboarding, decididos pelo Motor (não por um evento do
+Claude), para o primeiro uso não ser mudo:
+
+- **Primeira aparição:** na primeiríssima vez que o Zeca aparece, ele diz
+  **"Oi, eu sou o Zeca! Me arrasta pra onde quiser."** — uma vez só, ~1,5 s
+  depois de conectar (o poof da chegada passa antes). Responde ao tropeço comum
+  de "apareceu, e agora?".
+- **Dica de silêncio:** se **nenhum** evento do Claude chegar em **5 min** e não
+  houver sessão real conhecida, ele avisa uma vez **"Cadê o Claude? Não chegou
+  nada ainda. Se for engano, rode: bin/pet doutor"** — cobre o hook não
+  instalado, o `claude` fora do PATH e a sessão aberta antes do plugin. É longo
+  de propósito e **só com nenhum evento desde a partida**: um intervalo normal
+  entre prompts nunca dispara (qualquer evento desarma a dica para sempre nesta
+  partida; o aviso já dado some quando o sinal volta, para poder sair de novo
+  num silêncio futuro).
+
+**Onde:** tudo no `pet-core` (puro). Os dois são prazos `Option<u64>`
+(`boas_vindas_ms`, `dica_sem_sinal_ms`) armados em `Motor::conectou`, vencidos
+em `vencer`/`vencer_sem_conexao` e somados em `proximo_prazo`, como o
+`galho_tchau_ms` (decisão 0116); mostram com `balao_decidido`, que já respeita o
+"pode aparecer" (`na_tela`: visível, sem proteção de tela, fora do galho). Se no
+prazo o pet ainda não pode aparecer, tenta de novo (`RETENTAR_BOAS_VINDAS_MS`).
+
+**Não repetir entre reinícios:** um arquivo novo em `/state`, `marcos.json`
+(`motor::marcos::Marcos { ja_cumprimentou, ja_avisou_sem_sinal }`), no padrão do
+`posicoes.json` (o Motor guarda, o núcleo grava/lê). **Não** na memória das
+sessões (`sessoes.json`): aquela se prende ao boot id e nem restaura no macOS
+sem um — a saudação tem de valer entre reinícios da máquina e em qualquer SO, e
+é uma vez só para sempre.
+
+**Config:** `comportamento.boas_vindas` (`ligado`/`desligado`, padrão `ligado`),
+repassada no compose (`PET_COMPORTAMENTO_BOAS_VINDAS`) e documentada no
+`config/exemplo.toml`, onde a seção `[comportamento]` nasceu (o
+`comportamento.galho` da 0116 também passou a aparecer lá).
+
+**Dourados:** a saudação e a dica dependem do relógio de parede do daemon e não
+são parte das intenções que os cenários provam, então ficam **de fora** dos
+dourados (o executor de cenários e o helper `ligado()` dos testes desligam o
+`boas_vindas`); a cobertura é por testes próprios do Motor em relógio falso.

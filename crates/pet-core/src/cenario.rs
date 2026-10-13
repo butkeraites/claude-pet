@@ -412,6 +412,11 @@ impl Execucao {
         motor.gravar_todas_as_intencoes();
         motor.acertar_relogio(ag);
         motor.definir_skin(skin);
+        // A saudação da primeira aparição e a dica de silêncio (decisão 0117)
+        // dependem do relógio de parede do daemon e não são parte das
+        // intenções que os cenários provam: ficam de fora dos dourados, com
+        // testes próprios no Motor.
+        motor.definir_boas_vindas(false);
         if let Some(texto) = memoria {
             match memoria::ler(texto) {
                 Ok(lida) => {

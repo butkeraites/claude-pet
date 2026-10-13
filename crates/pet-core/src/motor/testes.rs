@@ -28,6 +28,9 @@ fn edp() -> Monitor {
 fn ligado() -> (Motor, Falsa) {
     let mut motor = Motor::novo(ConfigCerebro::default());
     motor.definir_skin(Some(skin_teste()));
+    // A primeira aparição (decisão 0117) tem testes próprios; aqui o pet já
+    // conhece o Renan, para não poluir os demais com a saudação.
+    motor.definir_boas_vindas(false);
     let mut janela = Falsa::default();
     motor.conectou(0);
     motor.aplicar_visibilidade(&mut janela, 0);
@@ -5137,4 +5140,147 @@ fn vista_a_espera_da_vez_a_que_o_renan_nao_viu_escala_na_hora() {
         "{:?}",
         chamadas_desde(&motor, 60_001)
     );
+}
+
+// --- as boas-vindas e a dica de silêncio (decisão 0117) ----------------------
+
+/// Como [`ligado`], mas com as boas-vindas ligadas; `ja_cumprimentou` e
+/// `ja_avisou_sem_sinal` dizem o que o pet já fez antes (o que viria do
+/// arquivo de marcos em `/state`).
+fn ligado_boas_vindas(ja_cumprimentou: bool, ja_avisou_sem_sinal: bool) -> (Motor, Falsa) {
+    let mut motor = Motor::novo(ConfigCerebro::default());
+    motor.definir_skin(Some(skin_teste()));
+    motor.definir_boas_vindas(true);
+    motor.definir_marcos(Marcos {
+        ja_cumprimentou,
+        ja_avisou_sem_sinal,
+    });
+    let mut janela = Falsa::default();
+    motor.conectou(0);
+    motor.aplicar_visibilidade(&mut janela, 0);
+    janela.pronta = Some(edp());
+    motor.evento_overlay(&mut janela, EventoOverlay::Pronta, 0);
+    (motor, janela)
+}
+
+#[test]
+fn primeira_aparicao_cumprimenta_uma_vez_e_grava_o_marco() {
+    let (mut motor, mut janela) = ligado_boas_vindas(false, false);
+    janela.mostrou();
+    motor.vencer(&mut janela, ATRASO_BOAS_VINDAS_MS - 1);
+    assert!(
+        motor.balao(ATRASO_BOAS_VINDAS_MS - 1).is_none(),
+        "antes do prazo, nada"
+    );
+    motor.vencer(&mut janela, ATRASO_BOAS_VINDAS_MS);
+    let balao = motor.balao(ATRASO_BOAS_VINDAS_MS).expect("a saudação");
+    assert!(balao.linhas[0].contains("Zeca"), "{:?}", balao.linhas);
+    assert!(motor.marcos().ja_cumprimentou);
+    // O marco vai para o disco uma vez só.
+    assert!(motor.marcos_para_gravar().is_some());
+    assert!(motor.marcos_para_gravar().is_none(), "só muda uma vez");
+    // Um restart com o marco gravado não cumprimenta de novo.
+    let marcos = motor.marcos();
+    let (mut outro, mut j2) =
+        ligado_boas_vindas(marcos.ja_cumprimentou, marcos.ja_avisou_sem_sinal);
+    j2.mostrou();
+    outro.vencer(&mut j2, 10 * ATRASO_BOAS_VINDAS_MS);
+    assert!(
+        outro.balao(10 * ATRASO_BOAS_VINDAS_MS).is_none(),
+        "já cumprimentou antes"
+    );
+}
+
+#[test]
+fn sem_sinal_avisa_uma_vez_para_rodar_o_doutor() {
+    // Já cumprimentou (isola a dica); nenhum evento, nenhuma sessão.
+    let (mut motor, mut janela) = ligado_boas_vindas(true, false);
+    janela.mostrou();
+    motor.vencer(&mut janela, SEM_SINAL_MS - 1);
+    assert!(
+        motor.balao(SEM_SINAL_MS - 1).is_none(),
+        "antes de 5 min, nada"
+    );
+    motor.vencer(&mut janela, SEM_SINAL_MS);
+    let balao = motor.balao(SEM_SINAL_MS).expect("a dica");
+    assert!(
+        balao.linhas.iter().any(|l| l.contains("bin/pet doutor")),
+        "{:?}",
+        balao.linhas
+    );
+    assert!(motor.marcos().ja_avisou_sem_sinal);
+    assert!(motor.marcos_para_gravar().is_some());
+}
+
+#[test]
+fn um_evento_do_claude_cala_a_dica_de_silencio() {
+    let (mut motor, mut janela) = ligado_boas_vindas(true, false);
+    janela.mostrou();
+    // Um evento antes dos 5 min prova que o hook funciona: a dica some.
+    prompt_em(&mut motor, "s1", "projeto", 1_000);
+    motor.vencer(&mut janela, SEM_SINAL_MS + 1_000);
+    assert!(
+        motor
+            .balao(SEM_SINAL_MS + 1_000)
+            .is_none_or(|b| b.linhas.iter().all(|l| !l.contains("doutor"))),
+        "o sinal chegou: sem dica"
+    );
+    assert!(!motor.marcos().ja_avisou_sem_sinal);
+}
+
+#[test]
+fn um_evento_apaga_o_aviso_de_silencio_ja_dado() {
+    let (mut motor, _janela) = ligado_boas_vindas(true, true);
+    assert!(motor.marcos().ja_avisou_sem_sinal);
+    prompt_em(&mut motor, "s1", "projeto", 1_000);
+    assert!(!motor.marcos().ja_avisou_sem_sinal, "o sinal voltou");
+    assert!(
+        motor.marcos_para_gravar().is_some(),
+        "o apagamento vai para o disco"
+    );
+}
+
+#[test]
+fn a_saudacao_espera_o_pet_poder_aparecer() {
+    let (mut motor, mut janela) = ligado_boas_vindas(false, false);
+    janela.mostrou();
+    // Escondido no prazo: não cumprimenta, e tenta de novo depois.
+    motor.definir_visivel(false);
+    motor.aplicar_visibilidade(&mut janela, 100);
+    motor.vencer(&mut janela, ATRASO_BOAS_VINDAS_MS);
+    assert!(
+        motor.balao(ATRASO_BOAS_VINDAS_MS).is_none(),
+        "escondido, não cumprimenta"
+    );
+    assert!(!motor.marcos().ja_cumprimentou);
+    // Volta a aparecer; no retentar, cumprimenta.
+    motor.definir_visivel(true);
+    motor.aplicar_visibilidade(&mut janela, ATRASO_BOAS_VINDAS_MS + 10);
+    janela.mostrou();
+    let t = ATRASO_BOAS_VINDAS_MS + RETENTAR_BOAS_VINDAS_MS;
+    motor.vencer(&mut janela, t);
+    assert!(
+        motor.balao(t).is_some_and(|b| b.linhas[0].contains("Zeca")),
+        "agora cumprimenta"
+    );
+    assert!(motor.marcos().ja_cumprimentou);
+}
+
+#[test]
+fn boas_vindas_desligado_nao_cumprimenta_nem_avisa() {
+    let mut motor = Motor::novo(ConfigCerebro::default());
+    motor.definir_skin(Some(skin_teste()));
+    motor.definir_boas_vindas(false);
+    let mut janela = Falsa::default();
+    motor.conectou(0);
+    motor.aplicar_visibilidade(&mut janela, 0);
+    janela.pronta = Some(edp());
+    motor.evento_overlay(&mut janela, EventoOverlay::Pronta, 0);
+    janela.mostrou();
+    motor.vencer(&mut janela, SEM_SINAL_MS + ATRASO_BOAS_VINDAS_MS);
+    assert!(
+        motor.balao(SEM_SINAL_MS + ATRASO_BOAS_VINDAS_MS).is_none(),
+        "desligado: nenhum balão"
+    );
+    assert!(!motor.marcos().ja_cumprimentou && !motor.marcos().ja_avisou_sem_sinal);
 }

@@ -86,6 +86,13 @@ const CHAVES: &[Chave] = &[
         tipo: Tipo::Opcao(LIGADO_DESLIGADO),
         padrao: "ligado",
     },
+    // Boas-vindas na primeira aparição e a dica quando não chega sinal do
+    // Claude por 5 min (decisão 0117).
+    Chave {
+        caminho: "comportamento.boas_vindas",
+        tipo: Tipo::Opcao(LIGADO_DESLIGADO),
+        padrao: "ligado",
+    },
     // De onde vêm as sessões que contam (`$CLAUDE_CODE_ENTRYPOINT`): só o
     // terminal por padrão; `claude -p`, SDK e IDE ficam de fora (decisão
     // 0020).
@@ -227,6 +234,8 @@ pub struct Config {
     pub pontuacao: Pesos,
     /// Esconder no galho ligado (decisão 0116).
     pub galho: bool,
+    /// Boas-vindas e dica de silêncio ligadas (decisão 0117).
+    pub boas_vindas: bool,
 }
 
 impl ConfigEfetiva {
@@ -361,6 +370,7 @@ impl ConfigEfetiva {
                 t3: self.numero("pontuacao.t3"),
             },
             galho: self.texto("comportamento.galho") != "desligado",
+            boas_vindas: self.texto("comportamento.boas_vindas") != "desligado",
         }
     }
 }
