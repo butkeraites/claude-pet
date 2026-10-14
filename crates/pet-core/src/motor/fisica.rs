@@ -22,6 +22,21 @@ pub fn quique_offset_d(decorrido_ms: u64) -> Option<i32> {
     QUIQUE.get((decorrido_ms / PASSO_MS) as usize).copied()
 }
 
+/// O balanço ao pendurar (M6, decisão 0129): ao pegar o pet, ele bambeia de um
+/// lado para o outro como um pêndulo e assenta. Deslocamento **horizontal** de
+/// cada quadro, em pixels de arte (negativo = esquerda). Começa em 0 (sob o
+/// cursor, sem pulo no instante do pegar) e termina em 0 (centrado).
+const BALANCO: [i32; 8] = [0, -4, -6, -2, 3, 5, 2, 0];
+
+/// Quanto o balanço dura, do pegar até parar.
+pub const BALANCO_MS: u64 = BALANCO.len() as u64 * PASSO_MS;
+
+/// O deslocamento horizontal do balanço (pixels de arte) `decorrido_ms` depois
+/// de pegar o pet; `None` quando já parou.
+pub fn balanco_offset_d(decorrido_ms: u64) -> Option<i32> {
+    BALANCO.get((decorrido_ms / PASSO_MS) as usize).copied()
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
@@ -51,5 +66,18 @@ mod testes {
             seq[vale..].windows(2).any(|w| w[1] < w[0]),
             "um segundo repique: {seq:?}"
         );
+    }
+
+    #[test]
+    fn o_balanco_bambeia_dos_dois_lados_e_para() {
+        assert_eq!(balanco_offset_d(BALANCO_MS), None, "acabou");
+        let seq: Vec<i32> = (0..BALANCO.len() as u64)
+            .map(|i| balanco_offset_d(i * PASSO_MS).unwrap())
+            .collect();
+        assert!(
+            seq.iter().any(|&o| o < 0) && seq.iter().any(|&o| o > 0),
+            "os dois lados: {seq:?}"
+        );
+        assert_eq!(*seq.last().unwrap(), 0, "termina centrado");
     }
 }

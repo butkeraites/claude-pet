@@ -2635,6 +2635,36 @@ fn o_quique_repica_ao_soltar_e_assenta_na_celula() {
     assert!(motor.proximo_prazo().is_none() || motor.quique.is_none());
 }
 
+#[test]
+fn o_balanco_bambeia_ao_pendurar_e_para() {
+    // Ao pegar o pet, ele bambeia horizontalmente (pêndulo) e para no alvo
+    // (M6, decisão 0129), em passos de D.
+    let (mut motor, mut janela) = ligado();
+    janela.mostrou();
+    let (x, y) = meio_do_corpo(&janela);
+    ponteiro(&mut motor, &mut janela, apertou(x, y), 1_000);
+    // Começa o arraste parado no lugar (sem mover o alvo): o balanço começa.
+    ponteiro(&mut motor, &mut janela, moveu(x, y - 60), 1_020);
+    assert!(motor.arrastando());
+    assert!(motor.balanco.is_some(), "o balanço começou ao pendurar");
+    let alvo_x = motor.palco.unwrap().x;
+    // Avançando os quadros do balanço, o pet se desloca na horizontal (o alvo
+    // não muda). O passo de D é garantido pela tabela (teste do `fisica`).
+    let mut vistos = std::collections::BTreeSet::new();
+    let mut t = 1_020;
+    while motor.balanco.is_some() && t < 1_020 + fisica::BALANCO_MS + 200 {
+        t += fisica::PASSO_MS;
+        motor.vencer(&mut janela, t);
+        vistos.insert(motor.palco.unwrap().x - alvo_x);
+    }
+    assert!(
+        vistos.iter().any(|&o| o < 0) && vistos.iter().any(|&o| o > 0),
+        "bambeou dos dois lados: {vistos:?}"
+    );
+    assert!(motor.balanco.is_none(), "o balanço parou");
+    assert_eq!(motor.palco.unwrap().x, alvo_x, "parou centrado no alvo");
+}
+
 // --- a origem do prompt e a janela da sessão (decisão 0073) ---------------
 
 fn prompt_de(sid: &str, orig: &str, ms: u64) -> Evento {
