@@ -339,6 +339,15 @@ struct Quique {
     proxima_ms: u64,
 }
 
+/// O balanço ao pendurar (M6, decisão 0129): quando começou, o próximo quadro e
+/// o deslocamento horizontal atual (pixels de arte), somado ao alvo do arraste.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Balanco {
+    inicio_ms: u64,
+    proxima_ms: u64,
+    off: i32,
+}
+
 /// O confete de uma festa na tela (decisão 0085): os pedaços andam um passo a
 /// cada [`PASSO_CONFETE_MS`], contados do começo.
 #[derive(Debug, Clone)]
@@ -452,6 +461,9 @@ pub struct Motor {
     /// O quique do pet ao ser solto (M6, decisão 0128): a célula de pouso e
     /// quando começou; o repique vertical anda até assentar.
     quique: Option<Quique>,
+    /// O balanço ao pendurar (M6, decisão 0129): enquanto arrasta, logo depois
+    /// de pegar, o pet bambeia horizontalmente como um pêndulo e para.
+    balanco: Option<Balanco>,
     /// As boas-vindas e a dica de silêncio estão ligadas
     /// (`comportamento.boas_vindas`, decisão 0117).
     boas_vindas_ligado: bool,
@@ -573,6 +585,7 @@ impl Motor {
             // não conta (macOS, Windows), e aí o Motor deriva (decisão 0119).
             deriva_olhando: false,
             quique: None,
+            balanco: None,
             boas_vindas_ligado: true,
             marcos: Marcos::default(),
             marcos_novos: false,
@@ -2132,6 +2145,7 @@ impl Motor {
         self.commits = Commits::default();
         self.proximo_quadro = None;
         self.quique = None;
+        self.balanco = None;
         self.armar_boas_vindas(agora_ms);
     }
 
@@ -2153,6 +2167,7 @@ impl Motor {
         self.balao = None;
         self.arraste.cancelar();
         self.quique = None;
+        self.balanco = None;
         // Idem ao [`Self::conectou`]: o arraste no meio sai, o escondido no
         // galho fica (decisão 0116).
         if self.galho.poleiro_na_tela() {
@@ -2551,6 +2566,7 @@ impl Motor {
             Gesto::Apertou => {
                 // Pegou o pet de novo: um quique em curso para (decisão 0128).
                 self.quique = None;
+                self.balanco = None;
                 punho.janela().cursor(Cursor::Agarrar);
             }
             Gesto::Comecou => {
@@ -2575,6 +2591,12 @@ impl Motor {
                 if let Some(pet) = self.pet.as_mut() {
                     pet.segurar(ARRASTADO, agora_ms);
                 }
+                // O balanço ao pendurar: o pet bambeia como um pêndulo (0129).
+                self.balanco = Some(Balanco {
+                    inicio_ms: agora_ms,
+                    proxima_ms: agora_ms,
+                    off: fisica::balanco_offset_d(0).unwrap_or(0),
+                });
                 self.ir_para_o_alvo();
                 self.desenhar(punho.janela(), agora_ms, false);
             }
@@ -2589,6 +2611,8 @@ impl Motor {
                 celula,
                 pegada,
             } => {
+                // O balanço para ao soltar; o quique assume (decisão 0129/0128).
+                self.balanco = None;
                 self.mover_para(celula);
                 let ov = punho.janela();
                 // Esconder no galho (decisão 0116): soltou na zona de pouso do
@@ -2625,8 +2649,14 @@ impl Motor {
                     }
                 }
             }
-            Gesto::Cancelou => self.pousar(punho.janela(), agora_ms),
-            Gesto::Desistiu => punho.janela().cursor(Cursor::Pegar),
+            Gesto::Cancelou => {
+                self.balanco = None;
+                self.pousar(punho.janela(), agora_ms);
+            }
+            Gesto::Desistiu => {
+                self.balanco = None;
+                punho.janela().cursor(Cursor::Pegar);
+            }
             Gesto::Clique(botao) => {
                 punho.janela().cursor(Cursor::Pegar);
                 self.clicar(punho, botao, agora_ms);
@@ -2641,7 +2671,11 @@ impl Motor {
             return false;
         };
         match self.arraste.alvo(d) {
-            Some(alvo) => self.mover_para(alvo),
+            // O balanço ao pendurar soma um deslocamento horizontal (decisão 0129).
+            Some(alvo) => {
+                let off = self.balanco.map_or(0, |b| b.off);
+                self.mover_para((alvo.0 + off * d, alvo.1))
+            }
             None => false,
         }
     }
@@ -2684,6 +2718,32 @@ impl Motor {
                 self.mover_para(q.base)
             }
         }
+    }
+
+    /// Um quadro do balanço ao pendurar (M6, decisão 0129): atualiza o
+    /// deslocamento horizontal e reaplica o alvo do arraste; para quando acaba
+    /// ou quando o arraste acaba. `true` se a célula mudou (pede redesenho).
+    fn vencer_balanco(&mut self, agora_ms: u64) -> bool {
+        let Some(mut b) = self.balanco else {
+            return false;
+        };
+        if !self.arraste.arrastando() {
+            self.balanco = None;
+            return false;
+        }
+        if agora_ms < b.proxima_ms {
+            return false;
+        }
+        match fisica::balanco_offset_d(agora_ms.saturating_sub(b.inicio_ms)) {
+            Some(off) => {
+                let quadro = (agora_ms - b.inicio_ms) / fisica::PASSO_MS;
+                b.off = off;
+                b.proxima_ms = b.inicio_ms + (quadro + 1) * fisica::PASSO_MS;
+                self.balanco = Some(b);
+            }
+            None => self.balanco = None,
+        }
+        self.ir_para_o_alvo()
     }
 
     /// O arraste acabou (soltou ou o fail-safe): o cursor volta, o pet larga
@@ -3531,8 +3591,9 @@ impl Motor {
     pub fn vencer(&mut self, punho: &mut dyn Punho, agora_ms: u64) {
         let gesto = self.arraste.vencer(agora_ms);
         self.aplicar_gesto(punho, gesto, agora_ms);
-        // O quique do pet solto (decisão 0128): move a célula e redesenha.
-        if self.vencer_quique(agora_ms) {
+        // O quique do pet solto (decisão 0128) e o balanço ao pendurar (0129):
+        // movem a célula e redesenham.
+        if self.vencer_quique(agora_ms) || self.vencer_balanco(agora_ms) {
             self.desenhar(punho.janela(), agora_ms, false);
         }
         // A sequência do pet pousado no galho: tchau, poof e sumir (decisão 0116).
@@ -3596,6 +3657,7 @@ impl Motor {
         if let Some(q) = self.quique.take() {
             self.mover_para(q.base);
         }
+        self.balanco = None;
         // Sem janela, não há para onde viajar: o prazo de conferir o foco
         // sai, e a camada nova (com output NULL) nasce no monitor em foco.
         self.seguir.decidir(agora_ms, None, false);
@@ -3635,6 +3697,11 @@ impl Motor {
             self.boas_vindas_ms,
             self.dica_sem_sinal_ms,
             self.quique.map(|q| q.proxima_ms),
+            // O balanço só anda enquanto arrasta; cancelado o arraste, o prazo
+            // dele não acorda o laço (o próximo `vencer_balanco` o limpa).
+            self.balanco
+                .filter(|_| self.arraste.arrastando())
+                .map(|b| b.proxima_ms),
         ]
         .into_iter()
         .flatten()

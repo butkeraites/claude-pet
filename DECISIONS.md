@@ -5661,3 +5661,23 @@ fim; o `proximo_prazo` inclui o próximo quadro; o `vencer_sem_conexao` assenta 
 hora (como a 0059, nada de prazo preso); um novo aperto/arraste ou uma janela
 nova cancelam o quique. Nada de novo nas intenções (decisão 0086): dourados com
 zero diff. Visível no Mac (o pet repica onde você soltar).
+
+## 0129 — Física do arraste (M6, T6.6): o balanço ao pendurar (2026-10-14)
+
+Segunda parte da física do arraste: o **balanço**. Ao pegar o pet (começo do
+arraste), ele bambeia de um lado para o outro como um pêndulo e para — dá a
+sensação de estar pendurado. (A poeira do pouso, a última parte do T6.6, é
+partícula de tela e espera o palco transitório do M8.)
+
+**Responsivo e nítido.** O pet continua seguindo o cursor na hora; o balanço é um
+deslocamento **horizontal** somado ao alvo do arraste (`ir_para_o_alvo`), em
+passos de D (`motor::fisica`, tabela `[0, -4, -6, -2, 3, 5, 2, 0]` pixels de
+arte). Começa em 0 (sob o cursor, sem pulo no instante do pegar) e termina em 0
+(centrado). Anda na grade de 34 ms (decisão 0088); dura `BALANCO_MS` ≈ 272 ms.
+
+**No Motor.** Um campo `balanco` (início, próximo quadro e o deslocamento atual)
+nasce no `Gesto::Comecou`; o `vencer` avança o quadro e reaplica o alvo; o
+`proximo_prazo` o inclui **só enquanto arrasta** (cancelado o arraste, o prazo não
+acorda o laço); soltar, um novo pegar, o esconder, a janela nova/fechada e o
+`vencer_sem_conexao` o limpam. Nada nas intenções (decisão 0086): dourados com
+zero diff. Visível no Mac (o pet bambeia ao ser pego).
