@@ -150,6 +150,9 @@ impl Desktop for DesktopWin {
             janela_ativa: true,
             foca_janela: true,
             nao_perturbe: false,
+            // O Motor deriva o "olhando o Claude" da janela (HWND) da sessão,
+            // sem ler o título (decisão 0119).
+            olhando_por_titulo: false,
         }
     }
 

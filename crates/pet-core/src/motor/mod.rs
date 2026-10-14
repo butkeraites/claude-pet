@@ -435,6 +435,10 @@ pub struct Motor {
     galho_tchau_ms: Option<u64>,
     /// O esconder no galho está ligado (`comportamento.galho`).
     galho_ligado: bool,
+    /// O desktop não conta "olhando o Claude" pelo título (macOS, Windows):
+    /// o Motor deriva da janela ativa ser a de uma sessão viva (decisão 0119).
+    /// Ligado pelo laço a partir de [`CapDesktop::olhando_por_titulo`].
+    deriva_olhando: bool,
     /// As boas-vindas e a dica de silêncio estão ligadas
     /// (`comportamento.boas_vindas`, decisão 0117).
     boas_vindas_ligado: bool,
@@ -552,6 +556,9 @@ impl Motor {
             galho: galho::Estado::default(),
             galho_tchau_ms: None,
             galho_ligado: true,
+            // Padrão: o desktop conta pelo título (Linux); o laço desliga onde
+            // não conta (macOS, Windows), e aí o Motor deriva (decisão 0119).
+            deriva_olhando: false,
             boas_vindas_ligado: true,
             marcos: Marcos::default(),
             marcos_novos: false,
@@ -1241,7 +1248,7 @@ impl Motor {
             .and_then(|c| self.janela_certa(&c.chave))
         {
             Some(janela) => self.janela_em_foco() == Some(janela),
-            None => self.desktop.olhando_claude,
+            None => self.olhando_claude(),
         }
     }
 
@@ -2047,6 +2054,27 @@ impl Motor {
     /// Esconder no galho (decisão 0116): liga/desliga pelo `comportamento.galho`.
     pub fn definir_galho_ligado(&mut self, ligado: bool) {
         self.galho_ligado = ligado;
+    }
+
+    /// Onde o desktop não conta "olhando o Claude" pelo título (macOS, Windows),
+    /// o Motor deriva o sinal da janela ativa ser a de uma sessão viva. O laço
+    /// liga isto a partir de [`crate::plataforma::CapDesktop::olhando_por_titulo`]
+    /// (decisão 0119).
+    pub fn definir_deriva_olhando(&mut self, deriva: bool) {
+        self.deriva_olhando = deriva;
+    }
+
+    /// O Renan está olhando um terminal do Claude. No Linux vem do título
+    /// (`desktop.olhando_claude`); onde o título não conta, deriva da janela
+    /// ativa ser a de uma sessão viva (decisão 0119).
+    fn olhando_claude(&self) -> bool {
+        self.desktop.olhando_claude
+            || (self.deriva_olhando
+                && self
+                    .desktop
+                    .janela_ativa
+                    .as_ref()
+                    .is_some_and(|a| self.identidades.alguma_tem(a)))
     }
 
     /// A fase do esconder no galho, para o `/v1/estado` (decisão 0116).
@@ -3086,13 +3114,13 @@ impl Motor {
         let ativa_antes = self.desktop.janela_ativa.clone();
         let ligado_antes = self.desktop.ligado;
         let ocioso_antes = self.desktop.ocioso;
-        let olhando_antes = self.desktop.olhando_claude;
+        let olhando_antes = self.olhando_claude();
         let mudou = self.desktop.aplicar(evento, agora.parede_ms);
         // O Renan passou a olhar uma janela do Claude: o pet volta do galho
-        // (decisão 0116).
-        let voltou_do_galho = !olhando_antes
-            && self.desktop.olhando_claude
-            && self.voltar_do_galho("foco", agora.mono_ms);
+        // (decisão 0116). O sinal pode vir do título (Linux) ou da janela ativa
+        // ser a de uma sessão (macOS/Windows, decisão 0119).
+        let voltou_do_galho =
+            !olhando_antes && self.olhando_claude() && self.voltar_do_galho("foco", agora.mono_ms);
         if self.desktop.ocioso != Some(true) {
             // A volta conta só para quem ficou longe de verdade: sem mexer
             // há 60 s ou mais, não de volta ao terminal da sessão que espera
@@ -3627,9 +3655,13 @@ impl Motor {
         let intencoes = self.intencoes.painel(agora_ms);
         let fotografia = self.painel_da_tela(agora_ms);
         let desenho = self.painel_do_desenho(agora_ms);
+        let olhando_claude = self.olhando_claude();
         let Some(punho) = punho else {
+            let mut desktop = self.desktop.painel(Default::default(), Default::default());
+            // Mostra o sinal efetivo (derivado onde o título não conta, 0119).
+            desktop.olhando_claude = olhando_claude;
             return Painel {
-                desktop: self.desktop.painel(Default::default(), Default::default()),
+                desktop,
                 intencoes,
                 fotografia,
                 ..Painel::default()
@@ -3637,7 +3669,9 @@ impl Motor {
         };
         let ov = punho.ver_janela();
         let desktop = punho.ver_desktop();
-        let painel_desktop = self.desktop.painel(desktop.capacidades(), desktop.info());
+        let mut painel_desktop = self.desktop.painel(desktop.capacidades(), desktop.info());
+        // Mostra o sinal efetivo (derivado onde o título não conta, 0119).
+        painel_desktop.olhando_claude = olhando_claude;
         let info = ov.info();
         // Pelo relógio: com a tela apagada o último quadro do estresse pode
         // nunca ser desenhado, mas o estresse acabou do mesmo jeito.

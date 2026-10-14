@@ -385,6 +385,16 @@ impl Identidades {
         self.mapa.get(chave)
     }
 
+    /// Alguma sessão viva tem esta janela como a dela: o terminal em foco é o
+    /// de uma sessão do Claude. A base do "olhando o Claude" sem título, onde o
+    /// desktop não conta pelo título (decisão 0119). Uma janela que fechou já
+    /// foi limpa (`fechou`), então não casa.
+    pub fn alguma_tem(&self, janela: &Alca) -> bool {
+        self.mapa
+            .values()
+            .any(|i| i.janela.as_ref() == Some(janela))
+    }
+
     pub fn resumo(&self, chave: &Chave) -> Option<ResumoJanela> {
         self.mapa.get(chave).map(|i| ResumoJanela {
             endereco: i.janela.as_ref().map(|a| a.0.clone()),

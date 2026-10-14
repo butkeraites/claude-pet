@@ -574,6 +574,12 @@ impl Nucleo {
         mut ov: Option<&mut dyn Punho>,
     ) -> bool {
         let agora = self.agora();
+        // Onde o desktop não conta "olhando o Claude" pelo título (macOS,
+        // Windows), o Motor deriva da janela ativa ser a de uma sessão (0119).
+        if let Some(p) = ov.as_deref() {
+            self.motor
+                .definir_deriva_olhando(!p.ver_desktop().capacidades().olhando_por_titulo);
+        }
         let mut mudou = self.motor.evento_desktop(janela(&mut ov), evento, agora);
         // A fonte das trocas voltou: o que mudou enquanto ela estava fora não
         // chegou, e o anel fica num buraco até a próxima troca. A conexão sabe

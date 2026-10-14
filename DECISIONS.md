@@ -5388,3 +5388,47 @@ isto é só a fonte do sinal. De quebra, a `cap_desktop()` livre do `pet-macos`
 (resíduo sem consumidor) dizia `segue_foco: true`, divergindo da
 `DesktopMac::capacidades()` (o `false` correto: o painel segue o monitor
 sozinho); alinhada para não virar armadilha.
+
+## 0119 — "Olhando o Claude" fora do Linux: pela janela da sessão, não pelo título (2026-10-14)
+
+O freio que impede o Zeca de chamar enquanto o Renan está de olho no terminal do
+Claude (`olhando_a_espera`, decisões 0090 e 0092) e a volta do galho/escalada
+pelo foco (decisão 0116) dependem do `EventoDesktop::OlhandoClaude(bool)` — que
+**só o Linux mandava** (o `activewindow` do Hyprland diz se o título da janela em
+foco começa com um glifo do Claude Code). No macOS e no Windows esse sinal
+faltava, então a escalada não calava com o Claude na frente e o galho não voltava
+só por olhar o terminal.
+
+**Por que não pelo título no macOS.** A primeira tentativa foi ler o `AXTitle` da
+janela em foco pela Acessibilidade (a mesma permissão do clique, decisão 0106) e
+classificar pelo glifo. Conferindo ao vivo no Mac do Renan, o terminal dele
+(Orca, da stably.ai) **não expõe o título do shell à Acessibilidade**: o
+`AXTitle` é sempre "Orca", e não há atributo AX com o título dinâmico
+(`AXDocument` vazio, `AXTitleUIElement` ausente). Terminais de UI própria (Orca,
+Warp, Ghostty…) desenham o título na interface deles, fora da barra nativa — o
+título é frágil e não serve de base multiplataforma.
+
+**A base robusta: a janela da sessão.** O Motor **já sabe** a janela de cada
+sessão viva do Claude — no macOS o bundle id que o hook manda (`app`, decisão
+0105), no Windows o HWND (decisão 0111), no Linux o endereço do foreign-toplevel
+— casada pelo anel de ativações (decisão 0055). E sabe a janela ativa agora
+(`desktop.janela_ativa`). Então "olhando o Claude" = **a janela ativa é a de
+alguma sessão viva** (`Identidades::alguma_tem`). Sem título, **sem a
+Acessibilidade e sem permissão nova**, e funciona em qualquer terminal. É ligado
+ao conjunto de sessões reais (mais preciso que "qualquer título com ✳" do Linux);
+a granularidade no macOS é por app (bundle id), a mesma do clique.
+
+**Gate por capacidade, Linux intacto.** `CapDesktop` ganha `olhando_por_titulo`:
+o Hyprland diz `true` (conta pelo título, o Motor usa o evento como antes); o
+macOS e o Windows dizem `false`, e o laço liga `Motor::definir_deriva_olhando`.
+O efetivo é `desktop.olhando_claude || (deriva && janela ativa é de sessão)`. No
+Linux `deriva` fica desligado → comportamento e **todos os dourados idênticos**
+(regenerados: zero diff). O `/v1/estado.desktop.olhando_claude` passa a mostrar o
+valor efetivo.
+
+**Uma fonte só do glifo (refactor que fica).** A const `GLIFOS_DO_CLAUDE` e o
+puro `plataforma::titulo_e_do_claude` foram para o `pet-core`, com teste, e o
+`pet-wayland` passou a usá-los no lugar da cópia local. O caminho por `AXTitle`
+no `pet-macos` foi revertido; como o daemon do Mac não lê mais título nenhum, a
+supressão de core dump no macOS também foi revertida (segue no-op fora do Linux,
+como antes).

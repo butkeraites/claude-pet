@@ -119,6 +119,12 @@ pub struct CapDesktop {
     pub foca_janela: bool,
     /// Sabe se o "não perturbe" está ligado.
     pub nao_perturbe: bool,
+    /// Conta sozinha se o Renan está olhando um terminal do Claude, pelo título
+    /// da janela em foco (o `activewindow` do Hyprland emite `OlhandoClaude`).
+    /// Sem isto (macOS, Windows: terminais de UI própria escondem o título da
+    /// Acessibilidade), o Motor deriva o sinal da janela ativa ser a de uma
+    /// sessão viva (decisão 0119).
+    pub olhando_por_titulo: bool,
 }
 
 /// Uma janela que o desktop sabe focar. Opaca: o endereço no Hyprland, um
@@ -177,6 +183,24 @@ pub enum EventoDesktop {
     /// Hyprland, o `screencast` do socket2). Depois de 2 s compartilhando,
     /// os balões perdem os nomes dos projetos (decisão 0076).
     Compartilhando(bool),
+}
+
+/// Os glifos com que o Claude Code começa o título do terminal: parado (✳) e
+/// trabalhando (◐, ◑). A mesma fonte para todos os sistemas que leem o título
+/// (o Hyprland pelo `activewindow`, o macOS pelo `AXTitle`): o glifo não separa
+/// trabalhando de parado de forma confiável (decisão 0092), então só serve para
+/// dizer "é um terminal do Claude".
+pub const GLIFOS_DO_CLAUDE: [char; 3] = ['\u{2733}', '\u{25D0}', '\u{25D1}'];
+
+/// O título começa com um glifo do Claude Code? Olha só o primeiro caractere e
+/// devolve um booleano — o título em si nunca é guardado por quem chama (nem no
+/// log, nem no `/v1/estado`, nem no disco; CLAUDE.md). Uma string vazia ou que
+/// começa com outra coisa não é o Claude.
+pub fn titulo_e_do_claude(titulo: &str) -> bool {
+    titulo
+        .chars()
+        .next()
+        .is_some_and(|c| GLIFOS_DO_CLAUDE.contains(&c))
 }
 
 /// O que a ligação com o desktop mostra no `/v1/estado`.
@@ -532,6 +556,8 @@ pub mod falsa {
                     janela_ativa: true,
                     foca_janela: true,
                     nao_perturbe: false,
+                    // Como o Hyprland: conta pelo título (o Motor não deriva).
+                    olhando_por_titulo: true,
                 },
                 janelas: Vec::new(),
                 focos: Vec::new(),
@@ -803,6 +829,18 @@ mod testes {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
+
+    #[test]
+    fn titulo_do_claude_olha_so_o_primeiro_glifo() {
+        // Parado (✳) e trabalhando (◐, ◑): todos contam.
+        assert!(titulo_e_do_claude("\u{2733} claude-pet"));
+        assert!(titulo_e_do_claude("\u{25D0} rodando"));
+        assert!(titulo_e_do_claude("\u{25D1}"));
+        // Qualquer outro começo, ou vazio, não é o Claude.
+        assert!(!titulo_e_do_claude("zsh"));
+        assert!(!titulo_e_do_claude(""));
+        assert!(!titulo_e_do_claude(" \u{2733}"), "o glifo não é o primeiro");
+    }
 
     #[test]
     fn mostrar_e_esconder_por_fase() {

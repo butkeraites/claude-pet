@@ -34,16 +34,13 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use pet_core::plataforma::{Alca, Caixa, EventoDesktop};
+use pet_core::plataforma::{Alca, Caixa, EventoDesktop, titulo_e_do_claude};
 
 use super::eh_reserva;
 use crate::conexao::conectar_unix;
 
 /// A classe da janela da proteção de tela do Omarchy.
 pub const PROTETOR_DE_TELA: &str = "org.omarchy.screensaver";
-/// Os glifos com que o Claude Code começa o título do terminal: parado (✳) e
-/// trabalhando (◐, ◑).
-pub const GLIFOS_DO_CLAUDE: [char; 3] = ['\u{2733}', '\u{25D0}', '\u{25D1}'];
 /// O Hyprland corta o DATA em 1024 bytes; uma linha maior que isto é lixo e
 /// é pulada sem ser guardada.
 const LIMITE_LINHA: u64 = 4096;
@@ -121,12 +118,12 @@ pub fn traduzir(linha: &[u8]) -> Option<Linha> {
             let virgula = dados.iter().position(|&b| b == b',')?;
             let titulo = &dados[virgula + 1..];
             // Um caractere tem até 4 bytes; um partido ou inválido vira o de
-            // substituição, que não é glifo do Claude.
+            // substituição, que não é glifo do Claude. O glifo em si decide no
+            // `pet_core` (a mesma fonte do macOS); o título não é guardado.
             let inicio = &titulo[..titulo.len().min(4)];
-            let primeiro = String::from_utf8_lossy(inicio).chars().next();
-            Some(Linha::OlhandoClaude(
-                primeiro.is_some_and(|c| GLIFOS_DO_CLAUDE.contains(&c)),
-            ))
+            Some(Linha::OlhandoClaude(titulo_e_do_claude(
+                &String::from_utf8_lossy(inicio),
+            )))
         }
         b"openwindow" => {
             // ADDR,WORKSPACENAME,CLASS,TITLE: o endereço e a classe só para
