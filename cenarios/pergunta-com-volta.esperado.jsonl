@@ -1,6 +1,6 @@
 {"t":0,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
 {"t":20000,"i":"reacao","nome":"alert","motivo":"aviso","sid8":"s1"}
-{"t":20000,"i":"balao","linhas":["Ô, meu camarada!","web precisa de você"],"motivo":"aviso"}
+{"t":20000,"i":"balao","linhas":["Bora, parceiro!","web precisa de você"],"motivo":"aviso"}
 {"t":20000,"i":"escalada","sid8":"s1","nivel":1,"espera":"permissao","motivo":"aviso"}
 {"t":20000,"i":"base","estado":"waiting","prioridade":"esperando","sid8":"s1"}
 {"t":50000,"i":"escalada","sid8":"s1","nivel":2,"motivo":"tempo"}

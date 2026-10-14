@@ -342,24 +342,69 @@ pub fn com_projeto(frase: &str, proj: Option<&str>) -> String {
     }
 }
 
-/// O balão da chamada de um aviso de espera (decisão 0075), pelo tipo. Sem
-/// `proj` (sem pasta, ou a tela compartilhada), a frase sem o nome.
-pub fn linhas_da_espera(espera: Option<TipoEspera>, proj: Option<&str>) -> Vec<String> {
+/// Quantas variantes de fala cada banco de malandro tem (decisão 0123).
+pub const VARIANTES_DE_FALA: usize = 3;
+
+/// Índice de variante estável para uma fala, a partir de uma marca dela (o
+/// `desde_ms` do aviso, o `estado_desde_ms` da sessão): a mesma fala mostra
+/// sempre a mesma variante, falas diferentes variam (decisão 0123). Um
+/// embaralhado leve distribui marcas próximas.
+pub fn variante(marca: u64) -> usize {
+    ((marca ^ (marca >> 7)).wrapping_mul(0x9E37_79B9) >> 24) as usize % VARIANTES_DE_FALA
+}
+
+/// O balão da chamada de um aviso de espera (decisão 0075), pelo tipo, numa das
+/// falas de malandro do banco (`variante`, decisão 0123). Sem `proj` (sem pasta,
+/// ou a tela compartilhada), a frase sem o nome.
+pub fn linhas_da_espera(
+    espera: Option<TipoEspera>,
+    proj: Option<&str>,
+    variante: usize,
+) -> Vec<String> {
+    let v = variante % VARIANTES_DE_FALA;
     let nome = proj.map(|p| fonte::cortar(p, MAX_PROJETO));
+    let com_nome = |sem: &str, com: &str| match &nome {
+        Some(nome) => format!("{nome}{com}"),
+        None => sem.to_owned(),
+    };
     match espera {
-        Some(TipoEspera::Pergunta) => vec![match nome {
-            Some(nome) => format!("{nome}: pergunta pra você"),
-            None => "Pergunta pra você".to_owned(),
+        Some(TipoEspera::Pergunta) => vec![match v {
+            0 => com_nome("Pergunta pra você", ": pergunta pra você"),
+            1 => com_nome("Tem pergunta pra você", ": tem pergunta!"),
+            _ => com_nome("Querem saber de você", ": querem saber"),
         }],
-        Some(TipoEspera::Plano) => vec![com_projeto("Plano pra aprovar!", proj)],
-        Some(TipoEspera::Permissao | TipoEspera::Elicitacao) | None => vec![
-            "Ô, meu camarada!".to_owned(),
-            match nome {
-                Some(nome) => format!("{nome} precisa de você"),
-                None => "precisa de você".to_owned(),
+        Some(TipoEspera::Plano) => vec![com_projeto(
+            match v {
+                0 => "Plano pra aprovar!",
+                1 => "Aprova o plano?",
+                _ => "Plano na mesa!",
             },
-        ],
+            proj,
+        )],
+        Some(TipoEspera::Permissao | TipoEspera::Elicitacao) | None => {
+            let saudacao = match v {
+                0 => "Ô, meu camarada!",
+                1 => "Psiu, chefia!",
+                _ => "Bora, parceiro!",
+            };
+            let corpo = match v {
+                1 => com_nome("tão te chamando", " tá te chamando"),
+                _ => com_nome("precisa de você", " precisa de você"),
+            };
+            vec![saudacao.to_owned(), corpo]
+        }
     }
+}
+
+/// O balão do erro, numa das falas de malandro do banco (`variante`, decisão
+/// 0123), com o nome do projeto no fim se há um.
+pub fn linhas_de_erro(proj: Option<&str>, variante: usize) -> String {
+    let frase = match variante % VARIANTES_DE_FALA {
+        0 => "Deu ruim...",
+        1 => "Xi, deu ruim...",
+        _ => "Complicou aqui...",
+    };
+    com_projeto(frase, proj)
 }
 
 /// "há quanto tempo", curto: 40 s, 3 min, 2 h, 2 d. Uma sessão sem evento
@@ -659,40 +704,56 @@ mod testes {
 
     #[test]
     fn a_chamada_pelo_tipo_da_espera_cabe_no_balao() {
-        let longo = Some("agenda-presidencial-2026");
+        // A variante 0 é a fala de sempre (decisão 0123: o banco é um superset).
         assert_eq!(
-            linhas_da_espera(Some(TipoEspera::Pergunta), Some("api")),
+            linhas_da_espera(Some(TipoEspera::Pergunta), Some("api"), 0),
             vec!["api: pergunta pra você"]
         );
         assert_eq!(
-            linhas_da_espera(Some(TipoEspera::Plano), Some("api")),
+            linhas_da_espera(Some(TipoEspera::Plano), Some("api"), 0),
             vec!["Plano pra aprovar! api"]
         );
         assert_eq!(
-            linhas_da_espera(Some(TipoEspera::Permissao), Some("api")),
+            linhas_da_espera(Some(TipoEspera::Permissao), Some("api"), 0),
             vec!["Ô, meu camarada!", "api precisa de você"]
         );
         assert_eq!(
-            linhas_da_espera(Some(TipoEspera::Elicitacao), None),
+            linhas_da_espera(Some(TipoEspera::Elicitacao), None, 0),
             vec!["Ô, meu camarada!", "precisa de você"]
         );
-        assert_eq!(linhas_da_espera(None, None)[1], "precisa de você");
-        for espera in [
-            None,
-            Some(TipoEspera::Permissao),
-            Some(TipoEspera::Elicitacao),
-            Some(TipoEspera::Plano),
-            Some(TipoEspera::Pergunta),
-        ] {
-            for proj in [longo, None] {
-                for linha in linhas_da_espera(espera, proj) {
-                    assert!(
-                        linha.chars().count() <= MAX_CARACTERES,
-                        "{linha}: o balão cortaria"
-                    );
-                    assert!(linha.chars().all(fonte::tem), "{linha}: glifo");
+        // Toda variante, de todo tipo, com nome longo ou sem, cabe no balão e só
+        // usa glifos da fonte (malandro, mas legível).
+        let longo = Some("agenda-presidencial-2026");
+        for v in 0..VARIANTES_DE_FALA {
+            for espera in [
+                None,
+                Some(TipoEspera::Permissao),
+                Some(TipoEspera::Elicitacao),
+                Some(TipoEspera::Plano),
+                Some(TipoEspera::Pergunta),
+            ] {
+                for proj in [longo, Some("api"), None] {
+                    for linha in linhas_da_espera(espera, proj, v) {
+                        assert!(
+                            linha.chars().count() <= MAX_CARACTERES,
+                            "v{v} {linha:?}: o balão cortaria ({} chars)",
+                            linha.chars().count()
+                        );
+                        assert!(linha.chars().all(fonte::tem), "v{v} {linha:?}: glifo");
+                    }
                 }
             }
+            // O erro também varia e cabe.
+            for proj in [longo, None] {
+                let l = linhas_de_erro(proj, v);
+                assert!(l.chars().count() <= MAX_CARACTERES, "erro v{v} {l:?}");
+                assert!(l.chars().all(fonte::tem), "erro v{v} {l:?}");
+            }
         }
+        // A variante é estável para a mesma marca e varia entre marcas.
+        assert_eq!(variante(1_000), variante(1_000));
+        let vistas: std::collections::BTreeSet<_> =
+            (0..50u64).map(|i| variante(i * 7_000 + 3)).collect();
+        assert!(vistas.len() >= 2, "o banco varia entre chamadas");
     }
 }

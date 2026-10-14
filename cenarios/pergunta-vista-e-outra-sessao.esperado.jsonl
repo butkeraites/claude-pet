@@ -1,12 +1,12 @@
 {"t":3000,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s2"}
 {"t":5000,"i":"selos","mais":1,"bandeiras":[],"corrente":false}
 {"t":9000,"i":"reacao","nome":"alert","motivo":"aviso","sid8":"s1"}
-{"t":9000,"i":"balao","linhas":["api: pergunta pra você"],"motivo":"aviso"}
+{"t":9000,"i":"balao","linhas":["api: querem saber"],"motivo":"aviso"}
 {"t":9000,"i":"escalada","sid8":"s1","nivel":1,"espera":"pergunta","motivo":"aviso"}
 {"t":9000,"i":"base","estado":"waiting","prioridade":"esperando","sid8":"s1"}
 {"t":14000,"i":"escalada","sid8":"s1","nivel":1,"motivo":"vista"}
 {"t":110000,"i":"reacao","nome":"alert","motivo":"aviso","sid8":"s2"}
-{"t":110000,"i":"balao","linhas":["web: pergunta pra você"],"motivo":"aviso"}
+{"t":110000,"i":"balao","linhas":["web: tem pergunta!"],"motivo":"aviso"}
 {"t":110000,"i":"escalada","sid8":"s1","nivel":0,"motivo":"outro_aviso"}
 {"t":110000,"i":"escalada","sid8":"s2","nivel":1,"espera":"pergunta","motivo":"aviso"}
 {"t":140000,"i":"escalada","sid8":"s2","nivel":2,"motivo":"tempo"}

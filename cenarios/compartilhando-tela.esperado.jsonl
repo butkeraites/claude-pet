@@ -7,7 +7,7 @@
 {"t":11600,"i":"discricao","ligada":true,"tirou_balao":true}
 {"t":20000,"i":"selos","mais":1,"bandeiras":[],"corrente":false}
 {"t":25000,"i":"reacao","nome":"alert","motivo":"aviso","sid8":"s2"}
-{"t":25000,"i":"balao","linhas":["Ô, meu camarada!","sessão 1 precisa de você"],"motivo":"aviso"}
+{"t":25000,"i":"balao","linhas":["Psiu, chefia!","sessão 1 tá te chamando"],"motivo":"aviso"}
 {"t":25000,"i":"escalada","sid8":"s2","nivel":1,"espera":"permissao","motivo":"aviso"}
 {"t":25000,"i":"base","estado":"waiting","prioridade":"esperando","sid8":"s2"}
 {"t":25000,"i":"selos","mais":0,"bandeiras":[7],"corrente":false}

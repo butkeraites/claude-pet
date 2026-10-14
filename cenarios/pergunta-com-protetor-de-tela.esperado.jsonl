@@ -1,7 +1,7 @@
 {"t":0,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
 {"t":30000,"i":"base","estado":"working","prioridade":"trabalhando","sid8":"s1"}
 {"t":60000,"i":"reacao","nome":"alert","motivo":"aviso","sid8":"s1"}
-{"t":60000,"i":"balao","linhas":["api: pergunta pra você"],"motivo":"aviso"}
+{"t":60000,"i":"balao","linhas":["api: querem saber"],"motivo":"aviso"}
 {"t":60000,"i":"escalada","sid8":"s1","nivel":1,"espera":"pergunta","motivo":"aviso"}
 {"t":60000,"i":"base","estado":"waiting","prioridade":"esperando","sid8":"s1"}
 {"t":90000,"i":"escalada","sid8":"s1","nivel":2,"motivo":"tempo"}

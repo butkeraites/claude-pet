@@ -2746,7 +2746,7 @@ fn a_chamada_toca_na_l1_e_a_escalada_segue_o_aviso_mais_velho() {
         chamadas_desde(&motor, 2_000),
         vec![
             r#"{"i":"reacao","nome":"alert","motivo":"aviso","sid8":"sessao-a"}"#,
-            r#"{"i":"balao","linhas":["Ô, meu camarada!","api precisa de você"],"motivo":"aviso"}"#,
+            r#"{"i":"balao","linhas":["Bora, parceiro!","api precisa de você"],"motivo":"aviso"}"#,
             r#"{"i":"escalada","sid8":"sessao-a","nivel":1,"espera":"permissao","motivo":"aviso"}"#,
         ]
     );
@@ -3114,7 +3114,7 @@ fn o_tipo_refinado_troca_o_balao_sem_chamar_de_novo() {
     );
     assert_eq!(
         chamadas_desde(&motor, 2_030),
-        vec![r#"{"i":"balao","linhas":["api: pergunta pra você"],"motivo":"aviso_refinado"}"#]
+        vec![r#"{"i":"balao","linhas":["api: querem saber"],"motivo":"aviso_refinado"}"#]
     );
     assert_eq!(motor.nivel_da_escalada(), 1);
 }
