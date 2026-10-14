@@ -240,8 +240,8 @@ fn pergunta_e_pergunta_dupla_sao_um_aviso_so() {
             .collect();
         assert_eq!(baloes.len(), 1, "{nome}: um balão");
         assert!(
-            matches!(&baloes[0].tipo, Tipo::Balao { linhas, .. } if linhas[0].ends_with("pergunta pra você")),
-            "{nome}: o balão da pergunta"
+            matches!(&baloes[0].tipo, Tipo::Balao { linhas, .. } if linhas[0].contains("pergunta") || linhas[0].contains("saber")),
+            "{nome}: o balão da pergunta (uma das falas do banco, decisão 0123)"
         );
         let n = niveis(&linha);
         assert_eq!(
@@ -265,7 +265,7 @@ fn plano_lido_no_terminal_fica_em_l1() {
     assert!(so(&linha, "rajada").is_empty() && so(&linha, "voo").is_empty());
     assert!(matches!(
         &so(&linha, "balao")[0].tipo,
-        Tipo::Balao { linhas, .. } if linhas[0].starts_with("Plano pra aprovar!")
+        Tipo::Balao { linhas, .. } if linhas[0].to_lowercase().contains("plano")
     ));
 }
 
@@ -1373,13 +1373,14 @@ fn outro_dialogo_depois_da_volta_chama_como_no_pet_de_pe() {
     assert_eq!(restauracao(&linha), (1, 1, 0, None));
     assert_eq!(restauracao_extra(&linha), (true, Vec::new()));
     assert_eq!(chamadas(&linha), 2, "a da pergunta e a do Bash");
-    assert!(baloes(&linha).contains(&(
-        150_000,
-        vec![
-            "Ô, meu camarada!".to_owned(),
-            "api precisa de você".to_owned()
-        ]
-    )));
+    // O balão da chamada da permissão (uma das falas do banco, decisão 0123):
+    // duas linhas, a segunda com o projeto "api".
+    assert!(
+        baloes(&linha)
+            .iter()
+            .any(|(t, linhas)| *t == 150_000 && linhas.len() == 2 && linhas[1].contains("api")),
+        "o balão da permissão do Bash depois da volta"
+    );
     assert_eq!(
         niveis(&linha),
         vec![

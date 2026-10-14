@@ -1,11 +1,11 @@
 {"t":1000,"i":"base","estado":"thinking","prioridade":"pensando","sid8":"s1"}
 {"t":3000,"i":"selos","mais":1,"bandeiras":[],"corrente":false}
 {"t":10000,"i":"reacao","nome":"alert","motivo":"aviso","sid8":"s1"}
-{"t":10000,"i":"balao","linhas":["api: pergunta pra você"],"motivo":"aviso"}
+{"t":10000,"i":"balao","linhas":["api: tem pergunta!"],"motivo":"aviso"}
 {"t":10000,"i":"escalada","sid8":"s1","nivel":1,"espera":"pergunta","motivo":"aviso"}
 {"t":10000,"i":"base","estado":"waiting","prioridade":"esperando","sid8":"s1"}
 {"t":12000,"i":"reacao","nome":"alert","motivo":"aviso","sid8":"s2"}
-{"t":12000,"i":"balao","linhas":["Ô, meu camarada!","web precisa de você"],"motivo":"aviso"}
+{"t":12000,"i":"balao","linhas":["Psiu, chefia!","web tá te chamando"],"motivo":"aviso"}
 {"t":90000,"i":"escalada","sid8":"s1","nivel":1,"espera":"pergunta","motivo":"restaurada"}
 {"t":90000,"i":"restauracao","sessoes":2,"avisos":2,"velha":true}
 {"t":90000,"i":"base","estado":"waiting","prioridade":"esperando","sid8":"s1"}

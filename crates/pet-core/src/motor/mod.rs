@@ -1145,9 +1145,9 @@ impl Motor {
                 EstadoSessao::Erro => (
                     SUSTO,
                     "erro",
-                    balao::com_projeto(
-                        "Deu ruim...",
+                    balao::linhas_de_erro(
                         self.rotulo(&s.chave, s.proj.as_deref()).as_deref(),
+                        balao::variante(s.estado_desde_ms),
                     ),
                 ),
                 EstadoSessao::Cansado => (BOCEJO, "cansado", "Cansei...".to_owned()),
@@ -1393,7 +1393,11 @@ impl Motor {
                             c.espera = p.aviso.espera;
                         }
                         let nome = self.rotulo(&p.chave, p.proj.as_deref());
-                        let linhas = balao::linhas_da_espera(p.aviso.espera, nome.as_deref());
+                        let linhas = balao::linhas_da_espera(
+                            p.aviso.espera,
+                            nome.as_deref(),
+                            balao::variante(p.aviso.desde_ms),
+                        );
                         self.balao_decidido(linhas, "aviso_refinado", agora_ms);
                     }
                 }
@@ -1472,7 +1476,11 @@ impl Motor {
             },
         );
         let rotulo = self.rotulo(&p.chave, p.proj.as_deref());
-        let linhas = balao::linhas_da_espera(p.aviso.espera, rotulo.as_deref());
+        let linhas = balao::linhas_da_espera(
+            p.aviso.espera,
+            rotulo.as_deref(),
+            balao::variante(p.aviso.desde_ms),
+        );
         self.balao_decidido(linhas, "aviso", agora_ms);
         Some(Reacao {
             nome,

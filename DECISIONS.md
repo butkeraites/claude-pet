@@ -5518,3 +5518,31 @@ e barato.
 não mudaram, os cenários regeneraram com zero diff, e vale em qualquer skin e
 plataforma. (Faltam do T6.2: a moldura 9-slice, o banco de frases de malandro e o
 modo discreto.)
+
+## 0123 — Balões ricos (M6), terceira parte: o banco de frases de malandro (2026-10-14)
+
+As falas das chamadas e do erro eram fixas ("Ô, meu camarada!", "Deu ruim...").
+Para o Zeca soar mais vivo e malandro, cada uma ganha um **banco** de variantes,
+e a fala é escolhida por chamada. (Falta do T6.2 a moldura 9-slice e o modo
+discreto.)
+
+**Estável por chamada, não por quadro.** A variante vem de uma marca da própria
+fala (`balao::variante(marca)`): o `desde_ms` do aviso para a chamada, o
+`estado_desde_ms` da sessão para o erro. A mesma chamada mostra sempre a mesma
+fala (nada de piscar entre quadros, nem entre a L1 e o refino), e chamadas
+diferentes variam. Sem estado de RNG e reproduzível — nos cenários a marca é
+determinística, então os dourados ficam estáveis.
+
+**As falas.** Três variantes por tipo, a variante 0 sendo a fala de sempre (o
+banco é um superset, menos surpresa): pergunta ("pergunta pra você" / "tem
+pergunta!" / "querem saber"), plano ("Plano pra aprovar!" / "Aprova o plano?" /
+"Plano na mesa!"), permissão/elicitação ("Ô, meu camarada!" / "Psiu, chefia!" /
+"Bora, parceiro!", com o corpo "{proj} precisa de você" ou "tá te chamando") e o
+erro ("Deu ruim..." / "Xi, deu ruim..." / "Complicou aqui..."). Todas cabem no
+balão (≤ 36 caracteres, mesmo com o projeto longo cortado em 16) e só usam glifos
+da monogram — um teste cobre toda variante de todo tipo.
+
+**Dourados.** A fala entra na intenção `Balao` (decisão 0077), que é dourada:
+regenerados, 21 cenários mudaram **só** as linhas dos balões — nenhuma mudança de
+escalada, nível ou tempo (a lógica não depende da fala). Vale em qualquer skin e
+plataforma.
