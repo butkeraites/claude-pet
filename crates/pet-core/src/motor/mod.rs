@@ -3344,8 +3344,20 @@ impl Motor {
         if let Some(balao) = self.balao.as_ref().filter(|b| agora_ms < b.ate_ms)
             && let Some(corpo) = pet.toque_no_palco(&palco)
         {
-            let revelar = balao.revelar_em(agora_ms);
-            let escala = balao.escala_em(agora_ms);
+            // Modo discreto (decisão 0125): com a tela compartilhada ou o "não
+            // perturbe", o balão aparece sóbrio — inteiro de uma vez, sem o pop
+            // nem a datilografia, para não chamar atenção.
+            let discreto = self.tela.discreto || self.nao_perturbe;
+            let revelar = if discreto {
+                None
+            } else {
+                balao.revelar_em(agora_ms)
+            };
+            let escala = if discreto {
+                None
+            } else {
+                balao.escala_em(agora_ms)
+            };
             cena.extend(balao::elementos(
                 &balao.linhas,
                 corpo,
