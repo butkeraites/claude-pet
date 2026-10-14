@@ -1270,7 +1270,9 @@ fn clique_sem_pendencia_mostra_as_sessoes_num_balao_que_some_sozinho() {
         ]
     );
     janela.mostrou();
-    motor.evento_overlay(&mut janela, EventoOverlay::Redesenhar, 91_060);
+    // A datilografia revela o texto aos poucos (decisão 0121): meio segundo
+    // depois já há glifos na cena.
+    motor.evento_overlay(&mut janela, EventoOverlay::Redesenhar, 91_600);
     assert!(tem_glifos(&janela), "o texto na cena");
     // Some sozinho no prazo (base + uma linha por segundo).
     let ate = 91_050 + balao::BASE_MS + 2 * balao::POR_LINHA_MS;
@@ -2429,13 +2431,43 @@ fn dois_ligados() -> ((Motor, Falsa), (Motor, Falsa)) {
 }
 
 #[test]
-fn o_balao_custa_dois_quadros() {
-    let ((mut a, mut ja), (mut b, mut jb)) = dois_ligados();
-    let antes = ja.quadros();
-    a.mostrar_balao(Some(&mut ja), vec!["oi".into()], 1_000);
-    let com = ja.quadros() - antes + quadros_entre(&mut a, &mut ja, 1_000, 60_000).len();
-    let sem = quadros_entre(&mut b, &mut jb, 1_000, 60_000).len();
-    assert_eq!(com, sem + 2, "aparecer e sumir (decisão 0052)");
+fn o_balao_datilografa_num_surto_curto_e_some() {
+    // M6 (decisão 0121): o balão não custa mais só 2 quadros (decisão 0052); ele
+    // datilografa o texto numa rajada curta na grade de 34 ms e some sozinho.
+    let (mut motor, mut janela) = ligado();
+    janela.mostrou();
+    let frase = "ô, meu camarada!".to_owned();
+    let chars = frase.chars().count() as u64;
+    motor.mostrar_balao(Some(&mut janela), vec![frase], 1_000);
+    // Durante a datilografia (até ~chars*CHAR_MS), os quadros saem na grade de
+    // 34 ms — nunca dois a menos disso (decisão 0088) — e são poucos.
+    let fim_digita = 1_000 + chars * balao::CHAR_MS + 100;
+    let horas = quadros_entre(&mut motor, &mut janela, 1_000, fim_digita);
+    assert!(
+        horas.len() > 2,
+        "datilografa em vários quadros: {}",
+        horas.len()
+    );
+    assert!(
+        (horas.len() as u64) <= chars * balao::CHAR_MS / PASSO_CONFETE_MS + 4,
+        "rajada curta: {} quadros para {chars} chars",
+        horas.len()
+    );
+    assert!(
+        menor_intervalo(&horas) >= PASSO_CONFETE_MS,
+        "quadros a {} ms, abaixo de 34",
+        menor_intervalo(&horas)
+    );
+    // Já digitou tudo: a datilografia terminou (revela tudo).
+    assert_eq!(
+        motor
+            .balao(fim_digita)
+            .and_then(|b| b.revelar_em(fim_digita)),
+        None
+    );
+    // Some sozinho no prazo.
+    motor.vencer(&mut janela, 60_000);
+    assert_eq!(motor.painel(Some(&janela), 60_000).balao, None);
 }
 
 #[test]
@@ -4275,6 +4307,9 @@ fn skin_de_producao() -> Rc<Skin> {
 /// Renan no teclado (ou longe, `longe`) e fora de um terminal do Claude.
 fn ligado_com(skin: Rc<Skin>, tamanho: Tamanho, longe: bool) -> (Motor, Falsa) {
     let mut motor = Motor::novo(ConfigCerebro::default());
+    // O orçamento mede a animação base; as boas-vindas (que agora datilografam,
+    // decisão 0121) são um balão de estreia, conferido à parte.
+    motor.definir_boas_vindas(false);
     motor.definir_skin(Some(skin));
     motor.definir_tamanho(tamanho, None, 0);
     let mut janela = Falsa::default();

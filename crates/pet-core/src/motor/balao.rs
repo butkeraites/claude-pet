@@ -26,6 +26,10 @@ pub const MIN_PROJETO: usize = 6;
 pub const BASE_MS: u64 = 5_000;
 pub const POR_LINHA_MS: u64 = 1_000;
 pub const TETO_MS: u64 = 12_000;
+/// Datilografia (M6): quanto cada caractere demora a aparecer. O texto vai
+/// surgindo da esquerda para a direita, linha a linha; a moldura já vem inteira
+/// (decisão 0121). Na grade de 34 ms do desenho sai ~2 caracteres por quadro.
+pub const CHAR_MS: u64 = 16;
 
 /// Creme do fundo, a tinta da borda e do texto (BGRA pré-multiplicado,
 /// opacos).
@@ -58,10 +62,11 @@ const RABO: i32 = 2;
 /// Distância entre a ponta do rabinho e o corpo, e até a borda da área.
 const VAO: i32 = 1;
 
-/// Um balão na tela até `ate_ms`.
+/// Um balão na tela de `desde_ms` até `ate_ms`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Balao {
     pub linhas: Vec<String>,
+    pub desde_ms: u64,
     pub ate_ms: u64,
 }
 
@@ -80,8 +85,22 @@ impl Balao {
         let duracao = (BASE_MS + POR_LINHA_MS * linhas.len() as u64).min(TETO_MS);
         Balao {
             linhas,
+            desde_ms: agora_ms,
             ate_ms: agora_ms + duracao,
         }
+    }
+
+    /// Quantos caracteres cabem no total (contando os espaços, para o ritmo da
+    /// datilografia ficar parelho).
+    pub fn total_de_caracteres(&self) -> usize {
+        self.linhas.iter().map(|l| l.chars().count()).sum()
+    }
+
+    /// Quantos caracteres revelar agora na datilografia: `Some(n)` enquanto
+    /// digita, `None` quando já apareceu tudo (decisão 0121).
+    pub fn revelar_em(&self, agora_ms: u64) -> Option<usize> {
+        let passados = (agora_ms.saturating_sub(self.desde_ms) / CHAR_MS) as usize;
+        (passados < self.total_de_caracteres()).then_some(passados)
     }
 }
 
@@ -92,8 +111,16 @@ pub fn dt(d: i32) -> i32 {
 }
 
 /// Os elementos do balão com `linhas` sobre o `corpo` (no palco), preso na
-/// `area`, com pixel de fonte `dt`.
-pub fn elementos(linhas: &[String], corpo: Ret, area: Ret, dt: i32) -> Vec<Elemento> {
+/// `area`, com pixel de fonte `dt`. `revelar` é a datilografia: `Some(n)` mostra
+/// só os `n` primeiros caracteres (contando os espaços, em ordem de leitura);
+/// `None` mostra tudo. A moldura é sempre inteira (decisão 0121).
+pub fn elementos(
+    linhas: &[String],
+    corpo: Ret,
+    area: Ret,
+    dt: i32,
+    revelar: Option<usize>,
+) -> Vec<Elemento> {
     let dt = dt.max(1);
     let texto_w = linhas.iter().map(|l| fonte::largura(l)).max().unwrap_or(0);
     let texto_h = linhas.len() as i32 * ALTURA_LINHA;
@@ -138,11 +165,15 @@ pub fn elementos(linhas: &[String], corpo: Ret, area: Ret, dt: i32) -> Vec<Eleme
     bloco(tx + 1, r1, 1, 1, FUNDO);
     bloco(tx + 2, r1, 1, 1, TINTA);
     bloco(tx + 1, r2, 1, 1, TINTA);
-    // O texto.
+    // O texto, revelado da esquerda para a direita (a datilografia conta cada
+    // caractere, inclusive os espaços, para o ritmo ficar parelho).
+    let mut idx = 0usize;
     for (i, linha) in linhas.iter().enumerate() {
         let y = y0 + (1 + FOLGA_CIMA + i as i32 * ALTURA_LINHA) * dt;
         for (j, c) in linha.chars().enumerate() {
-            if c == ' ' {
+            let mostrar = revelar.is_none_or(|n| idx < n);
+            idx += 1;
+            if c == ' ' || !mostrar {
                 continue;
             }
             saida.push(Elemento::Glifo {
@@ -362,7 +393,7 @@ mod testes {
     fn em_cima_do_corpo_em_blocos_inteiros_e_dentro_da_area() {
         let corpo = Ret::novo(1_782, 1_062, 114, 114);
         let linhas = vec!["claude-pet: pensando (3 min)".to_owned()];
-        let e = elementos(&linhas, corpo, area(), 3);
+        let e = elementos(&linhas, corpo, area(), 3, None);
         let caixa = limites(&e);
         assert!(caixa.baixo() <= corpo.y, "em cima do corpo: {caixa:?}");
         assert!(
@@ -388,7 +419,7 @@ mod testes {
     #[test]
     fn sem_espaco_em_cima_vai_para_baixo_e_o_rabinho_vira() {
         let corpo = Ret::novo(100, 10, 114, 114);
-        let e = elementos(&["oi".to_owned()], corpo, area(), 3);
+        let e = elementos(&["oi".to_owned()], corpo, area(), 3, None);
         let caixa = limites(&e);
         assert!(caixa.y >= corpo.baixo(), "embaixo: {caixa:?}");
         // Encostado na esquerda: preso dentro da área.
@@ -398,6 +429,7 @@ mod testes {
             colado,
             area(),
             3,
+            None,
         ));
         assert!(caixa.x >= 0);
     }
@@ -416,6 +448,37 @@ mod testes {
         assert_eq!(dt(5), 3);
         assert_eq!(dt(8), 4);
         assert_eq!(dt(1), 1);
+    }
+
+    #[test]
+    fn datilografia_revela_da_esquerda_para_a_direita_e_depois_tudo() {
+        let b = Balao::novo(vec!["abc".to_owned(), "de".to_owned()], 1_000);
+        assert_eq!(b.total_de_caracteres(), 5);
+        // No começo, nada; depois, um a um (contando os espaços); no fim, tudo.
+        assert_eq!(b.revelar_em(1_000), Some(0));
+        assert_eq!(b.revelar_em(1_000 + CHAR_MS), Some(1));
+        assert_eq!(b.revelar_em(1_000 + 4 * CHAR_MS), Some(4));
+        assert_eq!(b.revelar_em(1_000 + 5 * CHAR_MS), None, "tudo revelado");
+        assert_eq!(b.revelar_em(10_000), None);
+        // A moldura é inteira desde o começo; só os glifos entram aos poucos.
+        let corpo = Ret::novo(900, 600, 60, 60);
+        let cheio = elementos(&b.linhas, corpo, area(), 3, None);
+        let vazio = elementos(&b.linhas, corpo, area(), 3, Some(0));
+        let so_dois = elementos(&b.linhas, corpo, area(), 3, Some(2));
+        let glifos = |e: &[Elemento]| {
+            e.iter()
+                .filter(|x| matches!(x, Elemento::Glifo { .. }))
+                .count()
+        };
+        let blocos = |e: &[Elemento]| {
+            e.iter()
+                .filter(|x| matches!(x, Elemento::Bloco { .. }))
+                .count()
+        };
+        assert_eq!(glifos(&cheio), 5, "a,b,c,d,e");
+        assert_eq!(glifos(&vazio), 0, "nenhum glifo ainda");
+        assert_eq!(glifos(&so_dois), 2, "só os dois primeiros");
+        assert_eq!(blocos(&vazio), blocos(&cheio), "a moldura já vem inteira");
     }
 
     #[test]

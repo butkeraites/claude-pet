@@ -5467,3 +5467,31 @@ volta ao estado do momento, como quando a proteção de tela do Omarchy fecha. A
 semântica de tempo da escalada é a mesma de sempre, multiplataforma; isto só liga
 o macOS ao caminho que o Linux já tinha. Linux intacto (o `Bloqueado` não é
 emitido lá): os dourados regeneraram com zero diff.
+
+## 0121 — Balões ricos (M6), primeira parte: a datilografia (2026-10-14)
+
+O balão era mínimo (decisão 0052): aparecia inteiro e sumia (2 quadros). O M6
+("o encanto") o deixa mais vivo. Começando pela parte mais visível e de menor
+risco — a **datilografia**: o texto surge caractere a caractere, da esquerda
+para a direita, linha a linha; a moldura já vem inteira. (A moldura 9-slice, o
+pop, o banco de frases de malandro e o modo discreto ficam para itens seguintes
+do T6.2.)
+
+**Blocos inteiros, sem escala.** A datilografia revela um prefixo do texto, não
+redimensiona nada: respeita o pixel art em blocos D×D (nada de escala
+fracionária). O `Balao` ganha `desde_ms`; `revelar_em(agora)` devolve quantos
+caracteres mostrar (contando os espaços, para o ritmo ficar parelho), ou `None`
+quando já apareceu tudo. O `balao::elementos` recebe `revelar: Option<usize>` e
+desenha só os glifos até ali. `CHAR_MS = 16` ms por caractere.
+
+**No orçamento.** A datilografia é uma rajada, como o voo e o confete: anda na
+grade de 34 ms (`PASSO_CONFETE_MS`) e **põe os outros prazos nela**, então nunca
+saem dois quadros a menos de 34 ms (decisão 0088). Enquanto digita, o próximo
+quadro é o tique seguinte da grade da base do balão; terminada a digitação, só o
+prazo de sumir. A rajada é curta (o tamanho do texto): um balão de ~16 chars
+digita em ~¼ s. Os testes de orçamento passaram a medir a animação base sem o
+balão de boas-vindas (que é de estreia, conferido à parte).
+
+**Núcleo e dourados.** Tudo no desenho (`pet-core`), que não entra nos dourados
+(decisão 0086): as intenções não mudaram, e os cenários regeneraram com zero
+diff. Vale em qualquer skin e em qualquer plataforma.
