@@ -4,7 +4,7 @@
 # ao lado dele:
 #
 #   <dir>\bichinho.exe                      o daemon
-#   <dir>\skin\zeca-livre-escuro\           a skin padrão CC0 já aprovada
+#   <dir>\skin\zeca-livre-escuro\           a skin padrão CC0 já aprovada (snapshot)
 #   <dir>\.claude-plugin\marketplace.json   o marketplace do plugin
 #   <dir>\plugin\                           o plugin do Claude Code
 #
@@ -44,10 +44,19 @@ if (-not (Test-Path $cfg)) {
     "[aparencia]`nskin = `"zeca-livre-escuro`"`ntamanho = `"pequeno`"`n" |
         Set-Content -NoNewline -Encoding ascii $cfg
 }
+# A skin vai para /state (cópia aprovada, aparece sem atrito) E para skins-fonte
+# (o PET_SKINS do launcher abaixo), para o `bin/pet skin-aprovar` funcionar
+# depois — sem o PET_SKINS dava 404 (decisão 0130).
+$skinSrc = Join-Path $DIR "skin\zeca-livre-escuro"
+$skinsFonte = Join-Path $base "skins-fonte"
 $skinDst = Join-Path $base "skins\zeca-livre-escuro"
+$skinFonteDst = Join-Path $skinsFonte "zeca-livre-escuro"
 New-Item -ItemType Directory -Force -Path (Split-Path $skinDst) | Out-Null
+New-Item -ItemType Directory -Force -Path $skinsFonte | Out-Null
 if (Test-Path $skinDst) { Remove-Item -Recurse -Force $skinDst }
-Copy-Item -Recurse -Force (Join-Path $DIR "skin\zeca-livre-escuro") $skinDst
+if (Test-Path $skinFonteDst) { Remove-Item -Recurse -Force $skinFonteDst }
+Copy-Item -Recurse -Force $skinSrc $skinDst
+Copy-Item -Recurse -Force $skinSrc $skinFonteDst
 
 # 4. sobe no login (chave Run) e agora, escondido (launcher .vbs, sem janela) -
 Passo "subindo o Zeca no login (chave Run)"
@@ -55,6 +64,7 @@ $vbs = Join-Path $bindir "iniciar.vbs"
 @"
 Set sh = CreateObject("WScript.Shell")
 sh.Environment("PROCESS")("PET_CONFIG") = "$base"
+sh.Environment("PROCESS")("PET_SKINS") = "$skinsFonte"
 sh.Run """$exe"" rodar", 0, False
 "@ | Set-Content -Encoding ascii $vbs
 $run = "wscript.exe `"$vbs`""

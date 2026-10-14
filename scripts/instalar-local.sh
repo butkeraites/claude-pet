@@ -5,7 +5,7 @@
 # artefatos ao lado dele:
 #
 #   <dir>/Bichinho.app/                     o app assinado (CI)
-#   <dir>/skin/zeca-livre-escuro/           a skin padrão CC0 já aprovada
+#   <dir>/skin/zeca-livre-escuro/           a skin padrão CC0 já aprovada (snapshot)
 #   <dir>/.claude-plugin/marketplace.json   o marketplace do plugin
 #   <dir>/plugin/                           o plugin do Claude Code
 #
@@ -46,12 +46,19 @@ case ":$PATH:" in
   *) info "atenção: $(dirname "$BIN_PATH") não está no seu PATH — acrescente ao shell" ;;
 esac
 
-# 3. config + a skin padrão JÁ APROVADA (sem precisar aprovar nada) --------
+# 3. config + a skin padrão (CC0), já aprovada e nas pastas da imagem -------
+# A skin vai para dois lugares: a cópia aprovada em /state (o pacote já traz o
+# `aprovacao.json`, então o Zeca aparece sem atrito) E `skins-fonte`, que é o
+# PET_SKINS do LaunchAgent abaixo. Sem o PET_SKINS, `bin/pet skin-aprovar` dava
+# 404 ("a imagem não tem a skin") — então não dava para trocar a arte nem trazer
+# a própria skin num Mac instalado por download (decisão 0130).
 passo "config e a skin padrão (Zeca, CC0)"
-mkdir -p "$SUP/skins"
+SKINS_FONTE="$SUP/skins-fonte"
+mkdir -p "$SUP/skins" "$SKINS_FONTE"
 [ -f "$SUP/bichinho.toml" ] || printf '[aparencia]\nskin = "zeca-livre-escuro"\ntamanho = "pequeno"\n' > "$SUP/bichinho.toml"
-rm -rf "$SUP/skins/zeca-livre-escuro"
+rm -rf "$SUP/skins/zeca-livre-escuro" "$SKINS_FONTE/zeca-livre-escuro"
 cp -R "$DIR/skin/zeca-livre-escuro" "$SUP/skins/zeca-livre-escuro"
+cp -R "$DIR/skin/zeca-livre-escuro" "$SKINS_FONTE/zeca-livre-escuro"
 
 # 4. o daemon sobe no login ------------------------------------------------
 passo "subindo o Zeca no login (LaunchAgent)"
@@ -65,7 +72,10 @@ cat > "$AGENTE" <<PLIST
   <key>ProgramArguments</key>
   <array><string>${APP_BIN}</string><string>rodar</string></array>
   <key>EnvironmentVariables</key>
-  <dict><key>PET_CONFIG</key><string>${SUP}</string></dict>
+  <dict>
+    <key>PET_CONFIG</key><string>${SUP}</string>
+    <key>PET_SKINS</key><string>${SKINS_FONTE}</string>
+  </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
   <key>ProcessType</key><string>Interactive</string>
