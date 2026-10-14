@@ -28,6 +28,10 @@ pub struct EstadoDesktop {
     pub ocioso: Option<bool>,
     /// A tela está sendo compartilhada (decisão 0076).
     pub compartilhando: bool,
+    /// A sessão está bloqueada / com o protetor de tela, onde isso é um estado
+    /// e não uma janela (macOS, Windows): conta como proteção de tela
+    /// (decisão 0120).
+    pub bloqueado: bool,
 }
 
 impl EstadoDesktop {
@@ -50,6 +54,7 @@ impl EstadoDesktop {
                     // discrição, na dúvida, é a tela (decisão 0081).
                     self.olhando_claude = false;
                     self.compartilhando = false;
+                    self.bloqueado = false;
                     self.anel.buraco(parede_ms);
                 }
             }
@@ -84,6 +89,7 @@ impl EstadoDesktop {
             EventoDesktop::Monitores => {}
             EventoDesktop::Ocioso(ocioso) => self.ocioso = Some(*ocioso),
             EventoDesktop::Compartilhando(compartilhando) => self.compartilhando = *compartilhando,
+            EventoDesktop::Bloqueado(bloqueado) => self.bloqueado = *bloqueado,
         }
         *self != antes
     }
@@ -104,15 +110,17 @@ impl EstadoDesktop {
             protocolos: info.protocolos,
             janelas: info.janelas,
             anel: self.anel.painel(),
-            protetor_de_tela: !self.protetor.is_empty(),
+            protetor_de_tela: self.protetor_ativo(),
+            bloqueado: self.bloqueado,
             ocioso: self.ocioso,
             compartilhando: self.compartilhando,
         }
     }
 
-    /// A proteção de tela está na tela.
+    /// A proteção de tela está na tela: uma janela de protetor (Linux) ou a
+    /// sessão bloqueada (macOS, Windows; decisão 0120).
     pub fn protetor_ativo(&self) -> bool {
-        !self.protetor.is_empty()
+        !self.protetor.is_empty() || self.bloqueado
     }
 }
 
@@ -134,8 +142,11 @@ pub struct PainelDesktop {
     pub janelas: usize,
     /// As últimas trocas de janela ativa: o endereço e a hora, nada mais.
     pub anel: Vec<PainelTroca>,
-    /// A proteção de tela está na tela (o pet se esconde).
+    /// A proteção de tela está na tela (o pet se esconde): janela de protetor
+    /// (Linux) ou sessão bloqueada (macOS/Windows).
     pub protetor_de_tela: bool,
+    /// A sessão está bloqueada (macOS/Windows; no Linux o protetor é janela).
+    pub bloqueado: bool,
     /// O Renan longe do teclado e do mouse (`null`: não se sabe).
     pub ocioso: Option<bool>,
     /// A tela está sendo compartilhada.
@@ -257,5 +268,37 @@ mod testes {
         assert!(d.aplicar(&EventoDesktop::Compartilhando(false), 40));
         let p = d.painel(CapDesktop::default(), InfoDesktop::default());
         assert!(!p.compartilhando);
+    }
+
+    #[test]
+    fn a_sessao_bloqueada_conta_como_protetor_de_tela() {
+        let mut d = EstadoDesktop::default();
+        assert!(!d.protetor_ativo());
+        // A sessão bloqueou (macOS/Windows): conta como proteção de tela.
+        assert!(d.aplicar(&EventoDesktop::Bloqueado(true), 0));
+        assert!(!d.aplicar(&EventoDesktop::Bloqueado(true), 1), "o mesmo");
+        assert!(d.protetor_ativo());
+        let p = d.painel(CapDesktop::default(), InfoDesktop::default());
+        assert!(p.protetor_de_tela, "protetor_de_tela cobre o bloqueio");
+        assert!(p.bloqueado);
+        // Desbloqueou: o pet pode voltar.
+        assert!(d.aplicar(&EventoDesktop::Bloqueado(false), 2));
+        assert!(!d.protetor_ativo());
+        // Uma janela de protetor e o bloqueio somam: fechar a janela não libera
+        // enquanto a sessão segue bloqueada.
+        d.aplicar(
+            &EventoDesktop::JanelaAbriu {
+                janela: Alca("p1".into()),
+                protetor: true,
+            },
+            3,
+        );
+        d.aplicar(&EventoDesktop::Bloqueado(true), 3);
+        assert!(d.protetor_ativo());
+        d.aplicar(&EventoDesktop::JanelaFechou(Alca("p1".into())), 4);
+        assert!(d.protetor_ativo(), "ainda bloqueada");
+        // A fonte caiu: o bloqueio deixa de valer (o que mudou no meio não veio).
+        d.aplicar(&EventoDesktop::Ligado(false), 5);
+        assert!(!d.bloqueado);
     }
 }

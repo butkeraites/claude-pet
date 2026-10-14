@@ -12,11 +12,15 @@
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use std::ffi::c_void;
+
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSApplication, NSApplicationActivationOptions, NSWorkspace};
 use objc2_application_services::AXUIElement;
-use objc2_core_foundation::CFRetained;
-use objc2_core_graphics::{CGEventSource, CGEventSourceStateID, CGEventType};
+use objc2_core_foundation::{CFRetained, CFString, kCFBooleanTrue};
+use objc2_core_graphics::{
+    CGEventSource, CGEventSourceStateID, CGEventType, CGSessionCopyCurrentDictionary,
+};
 
 use pet_core::motor::OCIOSO_MS;
 use pet_core::plataforma::{Alca, CapDesktop, Desktop, ErroFoco, EventoDesktop, InfoDesktop};
@@ -39,6 +43,9 @@ pub struct DesktopMac {
     /// O último estado de ociosidade emitido (`None` até a primeira leitura);
     /// só emite `Ocioso` nas transições, como o Wayland (decisão 0118).
     ocioso: Option<bool>,
+    /// O último estado de bloqueio emitido (`None` até a primeira leitura); só
+    /// emite `Bloqueado` nas transições (decisão 0120).
+    bloqueado: Option<bool>,
 }
 
 impl DesktopMac {
@@ -91,6 +98,19 @@ impl DesktopMac {
             self.ultimo = bundle;
         }
         self.emitir_ocioso();
+        self.emitir_bloqueado();
+    }
+
+    /// Emite `Bloqueado(true/false)` nas transições, lendo o estado da sessão do
+    /// macOS (`CGSSessionScreenIsLocked`). É uma leitura pura, sem pedir
+    /// permissão nenhuma e sem ver título de janela. A primeira leitura semeia o
+    /// estado atual, como o Wayland faz com o protetor (decisão 0120).
+    fn emitir_bloqueado(&mut self) {
+        let agora = sessao_bloqueada();
+        if self.bloqueado != Some(agora) {
+            self.bloqueado = Some(agora);
+            self.eventos.push(EventoDesktop::Bloqueado(agora));
+        }
     }
 
     /// Emite `Ocioso(true/false)` nas transições, a partir do tempo de
@@ -177,7 +197,12 @@ impl Desktop for DesktopMac {
         // "HID idle": o tempo de inatividade do CGEventSource (sempre vale no
         // macOS, sem pedir Acessibilidade); o análogo do `ext_idle_notifier_v1`
         // do Wayland.
-        let mut protocolos = vec!["NSWorkspace".to_owned(), "HID idle".to_owned()];
+        let mut protocolos = vec![
+            "NSWorkspace".to_owned(),
+            "HID idle".to_owned(),
+            // O protetor de tela pela sessão bloqueada (decisão 0120).
+            "cadeado".to_owned(),
+        ];
         if self.acc {
             protocolos.push("Acessibilidade".to_owned());
         }
@@ -214,4 +239,25 @@ fn segundos_sem_input() -> f64 {
         CGEventSourceStateID::HIDSystemState,
         CGEventType(0xFFFF_FFFF),
     )
+}
+
+/// A sessão está bloqueada (a tela de senha ou o protetor de tela na frente)?
+/// Lê o dicionário da sessão do CoreGraphics e a chave `CGSSessionScreenIsLocked`
+/// (um `CFBoolean` verdadeiro quando bloqueada; ausente caso contrário). Leitura
+/// pura, sem permissão nenhuma e sem título de janela (decisão 0120).
+fn sessao_bloqueada() -> bool {
+    let Some(dicionario) = CGSessionCopyCurrentDictionary() else {
+        return false;
+    };
+    let chave = CFString::from_str("CGSSessionScreenIsLocked");
+    // SAFETY: `value` lê o dicionário pela chave (uma CFString válida como
+    // ponteiro opaco); devolve o valor sem transferir posse, ou nulo se ausente.
+    let valor = unsafe { dicionario.value(&*chave as *const CFString as *const c_void) };
+    // O valor documentado é o singleton `kCFBooleanTrue` quando bloqueada;
+    // comparar o ponteiro evita interpretar um tipo errado: ausente (nulo) ou
+    // qualquer outra coisa conta como desbloqueada.
+    // SAFETY: ler o static constante `kCFBooleanTrue` do framework.
+    let verdadeiro = unsafe { kCFBooleanTrue }
+        .map_or(std::ptr::null(), |b| std::ptr::from_ref(b).cast::<c_void>());
+    !valor.is_null() && std::ptr::eq(valor, verdadeiro)
 }

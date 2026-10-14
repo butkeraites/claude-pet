@@ -183,6 +183,12 @@ pub enum EventoDesktop {
     /// Hyprland, o `screencast` do socket2). Depois de 2 s compartilhando,
     /// os balões perdem os nomes dos projetos (decisão 0076).
     Compartilhando(bool),
+    /// A sessão está bloqueada ou com o protetor de tela (`true`) ou voltou
+    /// (`false`). No Linux a proteção de tela é uma janela
+    /// (`JanelaAbriu`/`JanelaFechou`); no macOS e no Windows é um estado da
+    /// sessão (o `CGSSessionScreenIsLocked`, o `WTS_SESSION_LOCK`). Conta como
+    /// proteção de tela: o pet se esconde e não chama (decisão 0120).
+    Bloqueado(bool),
 }
 
 /// Os glifos com que o Claude Code começa o título do terminal: parado (✳) e
