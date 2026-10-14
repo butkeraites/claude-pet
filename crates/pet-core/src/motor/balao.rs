@@ -38,6 +38,9 @@ pub const POP_MS: u64 = 68;
 /// opacos).
 const FUNDO: [u8; 4] = [0xE3, 0xF1, 0xF7, 0xFF];
 const TINTA: [u8; 4] = [0x2A, 0x1B, 0x1D, 0xFF];
+/// O brilho interno do topo da moldura 9-slice (decisão 0124): um creme quase
+/// branco, dando um ar de adesivo. BGRA pré-multiplicado, opaco.
+const BRILHO: [u8; 4] = [0xF4, 0xFB, 0xFE, 0xFF];
 /// O vermelho do coração.
 const VERMELHO: [u8; 4] = [0x4F, 0x3B, 0xE2, 0xFF];
 
@@ -171,16 +174,26 @@ pub fn elementos(
             });
         }
     };
-    // Fundo e borda, com os cantos de um pixel cortados.
-    bloco(1, 1, w - 2, h - 2, FUNDO);
-    bloco(0, 1, 1, h - 2, TINTA);
-    bloco(w - 1, 1, 1, h - 2, TINTA);
-    // A borda do lado do rabinho tem um vão de 3 por onde ele sai.
+    // Moldura 9-slice (decisão 0124): fundo arredondado com cantos de 2px, um
+    // brilho de adesivo no topo interno, e a borda com os cantos diagonais.
     let (lado_rabo, outro_lado) = if acima { (h - 1, 0) } else { (0, h - 1) };
-    bloco(1, outro_lado, w - 2, 1, TINTA);
-    bloco(1, lado_rabo, tx - 1, 1, TINTA);
+    // Fundo: o brilho no topo interno, o miolo e a base interna (cantos de fora).
+    bloco(2, 1, w - 4, 1, BRILHO);
+    bloco(1, 2, w - 2, h - 4, FUNDO);
+    bloco(2, h - 2, w - 4, 1, FUNDO);
+    // Bordas laterais (sem os cantos).
+    bloco(0, 2, 1, h - 4, TINTA);
+    bloco(w - 1, 2, 1, h - 4, TINTA);
+    // Os quatro cantos diagonais arredondam em 2px.
+    bloco(1, 1, 1, 1, TINTA);
+    bloco(w - 2, 1, 1, 1, TINTA);
+    bloco(1, h - 2, 1, 1, TINTA);
+    bloco(w - 2, h - 2, 1, 1, TINTA);
+    // Borda de cima e de baixo (entre os cantos); a do rabinho tem um vão de 3.
+    bloco(2, outro_lado, w - 4, 1, TINTA);
+    bloco(2, lado_rabo, tx - 2, 1, TINTA);
     bloco(tx, lado_rabo, 3, 1, FUNDO);
-    bloco(tx + 3, lado_rabo, w - tx - 4, 1, TINTA);
+    bloco(tx + 3, lado_rabo, w - 5 - tx, 1, TINTA);
     // O rabinho: tinta, fundo, tinta; e a ponta.
     let (r1, r2) = if acima { (h, h + 1) } else { (-1, -2) };
     bloco(tx, r1, 1, 1, TINTA);
@@ -470,6 +483,35 @@ mod testes {
             y1 = y1.max(r.baixo());
         }
         Ret::novo(x0, y0, x1 - x0, y1 - y0)
+    }
+
+    #[test]
+    fn moldura_9slice_arredonda_os_cantos_e_tem_brilho() {
+        let corpo = Ret::novo(900, 700, 114, 114);
+        let e = elementos(&["ô, camarada".to_owned()], corpo, area(), 3, None, None);
+        let caixa = limites(&e);
+        let cobre = |px: i32, py: i32| {
+            e.iter().any(|el| {
+                matches!(*el, Elemento::Bloco { ret, .. }
+                    if ret.x <= px && px < ret.direita() && ret.y <= py && py < ret.baixo())
+            })
+        };
+        // Os quatro cantos de fora ficam vazios (arredondados em 2px).
+        assert!(!cobre(caixa.x, caixa.y), "canto superior esquerdo redondo");
+        assert!(
+            !cobre(caixa.direita() - 1, caixa.y),
+            "canto superior direito redondo"
+        );
+        assert!(
+            !cobre(caixa.x, caixa.baixo() - 1),
+            "canto inferior esquerdo redondo"
+        );
+        // Tem o brilho de adesivo no topo.
+        assert!(
+            e.iter()
+                .any(|el| matches!(el, Elemento::Bloco { cor, .. } if *cor == BRILHO)),
+            "o brilho do topo"
+        );
     }
 
     #[test]
