@@ -5495,3 +5495,26 @@ balão de boas-vindas (que é de estreia, conferido à parte).
 **Núcleo e dourados.** Tudo no desenho (`pet-core`), que não entra nos dourados
 (decisão 0086): as intenções não mudaram, e os cenários regeneraram com zero
 diff. Vale em qualquer skin e em qualquer plataforma.
+
+## 0122 — Balões ricos (M6), segunda parte: o pop de entrada (2026-10-14)
+
+Depois da datilografia (decisão 0121), o pop de entrada: o balão **cresce a
+partir do rabinho** (do lado do corpo, como se saísse da cabeça do Zeca) até o
+tamanho cheio, e só então datilografa. Dá vida à aparição sem depender de som.
+
+**Em blocos, do rabinho.** A moldura é desenhada e os blocos são escalados por
+`n/d` em torno da ponta do rabinho (o ponto perto do corpo): `escala_em(agora)`
+dá `Some((60,100))` e `Some((84,100))` em dois passos e depois `None` (cheio). É
+um surto transitório — como o confete e o voo movem pixels livremente, os blocos
+do pop podem sair da grade D×D por um átimo (a nitidez vale no repouso, decisão
+0004). Durante o pop não há texto: a `revelar_em` só começa a contar depois do
+`POP_MS` (68 ms), então o pop vem primeiro e a datilografia depois.
+
+**No orçamento.** O pop é parte da mesma rajada da datilografia: anda na grade de
+34 ms e põe os outros prazos nela (decisão 0088), em dois quadros (~68 ms). Curto
+e barato.
+
+**Núcleo e dourados.** Tudo no desenho (`pet-core`, decisão 0086): as intenções
+não mudaram, os cenários regeneraram com zero diff, e vale em qualquer skin e
+plataforma. (Faltam do T6.2: a moldura 9-slice, o banco de frases de malandro e o
+modo discreto.)
