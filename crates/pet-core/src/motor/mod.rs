@@ -3337,14 +3337,17 @@ impl Motor {
             && let Some(corpo) = pet.toque_no_palco(&palco)
         {
             let revelar = balao.revelar_em(agora_ms);
+            let escala = balao.escala_em(agora_ms);
             cena.extend(balao::elementos(
                 &balao.linhas,
                 corpo,
                 palco.area,
                 balao::dt(palco.d),
                 revelar,
+                escala,
             ));
-            let prazo = if revelar.is_some() {
+            // Enquanto cresce (pop) ou digita, anda na grade da base do balão.
+            let prazo = if escala.is_some() || revelar.is_some() {
                 digitando_desde = Some(balao.desde_ms);
                 agora_ms + 1
             } else {
