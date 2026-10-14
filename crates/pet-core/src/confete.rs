@@ -48,6 +48,14 @@ pub struct Pedaco {
     pub vi: i32,
     pub vj: i32,
     pub cor: [u8; 4],
+    /// Tamanho em pixels de arte (variado nas festas; o mini-sim do M6,
+    /// decisão 0126). Na chuva de estresse todos têm o lado da chuva.
+    pub lado: i32,
+    /// Velocidade do giro (0 = sem girar): o pedaço "tomba", a altura oscilando
+    /// entre cheio (de frente) e 1 (de lado).
+    pub giro: i32,
+    /// Passos vividos: alimenta o giro e o esmaecer (fade).
+    pub idade: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,6 +121,9 @@ impl Chuva {
                     vi,
                     vj,
                     cor: CORES[n % CORES.len()],
+                    lado,
+                    giro: 0,
+                    idade: 0,
                 }
             })
             .collect();
@@ -163,6 +174,27 @@ impl Chuva {
 
 /// Velocidade de queda máxima da fonte, em pixels de arte por passo.
 const QUEDA_MAX: i32 = 4;
+/// Mini-sim do M6 (decisão 0126): a cada tantos passos o arrasto tira um da
+/// velocidade horizontal (o pedaço vai ficando mais vertical ao cair).
+const ARRASTO_CADA: u64 = 4;
+
+/// A altura do pedaço que gira, em pixels de arte: de `lado` (de frente) a 1
+/// (de lado), num vaivém triangular. Sem giro ou com lado 1, fica `lado`. O
+/// confete segue opaco (a nitidez pede blocos opacos, decisão 0004); o esmaecer
+/// fica para quando essa regra for revista.
+fn altura_do_giro(lado: i32, giro: i32, idade: u32) -> i32 {
+    if lado <= 1 || giro <= 0 {
+        return lado;
+    }
+    let periodo = (12 / giro).max(2);
+    let fase = (idade as i32) % (periodo * 2);
+    let t = if fase < periodo {
+        fase
+    } else {
+        periodo * 2 - fase
+    };
+    (lado - t * (lado - 1) / periodo).clamp(1, lado)
+}
 
 /// O confete de uma festa: pedaços que caem, na grade de arte do pet.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -191,13 +223,17 @@ impl Festa {
     ) -> Festa {
         let mut festa = Festa::vazia(tela, grade, lado, true);
         let mut estado = semente | 1;
+        let lado_max = festa.lado;
         festa.pedacos = (0..quantos)
             .map(|n| Pedaco {
                 i: origem.0 + entre(&mut estado, -2, 2),
-                j: origem.1 - festa.lado,
+                j: origem.1 - lado_max,
                 vi: entre(&mut estado, -2, 2),
                 vj: entre(&mut estado, -6, -4),
                 cor: CORES[n % CORES.len()],
+                lado: entre(&mut estado, 1, lado_max),
+                giro: entre(&mut estado, 0, 3),
+                idade: 0,
             })
             .collect();
         festa
@@ -210,13 +246,17 @@ impl Festa {
         let mut estado = semente | 1;
         let (i0, i1) = festa.faixa_i;
         let topo = festa.faixa_j.0;
+        let lado_max = festa.lado;
         festa.pedacos = (0..quantos)
             .map(|n| Pedaco {
                 i: entre(&mut estado, i0, i1),
-                j: topo - entre(&mut estado, festa.lado, 60),
+                j: topo - entre(&mut estado, lado_max, 60),
                 vi: entre(&mut estado, -1, 1),
                 vj: entre(&mut estado, 3, 5),
                 cor: CORES[n % CORES.len()],
+                lado: entre(&mut estado, 1, lado_max),
+                giro: entre(&mut estado, 0, 3),
+                idade: 0,
             })
             .collect();
         festa
@@ -245,12 +285,19 @@ impl Festa {
     pub fn passo(&mut self) {
         self.passos += 1;
         let acelera = self.gravidade && self.passos % 2 == 0;
+        let arrasta = self.passos % ARRASTO_CADA == 0;
         let (fi, fj) = (self.faixa_i, self.faixa_j);
         for p in &mut self.pedacos {
+            p.idade += 1;
             p.i += p.vi;
             p.j += p.vj;
             if acelera {
                 p.vj = (p.vj + 1).min(QUEDA_MAX);
+            }
+            // Arrasto: a velocidade horizontal cede aos poucos (o pedaço cai
+            // mais reto com o tempo; decisão 0126).
+            if arrasta && p.vi != 0 {
+                p.vi -= p.vi.signum();
             }
         }
         self.pedacos
@@ -269,14 +316,18 @@ impl Festa {
         self.pedacos.iter().filter(move |p| p.j >= fj.0)
     }
 
-    /// O pedaço em pixels do monitor.
+    /// O pedaço em pixels do monitor, com o tamanho dele e o giro (a altura
+    /// oscila; o canto desce para manter o pedaço centrado). Na grade de arte.
     pub fn retangulo(&self, p: &Pedaco) -> Ret {
         let g = self.grade;
+        let lado = p.lado.clamp(1, self.lado);
+        let alt = altura_do_giro(lado, p.giro, p.idade);
+        let desloc = (lado - alt) / 2;
         Ret::novo(
             g.x + p.i * g.d,
-            g.y + p.j * g.d,
-            self.lado * g.d,
-            self.lado * g.d,
+            g.y + (p.j + desloc) * g.d,
+            lado * g.d,
+            alt * g.d,
         )
     }
 
@@ -338,6 +389,9 @@ mod testes {
             vi: 2,
             vj: 0,
             cor: [0, 0, 0, 255],
+            lado: 1,
+            giro: 0,
+            idade: 0,
         };
         // 100 px de tela, pedaço de 5: i vai até 19.
         c.passo();
@@ -364,7 +418,10 @@ mod testes {
                 let r = f.retangulo(p);
                 assert_eq!(r.intersecao(&tela), Some(r), "{p:?} fora da tela");
                 assert_eq!(((r.x - grade.x) % 4, (r.y - grade.y) % 4), (0, 0));
-                assert_eq!((r.w, r.h), (8, 8));
+                // Tamanho variado e giro (o M6, decisão 0126): largura até o lado
+                // da fonte, altura até a largura, tudo na grade e dentro da tela.
+                assert!(r.w % 4 == 0 && (4..=2 * 4).contains(&r.w), "{r:?}");
+                assert!(r.h % 4 == 0 && r.h >= 4 && r.h <= r.w, "{r:?}");
             }
             subiu |= f.pedacos.iter().any(|p| p.j < 11 - 10);
             f.passo();
@@ -374,6 +431,39 @@ mod testes {
         assert!(subiu, "sobe antes de cair");
         assert!((15..=80).contains(&passos), "{passos} passos");
         assert_eq!(f.elementos().count(), 0);
+    }
+
+    #[test]
+    fn o_mini_sim_varia_tamanho_gira_e_esmaece() {
+        // Tamanho variado: numa festa há mais de um lado de pedaço (decisão 0126).
+        let grade = Grade {
+            x: 1_700,
+            y: 976,
+            d: 4,
+        };
+        let f = Festa::chuva(40, (1920, 1200), grade, 3, 7);
+        let lados: std::collections::BTreeSet<_> = f.pedacos.iter().map(|p| p.lado).collect();
+        assert!(lados.len() >= 2, "tamanhos variados: {lados:?}");
+        assert!(
+            lados.iter().all(|l| (1..=3).contains(l)),
+            "até o lado da chuva"
+        );
+        // Giro: a altura vaivém entre cheio (de frente) e 1 (de lado).
+        assert_eq!(altura_do_giro(3, 0, 10), 3, "sem giro, cheio");
+        assert_eq!(altura_do_giro(1, 2, 10), 1, "lado 1 não gira");
+        let alturas: std::collections::BTreeSet<_> =
+            (0..24).map(|t| altura_do_giro(3, 2, t)).collect();
+        assert!(
+            alturas.contains(&3) && alturas.contains(&1),
+            "gira: {alturas:?}"
+        );
+        assert!(alturas.iter().all(|a| (1..=3).contains(a)));
+        // O confete segue opaco (a nitidez pede opaco; o esmaecer fica para
+        // quando essa regra for revista, decisão 0126).
+        assert!(
+            f.elementos()
+                .all(|e| matches!(e, Elemento::Bloco { cor, .. } if cor[3] == 255))
+        );
     }
 
     #[test]

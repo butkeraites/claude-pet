@@ -4167,7 +4167,10 @@ fn a_festa_t2_solta_a_fonte_e_a_t3_a_chuva_a_ate_30_quadros_por_segundo() {
             (0, 0),
             "na grade de D"
         );
-        assert_eq!((r.w, r.h), (2 * 5, 2 * 5));
+        // Tamanho variado e giro (o mini-sim do M6, decisão 0126): largura até o
+        // lado da fonte, altura até a largura, tudo na grade de D.
+        assert!(r.w % 5 == 0 && (5..=2 * 5).contains(&r.w), "{r:?}");
+        assert!(r.h % 5 == 0 && r.h >= 5 && r.h <= r.w, "{r:?}");
     }
     // Anda de 100 em 100 ms: os quadros nunca a menos de 34 ms, e o confete
     // acaba em menos de 4,5 s.
