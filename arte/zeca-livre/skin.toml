@@ -22,7 +22,7 @@ escala_padrao = 3
 pe = [26, 45]
 # Tags com os pés no chão (o lint confere a linha dos pés em todos os quadros delas).
 chao = [
-  "respira", "ginga", "blink", "peck", "nod", "chirp", "wave", "work_session", "yawn",
+  "respira", "ginga", "blink", "olhar", "peck", "nod", "chirp", "wave", "work_session", "yawn",
   "sleep", "wake",
 ]
 
@@ -34,11 +34,10 @@ nome = "Zeca (tema escuro, com anel)"
 # primeiro quadro da primeira tag é a pose fixa e as rajadas do repouso tocam as tags em
 # ordem; nas reações, toca a primeira tag do estado uma vez e volta à pose.
 [estados]
-# parado: a pose neutra e, com pelo menos 4 s entre elas, uma respirada, uma piscada e a
-# ginga (~16 s por ciclo e ~0,95 commit/s; a ginga a cada ~16 s, dentro dos 8-20 s do
-# manifesto). O respira não toca em laço: a 3,6 commits/s estouraria o orçamento de 2/s
-# parado (decisão 0005).
-idle = ["respira", "blink", "ginga"]
+# parado: a pose neutra e, com pelo menos 4 s entre elas, uma respirada, uma piscada, a
+# ginga e um olhar em volta (o rodízio do repouso, decisão 0127). O respira não toca em
+# laço: a 3,6 commits/s estouraria o orçamento de 2/s parado (decisão 0005).
+idle = ["respira", "blink", "ginga", "olhar"]
 # trabalhando: debruça e dá o passo, bate na tecla e endireita (como reação toca uma vez;
 # o trabalho segurado em laço é do M6).
 working = ["work_session"]
@@ -97,6 +96,11 @@ partes = [{ anim = "idle", quadros = [0, 3] }]
 nome = "blink"
 nota = "repouso: pisca"
 partes = [{ anim = "blink" }]
+
+[[tag]]
+nome = "olhar"
+nota = "repouso: olha em volta (vira a cabeça pra esquerda, pausa, pra direita, volta)"
+partes = [{ anim = "look" }]
 
 [[tag]]
 nome = "ginga"

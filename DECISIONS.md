@@ -5611,3 +5611,29 @@ confete segue opaco; o fade volta quando a regra de nitidez separar "opaco" de
 repintura; o `redesenho.rs` depende dela). Nada disso entra nas intenções
 (decisão 0086): dourados com zero diff. Vale em qualquer skin e plataforma. (O
 `poof` de trocar de monitor — o outro alvo do T6.3 — fica para um item próprio.)
+
+## 0127 — Variedade parada (M6, T6.4): o "olhar em volta" do Zeca original (2026-10-14)
+
+O repouso do Zeca original já tinha variedade (o rodízio respira / piscar / ginga,
+decisão 0092). Faltava o "**olhar em volta**": uma animação nova no gerador
+`arte/zeca-livre/zeca.py` (`ANIMS['look']`) em que o Zeca vira a cabeça para a
+esquerda (olho meio-cerrado, o chapéu atrasa), segura, passa pelo centro, vira
+para a direita, segura, e volta ao neutro — com os pés no chão. Vira a tag `olhar`
+na receita `skin.toml`, entra no rodízio do `idle` (respira / piscar / ginga /
+olhar) e na lista de tags "no chão".
+
+**Arte do gerador, reaprovação do Renan.** Como toda arte do Zeca original, a
+animação se faz no gerador (nunca à mão nos PNGs) e as skins se refazem por
+`bin/pet skin-livre` (reprodutível: o `cargo xtask zeca-livre --conferir` passa).
+Mudar a arte muda a impressão digital da skin (`zeca-livre-escuro`:
+`165852bd…` → `5838479b…`), então **o Renan reaprova** (decisões 0026 e 0029; o
+Claude nunca aprova por ele). Na produção do Mac a skin vive em
+`~/Library/Application Support/bichinho/skins/`; trocar a arte lá faz o Zeca se
+esconder até o `bin/pet skin-aprovar zeca-livre-escuro` do Renan.
+
+**Núcleo intacto.** `olhar` é uma tag (não um estado do catálogo), então o
+`pet_core` não muda — o animador já toca o rodízio das tags do `idle`
+(data-driven). As variantes de paleta `azul`/`fogo` (exemplos de README,
+recolors manuais do `recolorir.py`) ficaram sem o `olhar` por ora. Visível no
+Mac (o Zeca é a janelinha que anda): o olhar aparece na tela, ao contrário dos
+efeitos de tela cheia.
