@@ -5546,3 +5546,22 @@ da monogram — um teste cobre toda variante de todo tipo.
 regenerados, 21 cenários mudaram **só** as linhas dos balões — nenhuma mudança de
 escalada, nível ou tempo (a lógica não depende da fala). Vale em qualquer skin e
 plataforma.
+
+## 0124 — Balões ricos (M6), quarta parte: a moldura 9-slice (2026-10-14)
+
+A moldura do balão era um retângulo de borda de 1px com os cantos cortados em
+1px. Para um molde mais bonito e encorpado (o "9-slice" do M6), ela ganha
+**cantos arredondados de 2px** (bolha mais macia) e um **brilho de adesivo** no
+topo interno (uma linha creme quase branca, `BRILHO`). Fecha o movimento que a
+datilografia (0121) e o pop (0122) já deram.
+
+**Sem mudar a caixa, baixo risco.** O molde novo cabe na mesma largura e altura
+de antes (o texto e o rabinho não mudam de lugar): os cantos de fora ficam vazios
+(a borda de cima/baixo vai de `2` a `w-2`, as laterais de `2` a `h-2`, com quatro
+pixels diagonais arredondando), e o brilho ocupa a primeira linha interna do
+fundo. Tudo opaco e em blocos D×D — a sombra translúcida (o raster compõe "over")
+fica para um ajuste posterior, se quiser.
+
+**Núcleo e dourados.** É só desenho (`pet-core`, decisão 0086): a moldura não
+entra nas intenções, então os dourados não mudaram (zero diff). Vale em qualquer
+skin e plataforma. (Falta do T6.2 só o modo discreto.)
