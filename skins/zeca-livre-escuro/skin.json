@@ -8,6 +8,7 @@
     "respira",
     "ginga",
     "blink",
+    "olhar",
     "peck",
     "nod",
     "chirp",
@@ -51,7 +52,8 @@
     "idle": [
       "respira",
       "blink",
-      "ginga"
+      "ginga",
+      "olhar"
     ],
     "land": [
       "landing"

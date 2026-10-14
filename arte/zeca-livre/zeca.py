@@ -1131,6 +1131,20 @@ ANIMS['blink'] = [
     F(60, eye='EYE_HALF'),
     F(500),
 ]
+# -- olhar em volta: vira a cabeca para a esquerda (o olho meio-cerrado, o chapeu atrasa),
+#    segura, passa pelo centro, vira para a direita, segura, e volta ao neutro.  Variacao do
+#    ocioso, como o piscar; os pes ficam no chao.
+ANIMS['look'] = [
+    F(360),
+    F(140, head_d=(-1, 0), hat_d=(0, 1)),
+    F(480, head_d=(-2, 0), hat_d=(-1, 1), eye='EYE_HALF'),
+    F(160, head_d=(-1, 0), hat_d=(0, 1)),
+    F(160),
+    F(140, head_d=(1, 0), hat_d=(0, 1)),
+    F(480, head_d=(2, 0), hat_d=(1, 1), eye='EYE_HALF'),
+    F(160, head_d=(1, 0), hat_d=(0, 1)),
+    F(320),
+]
 # -- piar: notas saem a 2 px do bico e sobem na mesma coluna
 ANIMS['chirp'] = [
     F(260),
@@ -1543,7 +1557,7 @@ def check_all(verbose=True):
 # ================================================================ exportar ==
 DARK, LIGHT = '#0B0C16', '#EFF1F5'
 RING_COLORS = dict(PALETTE, Q=RING)
-KEY = {'idle': 8, 'blink': 2, 'chirp': 4, 'peck': 4, 'hop': 4, 'fly': 0, 'scared': 3, 'sleep': 2, 'attention': 3, 'work': 1,
+KEY = {'idle': 8, 'blink': 2, 'look': 2, 'chirp': 4, 'peck': 4, 'hop': 4, 'fly': 0, 'scared': 3, 'sleep': 2, 'attention': 3, 'work': 1,
        'nod': 1, 'wave': 1, 'yawn': 2, 'wake': 3, 'work_in': 0, 'work_out': 0, 'sleep_in': 1, 'sleep_out': 1,
        'attention_in': 0, 'attention_out': 0, 'takeoff': 2, 'landing': 1, 'perched': 0}
 LOOPS = {'idle', 'fly', 'sleep', 'attention', 'work', 'perched'}
@@ -1557,7 +1571,7 @@ TRANSITIONS = {'work': {'entrar': 'work_in', 'sair': 'work_out'},
                'sleep': {'entrar': 'sleep_in', 'sair': 'sleep_out'},
                'attention': {'entrar': 'attention_in', 'sair': 'attention_out'},
                'fly': {'entrar': 'takeoff', 'sair': 'landing'}}
-TITLES = {'idle': 'idle (ginga)', 'blink': 'piscar', 'chirp': 'piar', 'peck': 'bicar / comer', 'hop': 'pulo / comemorar',
+TITLES = {'idle': 'idle (ginga)', 'blink': 'piscar', 'look': 'olhar em volta', 'chirp': 'piar', 'peck': 'bicar / comer', 'hop': 'pulo / comemorar',
           'fly': 'voar', 'scared': 'susto', 'sleep': 'dormir', 'attention': 'chamar atenção', 'work': 'trabalhando',
           'nod': 'aceno (tirada de chapéu)', 'wave': 'tchau (asa)', 'yawn': 'bocejo', 'wake': 'acordar (espreguiça)',
           'work_in': 'entrar no trabalho', 'work_out': 'sair do trabalho', 'sleep_in': 'adormecer',
@@ -1597,6 +1611,7 @@ def manifest():
             'work': 'Claude Code executando (o estado mais visto)', 'attention': 'pedindo permissao / esperando resposta',
             'hop': 'tarefa concluida', 'scared': 'erro ou falha de teste', 'sleep': 'ocioso por muito tempo',
             'chirp': 'notificacao / saudacao', 'peck': 'variacao do ocioso', 'blink': 'variacao do ocioso',
+            'look': 'variacao do ocioso (olha em volta)',
             'fly': 'entrando ou saindo da tela', 'idle': 'parado',
             'nod': 'resposta sem trabalho (aceno discreto)', 'wave': 'tchau / aceno', 'yawn': 'cansado, comeco da soneca',
             'wake': 'fim da soneca', 'perched': 'escondido no galho (arrastado ate o poleiro)',

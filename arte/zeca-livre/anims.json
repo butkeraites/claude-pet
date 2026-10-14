@@ -55,6 +55,7 @@
   "chirp": "notificacao / saudacao",
   "peck": "variacao do ocioso",
   "blink": "variacao do ocioso",
+  "look": "variacao do ocioso (olha em volta)",
   "fly": "entrando ou saindo da tela",
   "idle": "parado",
   "nod": "resposta sem trabalho (aceno discreto)",
@@ -188,6 +189,57 @@
      "arquivo": "frames/blink_04.png",
      "escuro": "frames/escuro/blink_04.png",
      "ms": 500
+    }
+   ]
+  },
+  "look": {
+   "titulo": "olhar em volta",
+   "loop": false,
+   "quadros": [
+    {
+     "arquivo": "frames/look_00.png",
+     "escuro": "frames/escuro/look_00.png",
+     "ms": 360
+    },
+    {
+     "arquivo": "frames/look_01.png",
+     "escuro": "frames/escuro/look_01.png",
+     "ms": 140
+    },
+    {
+     "arquivo": "frames/look_02.png",
+     "escuro": "frames/escuro/look_02.png",
+     "ms": 480
+    },
+    {
+     "arquivo": "frames/look_03.png",
+     "escuro": "frames/escuro/look_03.png",
+     "ms": 160
+    },
+    {
+     "arquivo": "frames/look_04.png",
+     "escuro": "frames/escuro/look_04.png",
+     "ms": 160
+    },
+    {
+     "arquivo": "frames/look_05.png",
+     "escuro": "frames/escuro/look_05.png",
+     "ms": 140
+    },
+    {
+     "arquivo": "frames/look_06.png",
+     "escuro": "frames/escuro/look_06.png",
+     "ms": 480
+    },
+    {
+     "arquivo": "frames/look_07.png",
+     "escuro": "frames/escuro/look_07.png",
+     "ms": 160
+    },
+    {
+     "arquivo": "frames/look_08.png",
+     "escuro": "frames/escuro/look_08.png",
+     "ms": 320
     }
    ]
   },
