@@ -9,8 +9,9 @@
 /// Um quadro do quique: 34 ms, a grade das rajadas (decisão 0088).
 pub const PASSO_MS: u64 = 34;
 /// O deslocamento vertical de cada quadro, em **pixels de arte** (negativo =
-/// para cima): o pet repica e assenta. O último é 0 (pousado).
-const QUIQUE: [i32; 5] = [-2, -3, -2, -1, 0];
+/// para cima): o pet repica alto, desce, dá um repique menor e assenta (um
+/// duplo quique, bem perceptível). O último é 0 (pousado).
+const QUIQUE: [i32; 7] = [-4, -7, -5, -1, -3, -1, 0];
 
 /// Quanto o quique dura, do soltar até assentar.
 pub const QUIQUE_MS: u64 = QUIQUE.len() as u64 * PASSO_MS;
@@ -27,18 +28,28 @@ mod testes {
 
     #[test]
     fn o_quique_repica_para_cima_e_assenta() {
-        // Começa subindo, chega ao pico e amortece até 0; depois, nada.
-        assert_eq!(quique_offset_d(0), Some(-2));
-        assert_eq!(quique_offset_d(PASSO_MS), Some(-3), "o pico");
-        assert_eq!(quique_offset_d(3 * PASSO_MS), Some(-1));
-        assert_eq!(quique_offset_d(4 * PASSO_MS), Some(0), "assentou");
+        // Começa subindo, tem um pico, e termina pousado (0); depois, nada.
+        assert!(quique_offset_d(0).unwrap() < 0, "começa subindo");
         assert_eq!(quique_offset_d(QUIQUE_MS), None, "acabou");
         assert_eq!(quique_offset_d(10_000), None);
-        // Só sobe (nunca desce abaixo do pouso) e amortece (o pico não volta).
         let seq: Vec<i32> = (0..QUIQUE.len() as u64)
             .map(|i| quique_offset_d(i * PASSO_MS).unwrap())
             .collect();
+        // Só sobe (nunca abaixo do pouso), tem um pico nítido e assenta no 0.
         assert!(seq.iter().all(|&o| o <= 0), "só para cima: {seq:?}");
+        assert!(
+            seq.iter().min().unwrap() <= &-5,
+            "pico bem visível: {seq:?}"
+        );
         assert_eq!(*seq.last().unwrap(), 0, "termina pousado");
+        // Duplo quique: depois de descer, torna a subir um pouco (segundo pico).
+        let vale = seq
+            .iter()
+            .position(|&o| o == *seq.iter().min().unwrap())
+            .unwrap();
+        assert!(
+            seq[vale..].windows(2).any(|w| w[1] < w[0]),
+            "um segundo repique: {seq:?}"
+        );
     }
 }

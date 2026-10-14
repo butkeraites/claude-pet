@@ -5647,10 +5647,12 @@ próprios; a poeira é partícula de tela, que espera o palco transitório do M8
 
 **Em passos de D, nítido.** A célula do pet é sempre múltipla de D (até
 arrastando, `arraste::alvo` usa `em_multiplos`), então o quique também anda em
-passos de D (`motor::fisica`, tabela `[-2, -3, -2, -1, 0]` pixels de arte, só
-para cima): a pose fica nítida (decisão 0004) e o repique tem a cara chunky do
-pixel art. Anda na grade de 34 ms das rajadas (decisão 0088) e é curto
-(`QUIQUE_MS` = 170 ms).
+passos de D (`motor::fisica`, tabela de deslocamentos verticais em pixels de
+arte, só para cima): a pose fica nítida (decisão 0004) e o repique tem a cara
+chunky do pixel art. Anda na grade de 34 ms das rajadas (decisão 0088). A
+conferência ao vivo no Mac pediu mais: a tabela virou um **duplo quique**
+(`[-4, -7, -5, -1, -3, -1, 0]` — sobe alto, desce, repica menor e assenta;
+`QUIQUE_MS` ≈ 238 ms), bem perceptível.
 
 **No Motor.** Um campo `quique` (a célula de pouso, o início e o próximo quadro)
 nasce no soltar normal (não no galho nem ao viajar para outro monitor); o
