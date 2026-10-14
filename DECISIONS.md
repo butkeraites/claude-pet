@@ -5585,3 +5585,29 @@ Os dourados não mudaram (zero diff). No macOS o gatilho do compartilhamento ain
 não é detectado (é o sinal do Hyprland, decisão 0081); lá o modo discreto vale
 pelo "não perturbe" (o `dnd` dos hooks), e o resto do gatilho entra quando o
 compartilhamento for detectado nos outros sistemas.
+
+## 0126 — Partículas de verdade (M6, T6.3): o confete das festas ganha um mini-sim (2026-10-14)
+
+O confete da festa (decisão 0085) era uniforme: pedaços todos do mesmo lado, com
+gravidade de dois passos. O M6 o troca por um **mini-sim** mais vivo, no
+`confete::Festa` (a fonte do T2 e a chuva do T3): **tamanho variado** (cada pedaço
+sorteia o lado em `[1, lado]`), **giro** (a altura vaivém entre cheio "de frente"
+e 1 "de lado", `altura_do_giro`, dando o tombo do confete), e **arrasto** (a
+velocidade horizontal cede aos poucos, `ARRASTO_CADA`, e o pedaço cai mais reto).
+
+**Na grade e determinístico.** Tudo segue em pixels de arte na grade D×D (decisão
+0004): o lado e a altura do giro são inteiros, o canto desce para centrar o
+pedaço ao tombar, e o sorteio é o mesmo xorshift semeado (reprodutível). O
+orçamento não muda (a mesma grade de 34 ms, decisão 0088; a mesma contagem de
+pedaços e de passos — o arrasto não muda quando o pedaço sai da tela).
+
+**Opaco por enquanto; o fade fica.** O quarto item do mini-sim — o **esmaecer**
+(fade) — pediria confete translúcido, mas a nitidez exige blocos opacos (a
+conferência `conferir_nitidez`, decisão 0004). Em vez de afrouxar essa guarda, o
+confete segue opaco; o fade volta quando a regra de nitidez separar "opaco" de
+"na grade" (alinhamento é a nitidez; alfa é outro eixo).
+
+**Só desenho.** A `Chuva` do teste de estresse segue uniforme (ela mede custo de
+repintura; o `redesenho.rs` depende dela). Nada disso entra nas intenções
+(decisão 0086): dourados com zero diff. Vale em qualquer skin e plataforma. (O
+`poof` de trocar de monitor — o outro alvo do T6.3 — fica para um item próprio.)
