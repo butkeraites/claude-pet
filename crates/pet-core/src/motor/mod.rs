@@ -32,6 +32,7 @@ pub mod arraste;
 pub mod balao;
 mod desktop;
 pub mod escalada;
+pub mod fisica;
 pub mod galho;
 pub mod intencoes;
 pub mod janelas;
@@ -329,6 +330,15 @@ struct Focando {
     ate_ms: u64,
 }
 
+/// O quique do pet ao ser solto (M6, decisão 0128): a célula de pouso (onde ele
+/// assenta no fim), quando o repique começou e o próximo quadro dele.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Quique {
+    base: (i32, i32),
+    inicio_ms: u64,
+    proxima_ms: u64,
+}
+
 /// O confete de uma festa na tela (decisão 0085): os pedaços andam um passo a
 /// cada [`PASSO_CONFETE_MS`], contados do começo.
 #[derive(Debug, Clone)]
@@ -439,6 +449,9 @@ pub struct Motor {
     /// o Motor deriva da janela ativa ser a de uma sessão viva (decisão 0119).
     /// Ligado pelo laço a partir de [`CapDesktop::olhando_por_titulo`].
     deriva_olhando: bool,
+    /// O quique do pet ao ser solto (M6, decisão 0128): a célula de pouso e
+    /// quando começou; o repique vertical anda até assentar.
+    quique: Option<Quique>,
     /// As boas-vindas e a dica de silêncio estão ligadas
     /// (`comportamento.boas_vindas`, decisão 0117).
     boas_vindas_ligado: bool,
@@ -559,6 +572,7 @@ impl Motor {
             // Padrão: o desktop conta pelo título (Linux); o laço desliga onde
             // não conta (macOS, Windows), e aí o Motor deriva (decisão 0119).
             deriva_olhando: false,
+            quique: None,
             boas_vindas_ligado: true,
             marcos: Marcos::default(),
             marcos_novos: false,
@@ -2117,6 +2131,7 @@ impl Motor {
         self.estresse = None;
         self.commits = Commits::default();
         self.proximo_quadro = None;
+        self.quique = None;
         self.armar_boas_vindas(agora_ms);
     }
 
@@ -2137,6 +2152,7 @@ impl Motor {
         self.ausente_desde = None;
         self.balao = None;
         self.arraste.cancelar();
+        self.quique = None;
         // Idem ao [`Self::conectou`]: o arraste no meio sai, o escondido no
         // galho fica (decisão 0116).
         if self.galho.poleiro_na_tela() {
@@ -2532,10 +2548,15 @@ impl Motor {
     fn aplicar_gesto(&mut self, punho: &mut dyn Punho, gesto: Gesto, agora_ms: u64) {
         match gesto {
             Gesto::Nada => {}
-            Gesto::Apertou => punho.janela().cursor(Cursor::Agarrar),
+            Gesto::Apertou => {
+                // Pegou o pet de novo: um quique em curso para (decisão 0128).
+                self.quique = None;
+                punho.janela().cursor(Cursor::Agarrar);
+            }
             Gesto::Comecou => {
                 self.balao = None;
                 self.coracao_ate = None;
+                self.quique = None;
                 // Pegou o pet no meio do voo: o voo acaba onde ele está, e o
                 // arraste segue dali (decisão 0084).
                 self.cancelar_voo(false, agora_ms);
@@ -2591,7 +2612,17 @@ impl Motor {
                         }
                         self.comecar_viagem(ov, Some(pouso), agora_ms);
                     }
-                    None => self.pousar(ov, agora_ms),
+                    None => {
+                        self.pousar(ov, agora_ms);
+                        // O quique: o pet repica ao assentar (M6, decisão 0128).
+                        if let Some(palco) = self.palco {
+                            self.quique = Some(Quique {
+                                base: (palco.x, palco.y),
+                                inicio_ms: agora_ms,
+                                proxima_ms: agora_ms,
+                            });
+                        }
+                    }
                 }
             }
             Gesto::Cancelou => self.pousar(punho.janela(), agora_ms),
@@ -2625,6 +2656,34 @@ impl Motor {
         palco.x = x;
         palco.y = y;
         mudou
+    }
+
+    /// Um quadro do quique (M6, decisão 0128): põe a célula em `base` mais o
+    /// repique vertical do momento (em passos de D, para a pose ficar nítida) e
+    /// assenta no fim. `true` se a célula mudou (pede redesenho).
+    fn vencer_quique(&mut self, agora_ms: u64) -> bool {
+        let Some(mut q) = self.quique else {
+            return false;
+        };
+        if agora_ms < q.proxima_ms {
+            return false;
+        }
+        let Some(d) = self.palco.map(|p| p.d) else {
+            self.quique = None;
+            return false;
+        };
+        match fisica::quique_offset_d(agora_ms.saturating_sub(q.inicio_ms)) {
+            Some(off) => {
+                let quadro = (agora_ms - q.inicio_ms) / fisica::PASSO_MS;
+                q.proxima_ms = q.inicio_ms + (quadro + 1) * fisica::PASSO_MS;
+                self.quique = Some(q);
+                self.mover_para((q.base.0, q.base.1 + off * d))
+            }
+            None => {
+                self.quique = None;
+                self.mover_para(q.base)
+            }
+        }
     }
 
     /// O arraste acabou (soltou ou o fail-safe): o cursor volta, o pet larga
@@ -3472,6 +3531,10 @@ impl Motor {
     pub fn vencer(&mut self, punho: &mut dyn Punho, agora_ms: u64) {
         let gesto = self.arraste.vencer(agora_ms);
         self.aplicar_gesto(punho, gesto, agora_ms);
+        // O quique do pet solto (decisão 0128): move a célula e redesenha.
+        if self.vencer_quique(agora_ms) {
+            self.desenhar(punho.janela(), agora_ms, false);
+        }
         // A sequência do pet pousado no galho: tchau, poof e sumir (decisão 0116).
         match self.vencer_galho(agora_ms) {
             PassoGalho::Escondeu => self.aplicar_visibilidade(punho.janela(), agora_ms),
@@ -3529,6 +3592,10 @@ impl Motor {
         if self.arraste.vencer(agora_ms) != Gesto::Nada {
             self.arraste.cancelar();
         }
+        // O quique assenta na hora sem janela (como a 0059): nada de prazo preso.
+        if let Some(q) = self.quique.take() {
+            self.mover_para(q.base);
+        }
         // Sem janela, não há para onde viajar: o prazo de conferir o foco
         // sai, e a camada nova (com output NULL) nasce no monitor em foco.
         self.seguir.decidir(agora_ms, None, false);
@@ -3567,6 +3634,7 @@ impl Motor {
             self.galho_tchau_ms,
             self.boas_vindas_ms,
             self.dica_sem_sinal_ms,
+            self.quique.map(|q| q.proxima_ms),
         ]
         .into_iter()
         .flatten()

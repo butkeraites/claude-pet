@@ -5637,3 +5637,25 @@ esconder até o `bin/pet skin-aprovar zeca-livre-escuro` do Renan.
 recolors manuais do `recolorir.py`) ficaram sem o `olhar` por ora. Visível no
 Mac (o Zeca é a janelinha que anda): o olhar aparece na tela, ao contrário dos
 efeitos de tela cheia.
+
+## 0128 — Física do arraste (M6, T6.4/T6.6): o quique ao soltar (2026-10-14)
+
+Primeira parte da física do arraste: o **quique**. Ao soltar o pet no mesmo
+monitor, ele dá um repique vertical curto e amortecido antes de assentar — dá o
+"peso" do pouso. (O pêndulo ao pendurar e a poeira do pouso ficam para itens
+próprios; a poeira é partícula de tela, que espera o palco transitório do M8.)
+
+**Em passos de D, nítido.** A célula do pet é sempre múltipla de D (até
+arrastando, `arraste::alvo` usa `em_multiplos`), então o quique também anda em
+passos de D (`motor::fisica`, tabela `[-2, -3, -2, -1, 0]` pixels de arte, só
+para cima): a pose fica nítida (decisão 0004) e o repique tem a cara chunky do
+pixel art. Anda na grade de 34 ms das rajadas (decisão 0088) e é curto
+(`QUIQUE_MS` = 170 ms).
+
+**No Motor.** Um campo `quique` (a célula de pouso, o início e o próximo quadro)
+nasce no soltar normal (não no galho nem ao viajar para outro monitor); o
+`vencer` move a célula para `base + repique` a cada quadro e assenta na `base` no
+fim; o `proximo_prazo` inclui o próximo quadro; o `vencer_sem_conexao` assenta na
+hora (como a 0059, nada de prazo preso); um novo aperto/arraste ou uma janela
+nova cancelam o quique. Nada de novo nas intenções (decisão 0086): dourados com
+zero diff. Visível no Mac (o pet repica onde você soltar).

@@ -2595,16 +2595,44 @@ fn o_arraste_faz_commits_no_ritmo_do_ponteiro_e_para_ao_soltar() {
         "no máximo um quadro por movimento: {}",
         janela.quadros() - antes
     );
-    // Depois do pouso, só o repouso: até 2 commits por segundo em média.
+    // Depois do pouso, só o repouso: até 2 commits por segundo em média. O
+    // pouso agora inclui o quique (o repique curto ao assentar, decisão 0128),
+    // uma rajada limitada.
     let depois = quadros_entre(&mut motor, &mut janela, 1_900, 61_900);
     let pouso = depois.iter().filter(|&&t| t < 3_900).count();
     let repouso = depois.len() - pouso;
-    assert!(pouso <= 5, "o pouso: {pouso} quadros");
+    assert!(pouso <= 10, "o pouso (com o quique): {pouso} quadros");
     assert!(
         repouso as u64 <= 58 * animador::COMMITS_POR_S_PARADO,
         "{repouso} quadros em 58 s"
     );
     assert!(motor.arraste.prazo().is_none(), "nada do arraste armado");
+}
+
+#[test]
+fn o_quique_repica_ao_soltar_e_assenta_na_celula() {
+    // Ao soltar o pet, ele repica para cima e assenta na célula de pouso
+    // (M6, decisão 0128), em passos de D (pose nítida).
+    let (mut motor, mut janela) = ligado();
+    janela.mostrou();
+    let (x, y) = meio_do_corpo(&janela);
+    ponteiro(&mut motor, &mut janela, apertou(x, y), 1_000);
+    ponteiro(&mut motor, &mut janela, moveu(x + 80, y), 1_050);
+    janela.mostrou();
+    ponteiro(&mut motor, &mut janela, soltou(x + 80, y), 1_100);
+    assert!(motor.quique.is_some(), "o quique começou ao soltar");
+    let base_y = motor.palco.unwrap().y;
+    let d = motor.palco.unwrap().d;
+    // O primeiro quadro repica para cima, em passo de D.
+    motor.vencer(&mut janela, 1_100);
+    let subiu = motor.palco.unwrap().y;
+    assert!(subiu < base_y, "repica para cima: {subiu} < {base_y}");
+    assert_eq!((base_y - subiu) % d, 0, "em passos de D");
+    // No fim, assenta exatamente na célula de pouso e o quique acaba.
+    motor.vencer(&mut janela, 1_100 + fisica::QUIQUE_MS);
+    assert_eq!(motor.palco.unwrap().y, base_y, "assentou na base");
+    assert!(motor.quique.is_none(), "o quique acabou");
+    assert!(motor.proximo_prazo().is_none() || motor.quique.is_none());
 }
 
 // --- a origem do prompt e a janela da sessão (decisão 0073) ---------------
