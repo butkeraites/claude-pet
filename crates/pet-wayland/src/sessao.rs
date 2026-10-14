@@ -704,6 +704,9 @@ impl Desktop for Sessao {
             janela_ativa: mapeia,
             foca_janela: mapeia && self.assentos.seats().next().is_some(),
             nao_perturbe: false,
+            // O `activewindow` do Hyprland diz pelo título se é um terminal do
+            // Claude (decisão 0092): o Motor usa esse sinal, não deriva.
+            olhando_por_titulo: true,
         }
     }
 

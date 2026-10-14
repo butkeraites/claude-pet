@@ -908,6 +908,73 @@ fn escondido_no_galho_um_done_traz_de_volta() {
     assert!(motor.quer_mostrar());
 }
 
+#[test]
+fn olhando_claude_deriva_da_janela_da_sessao_sem_titulo() {
+    // macOS/Windows: o desktop não conta "olhando o Claude" pelo título
+    // (terminais de UI própria o escondem). O Motor deriva da janela ativa ser
+    // a de uma sessão viva (decisão 0119).
+    let (mut motor, janela) = ligado();
+    motor.acertar_relogio(em(0));
+    ligar_desktop(&mut motor, 0);
+    // Uma sessão cujo terminal é a janela "f00d01".
+    ativou(&mut motor, Some("f00d01"), 1_000);
+    prompt_em(&mut motor, "s1", "api", 2_000);
+    // Sem derivar (Linux conta pelo título): sem evento de título, é falso
+    // mesmo com o terminal da sessão em foco.
+    assert!(
+        !motor.painel(Some(&janela), 3_000).desktop.olhando_claude,
+        "sem derivar, só o título conta"
+    );
+    // Derivando (macOS/Windows): o terminal da sessão em foco é olhar o Claude.
+    motor.definir_deriva_olhando(true);
+    assert!(
+        motor.painel(Some(&janela), 3_100).desktop.olhando_claude,
+        "a janela ativa é a da sessão"
+    );
+    // Uma janela que não é de sessão nenhuma: não é olhar o Claude.
+    ativou(&mut motor, Some("f00d99"), 4_000);
+    assert!(
+        !motor.painel(Some(&janela), 5_000).desktop.olhando_claude,
+        "janela sem sessão"
+    );
+}
+
+#[test]
+fn escondido_no_galho_focar_a_sessao_traz_de_volta_sem_titulo() {
+    // No macOS/Windows a volta do galho pelo foco vem da janela da sessão, não
+    // do título (decisão 0119).
+    let (mut motor, mut janela) = ligado();
+    motor.acertar_relogio(em(0));
+    motor.definir_deriva_olhando(true);
+    ligar_desktop(&mut motor, 0);
+    olhando(&mut motor, false, 0);
+    ocioso(&mut motor, false, 0);
+    janela.mostrou();
+    // Uma sessão cujo terminal é "f00d01"; o foco está noutra janela.
+    ativou(&mut motor, Some("f00d01"), 300);
+    prompt_em(&mut motor, "s1", "api", 400);
+    ativou(&mut motor, Some("f00d99"), 500);
+    // Esconde no galho.
+    let (x, y) = meio_do_corpo(&janela);
+    ponteiro(&mut motor, &mut janela, apertou(x, y), 1_000);
+    ponteiro(&mut motor, &mut janela, moveu(x - 100, y), 1_010);
+    let (zx, zy) = centro_do_poleiro(&motor);
+    ponteiro(&mut motor, &mut janela, soltou(zx, zy), 1_100);
+    motor.vencer(&mut janela, 1_100 + galho::POUSANDO_MS + 1_000);
+    assert_eq!(motor.galho(), "escondido");
+    // Focar uma janela que não é de sessão nenhuma não traz de volta.
+    ativou(&mut motor, Some("f00d99"), 5_000);
+    assert_eq!(motor.galho(), "escondido", "janela sem sessão não traz");
+    // Focar o terminal da sessão traz o pet de volta.
+    ativou(&mut motor, Some("f00d01"), 6_000);
+    assert_eq!(
+        motor.galho(),
+        "nenhum",
+        "o terminal da sessão traz de volta"
+    );
+    assert!(motor.quer_mostrar());
+}
+
 // --- seguir o monitor ativo (decisão 0051) ----------------------------------
 
 fn hdmi() -> Monitor {

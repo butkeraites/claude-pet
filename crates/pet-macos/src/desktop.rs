@@ -124,6 +124,10 @@ impl Desktop for DesktopMac {
             janela_ativa: true,
             foca_janela: true,
             nao_perturbe: false,
+            // Terminais de UI própria (Orca, Warp…) escondem o título do shell
+            // da Acessibilidade: não dá para ler "é o Claude" pelo título. O
+            // Motor deriva da janela ativa ser a de uma sessão (decisão 0119).
+            olhando_por_titulo: false,
         }
     }
 

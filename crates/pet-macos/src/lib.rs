@@ -69,6 +69,9 @@ pub fn cap_desktop() -> CapDesktop {
         foca_janela: true,
         // O "não perturbe"/Focus do macOS fica para depois.
         nao_perturbe: false,
+        // Terminais de UI própria escondem o título: o Motor deriva o "olhando
+        // o Claude" da janela da sessão (decisão 0119).
+        olhando_por_titulo: false,
     }
 }
 
