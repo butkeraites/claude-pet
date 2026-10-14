@@ -5681,3 +5681,31 @@ nasce no `Gesto::Comecou`; o `vencer` avança o quadro e reaplica o alvo; o
 acorda o laço); soltar, um novo pegar, o esconder, a janela nova/fechada e o
 `vencer_sem_conexao` o limpam. Nada nas intenções (decisão 0086): dourados com
 zero diff. Visível no Mac (o pet bambeia ao ser pego).
+
+## 0130 — Instaladores de download definem PET_SKINS (reaprovar skin no download) (2026-10-14)
+
+Os instaladores de download (`scripts/instalar-local.sh` no macOS,
+`instalar-local-linux.sh`, `instalar-local.ps1`) punham a skin padrão só como
+**cópia aprovada em /state** (com o `aprovacao.json` do pacote) e definiam só
+`PET_CONFIG` — sem `PET_SKINS`. O Zeca aparecia sem atrito, mas o daemon não tinha
+"pasta de imagem" de skins: `bin/pet skin-aprovar` dava **404** ("a imagem não tem
+a skin"). Ou seja, num Mac/Linux/Windows instalado por download não dava para
+**trocar a arte** (reaprovar) nem **trazer a própria skin** — justo a promessa
+"traga seu sprite" do lançamento. (O `scripts/instalar.sh`, do repo, já fazia
+certo.)
+
+**Conserto.** Além da cópia aprovada em /state (que fica, para a estreia sem
+atrito), os três instaladores agora copiam a skin para `skins-fonte` e apontam
+`PET_SKINS` para lá no serviço de autostart (LaunchAgent no macOS, unit do
+`systemd --user` no Linux, launcher `.vbs` no Windows). Com isso o daemon acha a
+skin como "imagem", e o `skin-aprovar` funciona (o mesmo caminho do
+`instalar.sh`). O default de `PET_SKINS` no `pet_core` é um caminho de contêiner
+(`/opt/bichinho/...`), que não existe nessas instalações — por isso precisa ser
+explícito.
+
+Provado ao vivo: a produção do Mac do Renan (instalada sem `PET_SKINS`) deu o 404
+na troca de arte do "olhar em volta" (decisão 0127); pôr `skins-fonte` +
+`PET_SKINS` no LaunchAgent fez o `skin-aprovar` funcionar. Plists/serviços antigos
+(pré-conserto) precisam do `PET_SKINS` acrescentado à mão; novas instalações já
+vêm certas. Os CIs `linux-instalar`/`windows-instalar` seguem verdes (a cópia
+aprovada em /state mantém `tela: ativa`).

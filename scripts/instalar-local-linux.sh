@@ -5,7 +5,7 @@
 # lado dele:
 #
 #   <dir>/bichinho                          o daemon (musl estático)
-#   <dir>/skin/zeca-livre-escuro/           a skin padrão CC0 já aprovada
+#   <dir>/skin/zeca-livre-escuro/           a skin padrão CC0 já aprovada (snapshot)
 #   <dir>/.claude-plugin/ , <dir>/plugin/   o plugin do Claude Code
 #
 # Precisa de Hyprland (Wayland com layer-shell). Não-interativo.
@@ -54,12 +54,17 @@ case ":$PATH:" in
   *) info "atenção: $(dirname "$BIN_PATH") não está no seu PATH — acrescente ao shell" ;;
 esac
 
-# 3. config + a skin padrão JÁ APROVADA (snapshot em <estado>/skins/<id>) --
+# 3. config + a skin padrão (CC0): já aprovada em /state E em skins-fonte -----
+# Como no macOS (decisão 0130): a cópia aprovada em /state faz o Zeca aparecer
+# sem atrito, e `skins-fonte` (o PET_SKINS do serviço abaixo) deixa o
+# `bin/pet skin-aprovar` funcionar depois (trocar a arte, trazer a sua skin).
 passo "config e a skin padrão (Zeca, CC0)"
-mkdir -p "$SUP/skins"
+SKINS_FONTE="$SUP/skins-fonte"
+mkdir -p "$SUP/skins" "$SKINS_FONTE"
 [ -f "$SUP/bichinho.toml" ] || printf '[aparencia]\nskin = "zeca-livre-escuro"\ntamanho = "pequeno"\n' > "$SUP/bichinho.toml"
-rm -rf "$SUP/skins/zeca-livre-escuro"
+rm -rf "$SUP/skins/zeca-livre-escuro" "$SKINS_FONTE/zeca-livre-escuro"
 cp -R "$DIR/skin/zeca-livre-escuro" "$SUP/skins/zeca-livre-escuro"
+cp -R "$DIR/skin/zeca-livre-escuro" "$SKINS_FONTE/zeca-livre-escuro"
 
 # 4. autostart no login (systemd --user) e sobe agora ---------------------
 passo "subindo o Zeca no login (systemd --user)"
@@ -73,6 +78,7 @@ After=graphical-session.target
 [Service]
 ExecStart=${APP_BIN} rodar
 Environment=PET_CONFIG=${SUP}
+Environment=PET_SKINS=${SKINS_FONTE}
 Restart=on-failure
 RestartSec=2
 
@@ -87,7 +93,7 @@ if ! esperar_pet; then
   # sem systemd --user acessível (ou sessão gráfica) — sobe em segundo plano;
   # o autostart no próximo login fica pelo serviço gravado.
   info "subindo em segundo plano (o autostart no login fica pelo serviço)"
-  PET_CONFIG="$SUP" "$APP_BIN" rodar >/dev/null 2>&1 &
+  PET_CONFIG="$SUP" PET_SKINS="$SKINS_FONTE" "$APP_BIN" rodar >/dev/null 2>&1 &
   esperar_pet || true
 fi
 if esperar_pet; then info "o Zeca está no ar em $URL"; else info "o Zeca ainda não respondeu (sobe no próximo login)"; fi
