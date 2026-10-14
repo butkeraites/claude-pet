@@ -3478,6 +3478,38 @@ fn o_t3_que_ninguem_viu_nao_gasta_o_intervalo() {
 }
 
 #[test]
+fn no_modo_discreto_o_balao_aparece_sobrio_sem_pop_nem_datilografia() {
+    // Com a tela compartilhada (a discrição ligada), o balão aparece inteiro de
+    // uma vez — sem o pop nem a datilografia, para não chamar atenção
+    // (decisão 0125). Fora da discrição, ele datilografa (começa vazio).
+    let (mut motor, mut janela) = ligado();
+    motor.acertar_relogio(em(0));
+    olhando(&mut motor, false, 0);
+    ocioso(&mut motor, false, 0);
+    janela.mostrou();
+    // Fora da discrição: no instante da aparição, ainda não há texto (digitando).
+    motor.mostrar_balao(Some(&mut janela), vec!["ô, camarada".into()], 1_000);
+    assert!(
+        !tem_glifos(&janela),
+        "fora da discrição, datilografa (começa vazio)"
+    );
+    // Liga a discrição (tela compartilhada por mais de 2 s).
+    compartilhar(&mut motor, true, 2_000);
+    andar(&mut motor, 5_000);
+    assert!(
+        motor.painel(None, 5_000).fotografia.discricao,
+        "discrição ligada"
+    );
+    janela.mostrou();
+    // Agora o balão aparece sóbrio: o texto inteiro já no instante da aparição.
+    motor.mostrar_balao(Some(&mut janela), vec!["ô, camarada".into()], 5_000);
+    assert!(
+        tem_glifos(&janela),
+        "no modo discreto, o texto aparece inteiro de uma vez"
+    );
+}
+
+#[test]
 fn a_tela_compartilhada_e_discreta_como_o_nao_perturbe() {
     // Com a tela sendo vista por outros (a discrição ligada), nada passa da
     // L1 e nada voa: nem a escalada, nem a festa (decisões 0010 e 0091).

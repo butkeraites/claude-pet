@@ -5565,3 +5565,23 @@ fica para um ajuste posterior, se quiser.
 **Núcleo e dourados.** É só desenho (`pet-core`, decisão 0086): a moldura não
 entra nas intenções, então os dourados não mudaram (zero diff). Vale em qualquer
 skin e plataforma. (Falta do T6.2 só o modo discreto.)
+
+## 0125 — Balões ricos (M6), quinta parte: o modo discreto (2026-10-14)
+
+Fecha o T6.2. Com a tela compartilhada (a discrição, decisão 0081) ou o "não
+perturbe" ligado, o balão não deve chamar atenção: aparece **sóbrio, inteiro de
+uma vez**, sem o pop (0122) nem a datilografia (0121). Soma-se ao que a discrição
+já fazia — anonimizar os projetos como "sessão N" (decisão 0076) e segurar os
+voos e a escalada (nada acima da L1).
+
+**Onde.** No desenho do balão, quando `tela.discreto || nao_perturbe`, o Motor
+passa `revelar: None` e `escala: None` para o `balao::elementos` — o texto todo e
+a moldura cheia no primeiro quadro, sem surto na grade. Fora da discrição, o pop e
+a datilografia seguem como nos itens anteriores.
+
+**Núcleo e dourados.** Só desenho (`pet-core`, decisão 0086): a decisão de mostrar
+o balão e o texto dele (a intenção `Balao`) não muda — só a animação da aparição.
+Os dourados não mudaram (zero diff). No macOS o gatilho do compartilhamento ainda
+não é detectado (é o sinal do Hyprland, decisão 0081); lá o modo discreto vale
+pelo "não perturbe" (o `dnd` dos hooks), e o resto do gatilho entra quando o
+compartilhamento for detectado nos outros sistemas.
