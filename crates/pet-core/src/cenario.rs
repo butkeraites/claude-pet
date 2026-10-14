@@ -8,8 +8,8 @@
 //! - `{"t": 1200, "evento": {…}}`: um evento do fio v1, como o hook manda
 //!   (`v` é opcional; o `ts`, se houver, também é relativo);
 //! - `{"t": 5000, "desktop": {"ocioso": true}}`: um evento do desktop
-//!   (`ocioso`, `olhando_claude`, `protetor`, `compartilhando`, `ligado`,
-//!   `janela_ativa` com o id da janela ou `null`, `monitor`);
+//!   (`ocioso`, `olhando_claude`, `protetor`, `bloqueado`, `compartilhando`,
+//!   `ligado`, `janela_ativa` com o id da janela ou `null`, `monitor`);
 //! - `{"t": 9000, "clique": "esquerdo"}` (ou `"direito"`);
 //! - `{"t": 90000, "reinicio": {"parado_ms": 20000}}`: o pet para (grava a
 //!   memória das sessões, como no SIGTERM; decisão 0093), fica fora do ar
@@ -118,6 +118,7 @@ pub enum Desktop {
     Ocioso(bool),
     OlhandoClaude(bool),
     Protetor(bool),
+    Bloqueado(bool),
     Compartilhando(bool),
     Ligado(bool),
     JanelaAtiva(Option<String>),
@@ -300,6 +301,7 @@ fn passo(objeto: &Map<String, Value>, padrao: &Map<String, Value>) -> Result<Pas
                 "ocioso" => Desktop::Ocioso(booleano()?),
                 "olhando_claude" => Desktop::OlhandoClaude(booleano()?),
                 "protetor" => Desktop::Protetor(booleano()?),
+                "bloqueado" => Desktop::Bloqueado(booleano()?),
                 "compartilhando" => Desktop::Compartilhando(booleano()?),
                 "ligado" => Desktop::Ligado(booleano()?),
                 "janela_ativa" => Desktop::JanelaAtiva(match valor {
@@ -547,6 +549,7 @@ impl Execucao {
                     Desktop::Protetor(false) => {
                         EventoDesktop::JanelaFechou(Alca(JANELA_DO_PROTETOR.into()))
                     }
+                    Desktop::Bloqueado(v) => EventoDesktop::Bloqueado(*v),
                     Desktop::Compartilhando(v) => EventoDesktop::Compartilhando(*v),
                     Desktop::Ligado(v) => EventoDesktop::Ligado(*v),
                     Desktop::JanelaAtiva(janela) => {

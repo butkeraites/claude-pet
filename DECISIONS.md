@@ -5432,3 +5432,38 @@ puro `plataforma::titulo_e_do_claude` foram para o `pet-core`, com teste, e o
 no `pet-macos` foi revertido; como o daemon do Mac não lê mais título nenhum, a
 supressão de core dump no macOS também foi revertida (segue no-op fora do Linux,
 como antes).
+
+## 0120 — Bloqueio / protetor de tela no macOS: a sessão bloqueada conta como proteção de tela (2026-10-14)
+
+No Linux a proteção de tela do Omarchy é uma **janela** (`org.omarchy.screensaver`):
+quando ela abre, o pet se esconde e não chama (decisão 0053). No macOS (e no
+Windows) não há essa janela — o bloqueio é um **estado da sessão**. Sem detectá-lo,
+o Zeca ficava à toa atrás da tela de senha; e, pior com o sinal de ocioso novo
+(decisão 0118), o bloqueio parece "usuário parado" e a escalada ramparia sozinha
+por trás do cadeado.
+
+**Fonte no macOS:** `CGSessionCopyCurrentDictionary()` e a chave
+`CGSSessionScreenIsLocked` (um `CFBoolean` verdadeiro quando bloqueada; ausente
+caso contrário). É uma leitura pura do CoreGraphics, **sem pedir permissão
+nenhuma** e sem ver título de janela. No `DesktopMac::pollar()` (toda volta),
+compara com o último e emite `EventoDesktop::Bloqueado(true/false)` **só nas
+transições** (campo `bloqueado: Option<bool>`), com a primeira leitura semeando
+o estado — como o ocioso (0118). O `info().protocolos` ganha `"cadeado"`. Para
+não interpretar um tipo errado sem `unsafe` de conversão, o valor é comparado por
+ponteiro ao singleton `kCFBooleanTrue`.
+
+**No núcleo, um estado, não uma janela.** O `EventoDesktop` ganha `Bloqueado(bool)`
+e o `EstadoDesktop` um campo `bloqueado`; o `protetor_ativo()` passa a ser
+`!protetor.is_empty() || bloqueado`. Assim o bloqueio entra pelo **mesmo caminho**
+da proteção de tela do Linux: `quer_mostrar()`/`na_tela()` ficam falsos (o pet se
+esconde e não chama nem festeja), e a transição de protetor no `evento_desktop`
+some/retorna o pet igual ao Omarchy. O `/v1/estado.desktop` mostra
+`protetor_de_tela` (a união) e `bloqueado` (só o estado). O Windows (o
+`WTS_SESSION_LOCK`) vai emitir o mesmo `Bloqueado` num item próprio.
+
+**Comportamento igual ao Linux.** Enquanto bloqueada, o pet não aparece — nem a
+escalada, nem a festa, nem os voos — porque `na_tela()` é falso; ao desbloquear,
+volta ao estado do momento, como quando a proteção de tela do Omarchy fecha. A
+semântica de tempo da escalada é a mesma de sempre, multiplataforma; isto só liga
+o macOS ao caminho que o Linux já tinha. Linux intacto (o `Bloqueado` não é
+emitido lá): os dourados regeneraram com zero diff.

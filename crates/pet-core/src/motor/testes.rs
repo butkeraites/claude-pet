@@ -1324,6 +1324,34 @@ fn a_protecao_de_tela_esconde_o_pet_e_ele_volta_quando_ela_fecha() {
     assert!(motor.quer_mostrar());
 }
 
+#[test]
+fn a_sessao_bloqueada_esconde_o_pet_como_o_protetor_de_tela() {
+    // No macOS/Windows a tela bloqueada é um estado, não uma janela
+    // (decisão 0120): conta como proteção de tela, igual ao Omarchy no Linux.
+    use crate::plataforma::EventoDesktop;
+    let (mut motor, mut janela) = ligado();
+    janela.mostrou();
+    motor.evento_desktop(
+        Some(&mut janela),
+        &EventoDesktop::Bloqueado(true),
+        em(1_000),
+    );
+    assert_eq!(janela.pedidos.last().unwrap(), "apagar com _teste");
+    assert!(!motor.quer_mostrar());
+    assert!(motor.painel(Some(&janela), 1_000).desktop.protetor_de_tela);
+    assert!(motor.painel(Some(&janela), 1_000).desktop.bloqueado);
+    // Desbloqueou: o pet pode voltar e o protetor sai do estado.
+    motor.evento_desktop(
+        Some(&mut janela),
+        &EventoDesktop::Bloqueado(false),
+        em(9_000),
+    );
+    assert!(motor.quer_mostrar(), "desbloqueou: o pet volta");
+    let p = motor.painel(Some(&janela), 9_000).desktop;
+    assert!(!p.protetor_de_tela);
+    assert!(!p.bloqueado);
+}
+
 fn clique_direito(motor: &mut Motor, janela: &mut Falsa, ms: u64) {
     let (x, y) = meio_do_corpo(janela);
     ponteiro(

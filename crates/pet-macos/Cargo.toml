@@ -55,6 +55,9 @@ objc2-core-graphics = { version = "0.3", features = [
   # sinal de "ocioso" do macOS, sem pedir Acessibilidade (decisão 0118).
   "CGEventSource",
   "CGEventTypes",
+  # A sessão bloqueada (`CGSessionCopyCurrentDictionary` + o
+  # `CGSSessionScreenIsLocked`): o protetor de tela do macOS (decisão 0120).
+  "CGSession",
 ] }
 objc2-core-foundation = { version = "0.3", features = [
   "CFBase",
