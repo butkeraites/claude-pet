@@ -3329,16 +3329,28 @@ impl Motor {
             proxima = Some(proxima.map_or(ate, |p| p.min(ate)));
         }
         // O balão em cima do corpo, até o prazo dele.
+        // Enquanto a datilografia do balão digita, a base da grade de 34 ms dela
+        // (decisão 0121): o próximo quadro e os outros prazos entram nessa grade,
+        // e nunca saem dois quadros a menos de 34 ms (como o voo e o confete).
+        let mut digitando_desde = None;
         if let Some(balao) = self.balao.as_ref().filter(|b| agora_ms < b.ate_ms)
             && let Some(corpo) = pet.toque_no_palco(&palco)
         {
+            let revelar = balao.revelar_em(agora_ms);
             cena.extend(balao::elementos(
                 &balao.linhas,
                 corpo,
                 palco.area,
                 balao::dt(palco.d),
+                revelar,
             ));
-            proxima = Some(proxima.map_or(balao.ate_ms, |p| p.min(balao.ate_ms)));
+            let prazo = if revelar.is_some() {
+                digitando_desde = Some(balao.desde_ms);
+                agora_ms + 1
+            } else {
+                balao.ate_ms
+            };
+            proxima = Some(proxima.map_or(prazo, |p| p.min(prazo)));
         }
         // O confete da festa (decisão 0085), no fim da cena: os passos que
         // venceram andam todos; acaba quando o último pedaço sai da tela, no
@@ -3385,6 +3397,9 @@ impl Motor {
         } else if let Some(efeito) = self.efeito.as_ref() {
             // O mesmo com o confete: os quadros na grade dele.
             proxima = proxima.map(|p| na_grade(efeito.inicio_ms, PASSO_CONFETE_MS, p));
+        } else if let Some(desde) = digitando_desde {
+            // E com a datilografia do balão (decisão 0121).
+            proxima = proxima.map(|p| na_grade(desde, PASSO_CONFETE_MS, p));
         }
         // Arrastando, a área de toque é o palco inteiro: o arraste continua
         // até numa área de trabalho vazia, onde o compositor pode perder a
